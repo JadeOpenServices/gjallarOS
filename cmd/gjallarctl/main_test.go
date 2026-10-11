@@ -9,9 +9,9 @@ import (
 func TestOrientationTransform(t *testing.T) {
 	cases := map[string]int{
 		"normal":    0,
-		"right-up":  1,
+		"left-up":   1,
 		"bottom-up": 2,
-		"left-up":   3,
+		"right-up":  3,
 	}
 
 	for input, want := range cases {
@@ -23,6 +23,28 @@ func TestOrientationTransform(t *testing.T) {
 
 	if _, ok := orientationTransform("unknown"); ok {
 		t.Fatal("unknown orientation unexpectedly accepted")
+	}
+}
+
+func TestRunningScale(t *testing.T) {
+	cases := []struct {
+		width, height int
+		reported      float64
+		want          float64
+	}{
+		// ZBook x2 G4 panel at 1.875: hyprctl monitors -j said 1.88 and
+		// Hyprland suggested 1.875 (ODDC report 2026-10-11).
+		{3840, 2160, 1.88, 1.875},
+		// e2e-book12 VM after `hyprctl keyword monitor` with 1.333333:
+		// hyprctl monitors -j said 1.33.
+		{1280, 800, 1.33, 160.0 / 120},
+		// Framework 13 panel at scale 1 (hyprctl monitors -j on the fw13).
+		{2256, 1504, 1.00, 1},
+	}
+	for _, c := range cases {
+		if got := runningScale(c.width, c.height, c.reported); got != c.want {
+			t.Errorf("runningScale(%d, %d, %v) = %v, want %v", c.width, c.height, c.reported, got, c.want)
+		}
 	}
 }
 

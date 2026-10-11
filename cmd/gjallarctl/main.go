@@ -13,6 +13,7 @@ import (
 	"github.com/JadeOpenServices/gjallarOS/internal/hardware/deviceprobe"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/repojson"
 	"io"
+	"math"
 	"math/rand/v2"
 	"net"
 	"net/http"
@@ -3250,15 +3251,40 @@ func orientationTransform(value string) (int, bool) {
 	switch strings.TrimSpace(value) {
 	case "normal":
 		return 0, true
-	case "right-up":
+	// iio-sensor-proxy names the edge that points up. Hyprland transform 1
+	// turns the picture for the left edge up (ZBook x2 G4, ODDC 2026-10-11).
+	case "left-up":
 		return 1, true
 	case "bottom-up":
 		return 2, true
-	case "left-up":
+	case "right-up":
 		return 3, true
 	default:
 		return 0, false
 	}
+}
+
+// Hyprland runs a scale only when it divides the mode into whole logical
+// pixels, in 1/120 steps, but hyprctl prints it with two decimals: 1.875
+// shows as 1.88, which Hyprland rejects when it is passed back. This finds
+// the step that prints as reported.
+func runningScale(width, height int, reported float64) float64 {
+	shown := strconv.FormatFloat(reported, 'f', 2, 64)
+	best, bestDist := reported, 1.0
+	center := int(math.Round(reported * 120))
+	for step := center - 1; step <= center+1; step++ {
+		if step <= 0 || width*120%step != 0 || height*120%step != 0 {
+			continue
+		}
+		scale := float64(step) / 120
+		if strconv.FormatFloat(scale, 'f', 2, 64) != shown {
+			continue
+		}
+		if dist := math.Abs(scale - reported); dist < bestDist {
+			best, bestDist = scale, dist
+		}
+	}
+	return best
 }
 
 func applyHyprlandRotation(sysRoot, orientation string) error {
@@ -3290,7 +3316,7 @@ func applyHyprlandRotation(sysRoot, orientation string) error {
 
 	mode := fmt.Sprintf("%dx%d@%.3f", monitor.Width, monitor.Height, monitor.RefreshRate)
 	position := fmt.Sprintf("%dx%d", monitor.X, monitor.Y)
-	scale := strconv.FormatFloat(monitor.Scale, 'f', -1, 64)
+	scale := strconv.FormatFloat(runningScale(monitor.Width, monitor.Height, monitor.Scale), 'f', -1, 64)
 	spec := fmt.Sprintf(
 		"%s,%s,%s,%s,transform,%d",
 		monitor.Name,
@@ -3302,6 +3328,10 @@ func applyHyprlandRotation(sysRoot, orientation string) error {
 
 	for _, args := range [][]string{
 		{"keyword", "monitor", spec},
+		// Touch screen and pen belong to the built-in panel. Hyprland's
+		// automatic binding finds no monitor for them.
+		{"keyword", "input:touchdevice:output", monitor.Name},
+		{"keyword", "input:tablet:output", monitor.Name},
 		{"keyword", "input:touchdevice:transform", strconv.Itoa(transform)},
 		{"keyword", "input:tablet:transform", strconv.Itoa(transform)},
 	} {
@@ -3317,6 +3347,55 @@ func applyHyprlandRotation(sysRoot, orientation string) error {
 	}
 
 	return nil
+}
+
+// sensorOrientation reads the orientation from a monitor-sensor line.
+func sensorOrientation(line string) string {
+	switch {
+	case strings.Contains(line, "Accelerometer orientation changed:"):
+		return strings.TrimSpace(
+			strings.TrimPrefix(
+				line[strings.Index(line, "Accelerometer orientation changed:"):],
+				"Accelerometer orientation changed:",
+			),
+		)
+
+	case strings.Contains(line, "Has accelerometer (orientation:"):
+		start := strings.Index(line, "orientation:")
+		if start >= 0 {
+			rest := line[start+len("orientation:"):]
+			if end := strings.IndexAny(rest, ",)"); end >= 0 {
+				rest = rest[:end]
+			}
+			return strings.TrimSpace(rest)
+		}
+	}
+	return ""
+}
+
+// watchHyprlandReloads signals reloads after each Hyprland config reload.
+func watchHyprlandReloads(reloads chan<- struct{}, stderr io.Writer) {
+	socket := filepath.Join(
+		os.Getenv("XDG_RUNTIME_DIR"), "hypr",
+		os.Getenv("HYPRLAND_INSTANCE_SIGNATURE"), ".socket2.sock",
+	)
+	conn, err := net.Dial("unix", socket)
+	if err != nil {
+		fmt.Fprintf(stderr, "WARN: Hyprland events: %v; rotation is not restored after a config reload\n", err)
+		return
+	}
+	defer conn.Close()
+
+	scanner := bufio.NewScanner(conn)
+	for scanner.Scan() {
+		if strings.HasPrefix(scanner.Text(), "configreloaded>>") {
+			select {
+			case reloads <- struct{}{}:
+			default:
+			}
+		}
+	}
+	fmt.Fprintf(stderr, "WARN: Hyprland events ended: %v\n", scanner.Err())
 }
 
 func runHyprlandRotate(args []string, stdout, stderr io.Writer) int {
@@ -3338,44 +3417,48 @@ func runHyprlandRotate(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	scanner := bufio.NewScanner(pipe)
-	for scanner.Scan() {
-		line := scanner.Text()
+	orientations := make(chan string)
+	scanErr := make(chan error, 1)
+	go func() {
+		scanner := bufio.NewScanner(pipe)
+		for scanner.Scan() {
+			if orientation := sensorOrientation(scanner.Text()); orientation != "" {
+				orientations <- orientation
+			}
+		}
+		scanErr <- scanner.Err()
+		close(orientations)
+	}()
 
-		var orientation string
-		switch {
-		case strings.Contains(line, "Accelerometer orientation changed:"):
-			orientation = strings.TrimSpace(
-				strings.TrimPrefix(
-					line[strings.Index(line, "Accelerometer orientation changed:"):],
-					"Accelerometer orientation changed:",
-				),
-			)
+	// A config reload (Monique saving, for one) brings back the monitor rule
+	// from the config, so the picture turns back until the sensor changes.
+	reloads := make(chan struct{}, 1)
+	go watchHyprlandReloads(reloads, stderr)
 
-		case strings.Contains(line, "Has accelerometer (orientation:"):
-			start := strings.Index(line, "orientation:")
-			if start >= 0 {
-				rest := line[start+len("orientation:"):]
-				if end := strings.IndexAny(rest, ",)"); end >= 0 {
-					rest = rest[:end]
-				}
-				orientation = strings.TrimSpace(rest)
+	var current string
+	for running := true; running; {
+		select {
+		case orientation, ok := <-orientations:
+			if !ok {
+				running = false
+				continue
+			}
+			current = orientation
+		case <-reloads:
+			if current == "" {
+				continue
 			}
 		}
 
-		if orientation == "" {
+		if err := applyHyprlandRotation("/sys", current); err != nil {
+			fmt.Fprintf(stderr, "WARN: rotate %s: %v\n", current, err)
 			continue
 		}
 
-		if err := applyHyprlandRotation("/sys", orientation); err != nil {
-			fmt.Fprintf(stderr, "WARN: rotate %s: %v\n", orientation, err)
-			continue
-		}
-
-		fmt.Fprintf(stdout, "PASS: orientation %s applied\n", orientation)
+		fmt.Fprintf(stdout, "PASS: orientation %s applied\n", current)
 	}
 
-	if err := scanner.Err(); err != nil {
+	if err := <-scanErr; err != nil {
 		fmt.Fprintf(stderr, "FAIL: read monitor-sensor: %v\n", err)
 		return 1
 	}
