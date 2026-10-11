@@ -2,8 +2,6 @@ package diskcrypto
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -124,37 +122,6 @@ func TPMPolicyAvailable() error {
 	return nil
 }
 
-func Verify(ctx context.Context, device, passphrase string) error {
-	key, cleanup, err := keyFile(passphrase)
-	if err != nil {
-		return err
-	}
-	defer cleanup()
-	return attached(ctx, "sudo", "cryptsetup", "open", "--test-passphrase", "--type", "luks", device, "--key-file", key)
-}
-
-func EnrollTPM(ctx context.Context, device, passphrase string) error {
-	if err := TPMPolicyAvailable(); err != nil {
-		return fmt.Errorf("refusing unbound TPM enrollment: %w", err)
-	}
-	key, cleanup, err := keyFile(passphrase)
-	if err != nil {
-		return err
-	}
-	defer cleanup()
-	args := append([]string{"systemd-cryptenroll"}, enrollmentArgs(device, key)...)
-	return attached(ctx, "sudo", args...)
-}
-
-func enrollmentArgs(device, key string) []string {
-	return []string{
-		"--unlock-key-file=" + key,
-		"--tpm2-device=auto",
-		"--tpm2-pcrlock=/var/lib/systemd/pcrlock.json",
-		device,
-	}
-}
-
 func EnableTPMConfig(path string) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -174,49 +141,10 @@ func EnableTPMConfig(path string) error {
 	return atomicWrite(path, updated)
 }
 
-type RotationResult struct{ NewKey, RecoveryKey string }
-
-func GenerateKey() (string, error) {
-	data := make([]byte, 32)
-	if _, err := rand.Read(data); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(data), nil
-}
-
-func AddKeysPreservingExisting(ctx context.Context, device, oldKey, newKey, recoveryKey string) error {
-	oldPath, oldCleanup, err := keyFile(oldKey)
-	if err != nil {
-		return err
-	}
-	defer oldCleanup()
-	newPath, newCleanup, err := keyFile(newKey)
-	if err != nil {
-		return err
-	}
-	defer newCleanup()
-	recoveryPath, recoveryCleanup, err := keyFile(recoveryKey)
-	if err != nil {
-		return err
-	}
-	defer recoveryCleanup()
-	if err := attached(ctx, "sudo", "cryptsetup", "luksAddKey", device, newPath, "--key-file", oldPath); err != nil {
-		return fmt.Errorf("enroll new LUKS key: %w", err)
-	}
-	if err := attached(ctx, "sudo", "cryptsetup", "luksAddKey", device, recoveryPath, "--key-file", oldPath); err != nil {
-		return fmt.Errorf("recovery key enrollment failed; new and original keys remain enrolled: %w", err)
-	}
-	if err := attached(ctx, "sudo", "cryptsetup", "open", "--test-passphrase", "--type", "luks", device, "--key-file", newPath); err != nil {
-		return fmt.Errorf("new LUKS key was enrolled but verification failed; no existing key was removed: %w", err)
-	}
-	if err := attached(ctx, "sudo", "cryptsetup", "open", "--test-passphrase", "--type", "luks", device, "--key-file", recoveryPath); err != nil {
-		return fmt.Errorf("recovery key was enrolled but verification failed; no existing key was removed: %w", err)
-	}
-	return nil
-}
-
-func keyFile(secret string) (string, func(), error) {
-	f, err := os.CreateTemp("", "gjallar-luks-key-*")
+// SecretFile writes a secret to a 0600 file on /run, a tmpfs, so it never
+// reaches a disk. Call the cleanup as soon as the file is used.
+func SecretFile(secret string) (string, func(), error) {
+	f, err := os.CreateTemp("/run", "gjallar-luks-key-*")
 	if err != nil {
 		return "", func() {}, err
 	}
@@ -267,14 +195,6 @@ func atomicWrite(path string, data []byte) error {
 		return err
 	}
 	return os.Rename(name, path)
-}
-
-func attached(ctx context.Context, name string, args ...string) error {
-	cmd := exec.CommandContext(ctx, name, args...)
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
 }
 
 type luksMetadata struct {

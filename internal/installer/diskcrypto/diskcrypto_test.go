@@ -37,31 +37,10 @@ func TestMappingAndTPMConfig(t *testing.T) {
 	}
 }
 
-func TestGenerateKey(t *testing.T) {
-	a, err := GenerateKey()
-	if err != nil || len(a) != 64 {
-		t.Fatalf("%q %v", a, err)
-	}
-	b, _ := GenerateKey()
-	if a == b {
-		t.Fatal("duplicate random keys")
-	}
-}
-
 func TestParseLUKSDevices(t *testing.T) {
 	devices := parseLUKSDevices("/dev/nvme0n1p2 crypto_LUKS\n/dev/nvme1n1p2 crypto_LUKS\n/dev/nvme0n1p1 vfat\n")
 	if len(devices) != 2 || devices[0] != "/dev/nvme0n1p2" || devices[1] != "/dev/nvme1n1p2" {
 		t.Fatalf("unexpected devices: %#v", devices)
-	}
-}
-
-func TestTPMEnrollmentCannotBecomeUnbound(t *testing.T) {
-	args := strings.Join(enrollmentArgs("/dev/disk/by-uuid/test", "/run/key"), " ")
-	if !strings.Contains(args, "--tpm2-pcrlock=/var/lib/systemd/pcrlock.json") {
-		t.Fatalf("TPM enrollment lacks measured-boot policy: %s", args)
-	}
-	if strings.Contains(args, "--tpm2-pcrs=0") || strings.Contains(args, "--tpm2-pcrs=\"") {
-		t.Fatalf("TPM enrollment contains an unbound PCR policy: %s", args)
 	}
 }
 

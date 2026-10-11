@@ -345,10 +345,10 @@ func usbReviewNotice(d usbtrust.Decision, enforcing, technical bool) []string {
 	}
 }
 
-// wrapUSBReviewText breaks long lines at spaces. Zenity never wraps the list
+// wrapWords breaks long lines at spaces. Zenity never wraps the list
 // dialog text, so one long line would set a minimum width wider than the
-// screen and override the compositor's size rule.
-func wrapUSBReviewText(text string, width int) string {
+// screen and override the compositor's size rule; terminals cut words.
+func wrapWords(text string, width int) string {
 	var out []string
 	for _, line := range strings.Split(text, "\n") {
 		current := ""
@@ -591,7 +591,7 @@ func usbReviewSummary(d usbtrust.Decision, enforcing, technical bool) string {
 		return b.String()
 	}
 	if !enforcing {
-		b.WriteString(html.EscapeString(wrapUSBReviewText("Audit mode: this device already works. Your choice is saved for when blocking is on.", 72)) + "\n")
+		b.WriteString(html.EscapeString(wrapWords("Audit mode: this device already works. Your choice is saved for when blocking is on.", 72)) + "\n")
 	}
 	b.WriteString("\n")
 	facts := usbReviewFacts(d)
@@ -606,7 +606,7 @@ func usbReviewSummary(d usbtrust.Decision, enforcing, technical bool) string {
 	if d.TrustedID != "" {
 		details += " · record " + d.TrustedID
 	}
-	fmt.Fprintf(&b, "<small><span foreground=\"gray\">%s</span></small>", html.EscapeString(wrapUSBReviewText(details, 90)))
+	fmt.Fprintf(&b, "<small><span foreground=\"gray\">%s</span></small>", html.EscapeString(wrapWords(details, 90)))
 	return b.String()
 }
 

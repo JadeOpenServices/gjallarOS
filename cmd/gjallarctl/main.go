@@ -115,6 +115,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runHelpme(args[1:], stdout, stderr)
 	case "tpm2":
 		return runTPM2Reenroll(args[1:], stderr)
+	case "luks":
+		return runLUKSLifecycle(args[1:], stdout, stderr)
 	case "vpn":
 		return runVPN(args[1:], stdout, stderr)
 	default:
@@ -170,9 +172,6 @@ func runInstaller(args []string, stdout, stderr io.Writer) int {
 	}
 	if args[0] == "tpm2" {
 		return runTPM2(args[1:], stdout, stderr)
-	}
-	if args[0] == "luks" {
-		return runLUKS(args[1:], stdout, stderr)
 	}
 	if args[0] == "bootstrap" {
 		return runBootstrap(args[1:], stdout, stderr)
@@ -322,129 +321,6 @@ func runTPM2(args []string, stdout, stderr io.Writer) int {
 	}
 	fmt.Fprintf(stdout, "PLAN: after Secure Boot verification, request the human LUKS passphrase and enroll this TPM against PCRLock on %s\n", device)
 	fmt.Fprintln(stdout, "luks_tpm2_enable=true")
-	return 0
-}
-
-func confirmSaved(tty *os.File, reader *bufio.Reader, label, key string) (bool, error) {
-	for {
-		fmt.Fprintf(tty, "\n%s\n%s\nIMPORTANT: save this key securely; it is never persisted.\n", label, key)
-		yes, quit, err := ttyConfirm(tty, reader, "Have you saved it?")
-		if err != nil {
-			return false, err
-		}
-		if quit {
-			return false, nil
-		}
-		if yes {
-			again, quit, err := ttyConfirm(tty, reader, "Are you absolutely sure it is saved?")
-			if err != nil {
-				return false, err
-			}
-			if quit {
-				return false, nil
-			}
-			if again {
-				return true, nil
-			}
-		}
-		fmt.Fprintln(tty, "Confirmation required; displaying the key again.")
-	}
-}
-
-func runLUKS(args []string, stdout, stderr io.Writer) int {
-	f := flag.NewFlagSet("gjallarctl installer luks", flag.ContinueOnError)
-	f.SetOutput(stderr)
-	repo := f.String("repo", "", "repository path")
-	hardware := f.String("hardware", "", "hardware configuration")
-	if err := f.Parse(args); err != nil || f.NArg() != 0 {
-		return 2
-	}
-	resolved, err := hardwareconfig.ValidateTarget(*repo, *hardware)
-	if err != nil {
-		fmt.Fprintf(stderr, "ERROR: %v\n", err)
-		return 2
-	}
-	mappingInfo, err := diskcrypto.MappingDetails(resolved)
-	if err != nil || mappingInfo.Name == "" {
-		fmt.Fprintln(stdout, "[NOTE] No LUKS mapping exists; skipping LUKS configuration.")
-		return 0
-	}
-	device, err := diskcrypto.DetectDevice(context.Background())
-	if err != nil {
-		fmt.Fprintf(stderr, "ERROR: refusing LUKS configuration: %v\n", err)
-		return 1
-	}
-	if device == "" {
-		fmt.Fprintln(stdout, "[NOTE] No LUKS-encrypted device detected; skipping LUKS configuration.")
-		return 0
-	}
-	if err := diskcrypto.VerifyDeviceIdentity(mappingInfo.Device, device); err != nil {
-		fmt.Fprintf(stderr, "ERROR: %v\n", err)
-		return 1
-	}
-	tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
-	if err != nil {
-		fmt.Fprintf(stderr, "ERROR: LUKS configuration requires a terminal: %v\n", err)
-		return 1
-	}
-	defer tty.Close()
-	reader := bufio.NewReader(tty)
-	yes, _, err := ttyConfirm(tty, reader, "Configure LUKS keys for "+device+"?")
-	if err != nil || !yes {
-		fmt.Fprintln(stdout, "LUKS configuration skipped; existing unlock methods remain unchanged.")
-		return 0
-	}
-	old, err := credential.ReadSecret(tty, reader, tty, "Current LUKS key: ")
-	if err != nil || old == "" {
-		fmt.Fprintln(stdout, "No key supplied; existing configuration unchanged.")
-		return 0
-	}
-	if err := diskcrypto.Verify(context.Background(), device, old); err != nil {
-		old = ""
-		fmt.Fprintln(stderr, "ERROR: supplied LUKS key rejected; no disk changes made.")
-		return 1
-	}
-	yes, _, err = ttyConfirm(tty, reader, "Generate a new LUKS key and separate recovery key?")
-	if err != nil || !yes {
-		old = ""
-		fmt.Fprintln(stdout, "Keeping the existing LUKS key.")
-		return 0
-	}
-	newKey, err := diskcrypto.GenerateKey()
-	if err != nil {
-		return 1
-	}
-	saved, err := confirmSaved(tty, reader, "NEW LUKS KEY", newKey)
-	if err != nil || !saved {
-		old = ""
-		newKey = ""
-		fmt.Fprintln(stdout, "LUKS rotation cancelled; existing key remains unchanged.")
-		return 0
-	}
-	recovery, err := diskcrypto.GenerateKey()
-	if err != nil {
-		return 1
-	}
-	saved, err = confirmSaved(tty, reader, "LUKS RECOVERY KEY", recovery)
-	if err != nil || !saved {
-		old = ""
-		newKey = ""
-		recovery = ""
-		fmt.Fprintln(stdout, "LUKS rotation cancelled; existing key remains unchanged.")
-		return 0
-	}
-	fmt.Fprintln(stdout, "PLAN: add and verify new key; add and verify recovery key; preserve every existing keyslot")
-	if err := diskcrypto.AddKeysPreservingExisting(context.Background(), device, old, newKey, recovery); err != nil {
-		old = ""
-		newKey = ""
-		recovery = ""
-		fmt.Fprintf(stderr, "ERROR: %v\n", err)
-		return 1
-	}
-	old = ""
-	newKey = ""
-	recovery = ""
-	fmt.Fprintln(stdout, "LUKS enrollment complete: new and recovery keys verified; all previous keyslots preserved.")
 	return 0
 }
 
@@ -1882,6 +1758,7 @@ func printUsage(out io.Writer) {
 	fmt.Fprintln(out, "       gjallarctl normalize keyboard --layout VALUE")
 	fmt.Fprintln(out, "       gjallarctl preset {validate|get|list|bool} --config PATH [--key NAME]")
 	fmt.Fprintln(out, "       gjallarctl tpm2 reenroll")
+	fmt.Fprintln(out, "       gjallarctl luks {status|recovery-key}")
 	fmt.Fprintln(out, "       gjallarctl vpn status")
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "Safe GjallarOS maintenance commands. Rebuild invokes sudo explicitly.")

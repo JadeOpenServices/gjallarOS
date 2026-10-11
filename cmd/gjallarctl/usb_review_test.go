@@ -139,12 +139,12 @@ func TestUSBReviewNoticeDoesNotClaimBlockInAuditMode(t *testing.T) {
 
 func TestUSBReviewTextWrapsLongLines(t *testing.T) {
 	long := strings.Repeat("word ", 40) + "\n\nshort"
-	for _, line := range strings.Split(wrapUSBReviewText(long, 30), "\n") {
+	for _, line := range strings.Split(wrapWords(long, 30), "\n") {
 		if len(line) > 30 {
 			t.Fatalf("line exceeds width: %q", line)
 		}
 	}
-	if !strings.HasSuffix(wrapUSBReviewText(long, 30), "\n\nshort") {
+	if !strings.HasSuffix(wrapWords(long, 30), "\n\nshort") {
 		t.Fatal("wrapping dropped paragraph breaks")
 	}
 }
