@@ -1,12 +1,13 @@
 { noctalia, libqalculate }:
 
 # Keep the pinned upstream package and dependencies; only repair the shell's
-# metadata admission and generic tray behavior, let notification cards be
-# swiped away with their timer bar draining from the left, show Bluetooth
-# devices by their advertised name with nameless ones hidden by default,
-# treat a touch long press as a right click, trust Bluetooth devices after
-# pairing (upstream 27f2e349, drop it once the pin includes that commit), and
-# let battery-guard own the laptop battery warnings.
+# metadata admission and generic tray behavior (with a divider on either
+# side), let notification cards be swiped away with their timer bar draining
+# from the left, show Bluetooth devices by their advertised name with
+# nameless ones hidden by default, treat a touch long press as a right click,
+# trust Bluetooth devices after pairing (upstream 27f2e349, drop it once the
+# pin includes that commit), and let battery-guard own the laptop battery
+# warnings.
 #
 # A card shown while the shell is still starting finished its slide-in within one
 # stalled frame and kept the input region of its start position, so clicks went
@@ -35,6 +36,7 @@
       ./media-tray.patch
       ./pointer-axis-frame.patch
       ./pointer-event-time.patch
+      ./tray-trailing-separator.patch
       ./notification-swipe.patch
       ./bluetooth.patch
       ./touch-long-press.patch

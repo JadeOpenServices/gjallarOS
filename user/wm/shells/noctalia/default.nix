@@ -166,7 +166,7 @@ in
           tray = {
             drawer = false;
             menu_on_left_click = [ "nextcloud" ];
-            leading_separator = true;
+            trailing_separator = true;
           };
           cpu_usage = {
             type = "sysmon";
@@ -208,7 +208,7 @@ in
             scale = 0.98;
           };
 
-          divider_diag = {
+          divider_battery = {
             type = "text";
             text = "│";
             scale = 0.72;
@@ -334,11 +334,8 @@ in
           shadow = false;
 
           # System status on the left, workspaces and time in the middle,
-          # controls on the right.
+          # app icons, controls and battery on the right.
           start = [
-            "power_profile"
-            "battery"
-            "divider_diag"
             "cpu_usage"
             "cpu_temp"
             "ram"
@@ -349,6 +346,7 @@ in
             "center_clock"
           ];
           end = [
+            "tray"
             "network"
           ]
           ++ lib.optional hasQuickKeys "quick_keys"
@@ -357,7 +355,9 @@ in
             "notifications"
             "clipboard"
             "volume"
-            "tray"
+            "divider_battery"
+            "power_profile"
+            "battery"
             "divider_apps"
             "weather"
             "divider_media"

@@ -1,0 +1,70 @@
+--- a/src/shell/bar/widgets/tray_widget.cpp
++++ b/src/shell/bar/widgets/tray_widget.cpp
+@@ -168,6 +168,7 @@
+     : m_config(config), m_tray(tray), m_hiddenItems(std::move(options.hiddenItems)),
+       m_pinnedItems(std::move(options.pinnedItems)), m_menuOnLeftClick(std::move(options.menuOnLeftClick)),
+       m_hidePassive(options.hidePassive), m_leadingSeparator(options.leadingSeparator),
++      m_trailingSeparator(options.trailingSeparator),
+       m_drawerMode(options.drawerMode), m_itemActivated(std::move(options.itemActivated)),
+       m_barPosition(std::move(options.barPosition)), m_panelGridMode(options.panelGridMode),
+       m_panelGridColumns(std::clamp<std::size_t>(options.panelGridColumns, 1U, 5U)),
+@@ -470,7 +471,7 @@
+     break;
+   }
+ 
+-  if (!m_panelGridMode && hasVisibleContent && m_leadingSeparator) {
++  const auto addSeparator = [this]() {
+     m_container->addChild(ui::label({
+         .text = "│",
+         .fontSize = Style::fontSizeCaption * fontScale(),
+@@ -479,6 +480,9 @@
+         .color = widgetForegroundOr(colorSpecFromRole(ColorRole::OnSurface)),
+         .maxLines = 1,
+     }));
++  };
++  if (!m_panelGridMode && hasVisibleContent && m_leadingSeparator) {
++    addSeparator();
+   }
+ 
+   auto attachHover = [this](InputArea& area, float size) {
+@@ -849,6 +853,10 @@
+     }
+   }
+ 
++  if (!m_panelGridMode && hasVisibleContent && m_trailingSeparator) {
++    addSeparator();
++  }
++
+   m_container->setVisible(!m_container->children().empty());
+ }
+ 
+--- a/src/shell/bar/widgets/tray_widget_definition.cpp
++++ b/src/shell/bar/widgets/tray_widget_definition.cpp
+@@ -25,6 +25,9 @@
+               field<&Options::leadingSeparator>({
+                   .key = "leading_separator",
+               }),
++              field<&Options::trailingSeparator>({
++                  .key = "trailing_separator",
++              }),
+               field<&Options::matchAdjacentSpacing>({
+                   .key = "match_adjacent_spacing",
+               }),
+--- a/src/shell/bar/widgets/tray_widget.h
++++ b/src/shell/bar/widgets/tray_widget.h
+@@ -29,6 +29,7 @@
+     std::vector<std::string> menuOnLeftClick;
+     bool hidePassive = true;
+     bool leadingSeparator = false;
++    bool trailingSeparator = false;
+     bool drawerMode = false;
+     std::function<void()> itemActivated;
+     std::string barPosition = "top";
+@@ -91,6 +92,7 @@
+   std::vector<std::string> m_menuOnLeftClick;
+   bool m_hidePassive = true;
+   bool m_leadingSeparator = false;
++  bool m_trailingSeparator = false;
+   std::vector<Image*> m_loadedImages;
+   std::vector<Image*> m_colorizedAppIcons;
+   std::unordered_map<std::string, std::size_t> m_initialPixmaps;
