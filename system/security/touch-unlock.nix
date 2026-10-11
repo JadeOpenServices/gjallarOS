@@ -58,6 +58,13 @@ in
   # Same pieces as nixpkgs boot.initrd.unl0kr, which warns on every rebuild
   # when Plymouth is on; the handoff below is what makes the pair work.
   config = lib.mkIf enabled {
+    # Loaded at the start of stage 1, so it is there when the panel shows up.
+    # Loaded on demand, hid-generic takes the panel first and hands it to
+    # hid-multitouch a moment later, while unl0kr is already starting, and
+    # touch stays dead at the prompt (ZBook x2 G4, 2026-10-11). The pen does
+    # not work there either way: unl0kr reads keys, pointer and touch only.
+    boot.initrd.kernelModules = [ "hid-multitouch" ];
+
     boot.initrd.availableKernelModules = [
       "hid-multitouch"
       "hid-generic"
