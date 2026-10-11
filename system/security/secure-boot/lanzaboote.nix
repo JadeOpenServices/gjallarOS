@@ -53,7 +53,7 @@ let
         ${lib.last config.systemd.services.systemd-pcrlock-make-policy.serviceConfig.ExecStart}
       else
         echo "warning: no usable TPM2 (see: systemd-analyze has-tpm2); the TPM policy was not updated." >&2
-        echo "warning: once the TPM is back, boot with the LUKS passphrase and run: gjallarctl tpm2 reenroll" >&2
+        echo "warning: once the TPM is back, boot with the recovery key or disk passphrase and run: gjallarctl tpm2 reenroll" >&2
       fi
     ''}
   '';

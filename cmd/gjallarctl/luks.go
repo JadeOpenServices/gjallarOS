@@ -18,12 +18,12 @@ import (
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/diskcrypto"
 )
 
-const luksUsage = "Usage: gjallarctl luks {status|recovery-key}"
+const luksUsage = "Usage: gjallarctl luks {status|recovery-key|setup}"
 
 // runLUKSLifecycle manages how the root disk unlocks. Reading or changing
 // the LUKS header needs root, so it runs itself again through sudo.
 func runLUKSLifecycle(args []string, stdout, stderr io.Writer) int {
-	if len(args) != 1 || args[0] != "status" && args[0] != "recovery-key" {
+	if len(args) != 1 || args[0] != "status" && args[0] != "recovery-key" && args[0] != "setup" {
 		fmt.Fprintln(stderr, luksUsage)
 		return 2
 	}
@@ -58,9 +58,12 @@ func runLUKSLifecycle(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "ERROR: %v\n", err)
 		return 1
 	}
-	if args[0] == "status" {
+	switch args[0] {
+	case "status":
 		printLUKSStatus(stdout, device, slots)
 		return 0
+	case "setup":
+		return runLUKSSetup(ctx, device, slots, stderr)
 	}
 	return runRecoveryKey(ctx, device, slots, stderr)
 }
@@ -81,9 +84,75 @@ func printLUKSStatus(out io.Writer, device string, slots diskcrypto.Keyslots) {
 	fmt.Fprintf(out, "Security chip: %s\n", chip)
 	fmt.Fprintf(out, "Recovery key:  %s\n", recovery)
 	fmt.Fprintf(out, "Passphrases:   %d\n", len(slots.Passphrase))
-	if len(slots.Recovery) == 0 {
+	switch {
+	case len(slots.Recovery) == 0:
 		fmt.Fprintln(out, "\nCreate a recovery key: gjallarctl luks recovery-key")
+	case len(slots.TPM2) > 0 && len(slots.Passphrase) > 0:
+		fmt.Fprintln(out, "\nRemove the install passphrase: gjallarctl luks setup")
 	}
+}
+
+// runLUKSSetup finishes disk protection once the security chip unlocks the
+// disk: it creates a recovery key when there is none, then removes the
+// passphrase typed at install, so the recovery key is the only fallback.
+func runLUKSSetup(ctx context.Context, device string, slots diskcrypto.Keyslots, stderr io.Writer) int {
+	if len(slots.TPM2) == 0 {
+		fmt.Fprintln(stderr, "The security chip does not unlock this disk; the passphrase stays.")
+		return 1
+	}
+	if len(slots.Recovery) == 0 {
+		if code := runRecoveryKey(ctx, device, slots, stderr); code != 0 {
+			return code
+		}
+		var err error
+		if slots, err = diskcrypto.ReadKeyslots(ctx, device); err != nil {
+			fmt.Fprintf(stderr, "ERROR: %v\n", err)
+			return 1
+		}
+	}
+	if len(slots.Passphrase) == 0 {
+		return 0
+	}
+	if len(slots.Recovery) == 0 {
+		fmt.Fprintln(stderr, "ERROR: no recovery key; the passphrase stays.")
+		return 1
+	}
+	tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
+	if err != nil {
+		fmt.Fprintf(stderr, "ERROR: removing the passphrase needs a terminal: %v\n", err)
+		return 1
+	}
+	defer tty.Close()
+	s := &luksSession{ctx: ctx, device: device, tty: tty, reader: bufio.NewReader(tty), signals: make(chan os.Signal, 1)}
+	signal.Notify(s.signals, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
+	defer signal.Stop(s.signals)
+
+	// Only a chip that opens the disk right now may become the way in.
+	if err := diskcrypto.TestTPM2(ctx, device, tty); err != nil {
+		fmt.Fprintf(stderr, "ERROR: %v\nThe passphrase stays until the security chip unlocks the disk.\n", err)
+		return 1
+	}
+	old := make([]string, len(slots.Passphrase))
+	for i, n := range slots.Passphrase {
+		old[i] = strconv.Itoa(n)
+	}
+	if _, err := s.cryptenroll(nil, "--wipe-slot="+strings.Join(old, ",")); err != nil {
+		fmt.Fprintf(stderr, "ERROR: removing the passphrase failed: %v\n", err)
+		return 1
+	}
+	after, err := diskcrypto.ReadKeyslots(ctx, device)
+	if err != nil {
+		fmt.Fprintf(stderr, "ERROR: %v\n", err)
+		return 1
+	}
+	if len(after.Passphrase) > 0 || len(after.TPM2) == 0 || len(after.Recovery) == 0 {
+		fmt.Fprintf(stderr, "ERROR: unexpected keyslots after removing the passphrase: %+v\n", after)
+		return 1
+	}
+	fmt.Fprintln(tty, s.wrap("The install passphrase was removed. The security chip unlocks the disk at startup. If it ever refuses, for example after a firmware update, type your recovery key instead."))
+	fmt.Fprintln(tty)
+	_, _ = s.readLine("Press Enter to continue. ")
+	return 0
 }
 
 var errCancelled = errors.New("cancelled")

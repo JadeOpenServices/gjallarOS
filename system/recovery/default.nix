@@ -123,7 +123,7 @@ lib.mkMerge [
       environment.etc."gjallar/recovery".text = ''
         Trusted GjallarOS recovery entry.
         Sign in locally and run: sudo gjallar-recover audit
-        Root disks require a verified human LUKS recovery credential.
+        Root disks need the disk recovery key or passphrase.
       '';
     }
     // lib.optionalAttrs settings.endpointManagedDevice {
@@ -202,7 +202,7 @@ lib.mkMerge [
           printf '%s\n' \
             "GjallarOS recovery-storage maintenance" \
             "The installed root is not mounted as /." \
-            "A human LUKS credential is required before /mnt is exposed."
+            "The disk recovery key or passphrase is needed before /mnt is exposed."
 
           selected_device=""
           selected_mapping=""

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/big"
+	"os"
 	"os/exec"
 	"sort"
 	"strconv"
@@ -153,6 +154,22 @@ func TestKeyslot(ctx context.Context, device string, slot int, key string) error
 	defer cleanup()
 	if err := exec.CommandContext(ctx, "cryptsetup", "open", "--test-passphrase", "--key-slot", strconv.Itoa(slot), "--key-file", path, device).Run(); err != nil {
 		return fmt.Errorf("new key does not open keyslot %d: %w", slot, err)
+	}
+	return nil
+}
+
+// systemd ships the TPM2 token plugin, and NixOS cryptsetup dlopens it by
+// bare name, ignoring its external tokens path (e2e-target, 2026-09-29).
+const tokenPluginDir = "/run/current-system/systemd/lib/cryptsetup"
+
+// TestTPM2 checks that the security chip opens device now. A token with a
+// startup PIN asks for it on tty.
+func TestTPM2(ctx context.Context, device string, tty *os.File) error {
+	cmd := exec.CommandContext(ctx, "cryptsetup", "open", "--test-passphrase", "--token-only", "--token-type", "systemd-tpm2", device)
+	cmd.Env = append(os.Environ(), "LD_LIBRARY_PATH="+tokenPluginDir)
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = tty, tty, tty
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("security chip unlock test: %w", err)
 	}
 	return nil
 }

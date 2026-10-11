@@ -18,6 +18,8 @@ let
     gjallarctlPackage
     pkgs.systemd
     pkgs.coreutils
+    # findmnt and lsblk for gjallarctl luks setup.
+    pkgs.util-linux
     pkgs.gnugrep
     pkgs.kbd
     pkgs.plymouth
@@ -82,9 +84,9 @@ let
       gjallar-verify-secure-boot-ownership enrolled
 
       systemd-ask-password --timeout=0 -n \
-        "GjallarOS: enter the human LUKS recovery passphrase to re-enroll TPM2 unlock" >"$keyfile"
+        "GjallarOS: enter the disk recovery key or passphrase to re-enroll TPM2 unlock" >"$keyfile"
       chmod 0600 "$keyfile"
-      # Check the passphrase before anything is removed.
+      # Check the key before anything is removed.
       cryptsetup open --test-passphrase --type luks "$device" --key-file "$keyfile"
 
       if [ -e /var/lib/systemd/pcrlock.json ]; then
@@ -200,7 +202,7 @@ in
       plymouth quit || true
       chvt 1 || true
       systemd-ask-password --timeout=0 -n \
-        "GjallarOS: enter the human LUKS recovery passphrase to enroll measured-boot TPM2 unlock" >"$keyfile"
+        "GjallarOS: enter the disk passphrase or recovery key to set up security chip unlock" >"$keyfile"
       chmod 0600 "$keyfile"
       cryptsetup open --test-passphrase --type luks "$device" --key-file "$keyfile"
 
@@ -210,6 +212,11 @@ in
       ${recordEnrollment}
       install -m 0600 /dev/null "$state/tpm2-enrollment-complete"
       printf '%s\n' 'GjallarOS measured-boot TPM2 enrollment completed; human recovery keyslots were preserved.'
+
+      # A confirmed recovery key replaces the install passphrase. Cancelled,
+      # the passphrase stays and `gjallarctl luks setup` finishes it later.
+      gjallarctl luks setup ||
+        printf '%s\n' 'Recovery key not set up; the install passphrase stays.' >&2
     '';
   };
 

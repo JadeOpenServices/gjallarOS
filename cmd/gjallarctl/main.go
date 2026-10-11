@@ -319,7 +319,7 @@ func runTPM2(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "ERROR: TPM2 preparation failed: %v\n", err)
 		return 1
 	}
-	fmt.Fprintf(stdout, "PLAN: after Secure Boot verification, request the human LUKS passphrase and enroll this TPM against PCRLock on %s\n", device)
+	fmt.Fprintf(stdout, "PLAN: after Secure Boot verification, request the disk passphrase and enroll this TPM against PCRLock on %s\n", device)
 	fmt.Fprintln(stdout, "luks_tpm2_enable=true")
 	return 0
 }
@@ -1758,7 +1758,7 @@ func printUsage(out io.Writer) {
 	fmt.Fprintln(out, "       gjallarctl normalize keyboard --layout VALUE")
 	fmt.Fprintln(out, "       gjallarctl preset {validate|get|list|bool} --config PATH [--key NAME]")
 	fmt.Fprintln(out, "       gjallarctl tpm2 reenroll")
-	fmt.Fprintln(out, "       gjallarctl luks {status|recovery-key}")
+	fmt.Fprintln(out, "       gjallarctl luks {status|recovery-key|setup}")
 	fmt.Fprintln(out, "       gjallarctl vpn status")
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "Safe GjallarOS maintenance commands. Rebuild invokes sudo explicitly.")

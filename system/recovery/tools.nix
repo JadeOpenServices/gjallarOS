@@ -138,7 +138,7 @@ let
           device="''${2:?DEVICE required}"
           name="''${3:?mapping NAME required}"
           cryptsetup isLuks "$device"
-          systemd-ask-password -n 'GjallarOS LUKS recovery passphrase:' |
+          systemd-ask-password -n 'GjallarOS: enter the recovery key or disk passphrase:' |
             cryptsetup open --type luks --key-file=- "$device" "$name"
           ;;
         mount)

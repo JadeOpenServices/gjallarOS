@@ -11,13 +11,13 @@ import (
 	"unsafe"
 )
 
-// usbReadRecoveryKey reads the disk encryption passphrase that authorizes
+// usbReadRecoveryKey reads the disk recovery key or passphrase that authorizes
 // disarming USB enforcement. A terminal prompts without echo; otherwise the
 // passphrase is read from stdin, so a graphical prompt can pipe it in.
 func usbReadRecoveryKey(stdin *os.File, stderr io.Writer) (string, error) {
 	if restore, ok := usbDisableEcho(stdin.Fd()); ok {
 		defer restore()
-		fmt.Fprint(stderr, "Disk encryption passphrase: ")
+		fmt.Fprint(stderr, "Disk recovery key or passphrase: ")
 		defer fmt.Fprintln(stderr)
 	}
 	return usbParseRecoveryKey(stdin)
@@ -32,7 +32,7 @@ func usbParseRecoveryKey(in io.Reader) (string, error) {
 	}
 	line = strings.TrimSuffix(strings.TrimSuffix(line, "\n"), "\r")
 	if line == "" {
-		return "", errors.New("no disk encryption passphrase given")
+		return "", errors.New("no disk recovery key or passphrase given")
 	}
 	return line, nil
 }
