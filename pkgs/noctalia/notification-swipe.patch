@@ -10,7 +10,7 @@
  #include <filesystem>
  #include <linux/input-event-codes.h>
  #include <unistd.h>
-@@ -2264,6 +2266,150 @@
+@@ -2264,6 +2266,161 @@ void NotificationToast::applyCardReveal(Instance::CardState& cs, float reveal, f
    );
  }
  
@@ -44,16 +44,25 @@
 +  };
 +
 +  // Follows the card's speed with a short smoothing, so one jittery event does
-+  // not decide a fling.
++  // not decide a fling. Events read in the same millisecond (a held-back touch
++  // press and its first move, or a batch from a busy compositor) add up and
++  // count once time moves on.
 +  const auto track = [state, now](float dx) {
 +    const std::uint32_t time = now();
 +    const std::uint32_t dt = time - state->lastTime;
-+    if (dt > 0 && dt < 100) {
-+      state->velocity = 0.6F * ((dx - state->dx) / static_cast<float>(dt)) + 0.4F * state->velocity;
-+    } else {
++    if (dt == 0) {
++      return;
++    }
++    const float v = (dx - state->lastDx) / static_cast<float>(dt);
++    if (dt >= 100) {
 +      state->velocity = 0.0F;
++    } else if (state->velocity == 0.0F) {
++      state->velocity = v;
++    } else {
++      state->velocity = 0.6F * v + 0.4F * state->velocity;
 +    }
 +    state->lastTime = time;
++    state->lastDx = dx;
 +  };
 +
 +  const auto settle = [this, &inst, area, state, moveTo, threshold, flingSpeed, slop, cardW,
@@ -101,6 +110,7 @@
 +      state->startX = data.localX + area->x() - state->dx;
 +      state->velocity = 0.0F;
 +      state->lastTime = now();
++      state->lastDx = state->dx;
 +      return;
 +    }
 +    if (state->tracking) {
@@ -143,6 +153,7 @@
 +    if (!state->moved) {
 +      state->velocity = 0.0F;
 +      state->lastTime = now();
++      state->lastDx = state->dx;
 +    }
 +    state->moved = true;
 +    const float dx = state->dx - static_cast<float>(data.axisValue);
@@ -161,7 +172,7 @@
  InputArea* NotificationToast::buildCard(
      Instance& outputInstance, const PopupEntry& entry, Node** outCardContent, Node** outCardForeground,
      ProgressBar** outProgress, Node** outActionsRow, Node** outInlineReplyRow, Input** outInlineReplyInput
-@@ -2284,9 +2430,13 @@
+@@ -2284,9 +2441,13 @@ InputArea* NotificationToast::buildCard(
    auto viewport = ui::inputArea({});
    viewport->setAcceptedButtons(InputArea::buttonMask({BTN_LEFT, BTN_RIGHT}));
    wl_surface* const sourceSurface = outputInstance.surface->wlSurface();
@@ -176,7 +187,7 @@
      if (data.button == BTN_RIGHT) {
        requestClose(id, CloseReason::Dismissed);
      } else if (data.button == BTN_LEFT && hasDefaultAction) {
-@@ -2300,6 +2450,7 @@
+@@ -2300,6 +2461,7 @@ InputArea* NotificationToast::buildCard(
      }
    });
    viewport->setCursorShape(WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_DEFAULT);
@@ -184,7 +195,7 @@
  
    auto cardRoot = ui::node({.out = outCardContent});
  
-@@ -2928,6 +3079,14 @@
+@@ -2928,6 +3090,14 @@ bool NotificationToast::onPointerEvent(const PointerEvent& event) {
        }
        break;
      case PointerEvent::Type::Axis:
@@ -201,7 +212,7 @@
  
 --- a/src/shell/notification/notification_toast.h
 +++ b/src/shell/notification/notification_toast.h
-@@ -119,6 +119,22 @@
+@@ -119,6 +119,23 @@ private:
      float lastPointerY = 0.0F;
    };
  
@@ -212,6 +223,7 @@
 +    float dx = 0.0F;
 +    // Pointer speed in px/ms and the time of the last move, for flicks.
 +    float velocity = 0.0F;
++    float lastDx = 0.0F;
 +    std::uint32_t lastTime = 0;
 +    AnimationManager::Id animId = 0;
 +    Timer axisIdle;
