@@ -1,0 +1,70 @@
+--- a/src/config/config_overrides.cpp
++++ b/src/config/config_overrides.cpp
+@@ -2265,6 +2265,35 @@
+ 
+ void ConfigService::extractWallpaperFromOverrides() { extractWallpaperFromTable(m_overridesTable); }
+ 
++namespace {
++
++  // The setup wizard saves the bundled wallpaper by its absolute path. On Nix
++  // that is a store path, which is gone once an update is garbage collected,
++  // leaving the desktop and lock screen without a wallpaper. Point a missing
++  // bundled asset at the same file in the running build.
++  std::string relinkBundledAsset(std::string path) {
++    constexpr std::string_view kAssetsDir = "/share/noctalia/assets/";
++    const auto pos = path.find(kAssetsDir);
++    if (pos == std::string::npos) {
++      return path;
++    }
++    std::error_code ec;
++    if (std::filesystem::exists(path, ec)) {
++      return path;
++    }
++    const std::string relative = path.substr(pos + kAssetsDir.size());
++    if (relative.empty() || relative.find("..") != std::string::npos) {
++      return path;
++    }
++    const auto current = paths::assetPath(relative);
++    if (!std::filesystem::is_regular_file(current, ec)) {
++      return path;
++    }
++    return current.string();
++  }
++
++} // namespace
++
+ void ConfigService::extractWallpaperFromTable(const toml::table& table) {
+   m_defaultWallpaperPath.clear();
+   m_lastWallpaperPath.clear();
+@@ -2273,19 +2302,19 @@
+ 
+   if (auto* wpDefault = table["wallpaper"]["default"].as_table()) {
+     if (auto v = (*wpDefault)["path"].value<std::string>()) {
+-      m_defaultWallpaperPath = FileUtils::expandUserPath(*v).string();
++      m_defaultWallpaperPath = relinkBundledAsset(FileUtils::expandUserPath(*v).string());
+     }
+   }
+   if (auto* wpLast = table["wallpaper"]["last"].as_table()) {
+     if (auto v = (*wpLast)["path"].value<std::string>()) {
+-      m_lastWallpaperPath = FileUtils::expandUserPath(*v).string();
++      m_lastWallpaperPath = relinkBundledAsset(FileUtils::expandUserPath(*v).string());
+     }
+   }
+   if (auto* monitors = table["wallpaper"]["monitors"].as_table()) {
+     for (const auto& [key, value] : *monitors) {
+       if (auto* monTbl = value.as_table()) {
+         if (auto v = (*monTbl)["path"].value<std::string>()) {
+-          m_monitorWallpaperPaths[std::string(key.str())] = FileUtils::expandUserPath(*v).string();
++          m_monitorWallpaperPaths[std::string(key.str())] = relinkBundledAsset(FileUtils::expandUserPath(*v).string());
+         }
+       }
+     }
+@@ -2298,7 +2327,7 @@
+       }
+       WallpaperFavorite favorite;
+       if (auto path = (*favTbl)["path"].value<std::string>()) {
+-        favorite.path = FileUtils::normalizeWallpaperPath(*path);
++        favorite.path = relinkBundledAsset(FileUtils::normalizeWallpaperPath(*path));
+       }
+       if (favorite.path.empty()) {
+         continue;

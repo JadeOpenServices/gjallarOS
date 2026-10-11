@@ -17,6 +17,11 @@
 # (pointer-event-time.patch), so a swipe's speed is measured on when the
 # finger moved, not on when a busy shell got round to reading the event.
 #
+# The setup wizard saves the bundled wallpaper by its store path, which is
+# gone after an update and garbage collection, so the desktop and lock screen
+# lost their wallpaper and the lock screen retried the dead path on every key
+# (wallpaper-store-path.patch maps it to the running build's asset).
+#
 # libqalculate 5.10 frees its random state on exit even when nothing ever
 # created it, so the shell crashes every time it stops. Upstream fixed that in
 # 931c2aa9 (5.11); drop the patch once nixpkgs ships libqalculate 5.11 or newer.
@@ -37,5 +42,6 @@
       ./notification-progress-left.patch
       ./battery-notify.patch
       ./notification-input-region.patch
+      ./wallpaper-store-path.patch
     ];
   })
