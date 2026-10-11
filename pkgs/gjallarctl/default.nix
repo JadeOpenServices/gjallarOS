@@ -1,5 +1,6 @@
 {
   buildGoModule,
+  dbus,
   git,
   lib,
   runtimeShell,
@@ -9,7 +10,10 @@ buildGoModule {
   pname = "gjallarctl";
   version = "0.1.0";
 
-  nativeCheckInputs = [ git ];
+  nativeCheckInputs = [
+    dbus
+    git
+  ];
 
   src = lib.fileset.toSource {
     root = ../../.;

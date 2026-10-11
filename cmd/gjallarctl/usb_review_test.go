@@ -104,13 +104,11 @@ func TestUSBReviewNoticeEscapesDeviceStrings(t *testing.T) {
 	d := usbtrust.Decision{ObservedDevice: usbtrust.ObservedDevice{
 		Identity: usbtrust.Identity{Name: `<b>Keyboard</b>`, VIDPID: "dead:beef"},
 	}}
-	args := usbReviewNotice(d, true, true)
-	body := args[len(args)-1]
+	body := usbReviewNotice(d, true, true).Body
 	if body != "&lt;b&gt;Keyboard&lt;/b&gt; (dead:beef)" {
 		t.Fatalf("device name reached notification markup: %q", body)
 	}
-	args = usbReviewNotice(d, true, false)
-	if body := args[len(args)-1]; body != "&lt;b&gt;Keyboard&lt;/b&gt;" {
+	if body := usbReviewNotice(d, true, false).Body; body != "&lt;b&gt;Keyboard&lt;/b&gt;" {
 		t.Fatalf("simple notice shows hardware IDs: %q", body)
 	}
 }
@@ -129,10 +127,13 @@ func TestUSBReviewOpensOnlyOnRequest(t *testing.T) {
 }
 
 func TestUSBReviewNoticeDoesNotClaimBlockInAuditMode(t *testing.T) {
-	args := usbReviewNotice(usbtrust.Decision{}, false, false)
-	for _, arg := range args {
-		if arg == "USB device blocked" || arg == "--action=keep=Keep blocked" {
-			t.Fatalf("audit-mode notice claims the device is blocked: %q", args)
+	n := usbReviewNotice(usbtrust.Decision{}, false, false)
+	if n.Summary == "USB device blocked" {
+		t.Fatalf("audit-mode notice claims the device is blocked: %+v", n)
+	}
+	for _, a := range n.Actions {
+		if a.Label == "Keep blocked" {
+			t.Fatalf("audit-mode notice claims the device is blocked: %+v", n)
 		}
 	}
 }
@@ -242,8 +243,7 @@ func TestUnpluggedConnectionIsInactive(t *testing.T) {
 }
 
 func TestUSBMediaNotice(t *testing.T) {
-	args := usbMediaNotice(usbtrust.MediaDecision{ID: "6:0:0:0", Reader: "<b>Reader</b>", Bytes: 31_900_000_000})
-	body := args[len(args)-1]
+	body := usbMediaNotice(usbtrust.MediaDecision{ID: "6:0:0:0", Reader: "<b>Reader</b>", Bytes: 31_900_000_000}).Body
 	if !strings.Contains(body, "&lt;b&gt;Reader&lt;/b&gt;, 31.9 GB") {
 		t.Fatalf("body = %q", body)
 	}

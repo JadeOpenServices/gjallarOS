@@ -100,6 +100,13 @@ func runUSBReview(args []string, stderr io.Writer) int {
 		return 1
 	}
 	seen := map[string]bool{}
+	// Devices the user already answered, by identity and port. A restarted
+	// broker hands out new connection tokens; that alone must not announce a
+	// device again that never left.
+	answered := map[string]bool{}
+	// Media notices close their cards when ctx ends; wait for that on exit.
+	var media sync.WaitGroup
+	defer media.Wait()
 	for ctx.Err() == nil {
 		requestCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		response, err := broker.Call(requestCtx, broker.DefaultSocket, broker.Request{Action: broker.ActionPolicy})
@@ -108,13 +115,18 @@ func runUSBReview(args []string, stderr io.Writer) int {
 			fmt.Fprintf(stderr, "WARN: USB review: %v\n", err)
 		} else {
 			active := map[string]bool{}
+			present := map[string]bool{}
 			for _, d := range response.Policy {
 				active[d.Connection] = true
-				if seen[d.Connection] || d.Target != usbtrust.TargetBlock {
+				present[usbReviewKey(d)] = true
+				if seen[d.Connection] || answered[usbReviewKey(d)] || d.Target != usbtrust.TargetBlock {
 					continue
 				}
 				seen[d.Connection] = true
-				if !usbReviewDecision(ctx, executable, d, response.Enforcing) {
+				switch usbReviewDecision(ctx, executable, d, response.Enforcing) {
+				case usbReviewAnswered:
+					answered[usbReviewKey(d)] = true
+				case usbReviewRetry:
 					delete(seen, d.Connection)
 				}
 			}
@@ -126,11 +138,20 @@ func runUSBReview(args []string, stderr io.Writer) int {
 					continue
 				}
 				seen[m.Connection] = true
-				go usbReviewMedia(ctx, executable, m)
+				media.Add(1)
+				go func() {
+					defer media.Done()
+					usbReviewMedia(ctx, executable, m)
+				}()
 			}
 			for token := range seen {
 				if !active[token] {
 					delete(seen, token)
+				}
+			}
+			for key := range answered {
+				if !present[key] {
+					delete(answered, key)
 				}
 			}
 		}
@@ -142,36 +163,58 @@ func runUSBReview(args []string, stderr io.Writer) int {
 	return 0
 }
 
+type usbReviewOutcome int
+
+const (
+	// The user answered; the device is not announced again while it stays.
+	usbReviewAnswered usbReviewOutcome = iota
+	// Nobody answered: the device left, its token changed or the review stops.
+	usbReviewInterrupted
+	// The decision failed and should be offered again.
+	usbReviewRetry
+)
+
+// usbReviewKey names a device across broker restarts: what it is and where
+// it is plugged in, without the per-connection token.
+func usbReviewKey(d usbtrust.Decision) string {
+	return d.Identity.Hash + "\x00" + d.Identity.Port
+}
+
 // usbReviewDecision announces one blocked device and carries out the chosen
-// action. Every prompt closes as soon as the device is unplugged. It reports
-// false when a failed decision should be offered again.
-func usbReviewDecision(ctx context.Context, executable string, d usbtrust.Decision, enforcing bool) bool {
+// action. Every prompt closes as soon as the device is unplugged.
+func usbReviewDecision(ctx context.Context, executable string, d usbtrust.Decision, enforcing bool) usbReviewOutcome {
 	technical := usbReviewAlwaysTechnical()
 	rows, available := usbReviewChoices(d, technical)
 	if len(rows) == 0 {
-		return true
+		return usbReviewAnswered
 	}
 	ctx, cancel := usbWhilePresent(ctx, d.Connection)
 	defer cancel()
 
 	// Announce the block quietly; the review dialog opens only on request.
 	// Dismissing the notice keeps the device blocked.
-	notice := exec.CommandContext(ctx, "notify-send", usbReviewNotice(d, enforcing, technical)...)
-	// SIGINT makes notify-send close the notice it is waiting on.
-	notice.Cancel = func() error { return notice.Process.Signal(os.Interrupt) }
-	picked, err := notice.Output()
-	if err != nil || ctx.Err() != nil || !usbReviewRequested(string(picked)) {
-		return true
+	picked, err := showNotice(ctx, usbReviewNotice(d, enforcing, technical))
+	if ctx.Err() != nil {
+		return usbReviewInterrupted
+	}
+	if err != nil {
+		return usbReviewRetry
+	}
+	if !usbReviewRequested(picked) {
+		return usbReviewAnswered
 	}
 	action, ok := usbReviewDialog(ctx, d, enforcing, technical)
+	if ctx.Err() != nil {
+		return usbReviewInterrupted
+	}
 	if !ok || !available[action] {
-		return true
+		return usbReviewAnswered
 	}
 	// Rejecting a device never requires authentication. The derived policy is
 	// already block; keeping it blocked only dismisses this review for the
 	// current connection.
 	if action == string(usbtrust.ActionKeepBlocked) {
-		return true
+		return usbReviewAnswered
 	}
 	request := []string{"usb", action, "--runtime-id", d.RuntimeID, "--connection", d.Connection}
 	switch action {
@@ -181,21 +224,24 @@ func usbReviewDecision(ctx context.Context, executable string, d usbtrust.Decisi
 		request = append(request, "--role", d.Role)
 	case "trust-permanent":
 		portability, err := exec.CommandContext(ctx, "zenity", "--list", "--radiolist", "--title=Permanent USB trust", "--text=Choose whether this device may move between ports and docks on this machine.", "--column=Choose", "--column=Portable", "--column=Meaning", "--hide-column=2", "--print-column=2", "TRUE", "false", "Only on this port", "FALSE", "true", "On any port or dock").Output()
-		if err != nil {
-			return true
+		if ctx.Err() != nil {
+			return usbReviewInterrupted
 		}
 		value := strings.TrimSpace(string(portability))
-		if value != "true" && value != "false" {
-			return true
+		if err != nil || (value != "true" && value != "false") {
+			return usbReviewAnswered
 		}
 		request = append(request, "--portable="+value)
 	}
 	output, err := usbAuthorize(ctx, d.Identity.Name, append([]string{executable}, request...))
-	if err == nil || ctx.Err() != nil {
-		return true
+	if ctx.Err() != nil {
+		return usbReviewInterrupted
+	}
+	if err == nil {
+		return usbReviewAnswered
 	}
 	_, _ = exec.Command("zenity", "--error", "--title=USB decision failed", "--text="+html.EscapeString(string(output))).Output()
-	return false
+	return usbReviewRetry
 }
 
 // usbReviewMedia announces a medium that stays closed in an allowed reader
@@ -204,13 +250,11 @@ func usbReviewDecision(ctx context.Context, executable string, d usbtrust.Decisi
 func usbReviewMedia(ctx context.Context, executable string, m usbtrust.MediaDecision) {
 	ctx, cancel := usbWhileMediaPresent(ctx, m.Connection)
 	defer cancel()
-	notice := exec.CommandContext(ctx, "notify-send", usbMediaNotice(m)...)
-	notice.Cancel = func() error { return notice.Process.Signal(os.Interrupt) }
-	picked, err := notice.Output()
+	picked, err := showNotice(ctx, usbMediaNotice(m))
 	if err != nil || ctx.Err() != nil {
 		return
 	}
-	switch strings.TrimSpace(string(picked)) {
+	switch picked {
 	case "open", "default":
 	default:
 		return
@@ -229,22 +273,19 @@ func usbMediaReader(m usbtrust.MediaDecision) string {
 	return m.Reader
 }
 
-// usbMediaNotice builds the notify-send arguments for a closed medium.
-func usbMediaNotice(m usbtrust.MediaDecision) []string {
+// usbMediaNotice builds the notice for a closed medium.
+func usbMediaNotice(m usbtrust.MediaDecision) desktopNotice {
 	body := usbMediaReader(m)
 	if m.Bytes > 0 {
 		body += fmt.Sprintf(", %.1f GB", float64(m.Bytes)/1e9)
 	}
 	body += "\nNothing on it is read until you open it."
-	return []string{
-		"--app-name=USB Guard",
-		"--icon=media-flash",
-		"--expire-time=0",
-		"--action=default=Open",
-		"--action=open=Open it",
-		"--action=keep=Keep closed",
-		"Card or USB storage inserted",
-		html.EscapeString(body),
+	return desktopNotice{
+		App:     "USB Guard",
+		Icon:    "media-flash",
+		Summary: "Card or USB storage inserted",
+		Body:    html.EscapeString(body),
+		Actions: []noticeAction{{"default", "Open"}, {"open", "Open it"}, {"keep", "Keep closed"}},
 	}
 }
 
@@ -316,10 +357,10 @@ func usbConnectionActive(policy []usbtrust.Decision, connection string) bool {
 	return false
 }
 
-// usbReviewNotice builds the notify-send arguments announcing a device that
-// needs a decision. In audit mode the device already works, so the notice
+// usbReviewNotice builds the notice announcing a device that needs a
+// decision. In audit mode the device already works, so the notice
 // must not claim it is blocked. Hardware IDs only appear in the techy view.
-func usbReviewNotice(d usbtrust.Decision, enforcing, technical bool) []string {
+func usbReviewNotice(d usbtrust.Decision, enforcing, technical bool) desktopNotice {
 	name := d.Identity.Name
 	if name == "" {
 		name = "Unknown device"
@@ -327,21 +368,18 @@ func usbReviewNotice(d usbtrust.Decision, enforcing, technical bool) []string {
 	if technical {
 		name = fmt.Sprintf("%s (%s)", name, d.Identity.VIDPID)
 	}
-	summary, dismiss := "USB device blocked", "--action=keep=Keep blocked"
+	summary, dismiss := "USB device blocked", "Keep blocked"
 	if !enforcing {
-		summary, dismiss = "New USB device", "--action=keep=Ignore"
+		summary, dismiss = "New USB device", "Ignore"
 		name += "\nBlocking is off, so it already works."
 	}
-	return []string{
-		"--app-name=USB Guard",
-		"--icon=drive-removable-media-usb",
-		"--expire-time=0",
-		"--action=default=Review",
-		"--action=review=Review…",
-		dismiss,
-		summary,
+	return desktopNotice{
+		App:     "USB Guard",
+		Icon:    "drive-removable-media-usb",
+		Summary: summary,
 		// Notification bodies may carry markup; device strings are untrusted.
-		html.EscapeString(name),
+		Body:    html.EscapeString(name),
+		Actions: []noticeAction{{"default", "Review"}, {"review", "Review…"}, {"keep", dismiss}},
 	}
 }
 
@@ -666,20 +704,25 @@ func usbFingerprintAuth(ctx context.Context, sudo, authHelper, name string) bool
 	scanned := make(chan error, 1)
 	go func() { scanned <- scan.Wait() }()
 
-	// SIGINT makes notify-send close the notice it is waiting on.
-	notice := exec.CommandContext(scanCtx, "notify-send", usbFingerprintNotice(name)...)
-	notice.Cancel = func() error { return notice.Process.Signal(os.Interrupt) }
 	picked := make(chan string, 1)
+	var notice sync.WaitGroup
+	notice.Add(1)
 	go func() {
-		output, _ := notice.Output()
-		picked <- string(output)
+		defer notice.Done()
+		key, _ := showNotice(scanCtx, usbFingerprintNotice(name))
+		picked <- key
+	}()
+	// The notice closes once the scan is over, however it ended.
+	defer func() {
+		cancel()
+		notice.Wait()
 	}()
 
 	select {
 	case err := <-scanned:
 		return err == nil
-	case output := <-picked:
-		if strings.TrimSpace(output) == "password" {
+	case key := <-picked:
+		if key == "password" {
 			cancel()
 			<-scanned
 			return false
@@ -689,18 +732,17 @@ func usbFingerprintAuth(ctx context.Context, sudo, authHelper, name string) bool
 	}
 }
 
-// usbFingerprintNotice builds the notify-send arguments for the scan prompt.
-func usbFingerprintNotice(name string) []string {
+// usbFingerprintNotice builds the notice for the scan prompt.
+func usbFingerprintNotice(name string) desktopNotice {
 	if name == "" {
 		name = "this USB device"
 	}
-	return []string{
-		"--app-name=USB Guard",
-		"--icon=fingerprint",
-		"--expire-time=0",
-		"--action=password=Use password",
-		"Touch the fingerprint reader",
-		html.EscapeString("to authorize " + name),
+	return desktopNotice{
+		App:     "USB Guard",
+		Icon:    "fingerprint",
+		Summary: "Touch the fingerprint reader",
+		Body:    html.EscapeString("to authorize " + name),
+		Actions: []noticeAction{{"password", "Use password"}},
 	}
 }
 

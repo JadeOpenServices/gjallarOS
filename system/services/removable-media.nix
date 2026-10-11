@@ -170,7 +170,7 @@ in
             Service = {
               ExecStart = "${pkgs.callPackage ../../pkgs/gjallarctl { }}/bin/gjallarctl usb review";
               Environment = [
-                "PATH=${lib.makeBinPath [ pkgs.zenity pkgs.libnotify ]}"
+                "PATH=${lib.makeBinPath [ pkgs.zenity ]}"
                 "SUDO_ASKPASS=${usbTrustAskpass}"
                 # Fallback start view; the review reads user.config.json itself.
                 "GJALLAR_USB_REVIEW_VIEW=${
