@@ -56,7 +56,13 @@
 
   boot.kernelPackages = pkgs.linuxPackages_latest;
 
-  nixpkgs.overlays = import ../pkgs/lib/overlays.nix;
+  # The KIO drive-usage patch rebuilds KIO and everything above it (Dolphin,
+  # Plasma file dialogs) on the device, so it is opt-in.
+  nixpkgs.overlays =
+    import ../pkgs/lib/overlays.nix
+    ++ lib.optional (settings.dolphinDriveUsage or false) (
+      import ../pkgs/optional-overlays/kio-device-capacity-text.nix
+    );
   nixpkgs.config.allowUnfree = true;
 
   nix.settings.experimental-features = [

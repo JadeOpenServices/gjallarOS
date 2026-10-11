@@ -87,7 +87,7 @@ type Settings struct {
 	TouchpadWorkspaceSwipe, TouchscreenEnable                                               bool
 	PenTabletEnable, OrientationSensorEnable                                                bool
 	ClamshellEnable, USBGuardEnable, USBTrustEnforce, PrintingEnable, NetworkPrintingEnable bool
-	ConsoleLoginEnable, USBReviewTechnical                                                  bool
+	ConsoleLoginEnable, USBReviewTechnical, DolphinDriveUsage                               bool
 	USBTrustTPMHandle                                                                       string
 	Name, Email, GitHubUsername, DotfilesDir                                                string
 	RootPasswordFile, UserPasswordFile                                                      string
@@ -144,6 +144,7 @@ func FromUser(user config.User) Settings {
 		USBReviewTechnical:                  user.USBReviewTechnical,
 		PrintingEnable:                      user.PrintingEnable,
 		NetworkPrintingEnable:               user.NetworkPrintingEnable,
+		DolphinDriveUsage:                   user.DolphinDriveUsage,
 		Name:                                user.Name,
 		Email:                               user.Email,
 		GitHubUsername:                      user.GitHubUsername,
@@ -229,6 +230,7 @@ var userIntentKeys = []string{
 	"usbReviewTechnicalView",
 	"printingEnable",
 	"networkPrintingEnable",
+	"dolphinDriveUsage",
 	"name",
 	"email",
 	"githubUsername",
@@ -402,6 +404,7 @@ func Render(s Settings) []byte {
 	boolean("usbReviewTechnicalView", s.USBReviewTechnical)
 	boolean("printingEnable", s.PrintingEnable)
 	boolean("networkPrintingEnable", s.NetworkPrintingEnable)
+	boolean("dolphinDriveUsage", s.DolphinDriveUsage)
 	str("name", s.Name)
 	str("email", s.Email)
 	str("githubUsername", s.GitHubUsername)

@@ -49,6 +49,7 @@ let
       usbguardEnable = getSetting "usbguardEnable" false;
       usbTrustEnforce = getSetting "usbTrustEnforce" false;
       usbTrustTpmHandle = getSetting "usbTrustTpmHandle" "";
+      dolphinDriveUsage = getSetting "dolphinDriveUsage" false;
 
       name = getSetting "name" "";
       email = getSetting "email" "";

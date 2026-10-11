@@ -55,6 +55,7 @@
   "luksTpm2Enable": false,
   "name": "Your Name",
   "networkPrintingEnable": false,
+  "dolphinDriveUsage": false,
   "nextcloudEnable": false,
   "nextcloudHost": "",
   "overrideAiSelection": false,

@@ -179,6 +179,11 @@ Web apps are listed in `webApplications`, for example
 The older `planeEnable`/`planeHost`/`drawio*` fields are still read when
 `webApplications` is absent, but new configs should use the list.
 
+`"dolphinDriveUsage": true` shows used and total space next to each drive in
+the Dolphin places panel. It patches KIO, so KIO, Dolphin and the file dialogs
+are compiled on the machine instead of downloaded. That adds a lot of time to
+a rebuild, so it is off by default.
+
 ### App catalogue
 
 Optional applications live in `apps/<id>/`: `meta.json` (name, description,
