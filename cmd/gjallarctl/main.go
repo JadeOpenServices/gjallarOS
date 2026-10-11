@@ -3415,8 +3415,11 @@ func watchHyprlandReloads(reloads chan<- struct{}, stderr io.Writer) {
 }
 
 func runHyprlandRotate(args []string, stdout, stderr io.Writer) int {
-	if len(args) != 0 {
-		fmt.Fprintln(stderr, "usage: gjallarctl hyprland-rotate")
+	flags := flag.NewFlagSet("gjallarctl hyprland-rotate", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	switchName := flags.String("tablet-switch", "", "rotate only while this input device reports tablet mode")
+	requireSwitch := flags.Bool("require-tablet-switch", false, "treat a missing tablet mode switch as laptop mode")
+	if err := flags.Parse(args); err != nil || flags.NArg() != 0 {
 		return 2
 	}
 
@@ -3451,27 +3454,48 @@ func runHyprlandRotate(args []string, stdout, stderr io.Writer) int {
 	reloads := make(chan struct{}, 1)
 	go watchHyprlandReloads(reloads, stderr)
 
-	var current string
+	// With a tablet mode switch the screen turns only in tablet mode; in
+	// laptop mode it keeps the configured orientation (ODDC 35.3).
+	gate := newRotationGate(*switchName != "", *requireSwitch)
+	switches := make(chan tabletSwitchState)
+	if *switchName != "" {
+		go watchTabletSwitch("/sys", "/dev/input", *switchName, switches, stderr)
+	}
+
 	for running := true; running; {
+		var action rotationAction
 		select {
 		case orientation, ok := <-orientations:
 			if !ok {
 				running = false
 				continue
 			}
-			current = orientation
+			action = gate.orientation(orientation)
+		case state := <-switches:
+			action = gate.switchState(state)
 		case <-reloads:
-			if current == "" {
+			action = gate.reloaded()
+		}
+
+		switch action {
+		case rotationApply:
+			// A failed apply may have changed some keywords already, so
+			// laptop mode restores after any attempt.
+			gate.applied()
+			if err := applyHyprlandRotation("/sys", gate.current); err != nil {
+				fmt.Fprintf(stderr, "WARN: rotate %s: %v\n", gate.current, err)
 				continue
 			}
+			fmt.Fprintf(stdout, "PASS: orientation %s applied\n", gate.current)
+		case rotationRestore:
+			// A reload brings back the monitor and input rules from the config.
+			if out, err := exec.Command("hyprctl", "reload").CombinedOutput(); err != nil {
+				fmt.Fprintf(stderr, "WARN: hyprctl reload: %v: %s\n", err, strings.TrimSpace(string(out)))
+				continue
+			}
+			gate.reloaded()
+			fmt.Fprintln(stdout, "PASS: laptop mode, configured orientation restored")
 		}
-
-		if err := applyHyprlandRotation("/sys", current); err != nil {
-			fmt.Fprintf(stderr, "WARN: rotate %s: %v\n", current, err)
-			continue
-		}
-
-		fmt.Fprintf(stdout, "PASS: orientation %s applied\n", current)
 	}
 
 	if err := <-scanErr; err != nil {

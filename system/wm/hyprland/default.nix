@@ -16,6 +16,30 @@ let
       config.oddc.sensors.orientation.present
     else
       settings.orientationSensorEnable or false;
+  # ODDC's own tablet mode switch (ODDC 35.3). Pins without the
+  # oddc.tabletMode option still look for it; a model ODDC says has none
+  # rotates freely, and one it says has one treats a missing switch as laptop
+  # mode.
+  tabletSwitchName = "ODDC Tablet Mode Switch";
+  tabletModeKnown = lib.hasAttrByPath [ "oddc" "tabletMode" "present" ] options;
+  tabletSwitchArgs =
+    lib.optionals (!tabletModeKnown || config.oddc.tabletMode.present) [
+      "--tablet-switch"
+      tabletSwitchName
+    ]
+    ++ lib.optional (tabletModeKnown && config.oddc.tabletMode.present) "--require-tablet-switch";
+  # The rotation service reads the switch as the logged-in user. uaccess must
+  # be tagged before 73-seat-late.rules applies it, so this cannot go into
+  # extraRules (99-local). systemd's own 70-uaccess.rules does the same for
+  # joysticks. ODDC creates the switch through uinput, so only a virtual
+  # device qualifies; a USB device picks its own name.
+  tabletSwitchAccess = pkgs.writeTextFile {
+    name = "gjallar-tablet-switch-udev-rules";
+    destination = "/lib/udev/rules.d/70-gjallar-tablet-switch.rules";
+    text = ''
+      SUBSYSTEM=="input", KERNEL=="event*", DEVPATH=="/devices/virtual/input/*", ENV{ID_INPUT_SWITCH}=="1", ENV{ID_INPUT_KEY}!="1", ATTRS{name}=="${tabletSwitchName}", TAG+="uaccess"
+    '';
+  };
   gjallarctl = pkgs.callPackage ../../../pkgs/gjallarctl { };
   moniquePackage = pkgs.callPackage ../../../pkgs/monique/nix/package.nix { };
   hyprlandSession = pkgs.writeShellScriptBin "gjallar-hyprland-session" ''
@@ -73,25 +97,33 @@ in
 
   services.displayManager.sessionPackages = [ hyprlandSessionEntry ];
 
-  systemd.user.services.display-input-rotation =
-    lib.mkIf orientationSensor
-      {
-        description = "Automatic display and input rotation";
+  systemd.user.services.display-input-rotation = lib.mkIf orientationSensor {
+    description = "Automatic display and input rotation";
 
-        wantedBy = [ "graphical-session.target" ];
-        after = [ "graphical-session.target" ];
-        # hyprland-rotate runs monitor-sensor and hyprctl.
-        path = [
-          pkgs.iio-sensor-proxy
-          config.programs.hyprland.package
-        ];
+    wantedBy = [ "graphical-session.target" ];
+    after = [ "graphical-session.target" ];
+    # hyprland-rotate runs monitor-sensor and hyprctl.
+    path = [
+      pkgs.iio-sensor-proxy
+      config.programs.hyprland.package
+    ];
 
-        serviceConfig = {
-          ExecStart = "${gjallarctl}/bin/gjallarctl hyprland-rotate";
-          Restart = "on-failure";
-          RestartSec = 1;
-        };
-      };
+    serviceConfig = {
+      ExecStart = lib.escapeShellArgs (
+        [
+          "${gjallarctl}/bin/gjallarctl"
+          "hyprland-rotate"
+        ]
+        ++ tabletSwitchArgs
+      );
+      Restart = "on-failure";
+      RestartSec = 1;
+    };
+  };
+
+  services.udev.packages = lib.mkIf (orientationSensor && tabletSwitchArgs != [ ]) [
+    tabletSwitchAccess
+  ];
 
   imports = [
     ../common/wayland.nix
