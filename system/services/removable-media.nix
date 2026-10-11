@@ -113,6 +113,12 @@ in
         ACTION=="add", SUBSYSTEM=="scsi", ENV{DEVTYPE}=="scsi_device", ENV{GJALLAR_USB_SCSI}!="1", RUN+="${pkgs.runtimeShell} -c 'echo %k > /sys/bus/scsi/drivers_probe'"
       '';
 
+      # The broker turns off SCSI autoprobe at start and the media gate binds
+      # SCSI drivers later, so /sys/bus/scsi must exist before it starts.
+      # Machines without SATA or USB disks at boot only get the SCSI core with
+      # the first USB disk, so load it at boot.
+      boot.kernelModules = [ "scsi_mod" ];
+
       systemd.services.usb-trust-broker = {
         description = "USB trust broker";
         wantedBy = [
@@ -122,7 +128,10 @@ in
         requires = [ "usbguard.service" ];
         bindsTo = [ "usbguard.service" ];
         partOf = [ "usbguard.service" ];
-        after = [ "usbguard.service" ];
+        after = [
+          "usbguard.service"
+          "systemd-modules-load.service"
+        ];
         path = [ pkgs.tpm2-tools ];
         serviceConfig = {
           Type = "simple";

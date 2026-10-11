@@ -49,6 +49,13 @@ let
       desktopGroups = if enabled then c.users.users.testuser.extraGroups else [ ];
       brokerGroup = if enabled then c.systemd.services.usb-trust-broker.serviceConfig.Group else null;
       stateDirectory = if enabled then c.systemd.services.usb-trust-broker.serviceConfig.StateDirectory else null;
+      # The broker needs /sys/bus/scsi at start (mount namespace and autoprobe).
+      scsiAtBoot =
+        !enabled
+        || (
+          builtins.elem "scsi_mod" c.boot.kernelModules
+          && builtins.elem "systemd-modules-load.service" c.systemd.services.usb-trust-broker.after
+        );
       startsWithBackend =
         !enabled || builtins.elem "usbguard.service" c.systemd.services.usb-trust-broker.wantedBy;
       review =
@@ -82,6 +89,7 @@ assert enforcing.stateDirectory == "gjallar-usbtrust";
 assert builtins.elem "-/sys" enforcing.usbguardReadWritePaths;
 assert enforcing.usbAssertions;
 assert audit.startsWithBackend && enforcing.startsWithBackend;
+assert audit.scsiAtBoot && enforcing.scsiAtBoot;
 assert audit.review != null;
 assert managedAudit.review == null;
 {
