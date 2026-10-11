@@ -300,15 +300,37 @@ whole directory into the Nix store, untracked files and VM disks included.
 GjallarOS patches a few packages (Noctalia, its greeter, the Nextcloud client
 with OpenVFS, OpenCode, qt6ct and others), so cache.nixos.org does not have
 them and every machine compiled them itself. For each `v*` release tag,
-`.github/workflows/cache.yml` builds them (flake package `prebuilt`) and pushes
-them, signed, to the cache named in `deployment/binary-cache.json`. Machines
-add that cache to `nix.conf`, and `rebuild` and the installer pass it on the
-command line too, so the first install uses it as well. Anything missing from
-the cache still builds locally.
+`.github/workflows/cache.yml` builds them (flake package `prebuilt`), signs
+them and uploads them as files of the `nix-cache` release. Those files are a
+plain Nix binary cache. Each tag adds to it, so a machine on `main` downloads a
+package whenever it matches one built for any tag. Anything missing still
+builds locally.
 
-The workflow only gets the push token and signing key through the
+`deployment/binary-cache.json` names the cache and its public key:
+
+```json
+{
+  "url": "https://github.com/JadeOpenServices/gjallarOS/releases/download/nix-cache",
+  "publicKey": "gjallaros-cache-1:..."
+}
+```
+
+Machines add it to `nix.conf`, and `rebuild` and the installer pass it on the
+command line too, so the first install uses it as well. Nix only accepts
+files signed with that key.
+
+The workflow reads the signing key (secret `NIX_SIGNING_KEY`) only through the
 `release-cache` environment, which should allow `v*` tags only and require a
-reviewer. The signing key signs cache packages and nothing else. Forks keep
+reviewer. Create the key on your own machine; it never needs network:
+
+```sh
+nix key generate-secret --key-name gjallaros-cache-1 > cache.sec
+nix key convert-secret-to-public < cache.sec
+```
+
+Paste `cache.sec` into the secret, put the public key into
+`deployment/binary-cache.json`, then delete `cache.sec` or keep it offline.
+The key signs cache files and nothing else. Forks keep
 `deployment/binary-cache.json` empty or point it at their own cache.
 
 ### Recovery and rollback

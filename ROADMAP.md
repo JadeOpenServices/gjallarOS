@@ -304,16 +304,16 @@ Plan agreed 2026-10-10. Nothing in this section is built yet.
       noctalia-greeter, gjallarctl, monique and the other packages in
       `pkgs/` are not on cache.nixos.org. Upstream caches do not match
       either, because the inputs follow our nixpkgs and carry our patches,
-      so slow devices compile them for a long time. Plan: GitHub runners
-      build the release tags and push to a cache (Cachix or a cache on our
-      own server). The installer and `rebuild` add it as a substituter.
+      so slow devices compile them for a long time. Built: GitHub runners
+      build the release tags and add them, signed, to the `nix-cache`
+      release (README "Release cache"); those files are the only binaries
+      in a release. The installer and `rebuild` add it as a substituter.
       Devices still evaluate the same source; the cache only skips building
       outputs with a matching hash, and `nix build --rebuild` can check it.
       Research flow first, because the cache signing key becomes a key every
       machine trusts: build only signed tags, keep the key in a protected
-      GitHub environment, let the installer ask whether to use the cache,
-      and look at a second builder that rebuilds and compares. Starts once
-      the release flow above works.
+      GitHub environment. Still open: let the installer ask whether to use
+      the cache, and a second builder that rebuilds and compares.
       Measured 2026-10-11 (fresh store, only cache.nixos.org trusted, 16
       threads): 46 min wall, 4.9 h summed build time. Our KIO capacity
       patch takes 37 % (KIO plus the 26 KDE packages that link it: Dolphin,

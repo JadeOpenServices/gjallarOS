@@ -1,6 +1,7 @@
 # Builds the packages GjallarOS patches (flake package `prebuilt`) for each
-# release tag and pushes them to the release cache, so machines download
-# them instead of compiling for hours. Setup: README "Release cache".
+# release tag and adds them to the signed Nix cache kept as files of the
+# `nix-cache` release, so machines download them instead of compiling for
+# hours. Setup: README "Release cache".
 name: release cache
 
 on:
@@ -14,10 +15,14 @@ jobs:
   build:
     if: github.repository == 'JadeOpenServices/gjallarOS'
     runs-on: ubuntu-latest
-    # Holds CACHIX_AUTH_TOKEN and CACHIX_SIGNING_KEY. Its rules (v* tags only,
-    # required reviewer) decide whether this job ever sees them.
+    # Holds NIX_SIGNING_KEY. Its rules (v* tags only, required reviewer)
+    # decide whether this job ever sees it.
     environment: release-cache
+    permissions:
+      contents: write
     timeout-minutes: 360
+    env:
+      GH_REPO: ${{ github.repository }}
     steps:
       # Room for the Nix store: the runner image ships about 14 GB free.
       - name: Free disk space
@@ -30,13 +35,46 @@ jobs:
 
       - uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31.11.1
 
-      # Daemon mode pushes only what this job builds, not what it downloaded
-      # from cache.nixos.org.
-      - uses: cachix/cachix-action@38b082610b782e7e93e209c35fd730d399dee866 # v17
-        with:
-          name: ${{ vars.CACHIX_CACHE }}
-          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
-          signingKey: ${{ secrets.CACHIX_SIGNING_KEY }}
-
       - name: Build
-        run: nix build --print-build-logs '.?submodules=1#prebuilt'
+        run: nix build --print-build-logs --out-link result '.?submodules=1#prebuilt'
+
+      - name: Sign into a file cache
+        env:
+          NIX_SIGNING_KEY: ${{ secrets.NIX_SIGNING_KEY }}
+        run: |
+          key="$RUNNER_TEMP/cache.key"
+          printf '%s\n' "$NIX_SIGNING_KEY" > "$key"
+          nix copy --to "file://$PWD/cache?compression=zstd&secret-key=$key" ./result
+          rm -f "$key"
+
+      # nix copy writes the whole closure. Machines get everything
+      # cache.nixos.org has from there, so only the rest is kept.
+      - name: Keep what cache.nixos.org lacks
+        working-directory: cache
+        run: |
+          ls *.narinfo | sed 's/\.narinfo$//' | xargs -P 16 -I{} sh -c '
+            if curl -sfI -o /dev/null "https://cache.nixos.org/{}.narinfo"; then
+              rm "$(sed -n "s/^URL: //p" {}.narinfo)" {}.narinfo
+            fi'
+          # Release files cannot sit in folders, so the NARs move next to the
+          # narinfo files. The signature covers store path, NAR hash, size and
+          # references, not the URL.
+          find nar -type f -exec mv -t . {} +
+          sed -i 's|^URL: nar/|URL: |' *.narinfo
+          printf 'StoreDir: /nix/store\nWantMassQuery: 1\nPriority: 50\n' > nix-cache-info
+          echo "$(ls *.narinfo | wc -l) store paths for the cache"
+
+      # NARs go up before the narinfo files that point at them: a machine that
+      # finds a narinfo but not its NAR fails the build instead of compiling.
+      - name: Upload new files to the nix-cache release
+        working-directory: cache
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view nix-cache > /dev/null 2>&1 ||
+            gh release create nix-cache --prerelease --title "Nix cache" \
+              --notes 'Signed Nix binary cache for GjallarOS packages, not a release. See README "Release cache".'
+          gh release view nix-cache --json assets --jq '.assets[].name' | sort > "$RUNNER_TEMP/have"
+          for files in '*.nar.zst' '*.narinfo' nix-cache-info; do
+            ls $files | sort | comm -23 - "$RUNNER_TEMP/have" | xargs -r gh release upload nix-cache
+          done
