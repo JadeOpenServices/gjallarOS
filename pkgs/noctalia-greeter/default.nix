@@ -12,6 +12,9 @@
 # runtime-dir.patch keeps the session's own /run/user dir instead of a fixed
 # /tmp path that any local user could create first and so block the login
 # screen.
+# internal-panel-cursor.patch starts the cursor on the laptop panel (eDP,
+# LVDS, DSI) while the lid is open, not on a TV the layout puts first, so
+# the touchpad moves a pointer the user can see.
 noctalia-greeter.overrideAttrs (old: {
   patches = (old.patches or [ ]) ++ [
     ./staging-snapshot.patch
@@ -19,5 +22,6 @@ noctalia-greeter.overrideAttrs (old: {
     ./wlr-log-level.patch
     ./osk.patch
     ./runtime-dir.patch
+    ./internal-panel-cursor.patch
   ];
 })
