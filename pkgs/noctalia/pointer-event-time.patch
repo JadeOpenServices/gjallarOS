@@ -1,0 +1,149 @@
+--- a/src/render/scene/input_area.cpp
++++ b/src/render/scene/input_area.cpp
+@@ -206,9 +206,9 @@ void InputArea::dispatchLeave() {
+   }
+ }
+ 
+-void InputArea::dispatchMotion(float localX, float localY) {
++void InputArea::dispatchMotion(float localX, float localY, std::uint32_t time) {
+   if (m_onMotion) {
+-    m_onMotion({.localX = localX, .localY = localY});
++    m_onMotion({.localX = localX, .localY = localY, .time = time});
+   }
+ }
+ 
+@@ -270,7 +270,8 @@ void InputArea::dispatchCancel() {
+ 
+ bool InputArea::dispatchAxis(
+     float localX, float localY, std::uint32_t axis, std::uint32_t axisSource, double axisValue,
+-    std::int32_t axisDiscrete, std::int32_t axisValue120, float axisLines, std::uint32_t axisGestureSerial
++    std::int32_t axisDiscrete, std::int32_t axisValue120, float axisLines, std::uint32_t axisGestureSerial,
++    std::uint32_t time
+ ) {
+   if (!m_onAxis) {
+     return false;
+@@ -348,6 +349,7 @@ bool InputArea::dispatchAxis(
+   return m_onAxis(
+       {.localX = localX,
+        .localY = localY,
++       .time = time,
+        .axis = axis,
+        .axisSource = axisSource,
+        .pressed = false,
+--- a/src/render/scene/input_area.h
++++ b/src/render/scene/input_area.h
+@@ -179,7 +179,8 @@ public:
+   // Dispatch methods (called by InputDispatcher)
+   void dispatchEnter(float localX, float localY);
+   void dispatchLeave();
+-  void dispatchMotion(float localX, float localY);
++  // time: the event's Wayland timestamp in ms, 0 for synthetic re-hover motion.
++  void dispatchMotion(float localX, float localY, std::uint32_t time = 0);
+   void dispatchPress(
+       float localX, float localY, std::uint32_t button, bool isPressed, float sceneX = 0.0F, float sceneY = 0.0F,
+       std::uint32_t serial = 0, std::uint32_t time = 0
+@@ -187,7 +188,8 @@ public:
+   void dispatchCancel();
+   [[nodiscard]] bool dispatchAxis(
+       float localX, float localY, std::uint32_t axis, std::uint32_t axisSource, double axisValue,
+-      std::int32_t axisDiscrete, std::int32_t axisValue120, float axisLines, std::uint32_t axisGestureSerial = 0
++      std::int32_t axisDiscrete, std::int32_t axisValue120, float axisLines, std::uint32_t axisGestureSerial = 0,
++      std::uint32_t time = 0
+   );
+   void dispatchKey(std::uint32_t sym, std::uint32_t utf32, std::uint32_t modifiers, bool pressed, bool preedit = false);
+   void dispatchFocusGain();
+--- a/src/render/scene/input_dispatcher.cpp
++++ b/src/render/scene/input_dispatcher.cpp
+@@ -140,7 +140,7 @@ void InputDispatcher::pointerLeave() {
+   updateCursor(m_lastSerial);
+ }
+ 
+-void InputDispatcher::pointerMotion(float x, float y, std::uint32_t serial) {
++void InputDispatcher::pointerMotion(float x, float y, std::uint32_t serial, std::uint32_t time) {
+   if (serial != 0) {
+     m_lastSerial = serial;
+   }
+@@ -172,7 +172,7 @@ void InputDispatcher::pointerMotion(float x, float y, std::uint32_t serial) {
+     }
+   }
+ 
+-  updateHover(x, y, m_lastSerial);
++  updateHover(x, y, m_lastSerial, time);
+ }
+ 
+ bool InputDispatcher::pointerButton(
+@@ -314,7 +314,7 @@ void InputDispatcher::syncPointerHover() {
+ 
+ bool InputDispatcher::pointerAxis(
+     float x, float y, std::uint32_t axis, std::uint32_t axisSource, double value, std::int32_t discrete,
+-    std::int32_t value120, float lines, std::uint32_t axisGestureSerial
++    std::int32_t value120, float lines, std::uint32_t axisGestureSerial, std::uint32_t time
+ ) {
+   pruneDetachedAreas();
+   InputArea* target = m_capturedArea != nullptr ? m_capturedArea : findInputAreaAt(x, y);
+@@ -333,7 +333,7 @@ bool InputDispatcher::pointerAxis(
+     float localY = 0.0F;
+     (void)Node::mapFromScene(area, x, y, localX, localY);
+     const bool consumed =
+-        area->dispatchAxis(localX, localY, axis, axisSource, value, discrete, value120, lines, axisGestureSerial);
++        area->dispatchAxis(localX, localY, axis, axisSource, value, discrete, value120, lines, axisGestureSerial, time);
+ 
+     if (!consumed) {
+       continue;
+@@ -577,7 +577,7 @@ InputArea* InputDispatcher::findInputAreaAt(float x, float y) {
+   return nullptr;
+ }
+ 
+-void InputDispatcher::updateHover(float x, float y, std::uint32_t serial) {
++void InputDispatcher::updateHover(float x, float y, std::uint32_t serial, std::uint32_t time) {
+   pruneDetachedAreas();
+ 
+   // While a button is held, all motion goes to the captured area; hover stays frozen.
+@@ -585,7 +585,7 @@ void InputDispatcher::updateHover(float x, float y, std::uint32_t serial) {
+     float localX = 0.0F;
+     float localY = 0.0F;
+     (void)Node::mapFromScene(m_capturedArea, x, y, localX, localY);
+-    m_capturedArea->dispatchMotion(localX, localY);
++    m_capturedArea->dispatchMotion(localX, localY, time);
+     updateCursor(serial);
+     return;
+   }
+@@ -612,7 +612,7 @@ void InputDispatcher::updateHover(float x, float y, std::uint32_t serial) {
+     float localX = 0.0F;
+     float localY = 0.0F;
+     (void)Node::mapFromScene(m_hoveredArea, x, y, localX, localY);
+-    m_hoveredArea->dispatchMotion(localX, localY);
++    m_hoveredArea->dispatchMotion(localX, localY, time);
+   }
+ 
+   updateCursor(serial);
+--- a/src/render/scene/input_dispatcher.h
++++ b/src/render/scene/input_dispatcher.h
+@@ -35,7 +35,8 @@ public:
+   // Dispatch Wayland pointer events into the scene graph
+   void pointerEnter(float x, float y, std::uint32_t serial);
+   void pointerLeave();
+-  void pointerMotion(float x, float y, std::uint32_t serial);
++  // time: the event's Wayland timestamp in ms; 0 for synthetic re-hover motion.
++  void pointerMotion(float x, float y, std::uint32_t serial, std::uint32_t time = 0);
+   void syncPointerHover();
+   // Returns true if the event was consumed by a scene widget
+   bool pointerButton(
+@@ -43,7 +44,7 @@ public:
+   );
+   bool pointerAxis(
+       float x, float y, std::uint32_t axis, std::uint32_t axisSource, double value, std::int32_t discrete,
+-      std::int32_t value120, float lines, std::uint32_t axisGestureSerial = 0
++      std::int32_t value120, float lines, std::uint32_t axisGestureSerial = 0, std::uint32_t time = 0
+   );
+   void cancelPointerCapture();
+ 
+@@ -69,7 +70,7 @@ private:
+   InputArea* findInputAreaAt(float x, float y);
+   [[nodiscard]] bool isAttachedToScene(const InputArea* area) const;
+   void pruneDetachedAreas();
+-  void updateHover(float x, float y, std::uint32_t serial);
++  void updateHover(float x, float y, std::uint32_t serial, std::uint32_t time = 0);
+   void updateCursor(std::uint32_t serial);
+   void trackArea(InputArea* area);
+   void clearTextInputFocus(InputArea* area);

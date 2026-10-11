@@ -10,7 +10,7 @@
  #include <filesystem>
  #include <linux/input-event-codes.h>
  #include <unistd.h>
-@@ -2264,6 +2266,161 @@ void NotificationToast::applyCardReveal(Instance::CardState& cs, float reveal, f
+@@ -2264,6 +2266,157 @@ void NotificationToast::applyCardReveal(Instance::CardState& cs, float reveal, f
    );
  }
  
@@ -35,20 +35,16 @@
 +    area->setOpacity(std::clamp(1.0F - std::abs(dx) / cardW, 0.0F, 1.0F));
 +  };
 +
-+  // Motion events carry no timestamp, so measure on arrival.
-+  const auto now = []() {
-+    return static_cast<std::uint32_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
-+                                          std::chrono::steady_clock::now().time_since_epoch()
-+    )
-+                                          .count());
-+  };
-+
-+  // Follows the card's speed with a short smoothing, so one jittery event does
-+  // not decide a fling. Events read in the same millisecond (a held-back touch
-+  // press and its first move, or a batch from a busy compositor) add up and
-+  // count once time moves on.
-+  const auto track = [state, now](float dx) {
-+    const std::uint32_t time = now();
++  // Speed is measured on the events' own timestamps, not on when they are read:
++  // a busy shell reads a whole touch burst at once, which would look like no
++  // time passed. Follows the speed with a short smoothing, so one jittery event
++  // does not decide a fling. Events with the same timestamp add up and count
++  // once time moves on; time 0 marks synthetic motion, which moves the card but
++  // says nothing about speed.
++  const auto track = [state](float dx, std::uint32_t time) {
++    if (time == 0) {
++      return;
++    }
 +    const std::uint32_t dt = time - state->lastTime;
 +    if (dt == 0) {
 +      return;
@@ -96,7 +92,7 @@
 +    inst.surface->requestRedraw();
 +  };
 +
-+  area->setOnPress([&inst, area, state, now, settle](const InputArea::PointerData& data) {
++  area->setOnPress([&inst, area, state, settle](const InputArea::PointerData& data) {
 +    if (data.button != BTN_LEFT) {
 +      return;
 +    }
@@ -109,13 +105,13 @@
 +      state->moved = false;
 +      state->startX = data.localX + area->x() - state->dx;
 +      state->velocity = 0.0F;
-+      state->lastTime = now();
++      state->lastTime = data.time;
 +      state->lastDx = state->dx;
 +      return;
 +    }
 +    if (state->tracking) {
 +      state->tracking = false;
-+      settle(now());
++      settle(data.time);
 +    }
 +  });
 +
@@ -129,7 +125,7 @@
 +      return;
 +    }
 +    state->moved = true;
-+    track(dx);
++    track(dx, data.time);
 +    moveTo(dx);
 +  });
 +
@@ -141,7 +137,7 @@
 +    }
 +  });
 +
-+  area->setOnAxisHandler([&inst, state, moveTo, now, track, settle](const InputArea::PointerData& data) {
++  area->setOnAxisHandler([&inst, state, moveTo, track, settle](const InputArea::PointerData& data) {
 +    if (data.axis != WL_POINTER_AXIS_HORIZONTAL_SCROLL || data.axisSource != WL_POINTER_AXIS_SOURCE_FINGER
 +        || state->tracking) {
 +      return false;
@@ -152,12 +148,12 @@
 +    }
 +    if (!state->moved) {
 +      state->velocity = 0.0F;
-+      state->lastTime = now();
++      state->lastTime = data.time;
 +      state->lastDx = state->dx;
 +    }
 +    state->moved = true;
 +    const float dx = state->dx - static_cast<float>(data.axisValue);
-+    track(dx);
++    track(dx, data.time);
 +    moveTo(dx);
 +    // Touchpads send no reliable end event here; settle once the fingers stop.
 +    // The fingers left with the last event, so judge the fling at that time.
@@ -172,7 +168,7 @@
  InputArea* NotificationToast::buildCard(
      Instance& outputInstance, const PopupEntry& entry, Node** outCardContent, Node** outCardForeground,
      ProgressBar** outProgress, Node** outActionsRow, Node** outInlineReplyRow, Input** outInlineReplyInput
-@@ -2284,9 +2441,13 @@ InputArea* NotificationToast::buildCard(
+@@ -2284,9 +2437,13 @@ InputArea* NotificationToast::buildCard(
    auto viewport = ui::inputArea({});
    viewport->setAcceptedButtons(InputArea::buttonMask({BTN_LEFT, BTN_RIGHT}));
    wl_surface* const sourceSurface = outputInstance.surface->wlSurface();
@@ -187,7 +183,7 @@
      if (data.button == BTN_RIGHT) {
        requestClose(id, CloseReason::Dismissed);
      } else if (data.button == BTN_LEFT && hasDefaultAction) {
-@@ -2300,6 +2461,7 @@ InputArea* NotificationToast::buildCard(
+@@ -2300,6 +2457,7 @@ InputArea* NotificationToast::buildCard(
      }
    });
    viewport->setCursorShape(WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_DEFAULT);
@@ -195,7 +191,18 @@
  
    auto cardRoot = ui::node({.out = outCardContent});
  
-@@ -2928,6 +3090,14 @@ bool NotificationToast::onPointerEvent(const PointerEvent& event) {
+@@ -2911,7 +3069,9 @@ bool NotificationToast::onPointerEvent(const PointerEvent& event) {
+       if (inst->pointerInside) {
+         inst->lastPointerX = static_cast<float>(event.sx);
+         inst->lastPointerY = static_cast<float>(event.sy);
+-        inst->inputDispatcher.pointerMotion(static_cast<float>(event.sx), static_cast<float>(event.sy), 0);
++        inst->inputDispatcher.pointerMotion(
++            static_cast<float>(event.sx), static_cast<float>(event.sy), 0, event.time
++        );
+       }
+       break;
+     case PointerEvent::Type::Button:
+@@ -2928,6 +3088,14 @@ bool NotificationToast::onPointerEvent(const PointerEvent& event) {
        }
        break;
      case PointerEvent::Type::Axis:
@@ -203,7 +210,7 @@
 +        consumed = inst->inputDispatcher.pointerAxis(
 +                       static_cast<float>(event.sx), static_cast<float>(event.sy), event.axis, event.axisSource,
 +                       event.axisValue, event.axisDiscrete, event.axisValue120, event.axisLines,
-+                       event.axisGestureSerial
++                       event.axisGestureSerial, event.time
 +                   )
 +            || consumed;
 +      }

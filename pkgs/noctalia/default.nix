@@ -13,6 +13,10 @@
 # through to the window below. Upstream fixed that in f5e744f0; drop
 # notification-input-region.patch once the pin includes it.
 #
+# Motion and scroll events reach widgets with their Wayland timestamp
+# (pointer-event-time.patch), so a swipe's speed is measured on when the
+# finger moved, not on when a busy shell got round to reading the event.
+#
 # libqalculate 5.10 frees its random state on exit even when nothing ever
 # created it, so the shell crashes every time it stops. Upstream fixed that in
 # 931c2aa9 (5.11); drop the patch once nixpkgs ships libqalculate 5.11 or newer.
@@ -25,6 +29,7 @@
     patches = (old.patches or [ ]) ++ [
       ./media-tray.patch
       ./pointer-axis-frame.patch
+      ./pointer-event-time.patch
       ./notification-swipe.patch
       ./bluetooth.patch
       ./touch-long-press.patch
