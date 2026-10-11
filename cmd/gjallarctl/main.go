@@ -9,6 +9,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"github.com/JadeOpenServices/gjallarOS/internal/binarycache"
 	"github.com/JadeOpenServices/gjallarOS/internal/hardware/deviceprobe"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/repojson"
 	"io"
@@ -2309,7 +2310,7 @@ func newRebuildPlan(
 			"--raw",
 			"path:" + repo + "#nixosConfigurations." + strconv.Quote(host) + ".config.system.build.toplevel.drvPath",
 		}, nixArgs),
-		build: slices.Concat(nix, []string{"build", "--no-link", "--print-out-paths"}, nixArgs),
+		build: slices.Concat(nix, []string{"build", "--no-link", "--print-out-paths"}, binarycache.Args(repo), nixArgs),
 		// Without --no-reexec, nixos-rebuild 26.05 first builds a newer copy
 		// of itself from <nixpkgs/nixos> even for --store-path, which fails
 		// on a flake system and has nothing to offer for a prebuilt one.

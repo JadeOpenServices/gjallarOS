@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/JadeOpenServices/gjallarOS/internal/binarycache"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/buildlimits"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/flakesource"
 )
@@ -46,10 +47,10 @@ func Apply(ctx context.Context, repo, hostname string) error {
 		return err
 	}
 	defer source.Close()
-	return apply(ctx, source.Ref(hostname))
+	return apply(ctx, source.Ref(hostname), binarycache.Args(repo))
 }
 
-func apply(ctx context.Context, target string) error {
+func apply(ctx context.Context, target string, cacheArgs []string) error {
 	// Before the swap below: build parallelism follows real memory.
 	limits := buildlimits.Args()
 	cleanup, err := enableEvalSwap(ctx)
@@ -65,6 +66,7 @@ func apply(ctx context.Context, target string) error {
 		fmt.Printf("Low memory: limiting local builds (%s).\n", strings.Join(limits, " "))
 		args = append(args, limits...)
 	}
+	args = append(args, cacheArgs...)
 	if err := run(ctx, "sudo", args...); err != nil {
 		return fmt.Errorf("boot generation failed: %w", err)
 	}

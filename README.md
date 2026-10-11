@@ -295,6 +295,22 @@ runs GjallarOS. If you need the package itself, build it with
 `nix build "git+file://$PWD#gjallarctl"`. A `path:` flake reference copies the
 whole directory into the Nix store, untracked files and VM disks included.
 
+### Release cache
+
+GjallarOS patches a few packages (Noctalia, its greeter, the Nextcloud client
+with OpenVFS, OpenCode, qt6ct and others), so cache.nixos.org does not have
+them and every machine compiled them itself. For each `v*` release tag,
+`.github/workflows/cache.yml` builds them (flake package `prebuilt`) and pushes
+them, signed, to the cache named in `deployment/binary-cache.json`. Machines
+add that cache to `nix.conf`, and `rebuild` and the installer pass it on the
+command line too, so the first install uses it as well. Anything missing from
+the cache still builds locally.
+
+The workflow only gets the push token and signing key through the
+`release-cache` environment, which should allow `v*` tags only and require a
+reviewer. The signing key signs cache packages and nothing else. Forks keep
+`deployment/binary-cache.json` empty or point it at their own cache.
+
 ### Recovery and rollback
 
 With `recoveryEnable`, the boot menu lists only the newest generation and its

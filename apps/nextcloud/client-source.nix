@@ -1,5 +1,5 @@
 # Pinned Nextcloud desktop source and the GjallarOS patches on top of it.
-# Shared by apps/nextcloud/home.nix and tests/nix/nextcloud-client-patches.nix.
+# Shared by apps/nextcloud/package.nix and tests/nix/nextcloud-client-patches.nix.
 { fetchFromGitHub }:
 {
   src = fetchFromGitHub {

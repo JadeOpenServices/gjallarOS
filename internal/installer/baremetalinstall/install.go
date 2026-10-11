@@ -19,6 +19,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/JadeOpenServices/gjallarOS/internal/binarycache"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/buildlimits"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/flakesource"
 )
@@ -160,6 +161,7 @@ func install(
 		)
 		installArgs = append(installArgs, limits...)
 	}
+	installArgs = append(installArgs, binarycache.Args(repo)...)
 	if err := r.Run(
 		ctx,
 		nil,

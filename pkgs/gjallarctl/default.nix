@@ -19,6 +19,7 @@ buildGoModule {
       (lib.fileset.fileFilter (f: f.hasExt "go" || f.name == "meta.json") ../../apps)
       ../../cmd
       ../../internal/ai
+      ../../internal/binarycache
       ../../internal/hardware
       ../../internal/input
       ../../internal/installercheck

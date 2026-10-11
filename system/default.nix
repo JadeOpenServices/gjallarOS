@@ -31,6 +31,7 @@
     ./security/keyring.nix
     ./maintenance/storage.nix
     ./maintenance/installer-resume.nix
+    ./maintenance/binary-cache.nix
     ./services/printing.nix
     ./services/removable-media.nix
 

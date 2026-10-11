@@ -1,6 +1,6 @@
 # Nextcloud/OpenVFS hydration patches
 
-These patches apply to the source revisions pinned in `../home.nix` and
+These patches apply to the source revisions pinned in `../package.nix` and
 `../client-source.nix`.
 
 - Nextcloud shares an existing hydration job with every requesting socket job,

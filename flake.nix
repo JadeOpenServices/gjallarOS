@@ -113,6 +113,36 @@
         "gjallar-recovery-iso" = self.nixosConfigurations.gjallar-recovery.config.system.build.isoImage;
         "gjallar-installer-lab-iso" =
           self.nixosConfigurations.gjallar-installer-lab.config.system.build.isoImage;
+
+        # Packages that cache.nixos.org does not have because GjallarOS patches
+        # them. The modules use the same files with the same pkgs, so a build
+        # here has the drvPath the machines need. CI builds `prebuilt` for each
+        # release tag and pushes it to the cache in deployment/binary-cache.json.
+        noctalia = pkgs.callPackage ./pkgs/noctalia {
+          noctalia = inputs.noctalia.packages.${system}.default;
+        };
+        noctalia-greeter = pkgs.callPackage ./pkgs/noctalia-greeter {
+          noctalia-greeter = inputs.noctalia-greeter.packages.${system}.default;
+        };
+        monique = pkgs.callPackage ./pkgs/monique/nix/package.nix { };
+        "nextcloud-client-openvfs" = (import ./apps/nextcloud/package.nix { inherit pkgs; }).client;
+        openvfs = (import ./apps/nextcloud/package.nix { inherit pkgs; }).openvfs;
+        "gjallar-opencode" = import ./apps/ai/opencode.nix { inherit pkgs; };
+        inherit (pkgs.qt6Packages) qt6ct;
+        inherit (pkgs) _nemu;
+
+        prebuilt = pkgs.linkFarmFromDrvs "gjallar-prebuilt" [
+          gjallarctl
+          gjallar-usbtrustd
+          noctalia
+          noctalia-greeter
+          monique
+          nextcloud-client-openvfs
+          openvfs
+          gjallar-opencode
+          qt6ct
+          _nemu
+        ];
       };
 
       checks.${system} = {
