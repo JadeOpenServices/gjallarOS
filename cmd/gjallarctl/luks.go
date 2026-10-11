@@ -378,7 +378,7 @@ func (s *luksSession) checkBlocks(blocks []string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	fmt.Fprintln(s.tty, s.wrap("Check your copy. Type the block marked with ^ from your written key."))
+	fmt.Fprintln(s.tty, s.wrap("Check your copy. Type the block marked with ^ from your written key, in small letters."))
 	for _, i := range picks {
 		for {
 			mask := make([]string, len(blocks))

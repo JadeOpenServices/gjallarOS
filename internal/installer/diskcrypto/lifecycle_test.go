@@ -63,12 +63,13 @@ func TestRecoveryKeyBlocks(t *testing.T) {
 
 func TestSameBlock(t *testing.T) {
 	want := realRecoveryKey[:8]
-	for _, typed := range []string{want, strings.ToUpper(want), want[:4] + " " + want[4:], " " + want + " "} {
+	for _, typed := range []string{want, " " + want + " "} {
 		if !SameBlock(want, typed) {
 			t.Errorf("%q rejected", typed)
 		}
 	}
-	for _, typed := range []string{"", want[:7], want + want[:1], realRecoveryKey[9:17]} {
+	// The boot prompt refuses these (fw13 VM, 2026-10-11).
+	for _, typed := range []string{"", want[:7], want + want[:1], realRecoveryKey[9:17], strings.ToUpper(want), want[:4] + " " + want[4:]} {
 		if SameBlock(want, typed) {
 			t.Errorf("%q accepted", typed)
 		}

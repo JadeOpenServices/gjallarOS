@@ -139,10 +139,11 @@ func Challenge() ([]int, error) {
 	return out, nil
 }
 
-// SameBlock compares a typed block, ignoring case and spaces.
+// SameBlock compares a typed block the way the boot prompt does: small
+// letters only, no spaces inside, so the check never passes a spelling that
+// cannot unlock the disk.
 func SameBlock(want, typed string) bool {
-	typed = strings.ToLower(strings.Join(strings.Fields(typed), ""))
-	return typed == want
+	return strings.TrimSpace(typed) == want
 }
 
 // TestKeyslot checks that key opens exactly keyslot slot.
