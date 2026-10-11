@@ -1,13 +1,22 @@
-diff --git a/src/shell/notification/notification_toast.cpp b/src/shell/notification/notification_toast.cpp
-index b5a3cec..5aa60aa 100644
 --- a/src/shell/notification/notification_toast.cpp
 +++ b/src/shell/notification/notification_toast.cpp
-@@ -2264,6 +2264,108 @@ void NotificationToast::applyCardReveal(Instance::CardState& cs, float reveal, f
+@@ -26,7 +26,9 @@
+ #include "wayland/wayland_seat.h"
+ 
+ #include <algorithm>
++#include <chrono>
+ #include <cmath>
++#include <cstdint>
+ #include <filesystem>
+ #include <linux/input-event-codes.h>
+ #include <unistd.h>
+@@ -2264,6 +2266,150 @@
    );
  }
  
 +// Swipe a card sideways to dismiss it: drag with a mouse or finger, or scroll
-+// horizontally on a touchpad. Short swipes spring back.
++// horizontally on a touchpad. A quarter of the card width or a quick flick is
++// enough; anything less springs back.
 +void NotificationToast::installSwipeToDismiss(
 +    Instance& inst, InputArea* area, const std::shared_ptr<SwipeState>& swipe, uint32_t notificationId, float cardW,
 +    float scale
@@ -15,7 +24,10 @@ index b5a3cec..5aa60aa 100644
 +  SwipeState* const state = swipe.get();
 +  const float restX = horizontalInnerPad(scale);
 +  const float slop = 8.0F * scale;
-+  const float threshold = cardW * 0.3F;
++  const float threshold = cardW * 0.25F;
++  // Release speed that dismisses however short the swipe was, in px/ms. Android
++  // dismisses notifications from 500 dp/s on (SwipeHelper), so does this.
++  const float flingSpeed = 0.5F * scale;
 +
 +  const auto moveTo = [area, state, restX, cardW](float dx) {
 +    state->dx = dx;
@@ -23,13 +35,40 @@ index b5a3cec..5aa60aa 100644
 +    area->setOpacity(std::clamp(1.0F - std::abs(dx) / cardW, 0.0F, 1.0F));
 +  };
 +
-+  const auto settle = [this, &inst, area, state, moveTo, threshold, cardW, notificationId]() {
++  // Motion events carry no timestamp, so measure on arrival.
++  const auto now = []() {
++    return static_cast<std::uint32_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
++                                          std::chrono::steady_clock::now().time_since_epoch()
++    )
++                                          .count());
++  };
++
++  // Follows the card's speed with a short smoothing, so one jittery event does
++  // not decide a fling.
++  const auto track = [state, now](float dx) {
++    const std::uint32_t time = now();
++    const std::uint32_t dt = time - state->lastTime;
++    if (dt > 0 && dt < 100) {
++      state->velocity = 0.6F * ((dx - state->dx) / static_cast<float>(dt)) + 0.4F * state->velocity;
++    } else {
++      state->velocity = 0.0F;
++    }
++    state->lastTime = time;
++  };
++
++  const auto settle = [this, &inst, area, state, moveTo, threshold, flingSpeed, slop, cardW,
++                       notificationId](std::uint32_t time) {
++    // time is when the finger left; a finger that stopped first is not flinging.
 +    if (state->animId != 0) {
 +      inst.animations.cancel(state->animId);
 +      state->animId = 0;
 +    }
 +    const float from = state->dx;
-+    if (std::abs(from) >= threshold) {
++    const bool fresh = time - state->lastTime < 100;
++    const bool flung = fresh && std::abs(from) >= slop && state->velocity * from > 0.0F
++        && std::abs(state->velocity) >= flingSpeed;
++    state->velocity = 0.0F;
++    if (std::abs(from) >= threshold || flung) {
 +      const float to = std::copysign(cardW, from);
 +      state->animId = inst.animations.animate(
 +          from, to, Style::animFast, Easing::EaseOutCubic, moveTo,
@@ -48,7 +87,7 @@ index b5a3cec..5aa60aa 100644
 +    inst.surface->requestRedraw();
 +  };
 +
-+  area->setOnPress([&inst, area, state, settle](const InputArea::PointerData& data) {
++  area->setOnPress([&inst, area, state, now, settle](const InputArea::PointerData& data) {
 +    if (data.button != BTN_LEFT) {
 +      return;
 +    }
@@ -60,15 +99,17 @@ index b5a3cec..5aa60aa 100644
 +      state->tracking = true;
 +      state->moved = false;
 +      state->startX = data.localX + area->x() - state->dx;
++      state->velocity = 0.0F;
++      state->lastTime = now();
 +      return;
 +    }
 +    if (state->tracking) {
 +      state->tracking = false;
-+      settle();
++      settle(now());
 +    }
 +  });
 +
-+  area->setOnMotion([area, state, moveTo, slop](const InputArea::PointerData& data) {
++  area->setOnMotion([area, state, moveTo, track, slop](const InputArea::PointerData& data) {
 +    if (!state->tracking || !area->pressed()) {
 +      return;
 +    }
@@ -78,17 +119,19 @@ index b5a3cec..5aa60aa 100644
 +      return;
 +    }
 +    state->moved = true;
++    track(dx);
 +    moveTo(dx);
 +  });
 +
 +  area->setOnCancel([state, settle]() {
 +    if (state->tracking) {
 +      state->tracking = false;
-+      settle();
++      // No release time: settle on distance alone.
++      settle(state->lastTime + 100);
 +    }
 +  });
 +
-+  area->setOnAxisHandler([&inst, state, moveTo, settle](const InputArea::PointerData& data) {
++  area->setOnAxisHandler([&inst, state, moveTo, now, track, settle](const InputArea::PointerData& data) {
 +    if (data.axis != WL_POINTER_AXIS_HORIZONTAL_SCROLL || data.axisSource != WL_POINTER_AXIS_SOURCE_FINGER
 +        || state->tracking) {
 +      return false;
@@ -97,12 +140,19 @@ index b5a3cec..5aa60aa 100644
 +      inst.animations.cancel(state->animId);
 +      state->animId = 0;
 +    }
++    if (!state->moved) {
++      state->velocity = 0.0F;
++      state->lastTime = now();
++    }
 +    state->moved = true;
-+    moveTo(state->dx - static_cast<float>(data.axisValue));
++    const float dx = state->dx - static_cast<float>(data.axisValue);
++    track(dx);
++    moveTo(dx);
 +    // Touchpads send no reliable end event here; settle once the fingers stop.
++    // The fingers left with the last event, so judge the fling at that time.
 +    state->axisIdle.start(std::chrono::milliseconds(120), [state, settle]() {
 +      state->moved = false;
-+      settle();
++      settle(state->lastTime);
 +    });
 +    return true;
 +  });
@@ -111,7 +161,7 @@ index b5a3cec..5aa60aa 100644
  InputArea* NotificationToast::buildCard(
      Instance& outputInstance, const PopupEntry& entry, Node** outCardContent, Node** outCardForeground,
      ProgressBar** outProgress, Node** outActionsRow, Node** outInlineReplyRow, Input** outInlineReplyInput
-@@ -2284,9 +2386,13 @@ InputArea* NotificationToast::buildCard(
+@@ -2284,9 +2430,13 @@
    auto viewport = ui::inputArea({});
    viewport->setAcceptedButtons(InputArea::buttonMask({BTN_LEFT, BTN_RIGHT}));
    wl_surface* const sourceSurface = outputInstance.surface->wlSurface();
@@ -126,7 +176,7 @@ index b5a3cec..5aa60aa 100644
      if (data.button == BTN_RIGHT) {
        requestClose(id, CloseReason::Dismissed);
      } else if (data.button == BTN_LEFT && hasDefaultAction) {
-@@ -2300,6 +2406,7 @@ InputArea* NotificationToast::buildCard(
+@@ -2300,6 +2450,7 @@
      }
    });
    viewport->setCursorShape(WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_DEFAULT);
@@ -134,7 +184,7 @@ index b5a3cec..5aa60aa 100644
  
    auto cardRoot = ui::node({.out = outCardContent});
  
-@@ -2928,6 +3035,14 @@ bool NotificationToast::onPointerEvent(const PointerEvent& event) {
+@@ -2928,6 +3079,14 @@
        }
        break;
      case PointerEvent::Type::Axis:
@@ -149,11 +199,9 @@ index b5a3cec..5aa60aa 100644
        break;
      }
  
-diff --git a/src/shell/notification/notification_toast.h b/src/shell/notification/notification_toast.h
-index 7c3f9a3..4464b57 100644
 --- a/src/shell/notification/notification_toast.h
 +++ b/src/shell/notification/notification_toast.h
-@@ -119,6 +119,19 @@ private:
+@@ -119,6 +119,22 @@
      float lastPointerY = 0.0F;
    };
  
@@ -162,6 +210,9 @@ index 7c3f9a3..4464b57 100644
 +    bool moved = false;
 +    float startX = 0.0F;
 +    float dx = 0.0F;
++    // Pointer speed in px/ms and the time of the last move, for flicks.
++    float velocity = 0.0F;
++    std::uint32_t lastTime = 0;
 +    AnimationManager::Id animId = 0;
 +    Timer axisIdle;
 +  };
