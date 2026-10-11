@@ -19,13 +19,13 @@ let
     PATH=${lib.makeBinPath [ pkgs.wl-clipboard pkgs.gnugrep pkgs.coreutils ]}
 
     hand_over() {
-      types="$(wl-paste "$@" --list-types 2>/dev/null)" || return 0
+      types="$(wl-paste --list-types 2>/dev/null)" || return 0
       type="$(printf '%s\n' "$types" | grep -m1 -x 'text/plain;charset=utf-8' ||
         printf '%s\n' "$types" | grep -m1 -x 'text/plain' ||
         printf '%s\n' "$types" | head -n1)"
       [ -n "$type" ] || return 0
-      wl-paste "$@" --no-newline --type "$type" |
-        wl-copy "$@" --paste-once --sensitive --type "$type"
+      wl-paste --no-newline --type "$type" |
+        wl-copy --paste-once --sensitive --type "$type"
     }
 
     case "''${1:-}" in
@@ -36,12 +36,9 @@ let
     esac
 
     hand_over
-    # Shift+Insert reads the primary selection in some apps (Ghostty).
-    if [ "$1" = shift-insert ]; then
-      hand_over --primary
-    else
-      wl-copy --primary --clear >/dev/null 2>&1 || true
-    fi
+    # All three keys paste the clipboard (Ghostty is set up the same way), so
+    # nothing reads the primary selection and it is dropped.
+    wl-copy --primary --clear >/dev/null 2>&1 || true
 
     ${pkgs.hyprland}/bin/hyprctl dispatch sendshortcut "$keys,$key,activewindow" >/dev/null
   '';

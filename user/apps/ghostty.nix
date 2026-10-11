@@ -88,6 +88,9 @@ in
       clipboard-paste-protection = true;
       clipboard-paste-bracketed-safe = false;
       copy-on-select = false;
+      # Shift+Insert pastes the clipboard like in every other app. Ghostty's
+      # default reads the primary selection, which paste-once empties.
+      keybind = [ "shift+insert=paste_from_clipboard" ];
 
       title-report = false;
       scrollback-limit = 10485760;
