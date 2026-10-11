@@ -49,6 +49,7 @@ type sgIOv4 struct {
 
 const (
 	sgIO              = 0x2285
+	driverSense       = 0x08 // driver byte: sense data returned, not an error
 	statusGood        = 0x00
 	statusCheck       = 0x02
 	senseNotReady     = 0x02
@@ -117,7 +118,7 @@ func (b BSG) command(id string, cdb []byte, din []byte) (scsiResult, error) {
 	if errno != 0 {
 		return scsiResult{}, fmt.Errorf("SG_IO %s: %w", id, errno)
 	}
-	if hdr.DriverStatus != 0 || hdr.TransportStatus != 0 {
+	if hdr.DriverStatus&^driverSense != 0 || hdr.TransportStatus != 0 {
 		return scsiResult{}, fmt.Errorf("SG_IO %s: driver status %#x, transport status %#x", id, hdr.DriverStatus, hdr.TransportStatus)
 	}
 	result := scsiResult{status: hdr.DeviceStatus}

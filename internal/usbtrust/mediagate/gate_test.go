@@ -185,6 +185,33 @@ func TestSwapRevokes(t *testing.T) {
 	}
 }
 
+// sd can take the unit attention before the gate polls; the kernel then
+// raises diskseq and the gate must still close the new card.
+func TestSwapSeenOnlyBySD(t *testing.T) {
+	g, k, probe := newGate(t)
+	real := k.add("6:0:0:0", true, true, 0, "5")
+	probe["6:0:0:0"] = MediumPresent
+	g.Sync(true)
+	id, token, _ := only(t, g)
+	if err := g.AllowMedia(id, token); err != nil {
+		t.Fatal(err)
+	}
+	mustWrite(t, filepath.Join(real, "block/sdb/diskseq"), "14")
+	g.Sync(true)
+	if !k.bound("6:0:0:0") {
+		t.Fatal("allowed card closed without a change")
+	}
+	mustWrite(t, filepath.Join(real, "block/sdb/diskseq"), "15")
+	g.Sync(true)
+	if k.bound("6:0:0:0") {
+		t.Fatal("card swapped behind sd stayed open")
+	}
+	g.Sync(true)
+	if _, _, allowed := only(t, g); allowed || k.bound("6:0:0:0") {
+		t.Fatal("swapped card opened")
+	}
+}
+
 func TestReplugResetsApproval(t *testing.T) {
 	g, k, probe := newGate(t)
 	k.add("6:0:0:0", true, true, 0, "5")

@@ -53,6 +53,10 @@ type LUN struct {
 	Removable bool
 	Driver    string // bound upper driver, empty when unbound
 	InUse     bool   // mounted or held (dm, md) through the disk or a partition
+	// DiskSeq is the bound disk's diskseq. The kernel raises it whenever sd
+	// sees a media change, so a swap is caught even when sd, not the gate,
+	// received the unit attention.
+	DiskSeq string
 }
 
 // Gated reports whether the LUN's medium needs the owner's approval: a
@@ -67,6 +71,7 @@ type state struct {
 	token   string
 	allowed bool
 	bytes   uint64
+	diskSeq string
 }
 
 type Gate struct {
@@ -146,6 +151,12 @@ func (g *Gate) Sync(enforcing bool) error {
 func (g *Gate) step(st *state, arming bool) error {
 	lun := st.lun
 	medium, err := g.Probe.Medium(lun.ID)
+	if st.allowed && lun.DiskSeq != "" {
+		if st.diskSeq != "" && st.diskSeq != lun.DiskSeq {
+			medium, err = MediumChanged, nil
+		}
+		st.diskSeq = lun.DiskSeq
+	}
 	if err != nil || medium == MediumUnknown {
 		// Fail closed: an unanswered probe never opens a medium.
 		if !st.allowed && lun.Driver != "" && !(arming && lun.InUse) {
@@ -342,6 +353,9 @@ func (g *Gate) scan() ([]LUN, error) {
 			lun.Driver = filepath.Base(target)
 		}
 		lun.InUse = inUse(filepath.Join(real, "block"), mounts)
+		if disks, err := os.ReadDir(filepath.Join(real, "block")); err == nil && len(disks) > 0 {
+			lun.DiskSeq = readTrim(filepath.Join(real, "block", disks[0].Name(), "diskseq"))
+		}
 		result = append(result, lun)
 	}
 	return result, nil
