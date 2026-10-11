@@ -10,7 +10,7 @@
  #include <filesystem>
  #include <linux/input-event-codes.h>
  #include <unistd.h>
-@@ -2264,6 +2266,157 @@ void NotificationToast::applyCardReveal(Instance::CardState& cs, float reveal, f
+@@ -2264,6 +2266,168 @@ void NotificationToast::applyCardReveal(Instance::CardState& cs, float reveal, f
    );
  }
  
@@ -142,6 +142,17 @@
 +        || state->tracking) {
 +      return false;
 +    }
++    // libinput ends a touchpad scroll with a zero value, and Hyprland passes it
++    // on next to axis_stop: the fingers left. Taken as a move, it would halve
++    // the speed and turn every flick into a spring back.
++    if (data.axisValue == 0.0) {
++      if (state->moved) {
++        state->axisIdle.stop();
++        state->moved = false;
++        settle(data.time);
++      }
++      return true;
++    }
 +    if (state->animId != 0) {
 +      inst.animations.cancel(state->animId);
 +      state->animId = 0;
@@ -168,7 +179,7 @@
  InputArea* NotificationToast::buildCard(
      Instance& outputInstance, const PopupEntry& entry, Node** outCardContent, Node** outCardForeground,
      ProgressBar** outProgress, Node** outActionsRow, Node** outInlineReplyRow, Input** outInlineReplyInput
-@@ -2284,9 +2437,13 @@ InputArea* NotificationToast::buildCard(
+@@ -2284,9 +2448,13 @@ InputArea* NotificationToast::buildCard(
    auto viewport = ui::inputArea({});
    viewport->setAcceptedButtons(InputArea::buttonMask({BTN_LEFT, BTN_RIGHT}));
    wl_surface* const sourceSurface = outputInstance.surface->wlSurface();
@@ -183,7 +194,7 @@
      if (data.button == BTN_RIGHT) {
        requestClose(id, CloseReason::Dismissed);
      } else if (data.button == BTN_LEFT && hasDefaultAction) {
-@@ -2300,6 +2457,7 @@ InputArea* NotificationToast::buildCard(
+@@ -2300,6 +2468,7 @@ InputArea* NotificationToast::buildCard(
      }
    });
    viewport->setCursorShape(WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_DEFAULT);
@@ -191,7 +202,7 @@
  
    auto cardRoot = ui::node({.out = outCardContent});
  
-@@ -2911,7 +3069,9 @@ bool NotificationToast::onPointerEvent(const PointerEvent& event) {
+@@ -2911,7 +3080,9 @@ bool NotificationToast::onPointerEvent(const PointerEvent& event) {
        if (inst->pointerInside) {
          inst->lastPointerX = static_cast<float>(event.sx);
          inst->lastPointerY = static_cast<float>(event.sy);
@@ -202,7 +213,7 @@
        }
        break;
      case PointerEvent::Type::Button:
-@@ -2928,6 +3088,14 @@ bool NotificationToast::onPointerEvent(const PointerEvent& event) {
+@@ -2928,6 +3099,14 @@ bool NotificationToast::onPointerEvent(const PointerEvent& event) {
        }
        break;
      case PointerEvent::Type::Axis:
