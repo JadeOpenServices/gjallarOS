@@ -84,7 +84,13 @@ func (h Handler) Handle(
 		if mode, ok := h.Reader.(interface{ EnforcementEnabled() bool }); ok {
 			enforcing = mode.EnforcementEnabled()
 		}
-		return Response{OK: true, Policy: policy, Revision: revision, Enforcing: enforcing}
+		var media []usbtrust.MediaDecision
+		if gate, ok := h.Reader.(interface {
+			MediaPolicy() []usbtrust.MediaDecision
+		}); ok {
+			media = gate.MediaPolicy()
+		}
+		return Response{OK: true, Policy: policy, Media: media, Revision: revision, Enforcing: enforcing}
 	case ActionStatus:
 		status, err := h.Reader.Status(ctx)
 		if err != nil {

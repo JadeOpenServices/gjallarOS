@@ -23,6 +23,7 @@ const (
 	ActionAcceptReplacement = usbtrust.ActionAcceptReplacement
 	ActionEnrollInternal    = usbtrust.ActionEnrollInternal
 	ActionDisarm            = usbtrust.ActionDisarm
+	ActionAllowMedia        = usbtrust.ActionAllowMedia
 )
 
 type Request struct {
@@ -38,6 +39,9 @@ type Request struct {
 
 	// RecoveryKey is the disk encryption passphrase that authorizes disarm.
 	RecoveryKey string `json:"recoveryKey,omitempty"`
+
+	// Media is the SCSI LUN (H:C:T:L) whose current medium allow-media opens.
+	Media string `json:"media,omitempty"`
 }
 
 type Status struct {
@@ -53,14 +57,15 @@ type Status struct {
 }
 
 type Response struct {
-	Enforcing bool                  `json:"enforcing"`
-	OK        bool                  `json:"ok"`
-	Message   string                `json:"message,omitempty"`
-	Error     string                `json:"error,omitempty"`
-	Revision  uint64                `json:"revision,omitempty"`
-	Status    *Status               `json:"status,omitempty"`
-	Audit     *usbtrust.AuditResult `json:"audit,omitempty"`
-	Policy    []usbtrust.Decision   `json:"policy,omitempty"`
+	Enforcing bool                     `json:"enforcing"`
+	OK        bool                     `json:"ok"`
+	Message   string                   `json:"message,omitempty"`
+	Error     string                   `json:"error,omitempty"`
+	Revision  uint64                   `json:"revision,omitempty"`
+	Status    *Status                  `json:"status,omitempty"`
+	Audit     *usbtrust.AuditResult    `json:"audit,omitempty"`
+	Policy    []usbtrust.Decision      `json:"policy,omitempty"`
+	Media     []usbtrust.MediaDecision `json:"media,omitempty"`
 }
 
 func ValidateRequest(request Request) error {
@@ -84,6 +89,9 @@ func ValidateRequest(request Request) error {
 		}
 		if request.RecoveryKey != "" && request.Action != ActionDisarm {
 			return fmt.Errorf("%s does not accept recoveryKey", request.Action)
+		}
+		if request.Media != "" && request.Action != ActionAllowMedia {
+			return fmt.Errorf("%s does not accept media", request.Action)
 		}
 		if request.Action == ActionForget && (request.RuntimeID != "" || request.Connection != "") {
 			return fmt.Errorf("forget does not accept a connection")
@@ -132,6 +140,14 @@ func ValidateRequest(request Request) error {
 			)
 		}
 
+	case ActionAllowMedia:
+		if request.RuntimeID != "" {
+			return fmt.Errorf("%s does not accept runtimeId", request.Action)
+		}
+		if strings.TrimSpace(request.Media) == "" || strings.TrimSpace(request.Connection) == "" {
+			return fmt.Errorf("%s requires media and connection", request.Action)
+		}
+
 	case ActionDisarm:
 		if request.RuntimeID != "" || request.TrustedID != "" || request.Connection != "" {
 			return fmt.Errorf("%s does not accept device arguments", request.Action)
@@ -173,7 +189,8 @@ func noMutationArguments(request Request) error {
 		request.Role != "" ||
 		request.Connection != "" ||
 		request.Portable != nil ||
-		request.RecoveryKey != "" {
+		request.RecoveryKey != "" ||
+		request.Media != "" {
 		return fmt.Errorf(
 			"%s does not accept mutation arguments",
 			request.Action,

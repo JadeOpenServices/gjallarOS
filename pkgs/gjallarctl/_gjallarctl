@@ -33,6 +33,7 @@ _gjallarctl_usb() {
     'accept-replacement:accept a replaced built-in device'
     'forget:forget a trusted device'
     'disarm:turn enforcement off until the next arm'
+    'allow-media:open the card or storage in an allowed reader'
   )
   if (( CURRENT == 2 )); then
     _describe -t commands 'usb command' cmds
@@ -45,7 +46,8 @@ _gjallarctl_usb() {
     '--connection[connection token]:token:' \
     '--trusted-id[trusted device id]:id:' \
     '--role[ODDC expectation role]:role:' \
-    '--portable=-[portable device]:portable:(true false)'
+    '--portable=-[portable device]:portable:(true false)' \
+    '--media[storage medium id (H:C:T:L)]:id:'
 }
 
 _gjallarctl_vpn() {

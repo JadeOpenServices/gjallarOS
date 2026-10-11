@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -25,7 +26,7 @@ import (
 
 func runUSB(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		fmt.Fprintln(stderr, "Usage: gjallarctl usb {status|audit|policy|review|provision-key|allow-once|trust-permanent|keep-blocked|enroll-internal|accept-replacement|forget|disarm} [--runtime-id ID --connection TOKEN] [--trusted-id ID] [--role ROLE] [--portable=true|false]")
+		fmt.Fprintln(stderr, "Usage: gjallarctl usb {status|audit|policy|review|provision-key|allow-once|trust-permanent|keep-blocked|enroll-internal|accept-replacement|forget|disarm|allow-media} [--runtime-id ID --connection TOKEN] [--trusted-id ID] [--role ROLE] [--portable=true|false] [--media H:C:T:L --connection TOKEN]")
 		return 2
 	}
 	if args[0] == "review" {
@@ -39,6 +40,7 @@ func runUSB(args []string, stdout, stderr io.Writer) int {
 	f.StringVar(&r.Connection, "connection", "", "review connection token from policy")
 	f.StringVar(&r.TrustedID, "trusted-id", "", "accepted trust record ID")
 	f.StringVar(&r.Role, "role", "", "ODDC expectation role")
+	f.StringVar(&r.Media, "media", "", "storage medium ID (H:C:T:L) from policy")
 	portable := f.String("portable", "", "explicit true or false for permanent external trust")
 	if err := f.Parse(args[1:]); err != nil {
 		return 2
@@ -116,6 +118,16 @@ func runUSBReview(args []string, stderr io.Writer) int {
 					delete(seen, d.Connection)
 				}
 			}
+			// Media notices run on their own: a card left closed must not hold
+			// back the review of the next USB device.
+			for _, m := range response.Media {
+				active[m.Connection] = true
+				if m.Allowed || seen[m.Connection] {
+					continue
+				}
+				seen[m.Connection] = true
+				go usbReviewMedia(ctx, executable, m)
+			}
 			for token := range seen {
 				if !active[token] {
 					delete(seen, token)
@@ -183,6 +195,89 @@ func usbReviewDecision(ctx context.Context, executable string, d usbtrust.Decisi
 		return true
 	}
 	_, _ = exec.Command("zenity", "--error", "--title=USB decision failed", "--text="+html.EscapeString(string(output))).Output()
+	return false
+}
+
+// usbReviewMedia announces a medium that stays closed in an allowed reader
+// and opens it after authentication. The notice closes when the medium is
+// removed or swapped.
+func usbReviewMedia(ctx context.Context, executable string, m usbtrust.MediaDecision) {
+	ctx, cancel := usbWhileMediaPresent(ctx, m.Connection)
+	defer cancel()
+	notice := exec.CommandContext(ctx, "notify-send", usbMediaNotice(m)...)
+	notice.Cancel = func() error { return notice.Process.Signal(os.Interrupt) }
+	picked, err := notice.Output()
+	if err != nil || ctx.Err() != nil {
+		return
+	}
+	switch strings.TrimSpace(string(picked)) {
+	case "open", "default":
+	default:
+		return
+	}
+	output, err := usbAuthorize(ctx, "the storage in "+usbMediaReader(m), []string{executable, "usb", "allow-media", "--media", m.ID, "--connection", m.Connection})
+	if err == nil || ctx.Err() != nil {
+		return
+	}
+	_, _ = exec.Command("zenity", "--error", "--title=Storage stays closed", "--text="+html.EscapeString(string(output))).Output()
+}
+
+func usbMediaReader(m usbtrust.MediaDecision) string {
+	if m.Reader == "" {
+		return "USB storage device"
+	}
+	return m.Reader
+}
+
+// usbMediaNotice builds the notify-send arguments for a closed medium.
+func usbMediaNotice(m usbtrust.MediaDecision) []string {
+	body := usbMediaReader(m)
+	if m.Bytes > 0 {
+		body += fmt.Sprintf(", %.1f GB", float64(m.Bytes)/1e9)
+	}
+	body += "\nNothing on it is read until you open it."
+	return []string{
+		"--app-name=USB Guard",
+		"--icon=media-flash",
+		"--expire-time=0",
+		"--action=default=Open",
+		"--action=open=Open it",
+		"--action=keep=Keep closed",
+		"Card or USB storage inserted",
+		html.EscapeString(body),
+	}
+}
+
+// usbWhileMediaPresent ends the context once the medium leaves the policy.
+func usbWhileMediaPresent(ctx context.Context, connection string) (context.Context, context.CancelFunc) {
+	ctx, cancel := context.WithCancel(ctx)
+	go func() {
+		ticker := time.NewTicker(time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+			}
+			callCtx, done := context.WithTimeout(ctx, 2*time.Second)
+			response, err := broker.Call(callCtx, broker.DefaultSocket, broker.Request{Action: broker.ActionPolicy})
+			done()
+			if err == nil && !usbMediaActive(response.Media, connection) {
+				cancel()
+				return
+			}
+		}
+	}()
+	return ctx, cancel
+}
+
+func usbMediaActive(media []usbtrust.MediaDecision, connection string) bool {
+	for _, m := range media {
+		if m.Connection == connection && !m.Allowed {
+			return true
+		}
+	}
 	return false
 }
 
@@ -526,7 +621,12 @@ func usbOrNone(value string) string {
 // fingerprint is tried first while a notice offers the password instead; a
 // failed or skipped scan opens the password prompt at once. The credential
 // cached for the command is dropped again afterwards.
+// usbAuthMu keeps two prompts from sharing or dropping one sudo timestamp.
+var usbAuthMu sync.Mutex
+
 func usbAuthorize(ctx context.Context, name string, command []string) ([]byte, error) {
+	usbAuthMu.Lock()
+	defer usbAuthMu.Unlock()
 	const sudo = "/run/wrappers/bin/sudo"
 	authHelper, err := helperExecutable("gjallar-sudo-auth")
 	if err != nil {

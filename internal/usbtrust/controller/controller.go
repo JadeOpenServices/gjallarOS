@@ -35,7 +35,12 @@ type Controller struct {
 	// VerifyRecoveryKey checks the disk encryption passphrase for disarm.
 	VerifyRecoveryKey func(context.Context, []byte) error
 	// DisarmDelay slows repeated passphrase guesses.
-	DisarmDelay      time.Duration
+	DisarmDelay time.Duration
+	// Media keeps media in allowed USB readers closed until allowed.
+	Media interface {
+		MediaPolicy() []usbtrust.MediaDecision
+		AllowMedia(id, connection string) error
+	}
 	mu               sync.Mutex
 	sessions         usbtrust.Sessions
 	persistenceReady bool
@@ -50,6 +55,14 @@ func (c *Controller) EnforcementEnabled() bool {
 		return false
 	}
 	return c.armed.Load() || (c.ArmOnStart && !c.disarmed.Load())
+}
+
+// MediaPolicy lists the media in gated USB readers.
+func (c *Controller) MediaPolicy() []usbtrust.MediaDecision {
+	if c.Media == nil {
+		return nil
+	}
+	return c.Media.MediaPolicy()
 }
 
 func (c *Controller) SetPersistenceReady(ready bool) {
@@ -296,6 +309,15 @@ func (c *Controller) Mutate(ctx context.Context, request broker.Request) (broker
 	defer c.mu.Unlock()
 	if err := broker.ValidateRequest(request); err != nil {
 		return broker.Response{}, err
+	}
+	if request.Action == broker.ActionAllowMedia {
+		if c.Media == nil {
+			return broker.Response{}, fmt.Errorf("the storage media gate is not running")
+		}
+		if err := c.Media.AllowMedia(request.Media, request.Connection); err != nil {
+			return broker.Response{}, err
+		}
+		return broker.Response{OK: true, Message: "storage medium opened", Enforcing: c.EnforcementEnabled()}, nil
 	}
 	if request.Action == broker.ActionProvisionKey {
 		if c.Provision == nil {

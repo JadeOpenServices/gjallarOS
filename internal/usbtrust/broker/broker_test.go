@@ -224,3 +224,25 @@ func TestPeerUIDUsesUnixPeerCredentials(t *testing.T) {
 		)
 	}
 }
+
+func TestAllowMediaValidation(t *testing.T) {
+	valid := Request{Action: ActionAllowMedia, Media: "6:0:0:0", Connection: "token"}
+	if err := ValidateRequest(valid); err != nil {
+		t.Fatalf("valid allow-media rejected: %v", err)
+	}
+	for name, request := range map[string]Request{
+		"no media":            {Action: ActionAllowMedia, Connection: "token"},
+		"no connection":       {Action: ActionAllowMedia, Media: "6:0:0:0"},
+		"runtime id":          {Action: ActionAllowMedia, Media: "6:0:0:0", Connection: "token", RuntimeID: "1"},
+		"trusted id":          {Action: ActionAllowMedia, Media: "6:0:0:0", Connection: "token", TrustedID: "x"},
+		"media on allow-once": {Action: ActionAllowOnce, RuntimeID: "1", Connection: "token", Media: "6:0:0:0"},
+		"media on policy":     {Action: ActionPolicy, Media: "6:0:0:0"},
+	} {
+		if err := ValidateRequest(request); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+	if err := AuthorizePeer(1000, ActionAllowMedia, 1000); err == nil {
+		t.Fatal("owner may not open media without root")
+	}
+}

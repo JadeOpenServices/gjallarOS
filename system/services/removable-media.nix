@@ -104,6 +104,15 @@ in
         "-/sys"
       ];
 
+      # While USB protection enforces, the broker turns off automatic SCSI
+      # driver binding so a medium in an allowed reader stays unread until
+      # the owner opens it (gjallar-usbtrustd media gate). Disks that are not
+      # on USB keep binding as soon as they appear.
+      services.udev.extraRules = ''
+        ACTION=="add", SUBSYSTEM=="scsi", ENV{DEVTYPE}=="scsi_device", SUBSYSTEMS=="usb", ENV{GJALLAR_USB_SCSI}="1"
+        ACTION=="add", SUBSYSTEM=="scsi", ENV{DEVTYPE}=="scsi_device", ENV{GJALLAR_USB_SCSI}!="1", RUN+="${pkgs.runtimeShell} -c 'echo %k > /sys/bus/scsi/drivers_probe'"
+      '';
+
       systemd.services.usb-trust-broker = {
         description = "USB trust broker";
         wantedBy = [
@@ -133,6 +142,8 @@ in
           ProtectSystem = "strict";
           ProtectHome = true;
           ProtectKernelTunables = true;
+          # The media gate binds and unbinds SCSI upper drivers.
+          ReadWritePaths = [ "/sys/bus/scsi" ];
           ProtectKernelModules = true;
           ProtectControlGroups = true;
           RestrictSUIDSGID = true;

@@ -20,6 +20,7 @@ import (
 	"github.com/JadeOpenServices/gjallarOS/internal/usbtrust/broker"
 	"github.com/JadeOpenServices/gjallarOS/internal/usbtrust/controller"
 	"github.com/JadeOpenServices/gjallarOS/internal/usbtrust/daemon"
+	"github.com/JadeOpenServices/gjallarOS/internal/usbtrust/mediagate"
 	"github.com/JadeOpenServices/gjallarOS/internal/usbtrust/readmodel"
 	"github.com/JadeOpenServices/gjallarOS/internal/usbtrust/usbguardsource"
 )
@@ -125,8 +126,34 @@ func run(
 	control.ArmOnStart = cfg.enforce
 	control.VerifyRecoveryKey = luksVerifier(cfg.cryptsetup, cfg.luksDevices)
 	control.DisarmDelay = 3 * time.Second
+	media := &mediagate.Gate{
+		Sysfs:     "/sys",
+		MountInfo: "/proc/self/mountinfo",
+		Probe:     mediagate.BSG{Dir: "/dev/bsg"},
+		Event:     func(event map[string]any) { _ = json.NewEncoder(stderr).Encode(event) },
+	}
+	control.Media = media
 	loopCtx, stopLoop := context.WithCancel(ctx)
 	defer stopLoop()
+	go func() {
+		// Poll fast enough that a card pulled from an allowed reader is seen
+		// as gone before a new one can be pushed in.
+		var last string
+		for loopCtx.Err() == nil {
+			err := media.Sync(control.EnforcementEnabled())
+			if text := fmt.Sprint(err); err != nil && text != last {
+				fmt.Fprintf(stderr, "WARN: USB storage media gate: %v\n", err)
+				last = text
+			} else if err == nil {
+				last = ""
+			}
+			select {
+			case <-loopCtx.Done():
+				return
+			case <-time.After(250 * time.Millisecond):
+			}
+		}
+	}()
 	go func() {
 		for loopCtx.Err() == nil {
 			requestCtx, cancel := context.WithTimeout(loopCtx, cfg.requestTimeout)
@@ -159,7 +186,7 @@ func run(
 			Reader:   control,
 			Mutator:  control,
 			OnDecision: func(uid uint32, request broker.Request, response broker.Response) {
-				_ = json.NewEncoder(stderr).Encode(map[string]any{"event": "usb-trust-decision", "peerUID": uid, "action": request.Action, "runtimeId": request.RuntimeID, "trustedId": request.TrustedID, "ok": response.OK, "revision": response.Revision, "error": response.Error})
+				_ = json.NewEncoder(stderr).Encode(map[string]any{"event": "usb-trust-decision", "peerUID": uid, "action": request.Action, "runtimeId": request.RuntimeID, "trustedId": request.TrustedID, "media": request.Media, "ok": response.OK, "revision": response.Revision, "error": response.Error})
 			},
 		},
 		OnError: func(err error) {

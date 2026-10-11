@@ -14,6 +14,8 @@ const (
 	ActionAcceptReplacement Action = "accept-replacement"
 	ActionEnrollInternal    Action = "enroll-internal"
 	ActionDisarm            Action = "disarm"
+	// ActionAllowMedia opens the medium that is in an allowed reader now.
+	ActionAllowMedia Action = "allow-media"
 )
 
 func (a Action) Valid() bool {
@@ -28,7 +30,8 @@ func (a Action) Valid() bool {
 		ActionForget,
 		ActionAcceptReplacement,
 		ActionEnrollInternal,
-		ActionDisarm:
+		ActionDisarm,
+		ActionAllowMedia:
 		return true
 	default:
 		return false
@@ -45,7 +48,8 @@ func (a Action) Mutation() bool {
 		ActionForget,
 		ActionAcceptReplacement,
 		ActionEnrollInternal,
-		ActionDisarm:
+		ActionDisarm,
+		ActionAllowMedia:
 		return true
 	default:
 		return false

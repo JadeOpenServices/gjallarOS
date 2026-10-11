@@ -240,3 +240,17 @@ func TestUnpluggedConnectionIsInactive(t *testing.T) {
 		t.Fatal("unplugged connection reported active")
 	}
 }
+
+func TestUSBMediaNotice(t *testing.T) {
+	args := usbMediaNotice(usbtrust.MediaDecision{ID: "6:0:0:0", Reader: "<b>Reader</b>", Bytes: 31_900_000_000})
+	body := args[len(args)-1]
+	if !strings.Contains(body, "&lt;b&gt;Reader&lt;/b&gt;, 31.9 GB") {
+		t.Fatalf("body = %q", body)
+	}
+	if usbMediaActive([]usbtrust.MediaDecision{{Connection: "a", Allowed: true}}, "a") {
+		t.Fatal("an opened medium keeps its notice")
+	}
+	if !usbMediaActive([]usbtrust.MediaDecision{{Connection: "a"}}, "a") {
+		t.Fatal("closed medium not active")
+	}
+}
