@@ -107,7 +107,9 @@ def main():
     a = ap.parse_args()
 
     src = a.src or default_profile([HOME / ".librewolf", HOME / ".config/librewolf/librewolf"])
-    dst = a.dst or default_profile([HOME / ".config/mozilla/firefox", HOME / ".mozilla/firefox"])
+    # Firefox keeps using ~/.mozilla while it exists and only falls back to
+    # the XDG folder without it; Home Manager writes the profile there too.
+    dst = a.dst or default_profile([HOME / ".mozilla/firefox", HOME / ".config/mozilla/firefox"])
     if not src or not dst:
         if a.once:
             return

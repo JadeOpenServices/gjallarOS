@@ -54,8 +54,12 @@ jobs:
         run: |
           ls *.narinfo | sed 's/\.narinfo$//' | xargs -P 16 -I{} sh -c '
             if curl -sfI -o /dev/null "https://cache.nixos.org/{}.narinfo"; then
-              rm "$(sed -n "s/^URL: //p" {}.narinfo)" {}.narinfo
+              rm {}.narinfo
             fi'
+          # Store paths with the same contents share one NAR, so a NAR goes
+          # only when no narinfo left points at it.
+          sed -n 's/^URL: //p' *.narinfo | sort -u > ../keep
+          find nar -type f | sort | comm -23 - ../keep | xargs -r rm
           # Release files cannot sit in folders, so the NARs move next to the
           # narinfo files. The signature covers store path, NAR hash, size and
           # references, not the URL.
