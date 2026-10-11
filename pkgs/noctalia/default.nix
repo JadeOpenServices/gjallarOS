@@ -24,6 +24,7 @@
   (old: {
     patches = (old.patches or [ ]) ++ [
       ./media-tray.patch
+      ./pointer-axis-frame.patch
       ./notification-swipe.patch
       ./bluetooth.patch
       ./touch-long-press.patch

@@ -1,0 +1,66 @@
+diff --git a/src/wayland/wayland_seat.cpp b/src/wayland/wayland_seat.cpp
+--- a/src/wayland/wayland_seat.cpp
++++ b/src/wayland/wayland_seat.cpp
+@@ -335,9 +335,9 @@ void WaylandSeat::handlePointerAxis(
+       .axisGestureSerial = axis < self->m_axisGestureSerial.size() ? self->m_axisGestureSerial[axis] : 0,
+   };
+ 
+-  // axis_discrete/axis_value120 arrive before the axis event they describe, and
+-  // the protocol couples each of them to exactly one axis event of the same
+-  // axis within the frame. Claim whatever was stashed for this axis.
++  // The protocol couples each axis_discrete/axis_value120 to exactly one axis
++  // event of the same axis within the frame. Claim it here when it came first;
++  // handlePointerFrame hands out the ones that came after (Hyprland's order).
+   if (axis < self->m_pendingAxisDetents.size()) {
+     AxisDetent& detent = self->m_pendingAxisDetents[axis];
+     if (detent.valid) {
+@@ -354,6 +354,7 @@ void WaylandSeat::handlePointerAxis(
+ void WaylandSeat::handlePointerAxisSource(void* data, wl_pointer* /*pointer*/, std::uint32_t axisSource) {
+   auto* self = static_cast<WaylandSeat*>(data);
+   self->m_pendingAxisSource = axisSource;
++  self->m_hasPendingAxisSource = true;
+ }
+ 
+ void WaylandSeat::handlePointerAxisStop(
+@@ -397,7 +398,28 @@ void WaylandSeat::handlePointerFrame(void* data, wl_pointer* /*pointer*/) {
+   auto* self = static_cast<WaylandSeat*>(data);
+   std::vector<PointerEvent> events = std::move(self->m_pendingPointerEvents);
+   self->m_pendingPointerEvents.clear();
++  // Events of one frame belong together, in any order. Compositors such as
++  // Hyprland send axis_source and axis_value120 after the axis event, so apply
++  // them now; otherwise every touchpad scroll would look like a wheel.
++  for (auto& event : events) {
++    if (event.type != PointerEvent::Type::Axis) {
++      continue;
++    }
++    if (self->m_hasPendingAxisSource) {
++      event.axisSource = self->m_pendingAxisSource;
++    }
++    if (event.axis < self->m_pendingAxisDetents.size()) {
++      AxisDetent& detent = self->m_pendingAxisDetents[event.axis];
++      if (detent.valid && event.axisDiscrete == 0 && event.axisValue120 == 0 && event.axisLines == 0.0F) {
++        event.axisDiscrete = detent.discrete;
++        event.axisValue120 = detent.value120;
++        event.axisLines = detent.lines;
++        detent = {};
++      }
++    }
++  }
+   self->m_pendingAxisSource = 0;
++  self->m_hasPendingAxisSource = false;
+   // Detents never carry across a frame; drop any the compositor left uncoupled.
+   self->m_pendingAxisDetents.fill({});
+ 
+diff --git a/src/wayland/wayland_seat.h b/src/wayland/wayland_seat.h
+--- a/src/wayland/wayland_seat.h
++++ b/src/wayland/wayland_seat.h
+@@ -164,6 +164,9 @@ private:
+   PointerEventCallback m_pointerEventCallback;
+   std::vector<PointerEvent> m_pendingPointerEvents;
+   std::uint32_t m_pendingAxisSource = 0;
++  // axis_source may come before or after the axis events of its frame, so it
++  // is applied to them when the frame ends.
++  bool m_hasPendingAxisSource = false;
+   // Detent info for an axis, received ahead of the axis event it belongs to.
+   struct AxisDetent {
+     bool valid = false;
