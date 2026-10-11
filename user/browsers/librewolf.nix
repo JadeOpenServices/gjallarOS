@@ -20,10 +20,21 @@ in
       #compdef gjallar-librewolf-import
       _arguments \
         '--dry-run[list the files without copying]' \
+        '--once[import only into a Firefox profile that was never opened]' \
         '--src[LibreWolf profile]:directory:_files -/' \
         '--dst[Firefox profile]:directory:_files -/'
     '')
   ];
+
+  # Brings bookmarks, logins and history over the first time Firefox and
+  # LibreWolf are both installed. Skips a Firefox profile that was already
+  # opened, and tries again next time if a browser is running.
+  home.activation.gjallarLibrewolfImport = lib.mkIf config.programs.firefox.enable (
+    lib.hm.dag.entryAfter [ "linkGeneration" ] ''
+      run ${import'}/bin/gjallar-librewolf-import --once \
+        || echo "gjallar-librewolf-import failed; run it by hand to see why" >&2
+    ''
+  );
 
   stylix.targets.librewolf.profileNames = [ profileName ];
   stylix.targets.librewolf.colorTheme.enable = true;

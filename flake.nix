@@ -85,10 +85,20 @@
 
       basePkgs = mkPkgs system;
 
-      settings = import (./. + "/generated/state.nix") {
+      # Firefox replaced LibreWolf. Installs that still list LibreWolf get
+      # Firefox as well and open links in it. LibreWolf stays until it is
+      # removed from user.config.json, so its profile can be imported.
+      stateSettings = import (./. + "/generated/state.nix") {
         pkgs = basePkgs;
         inherit inputs;
       };
+      settings =
+        stateSettings
+        // lib.optionalAttrs (builtins.elem "librewolf" stateSettings.browsers) {
+          browsers = [ "firefox" ] ++ builtins.filter (b: b != "firefox") stateSettings.browsers;
+          preferredBrowser =
+            if stateSettings.preferredBrowser == "librewolf" then "firefox" else stateSettings.preferredBrowser;
+        };
 
       installState = import (./. + "/generated/install-state.nix");
 

@@ -5,7 +5,10 @@ SQLite databases go through the backup API from a private copy so a stale
 -wal file can never be replayed onto the copied database. Files that Home
 Manager owns (user.js, search, extensions, chrome) are left alone.
 
-Usage: gjallar-librewolf-import [--dry-run] [--src DIR] [--dst DIR]
+With --once (used by Home Manager activation) it only runs while Firefox has
+never been opened, and leaves a marker so it never runs again.
+
+Usage: gjallar-librewolf-import [--dry-run] [--once] [--src DIR] [--dst DIR]
 """
 import argparse
 import configparser
@@ -99,18 +102,28 @@ def main():
     ap.add_argument("--src", type=Path)
     ap.add_argument("--dst", type=Path)
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--once", action="store_true",
+                    help="import only into a Firefox profile that was never opened")
     a = ap.parse_args()
 
     src = a.src or default_profile([HOME / ".librewolf", HOME / ".config/librewolf/librewolf"])
     dst = a.dst or default_profile([HOME / ".config/mozilla/firefox", HOME / ".mozilla/firefox"])
     if not src or not dst:
+        if a.once:
+            return
         sys.exit(f"profile not found: src={src} dst={dst}")
     src, dst = src.resolve(), dst.resolve()
+    marker = dst / ".gjallar-librewolf-imported"
+    if a.once and (marker.exists() or (dst / "places.sqlite").exists()):
+        return
     print(f"from {src}\n  to {dst}")
     if src == dst:
         sys.exit("source and target are the same")
     for p, name in ((src, "LibreWolf"), (dst, "Firefox")):
         if running(p):
+            if a.once:
+                print(f"{name} is running; LibreWolf import waits for the next switch")
+                return
             sys.exit(f"{name} is running ({p}/lock); close it first")
 
     plan = []
@@ -180,6 +193,7 @@ def main():
             print(f"  {f}: {'yes' if (dst / f).exists() else 'missing'}")
     if bad:
         sys.exit("integrity check failed: " + "; ".join(bad))
+    marker.write_text(time.strftime("%Y-%m-%d %H:%M:%S\n"))
     print("done; LibreWolf profile untouched")
 
 
