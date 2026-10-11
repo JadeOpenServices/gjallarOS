@@ -297,3 +297,22 @@ func TestPrivilegeAuthenticationReusesLiveSessionQuietly(t *testing.T) {
 		t.Fatalf("live session printed %q", stderr.String())
 	}
 }
+
+func TestAuthenticationResultClosesThePrompt(t *testing.T) {
+	for _, c := range []struct {
+		status int
+		want   string
+	}{
+		{0, "[GjallarOS] Authenticated.\n"},
+		{1, "[GjallarOS] Authentication failed.\n"},
+		{130, ""},
+	} {
+		var tty strings.Builder
+		if got := reportAuthentication(&tty, c.status); got != c.status {
+			t.Fatalf("status %d came back as %d", c.status, got)
+		}
+		if tty.String() != c.want {
+			t.Fatalf("status %d printed %q, want %q", c.status, tty.String(), c.want)
+		}
+	}
+}

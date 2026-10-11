@@ -3010,7 +3010,7 @@ func authenticatePrivilege(ctx context.Context, stderr io.Writer) int {
 			"fingerprint authentication",
 		)
 		if fingerprintStatus == 0 {
-			return 0
+			return reportAuthentication(tty, 0)
 		}
 		if fingerprintStatus == 130 {
 			return 130
@@ -3035,12 +3035,28 @@ func authenticatePrivilege(ctx context.Context, stderr io.Writer) int {
 	defer signal.Reset(syscall.SIGTTOU)
 	defer reclaimTerminalForeground(tty)
 
-	return authenticationCommandStatus(
+	return reportAuthentication(tty, authenticationCommandStatus(
 		ctx,
 		password,
 		stderr,
 		"password authentication",
-	)
+	))
+}
+
+// reportAuthentication closes the prompt with a result line. Without it the
+// answered prompt stayed the last line on screen while a quiet rebuild ran,
+// looked like it was still waiting, and a password typed into it went to the
+// shell once the rebuild ended (e2e-fw13, 2026-10-11). Ctrl-C already shows
+// on the terminal.
+func reportAuthentication(tty io.Writer, status int) int {
+	switch status {
+	case 0:
+		fmt.Fprintln(tty, "[GjallarOS] Authenticated.")
+	case 130:
+	default:
+		fmt.Fprintln(tty, "[GjallarOS] Authentication failed.")
+	}
+	return status
 }
 
 func runCommand(ctx context.Context, stdout, stderr io.Writer, name string, args ...string) int {
