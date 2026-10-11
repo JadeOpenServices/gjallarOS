@@ -8,28 +8,42 @@
   ...
 }:
 let
+  # Paste once: on a paste shortcut the clipboard is handed to a wl-copy that
+  # serves exactly one read and then exits, so it empties after the app has
+  # read it, however slow the app is. A timer here lost the race on slow
+  # machines (ZBook x2) and pasted nothing. Only one type survives the
+  # hand-over (text first, else the first offered), so rich formatting is
+  # pasted as plain text.
   gjallarPasteOnce = pkgs.writeShellScript "gjallar-paste-once" ''
     set -eu
+    PATH=${lib.makeBinPath [ pkgs.wl-clipboard pkgs.gnugrep pkgs.coreutils ]}
+
+    hand_over() {
+      types="$(wl-paste "$@" --list-types 2>/dev/null)" || return 0
+      type="$(printf '%s\n' "$types" | grep -m1 -x 'text/plain;charset=utf-8' ||
+        printf '%s\n' "$types" | grep -m1 -x 'text/plain' ||
+        printf '%s\n' "$types" | head -n1)"
+      [ -n "$type" ] || return 0
+      wl-paste "$@" --no-newline --type "$type" |
+        wl-copy "$@" --paste-once --sensitive --type "$type"
+    }
 
     case "''${1:-}" in
-      ctrl-v)
-        ${pkgs.hyprland}/bin/hyprctl dispatch sendshortcut CTRL,V,activewindow >/dev/null
-        ;;
-      ctrl-shift-v)
-        ${pkgs.hyprland}/bin/hyprctl dispatch sendshortcut "CTRL SHIFT",V,activewindow >/dev/null
-        ;;
-      shift-insert)
-        ${pkgs.hyprland}/bin/hyprctl dispatch sendshortcut SHIFT,Insert,activewindow >/dev/null
-        ;;
-      *)
-        exit 2
-        ;;
+      ctrl-v) keys="CTRL" key=V ;;
+      ctrl-shift-v) keys="CTRL SHIFT" key=V ;;
+      shift-insert) keys="SHIFT" key=Insert ;;
+      *) exit 2 ;;
     esac
 
-    ${pkgs.coreutils}/bin/sleep 0.12
+    hand_over
+    # Shift+Insert reads the primary selection in some apps (Ghostty).
+    if [ "$1" = shift-insert ]; then
+      hand_over --primary
+    else
+      wl-copy --primary --clear >/dev/null 2>&1 || true
+    fi
 
-    ${pkgs.wl-clipboard}/bin/wl-copy --clear >/dev/null 2>&1 || true
-    ${pkgs.wl-clipboard}/bin/wl-copy --primary --clear >/dev/null 2>&1 || true
+    ${pkgs.hyprland}/bin/hyprctl dispatch sendshortcut "$keys,$key,activewindow" >/dev/null
   '';
   themeDetails = settings.themeDetails;
   shellDetails = hyprlandShellDetails;
