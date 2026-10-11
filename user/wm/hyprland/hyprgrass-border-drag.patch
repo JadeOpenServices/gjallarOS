@@ -1,0 +1,308 @@
+diff --git a/src/GestureManager.cpp b/src/GestureManager.cpp
+index 9b7036b..d7bc5f8 100644
+--- a/src/GestureManager.cpp
++++ b/src/GestureManager.cpp
+@@ -25,6 +25,8 @@
+ 
+ // constexpr double SWIPE_THRESHOLD = 30.;
+ constexpr int RESIZE_BORDER_GAP_INCREMENT = 10;
++// how far (px) a finger on a border moves before it resizes; less is a tap
++constexpr double BORDER_DRAG_THRESHOLD = 8.;
+ 
+ static std::string trim(const std::string& str) {
+     size_t first = str.find_first_not_of(' ');
+@@ -129,10 +131,6 @@ bool GestureManager::handleDragGesture(const DragGestureEvent& gev) {
+     static auto const WORKSPACE_SWIPE_EDGE    = g_config->workspaceSwipeEdge;
+     static auto const RESIZE_LONG_PRESS       = g_config->resizeOnBorder;
+ 
+-    static auto PBORDERSIZE       = CConfigValue<Config::INTEGER>("general:border_size");
+-    static auto PBORDERGRABEXTEND = CConfigValue<Config::INTEGER>("general:extend_border_grab_area");
+-    static auto PGAPSINDATA       = CConfigValue<Config::IComplexConfigValue>("general:gaps_in");
+-
+     Log::logger->log(Log::DEBUG, "[hyprgrass] Drag gesture begin: {}", gev.to_string());
+ 
+     auto const workspace_swipe_edge_str = WORKSPACE_SWIPE_EDGE->value();
+@@ -177,51 +175,10 @@ bool GestureManager::handleDragGesture(const DragGestureEvent& gev) {
+                 return this->handleGestureBind(gev.to_string(), GestureEventType::DRAG_BEGIN);
+             }
+ 
+-            if (RESIZE_LONG_PRESS->value() && gev.finger_count == 1) {
+-                const auto BORDER_GRAB_AREA = *PBORDERSIZE + *PBORDERGRABEXTEND;
+-
+-                // kind of a hack: this is the window detected from previous touch events
+-                const auto w = g_pInputManager->m_foundWindowToFocus.lock();
+-                const Vector2D touchPos =
+-                    pixelPositionToPercentagePosition(this->m_sGestureState.get_center().current) *
+-                    this->m_lastTouchedMonitor->m_size;
+-                if (w && !w->isFullscreen()) {
+-                    const CBox real = {
+-                        w->m_realPosition->value().x, w->m_realPosition->value().y, w->m_realSize->value().x,
+-                        w->m_realSize->value().y
+-                    };
+-                    const CBox grab = {
+-                        real.x - BORDER_GRAB_AREA, real.y - BORDER_GRAB_AREA, real.width + 2 * BORDER_GRAB_AREA,
+-                        real.height + 2 * BORDER_GRAB_AREA
+-                    };
+-
+-                    bool notInRealWindow = !real.containsPoint(touchPos) || w->isInCurvedCorner(touchPos.x, touchPos.y);
+-                    bool onTiledGap      = !w->m_isFloating && !w->isFullscreen() && notInRealWindow;
+-                    bool inGrabArea      = notInRealWindow && grab.containsPoint(touchPos);
+-
+-                    if ((onTiledGap || inGrabArea) && !w->hasPopupAt(touchPos)) {
+-                        IPointer::SButtonEvent e = {
+-                            .timeMs = 0, // HACK: they don't use this :p
+-                            .button = 0,
+-                            .state  = WL_POINTER_BUTTON_STATE_PRESSED,
+-                        };
+-                        g_pKeybindManager->resizeWithBorder(e);
+-
+-                        auto oldGapsIn           = *static_cast<Config::CCssGapData*>(PGAPSINDATA.ptr());
+-                        this->resizeOnBorderInfo = {
+-                            .active      = true,
+-                            .old_gaps_in = oldGapsIn,
+-                        };
+-
+-                        Config::CCssGapData newGapsIn = oldGapsIn;
+-                        newGapsIn.m_top += RESIZE_BORDER_GAP_INCREMENT;
+-                        newGapsIn.m_right += RESIZE_BORDER_GAP_INCREMENT;
+-                        newGapsIn.m_bottom += RESIZE_BORDER_GAP_INCREMENT;
+-                        newGapsIn.m_left += RESIZE_BORDER_GAP_INCREMENT;
+-                        updateGapsIn(newGapsIn);
+-                        return true;
+-                    }
+-                }
++            if (RESIZE_LONG_PRESS->value() && gev.finger_count == 1 &&
++                this->onWindowBorder(this->m_sGestureState.get_center().current)) {
++                this->startBorderResize(this->m_sGestureState.fingers.begin()->first);
++                return true;
+             }
+ 
+             if (this->trackpadGestureBegin(gev))
+@@ -340,6 +297,71 @@ bool GestureManager::handleGestureBind(std::string bind, GestureEventType type)
+ 
+ void GestureManager::handleCancelledGesture() {}
+ 
++// Whether a touch at point (layout pixels) is on a window border or the gap
++// next to a tiled window, where a pointer would resize. refocus() on touch down
++// already picked the window under it, the same way as for the pointer.
++bool GestureManager::onWindowBorder(wf::touch::point_t point) const {
++    static auto PBORDERSIZE       = CConfigValue<Config::INTEGER>("general:border_size");
++    static auto PBORDERGRABEXTEND = CConfigValue<Config::INTEGER>("general:extend_border_grab_area");
++
++    // a bar or the on-screen keyboard on top gets the touch
++    if (g_pInputManager->m_foundLSToFocus.lock()) {
++        return false;
++    }
++
++    const auto w = g_pInputManager->m_foundWindowToFocus.lock();
++    if (!w || w->isFullscreen()) {
++        return false;
++    }
++
++    const auto BORDER_GRAB_AREA = *PBORDERSIZE + *PBORDERGRABEXTEND;
++    const Vector2D touchPos     = {point.x, point.y};
++    const CBox real = {
++        w->m_realPosition->value().x, w->m_realPosition->value().y, w->m_realSize->value().x, w->m_realSize->value().y
++    };
++    const CBox grab = {
++        real.x - BORDER_GRAB_AREA, real.y - BORDER_GRAB_AREA, real.width + 2 * BORDER_GRAB_AREA,
++        real.height + 2 * BORDER_GRAB_AREA
++    };
++
++    bool notInRealWindow = !real.containsPoint(touchPos) || w->isInCurvedCorner(touchPos.x, touchPos.y);
++    bool onTiledGap      = !w->m_isFloating && notInRealWindow;
++    bool inGrabArea      = notInRealWindow && grab.containsPoint(touchPos);
++
++    return (onTiledGap || inGrabArea) && !w->hasPopupAt(touchPos);
++}
++
++void GestureManager::startBorderResize(int32_t finger) {
++    static auto PGAPSINDATA = CConfigValue<Config::IComplexConfigValue>("general:gaps_in");
++
++    IPointer::SButtonEvent e = {
++        .timeMs = 0, // HACK: they don't use this :p
++        .button = 0,
++        .state  = WL_POINTER_BUTTON_STATE_PRESSED,
++    };
++    g_pKeybindManager->resizeWithBorder(e);
++
++    auto oldGapsIn           = *static_cast<Config::CCssGapData*>(PGAPSINDATA.ptr());
++    this->resizeOnBorderInfo = {
++        .active      = true,
++        .finger      = finger,
++        .old_gaps_in = oldGapsIn,
++    };
++
++    Config::CCssGapData newGapsIn = oldGapsIn;
++    newGapsIn.m_top += RESIZE_BORDER_GAP_INCREMENT;
++    newGapsIn.m_right += RESIZE_BORDER_GAP_INCREMENT;
++    newGapsIn.m_bottom += RESIZE_BORDER_GAP_INCREMENT;
++    newGapsIn.m_left += RESIZE_BORDER_GAP_INCREMENT;
++    updateGapsIn(newGapsIn);
++}
++
++void GestureManager::endBorderResize() {
++    g_pKeybindManager->changeMouseBindMode(eMouseBindMode::MBIND_INVALID);
++    updateGapsIn(this->resizeOnBorderInfo.old_gaps_in);
++    this->resizeOnBorderInfo = {};
++}
++
+ void GestureManager::dragGestureUpdate(const wf::touch::gesture_event_t& ev) {
+     if (!this->getActiveDragGesture().has_value()) {
+         return;
+@@ -358,7 +380,15 @@ void GestureManager::dragGestureUpdate(const wf::touch::gesture_event_t& ev) {
+             return;
+ 
+         case GestureType::LONG_PRESS: {
+-            const auto pos = this->m_sGestureState.get_center().current;
++            auto pos = this->m_sGestureState.get_center().current;
++            if (this->resizeOnBorderInfo.active) {
++                // follow the finger on the border, not the middle of all fingers
++                const auto finger = this->m_sGestureState.fingers.find(this->resizeOnBorderInfo.finger);
++                if (finger == this->m_sGestureState.fingers.end()) {
++                    return;
++                }
++                pos = finger->second.current;
++            }
+             g_pCompositor->warpCursorTo(Vector2D(pos.x, pos.y));
+             g_pInputManager->simulateMouseMovement();
+             return;
+@@ -396,9 +426,7 @@ void GestureManager::handleDragGestureEnd(const DragGestureEvent& gev) {
+             return;
+         case GestureType::LONG_PRESS:
+             if (this->resizeOnBorderInfo.active) {
+-                g_pKeybindManager->changeMouseBindMode(eMouseBindMode::MBIND_INVALID);
+-                updateGapsIn(this->resizeOnBorderInfo.old_gaps_in);
+-                this->resizeOnBorderInfo = {};
++                this->endBorderResize();
+                 return;
+             }
+ 
+@@ -588,7 +616,9 @@ void GestureManager::sendCancelEventsToWindows() {
+ 
+ // @return whether or not to inhibit further actions
+ bool GestureManager::onTouchDown(ITouch::SDownEvent ev) {
+-    static auto const SEND_CANCEL = g_config->sendCancel;
++    static auto const SEND_CANCEL      = g_config->sendCancel;
++    static auto const RESIZE_ON_BORDER = g_config->resizeOnBorder;
++    static auto const EDGE_MARGIN      = g_config->edgeMargin;
+ 
+     auto monitor = g_pCompositor->getMonitorFromName(!ev.device->m_boundOutput.empty() ? ev.device->m_boundOutput : "");
+     monitor      = monitor ? monitor : Desktop::focusState()->monitor();
+@@ -640,6 +670,16 @@ bool GestureManager::onTouchDown(ITouch::SDownEvent ev) {
+     // @wf::touch::gesture_event_t uses PIXELS as unit
+     auto pos = wlrTouchEventPositionAsPixels(ev.pos.x, ev.pos.y);
+ 
++    // A finger on a window border or gap resizes the window as soon as it moves,
++    // like the pointer does. Edge swipes, taps and gestures with more fingers
++    // stay as they are.
++    this->borderTouch.reset();
++    if (this->m_sGestureState.fingers.empty() && RESIZE_ON_BORDER->value() &&
++        !g_pSessionLockManager->isSessionLocked() && this->find_swipe_edges(pos, EDGE_MARGIN->value()) == 0 &&
++        this->onWindowBorder(pos)) {
++        this->borderTouch = std::make_pair(ev.touchID, pos);
++    }
++
+     const wf::touch::gesture_event_t gesture_event = {
+         .type   = wf::touch::EVENT_TYPE_TOUCH_DOWN,
+         .time   = ev.timeMs,
+@@ -660,6 +700,14 @@ bool GestureManager::onTouchUp(ITouch::SUpEvent ev) {
+         return false;
+     }
+ 
++    if (this->borderTouch && this->borderTouch->first == ev.touchID) {
++        this->borderTouch.reset();
++    }
++    // done once the finger on the border lifts, even if others still touch
++    if (this->resizeOnBorderInfo.active && this->resizeOnBorderInfo.finger == ev.touchID) {
++        this->endBorderResize();
++    }
++
+     const wf::touch::gesture_event_t gesture_event = {
+         .type   = wf::touch::EVENT_TYPE_TOUCH_UP,
+         .time   = ev.timeMs,
+@@ -705,6 +753,22 @@ bool GestureManager::onTouchMove(ITouch::SMotionEvent ev) {
+ 
+     auto pos = wlrTouchEventPositionAsPixels(ev.pos.x, ev.pos.y);
+ 
++    // Start the resize where the finger landed; the move below then drags it.
++    if (this->borderTouch && this->borderTouch->first == ev.touchID && this->m_sGestureState.fingers.size() == 1) {
++        const auto start = this->borderTouch->second;
++        if (std::hypot(pos.x - start.x, pos.y - start.y) >= BORDER_DRAG_THRESHOLD) {
++            this->borderTouch.reset();
++            if (this->onWindowBorder(start)) {
++                this->beginDragGesture(DragGestureEvent{
++                    .time         = ev.timeMs,
++                    .type         = GestureType::LONG_PRESS,
++                    .direction    = 0,
++                    .finger_count = 1,
++                });
++            }
++        }
++    }
++
+     const wf::touch::gesture_event_t gesture_event = {
+         .type   = wf::touch::EVENT_TYPE_MOTION,
+         .time   = ev.timeMs,
+diff --git a/src/GestureManager.hpp b/src/GestureManager.hpp
+index 8d3275b..cb7729a 100644
+--- a/src/GestureManager.hpp
++++ b/src/GestureManager.hpp
+@@ -110,8 +110,12 @@ class GestureManager : public IGestureManager {
+     wl_event_source* long_press_timer;
+     struct {
+         bool active = false;
++        // the finger that holds the border
++        int32_t finger = -1;
+         Config::CCssGapData old_gaps_in;
+     } resizeOnBorderInfo;
++    // a lone finger that landed on a window border or gap and has not moved yet
++    std::optional<std::pair<int32_t, wf::touch::point_t>> borderTouch;
+     bool workspaceSwipeActive                = false;
+     CTrackpadGestures* activeTrackpadGesture = nullptr;
+     bool mouseBindActive                     = false;
+@@ -127,6 +131,9 @@ class GestureManager : public IGestureManager {
+     Vector2D pixelPositionToPercentagePosition(wf::touch::point_t) const;
+     Vector2D pixelToTrackpadDistance(wf::touch::point_t) const;
+     bool handleWorkspaceSwipe(const GestureDirection direction);
++    bool onWindowBorder(wf::touch::point_t point) const;
++    void startBorderResize(int32_t finger);
++    void endBorderResize();
+     void updateWorkspaceSwipe();
+ 
+     bool trackpadGestureBegin(const DragGestureEvent& gev);
+diff --git a/src/gestures/Gestures.cpp b/src/gestures/Gestures.cpp
+index 0253e43..6fa739c 100644
+--- a/src/gestures/Gestures.cpp
++++ b/src/gestures/Gestures.cpp
+@@ -91,6 +91,15 @@ bool IGestureManager::emitDragGestureEnd(const DragGestureEvent& gev) {
+     return false;
+ }
+ 
++bool IGestureManager::beginDragGesture(const DragGestureEvent& gev) {
++    if (this->activeDragGesture.has_value() || !this->emitDragGesture(gev)) {
++        return false;
++    }
++
++    this->cancelTouchEventsOnAllWindows();
++    return true;
++}
++
+ // @return whether or not to inhibit further actions
+ bool IGestureManager::onTouchDown(const wf::touch::gesture_event_t& ev) {
+     // NOTE @m_sGestureState is used in gesture-completed callbacks
+diff --git a/src/gestures/Gestures.hpp b/src/gestures/Gestures.hpp
+index 76d36c8..19550aa 100644
+--- a/src/gestures/Gestures.hpp
++++ b/src/gestures/Gestures.hpp
+@@ -64,6 +64,10 @@ class IGestureManager {
+     wf::touch::gesture_state_t m_sGestureState;
+ 
+     GestureDirection find_swipe_edges(wf::touch::point_t point, int edge_margin);
++
++    // starts a drag gesture no recognizer has seen, like a finger that lands on
++    // a window border; its end is up to the caller
++    bool beginDragGesture(const DragGestureEvent& gev);
+     virtual SMonitorArea getMonitorArea() const = 0;
+ 
+     // checks if the gesture event has a corresponding handler. longpress skips this

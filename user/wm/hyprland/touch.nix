@@ -148,8 +148,14 @@ let
       rev = "d094a3e62f6ecaeb41515982d3e13edefaf8a4e7";
       hash = "sha256-tCt7FNc1RBHou/ym7B0XzoOqqNq8Df+dizEDkAgJ4U0=";
     };
-    # Keep the finger wobble tolerance when sensitivity shortens swipes.
-    patches = [ ./hyprgrass-finger-slip.patch ];
+    # finger-slip: keep the finger wobble tolerance when sensitivity shortens
+    # swipes. border-drag: one finger dragged from a window border or gap
+    # resizes at once, not only after a long press, and the long press finds
+    # the border on any monitor, not just the one at (0,0).
+    patches = [
+      ./hyprgrass-finger-slip.patch
+      ./hyprgrass-border-drag.patch
+    ];
   };
 in
 # Touchscreen machines (the installer sets touchscreenEnable when it finds
@@ -170,6 +176,10 @@ lib.mkIf (settings.touchscreenEnable or false) {
     {
       keys = "Hold two fingers on a window and drag";
       description = "Move window";
+    }
+    {
+      keys = "Drag a window border or gap";
+      description = "Resize window";
     }
   ];
 
@@ -225,6 +235,9 @@ lib.mkIf (settings.touchscreenEnable or false) {
         workspace_swipe_edge = "none";
         # Wider than the 10 px default, so a finger at the bezel still hits it.
         edge_margin = 20;
+        # One finger on a border or gap resizes, as resize_on_border does for
+        # the mouse (upstream default, set here because the patch builds on it).
+        resize_on_border_long_press = true;
       };
 
       hyprgrass-bind = map (g: g.bind) gestures;
