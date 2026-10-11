@@ -1,0 +1,20 @@
+--- a/src/gestures/Actions.cpp
++++ b/src/gestures/Actions.cpp
+@@ -1,4 +1,5 @@
+ #include "Actions.hpp"
++#include <algorithm>
+ #include <cmath>
+ #include <glm/geometric.hpp>
+ #include <glm/glm.hpp>
+@@ -15,7 +16,10 @@
+         return wf::touch::ACTION_STATUS_CANCELLED;
+     }
+ 
+-    const double finger_slip = base_finger_slip / *sensitivity;
++    // Sensitivity shortens the swipe, but must not also make it strict: dividing
++    // the slip by it left 25 px of wobble at sensitivity 4, so a finger that
++    // moved before the last one landed cancelled the swipe.
++    const double finger_slip = base_finger_slip / std::min(*sensitivity, 1.0F);
+     const double threshold   = base_threshold / *sensitivity;
+     if (event.type == wf::touch::EVENT_TYPE_TOUCH_DOWN) {
+         // cancel if previous fingers moved too much

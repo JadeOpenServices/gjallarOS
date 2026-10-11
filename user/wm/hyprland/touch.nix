@@ -148,6 +148,8 @@ let
       rev = "d094a3e62f6ecaeb41515982d3e13edefaf8a4e7";
       hash = "sha256-tCt7FNc1RBHou/ym7B0XzoOqqNq8Df+dizEDkAgJ4U0=";
     };
+    # Keep the finger wobble tolerance when sensitivity shortens swipes.
+    patches = [ ./hyprgrass-finger-slip.patch ];
   };
 in
 # Touchscreen machines (the installer sets touchscreenEnable when it finds
@@ -214,7 +216,8 @@ lib.mkIf (settings.touchscreenEnable or false) {
 
       plugin.touch_gestures = {
         # The default is meant for small phone screens; 4.0 is upstream's
-        # advice for tablets.
+        # advice for tablets. Swipes complete after about 40 px; the patch
+        # above keeps the 100 px sideways tolerance.
         sensitivity = 4.0;
         # Three fingers left/right switch workspaces.
         workspace_swipe_fingers = 3;
