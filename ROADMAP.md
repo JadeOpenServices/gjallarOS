@@ -314,6 +314,14 @@ Plan agreed 2026-10-10. Nothing in this section is built yet.
       GitHub environment, let the installer ask whether to use the cache,
       and look at a second builder that rebuilds and compares. Starts once
       the release flow above works.
+      Measured 2026-10-11 (fresh store, only cache.nixos.org trusted, 16
+      threads): 46 min wall, 4.9 h summed build time. Our KIO capacity
+      patch takes 37 % (KIO plus the 26 KDE packages that link it: Dolphin,
+      Ark, Konsole, Baloo, Darkly and others), Noctalia with its libqalculate
+      patch 13 %, the Nextcloud client with OpenVFS 8 %, opencode 4 % (not
+      on cache.nixos.org for our nixpkgs pin), the qt6ct patch 2 %. A cache
+      of these saves about 63 %. Kernel modules and the initrd depend on the
+      device and always build locally (2 %).
 
 Sources:
 
