@@ -1,0 +1,242 @@
+{
+  "devices": [
+    {
+      "path": "hardware.audio.controller",
+      "id": "audio/intel/sunrise-point-lp-hda",
+      "name": "Intel Sunrise Point-LP HD Audio",
+      "bus": "pci",
+      "deviceId": "8086:9d71",
+      "supported": true,
+      "proven": "pass"
+    },
+    {
+      "path": "hardware.camera.front",
+      "id": "camera/chicony/b5e7",
+      "name": "HP HD Camera (Chicony 04F2:B5E7)",
+      "bus": "usb",
+      "deviceId": "04f2:b5e7",
+      "attachment": "internal",
+      "usbPort": {
+        "path": "hardware.camera.front",
+        "name": "HP HD Camera (Chicony 04F2:B5E7)",
+        "deviceId": "04f2:b5e7",
+        "controller": "8086:9d2f",
+        "hub": "usb2",
+        "port": 9,
+        "connectType": "hardwired",
+        "attachment": "internal",
+        "supported": true
+      },
+      "supported": true,
+      "proven": "pass",
+      "usbIdentity": {
+        "serial": "placeholder"
+      }
+    },
+    {
+      "path": "hardware.camera.rear",
+      "id": "camera/realtek/5666",
+      "name": "HP 8MP Camera (Realtek 0BDA:5666)",
+      "bus": "usb",
+      "deviceId": "0bda:5666",
+      "attachment": "internal",
+      "usbPort": {
+        "path": "hardware.camera.rear",
+        "name": "HP 8MP Camera (Realtek 0BDA:5666)",
+        "deviceId": "0bda:5666",
+        "controller": "8086:9d2f",
+        "hub": "usb3",
+        "port": 2,
+        "connectType": "hardwired",
+        "attachment": "internal",
+        "supported": true
+      },
+      "supported": true,
+      "proven": "pass",
+      "usbIdentity": {
+        "serial": "placeholder"
+      }
+    },
+    {
+      "path": "hardware.display.internal.primary",
+      "id": "display/lgd/05a4",
+      "name": "LG Display LGD05A4 14\" 3840x2160 panel",
+      "bus": "edid",
+      "deviceId": "lgd:05a4",
+      "supported": true,
+      "proven": "pass"
+    },
+    {
+      "path": "hardware.graphics.discrete",
+      "id": "graphics/nvidia/quadro-m620",
+      "name": "NVIDIA Quadro M620",
+      "bus": "pci",
+      "deviceId": "10de:13b4",
+      "supported": true,
+      "proven": "pass"
+    },
+    {
+      "path": "hardware.input.keyboard.primary",
+      "id": "keyboard/nxp/1fc9-0088",
+      "name": "HP ZBook x2 detachable keyboard (NXP 1FC9:0088)",
+      "bus": "hid",
+      "deviceId": "1fc9:0088",
+      "attachment": "detachable",
+      "usbPort": {
+        "path": "hardware.input.keyboard.primary",
+        "name": "HP ZBook x2 detachable keyboard (NXP 1FC9:0088)",
+        "deviceId": "1fc9:0088",
+        "controller": "8086:9d2f",
+        "hub": "usb2",
+        "port": 4,
+        "connectType": "hardwired",
+        "attachment": "detachable",
+        "supported": true
+      },
+      "supported": true,
+      "proven": "pass",
+      "protocol": "alps-u1-report-passthrough",
+      "usbIdentity": {
+        "serial": "placeholder"
+      }
+    },
+    {
+      "path": "hardware.input.pen.primary",
+      "id": "pen/wacom/056a-016c",
+      "name": "Wacom Digitizer 056A:016C",
+      "bus": "hid",
+      "deviceId": "056a:016c",
+      "supported": true,
+      "proven": "pass"
+    },
+    {
+      "path": "hardware.input.quickKeys.primary",
+      "id": "quickkeys/hp/03f0-0a56",
+      "name": "HP ZBook Create x2 Quick Keys",
+      "bus": "hid",
+      "deviceId": "03f0:0a56",
+      "attachment": "internal",
+      "usbPort": {
+        "path": "hardware.input.quickKeys.primary",
+        "name": "HP ZBook Create x2 Quick Keys",
+        "deviceId": "03f0:0a56",
+        "controller": "8086:9d2f",
+        "hub": "usb2",
+        "port": 2,
+        "connectType": "hardwired",
+        "attachment": "internal",
+        "supported": true
+      },
+      "supported": true,
+      "proven": "pass",
+      "usbIdentity": {
+        "serial": "none"
+      }
+    },
+    {
+      "path": "hardware.input.touchscreen.primary",
+      "id": "touchscreen/03eb-8abb",
+      "name": "ZBook Touchscreen HID 03EB:8ABB",
+      "bus": "hid",
+      "deviceId": "03eb:8abb",
+      "supported": true,
+      "proven": "pass"
+    },
+    {
+      "path": "hardware.network.bluetooth.primary",
+      "id": "bluetooth/intel/0a2b",
+      "name": "Intel 0a2b Bluetooth",
+      "bus": "usb",
+      "deviceId": "8087:0a2b",
+      "attachment": "internal",
+      "usbPort": {
+        "path": "hardware.network.bluetooth.primary",
+        "name": "Intel 0a2b Bluetooth",
+        "deviceId": "8087:0a2b",
+        "controller": "8086:9d2f",
+        "hub": "usb2",
+        "port": 7,
+        "connectType": "hardwired",
+        "attachment": "internal",
+        "supported": true
+      },
+      "supported": true,
+      "proven": "pass",
+      "usbIdentity": {
+        "anchor": "bluetooth-address",
+        "serial": "none"
+      }
+    },
+    {
+      "path": "hardware.network.wifi.primary",
+      "id": "wifi/intel/8265",
+      "name": "Intel Dual Band Wireless-AC 8265",
+      "bus": "pci",
+      "deviceId": "8086:24fd",
+      "supported": true,
+      "proven": "pass"
+    },
+    {
+      "path": "hardware.security.fingerprint.primary",
+      "id": "fingerprint/validity/003f",
+      "name": "Validity VFS495",
+      "bus": "usb",
+      "deviceId": "138a:003f",
+      "attachment": "internal",
+      "usbPort": {
+        "path": "hardware.security.fingerprint.primary",
+        "name": "Validity VFS495",
+        "deviceId": "138a:003f",
+        "controller": "8086:9d2f",
+        "hub": "usb2",
+        "port": 8,
+        "connectType": "hardwired",
+        "attachment": "internal",
+        "supported": false
+      },
+      "supported": false,
+      "proven": "unsupported",
+      "usbIdentity": {
+        "serial": "per-unit"
+      }
+    },
+    {
+      "path": "hardware.sensors.hub",
+      "id": "sensorhub/intel/sunrise-point-lp-ish",
+      "name": "Intel Sunrise Point-LP Integrated Sensor Hub",
+      "bus": "pci",
+      "deviceId": "8086:9d35",
+      "supported": true,
+      "proven": "pass"
+    },
+    {
+      "path": "hardware.storage.cardReader.primary",
+      "id": "cardreader/realtek/rts522a",
+      "name": "Realtek RTS522A",
+      "bus": "pci",
+      "deviceId": "10ec:522a",
+      "supported": true,
+      "proven": "pass"
+    },
+    {
+      "path": "hardware.usb.controller",
+      "id": "usbcontroller/intel/sunrise-point-lp-xhci",
+      "name": "Intel Sunrise Point-LP USB 3.0 xHCI controller",
+      "bus": "pci",
+      "deviceId": "8086:9d2f",
+      "attachment": "internal",
+      "supported": true,
+      "proven": "pass"
+    },
+    {
+      "path": "hardware.usbC.thunderbolt",
+      "id": "thunderbolt/intel/jhl6540",
+      "name": "Intel JHL6540 Thunderbolt 3 USB controller",
+      "bus": "pci",
+      "deviceId": "8086:15d4",
+      "supported": true,
+      "proven": "pass"
+    }
+  ],
+  "model": "model/hp/zbook-x2-g4"
+}

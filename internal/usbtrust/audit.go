@@ -12,7 +12,44 @@ type ExpectedDevice struct {
 	ConnectType string   `json:"connectType,omitempty"`
 	Interfaces  []string `json:"interfaces,omitempty"`
 	Required    bool     `json:"required"`
+
+	// Port is where ODDC says the part is wired. Set only for parts that
+	// ODDC lists with a usbPort; those are the built-in parts.
+	Port *ExpectedPort `json:"port,omitempty"`
 }
+
+// ExpectedPort is one usbPort entry from `oddc devices --json`.
+type ExpectedPort struct {
+	// Controller is the PCI vendor:device of the host controller.
+	Controller string `json:"controller"`
+	// Hub is the root hub on that controller ("usb2" or "usb3").
+	Hub string `json:"hub"`
+	// RootPort is the port number on that root hub.
+	RootPort int `json:"rootPort"`
+	// Attachment is "internal" or "detachable". A detachable part may be
+	// absent without a finding.
+	Attachment string `json:"attachment"`
+	// Debug is set when ODDC marks the part unsupported or not proven.
+	// Such a part stays blocked unless a contributor allows it.
+	Debug bool `json:"debug,omitempty"`
+	// Serial says whether the USB serial tells units apart.
+	Serial SerialMode `json:"serial,omitempty"`
+	// Anchor names a second identity check, e.g. the Bluetooth address.
+	Anchor string `json:"anchor,omitempty"`
+}
+
+type SerialMode string
+
+const (
+	// SerialPerUnit: the serial differs per unit and is part of identity.
+	SerialPerUnit SerialMode = "per-unit"
+	// SerialPlaceholder: every unit reports the same serial.
+	SerialPlaceholder SerialMode = "placeholder"
+	// SerialNone: the part reports no serial.
+	SerialNone SerialMode = "none"
+)
+
+const AnchorBluetoothAddress = "bluetooth-address"
 
 type ObservedDevice struct {
 	RuntimeID string   `json:"runtimeId"`
