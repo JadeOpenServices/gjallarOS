@@ -340,7 +340,7 @@ Plan written 2026-10-12. Today only the installer sets up Secure Boot. An
 installed system without it (the ZBook x2 G4, installed before its ODDC
 setup existed) can only get it by running the whole installer again.
 
-- [ ] **`sudo gjallarctl secure-boot setup`.** Does what the installer does,
+- [x] **`gjallarctl secure-boot setup`.** Does what the installer does,
       in the same order, from the installed system:
       1. Resolve the device and its ODDC Secure Boot setup the way the
          installer does. No setup for this model: stop and point to §8.
@@ -358,8 +358,9 @@ setup existed) can only get it by running the whole installer again.
       The boot services that exist for the installer then enroll the keys,
       ask to turn on Secure Boot and verify it. The installer and this
       command call the same code for steps 2, 3 and 5; nothing is copied.
-      zsh completion like every other command.
-- [ ] **Restore dbx before enrolling.** HP's "Clear Secure Boot Keys" also
+      zsh completion like every other command. gjallarctl asks for sudo
+      itself.
+- [x] **Restore dbx before enrolling.** HP's "Clear Secure Boot Keys" also
       empties dbx, the list of revoked boot files. Without it, Secure Boot
       starts boot loaders that are known to be exploitable. Rule: in Setup
       Mode, when the ODDC setup wants dbx present, dbx is empty and the
@@ -367,23 +368,32 @@ setup existed) can only get it by running the whole installer again.
       signed with our KEK, read it back and compare, then enroll. Any
       mismatch stops before the PK is written. sbctl cannot write dbx since
       0.13, so this uses efitools (`sign-efi-sig-list`, `efi-updatevar`),
-      as the Arch wiki describes. Ask ODDC for a structured field instead
-      of matching on the instruction text.
-- [ ] **Microsoft KEK 2023.** Microsoft's KEK CA 2011 expired in June
+      as the Arch wiki describes. Open: ask ODDC for a structured field
+      instead of matching on the instruction text.
+- [x] **Microsoft KEK 2023.** Microsoft's KEK CA 2011 expired in June
       2026. New dbx updates are signed with KEK 2K CA 2023. A KEK update
       has to be signed by the PK, and after enrollment the PK is ours, so
       neither Microsoft nor HP can add it later. When the ODDC setup keeps
-      the firmware KEKs, enroll KEK 2K CA 2023 as well, through sbctl's
+      the firmware KEKs and KEKDefault has the 2011 CA but not the 2023 one,
+      enroll KEK 2K CA 2023 as well, through sbctl's
       custom KEK folder (`-c`). The certificate is pinned by hash. db stays
       as the firmware had it (no `-m`), so nothing new is trusted to boot.
-      Ask ODDC whether the ZBook's KEKDefault already has it.
-- [ ] **dbx updates after enrollment.** The fwupd refresh timer is off, so
-      no dbx update arrives on its own. After Secure Boot is verified, the
-      command offers a dbx update through fwupd (2.0.8 or newer handles
+      Open: ask ODDC whether the ZBook's KEKDefault already has it.
+- [x] **dbx updates after enrollment.** The fwupd refresh timer is off, so
+      no dbx update arrives on its own. After Secure Boot is verified, setup
+      offers `gjallarctl secure-boot update-dbx`, a dbx update through fwupd (2.0.8 or newer handles
       the 2023 KEK). dbx is measured into PCR 7, which TPM disk unlock is
       bound to, so before the reboot the Secure Boot policy is locked again
       and the TPM policy predicted for the new dbx. Otherwise the next boot
-      asks for the recovery key.
+      asks for the recovery key. The PCR 7 state of the running boot stays
+      valid until the restart, so a rebuild in between still matches.
+- [x] **Running boot stays in the TPM policy.** lzbt deletes the pcrlock
+      files of boot files it no longer installs. With one generation
+      (recovery installs) every rebuild deleted the running UKI's, and the
+      policy dropped PCR 4 until the next boot: an older UKI signed with the
+      same key could unlock the disk in that window. The install hook now
+      keeps what this boot measured as one more variant; boot removes it
+      before the policy is made (e2e-fw13, 2026-10-12).
 - [ ] **Kernel lockdown (job 25.5, decision needed).** With Secure Boot on,
       root can still reach the firmware and the running kernel: /dev/mem,
       MSR writes, unsigned kexec, unsigned kernel modules. Fedora and Arch

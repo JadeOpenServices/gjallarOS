@@ -359,6 +359,39 @@ GjallarOS. If the ESP itself is broken, boot the recovery ISO from USB.
 > boot entry, the recovery-maintenance initrd and the recovery ISO. A reinstall
 > or reset therefore needs a deliberate boot into recovery.
 
+### Secure Boot
+
+The installer offers Secure Boot on models whose ODDC entry has a Secure Boot
+setup. A system installed without it gets it with:
+
+```bash
+gjallarctl secure-boot setup
+```
+
+It takes the installer's steps: it checks the firmware state, creates the keys
+and shows their recovery archive, turns on `secureBootEnable`, rebuilds and
+offers to restart into firmware setup. After the restart the boot services
+enroll the keys and verify them. Run the command again after a step was
+interrupted; it picks up where it stopped. `gjallarctl secure-boot status`
+shows the current state.
+
+Some firmware empties its revocation list (dbx) along with its keys. When the
+ODDC setup wants dbx kept, the firmware's own default list is written back
+before enrolling, and enrollment stops if that fails. Firmware that only knows
+Microsoft's 2011 KEK (expired June 2026) also gets the 2023 one, so revocation
+updates signed with it still apply once GjallarOS owns the keys.
+
+Revocation updates do not arrive on their own. Once Secure Boot is on, `setup`
+offers one, and you can check any time with:
+
+```bash
+gjallarctl secure-boot update-dbx
+```
+
+The new list takes effect at the next restart. With TPM disk unlock, the TPM
+accepts the current and the new state until then, so a rebuild in between
+still unlocks.
+
 ### USB trust
 
 The installer asks for USB trust review on machines with an ODDC model. On a
