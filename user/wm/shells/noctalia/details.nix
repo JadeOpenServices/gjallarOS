@@ -22,8 +22,9 @@ in
     launcher = "${ipc} panel-toggle launcher";
     controlCenter = "${ipc} panel-toggle control-center";
 
-    volumeUp = "${ipc} volume-up 2";
-    volumeDown = "${ipc} volume-down 2";
+    # Held volume keys repeat about 7 times a second (ZBook, ODDC 26.2).
+    volumeUp = "${ipc} volume-up 5";
+    volumeDown = "${ipc} volume-down 5";
     volumeMute = "${ipc} volume-mute";
     brightnessUp = "${ipc} brightness-up current 5";
     brightnessDown = "${ipc} brightness-down current 5";
