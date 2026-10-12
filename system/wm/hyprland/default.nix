@@ -84,6 +84,9 @@ let
           [ -n "$render_gpus" ]; then
           export AQ_DRM_DEVICES="$render_gpus"
         fi
+        # The login choice, for render-gpu-notice below.
+        mkdir -m 0700 -p "$XDG_RUNTIME_DIR/gjallar"
+        printf '%s\n' "''${AQ_DRM_DEVICES-}" >"$XDG_RUNTIME_DIR/gjallar/render-gpu"
 
         export HYPRLAND_CONFIG="$hypr_config_dir/hyprland.conf"
         exec ${pkgs.hyprland}/bin/start-hyprland >>"$state_dir/startup.log" 2>&1
@@ -130,6 +133,27 @@ in
       );
       Restart = "on-failure";
       RestartSec = 1;
+    };
+  };
+
+  # A screen plugged in after login that wants another GPU gets a card
+  # offering a new login (ODDC 78). Models without ODDC's render quirk stop
+  # it at start.
+  systemd.user.services.render-gpu-notice = {
+    description = "Offer a new login for screens on another GPU";
+    wantedBy = [ "graphical-session.target" ];
+    after = [ "graphical-session.target" ];
+    partOf = [ "graphical-session.target" ];
+    # oddc comes with the system.
+    path = [
+      config.programs.hyprland.package
+      pkgs.power-profiles-daemon
+      "/run/current-system/sw"
+    ];
+    serviceConfig = {
+      ExecStart = "${gjallarctl}/bin/gjallarctl hyprland-render-gpu";
+      Restart = "on-failure";
+      RestartSec = 5;
     };
   };
 

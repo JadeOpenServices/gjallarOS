@@ -164,6 +164,8 @@ _gjallarctl() {
     'preset:read user.config.json presets'
     'normalize:normalize a setting'
     'device-probe:refresh the hardware probe'
+    'hyprland-rotate:turn screens and input with the orientation sensor (session service)'
+    'hyprland-render-gpu:offer a new login when a new screen wants another GPU (session service)'
   )
 
   _arguments -C '1:command:->cmd' '*::argument:->args'
@@ -200,6 +202,10 @@ _gjallarctl() {
         device-probe)
           _arguments '1:device-probe command:(refresh)' \
             '--output[output path]:file:_files' ;;
+        hyprland-rotate)
+          _arguments '--tablet-switch[rotate only in tablet mode of this switch]:input device name:' \
+            '--require-tablet-switch[treat a missing tablet mode switch as laptop mode]' ;;
+        hyprland-render-gpu) _message 'no arguments' ;;
       esac ;;
   esac
 }

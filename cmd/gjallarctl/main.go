@@ -96,6 +96,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runFan(args[1:], stdout, stderr)
 	case "hyprland-rotate":
 		return runHyprlandRotate(args[1:], stdout, stderr)
+	case "hyprland-render-gpu":
+		return runHyprlandRenderGPU(args[1:], stderr)
 	case "ai":
 		return runAI(args[1:], stdout, stderr)
 	case "normalize":
@@ -1767,6 +1769,7 @@ func printUsage(out io.Writer) {
 	fmt.Fprintln(out, "       gjallarctl luks {status|recovery-key|setup|remind [--open|--refresh]}")
 	fmt.Fprintln(out, "       gjallarctl vpn status")
 	fmt.Fprintln(out, "       gjallarctl secure-boot {status|setup|update-dbx} [--repo PATH]")
+	fmt.Fprintln(out, "       gjallarctl hyprland-render-gpu")
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "Safe GjallarOS maintenance commands. Rebuild invokes sudo explicitly.")
 }
