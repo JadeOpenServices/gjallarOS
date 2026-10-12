@@ -8,6 +8,7 @@ import (
 	"math/big"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -15,10 +16,12 @@ import (
 
 // Unlock methods of one LUKS2 volume, read from its JSON header.
 type Keyslots struct {
-	All      []int
-	TPM2     []int
-	TPM2PIN  bool
-	Recovery []int
+	All     []int
+	TPM2    []int
+	TPM2PIN bool
+	// Token id of each TPM2 slot.
+	TPM2Token map[int]string
+	Recovery  []int
 	// Slots no token claims: passphrases typed at boot.
 	Passphrase []int
 }
@@ -44,7 +47,7 @@ func ParseKeyslots(raw []byte) (Keyslots, error) {
 		}
 		k.All = append(k.All, slot)
 	}
-	for _, token := range header.Tokens {
+	for tokenID, token := range header.Tokens {
 		for _, id := range token.Keyslots {
 			slot, err := strconv.Atoi(id)
 			if err != nil {
@@ -54,6 +57,10 @@ func ParseKeyslots(raw []byte) (Keyslots, error) {
 			switch token.Type {
 			case "systemd-tpm2":
 				k.TPM2 = append(k.TPM2, slot)
+				if k.TPM2Token == nil {
+					k.TPM2Token = map[int]string{}
+				}
+				k.TPM2Token[slot] = tokenID
 				k.TPM2PIN = k.TPM2PIN || token.TPM2PIN
 			case "systemd-recovery":
 				k.Recovery = append(k.Recovery, slot)
@@ -173,4 +180,39 @@ func TestTPM2(ctx context.Context, device string, tty *os.File) error {
 		return fmt.Errorf("security chip unlock test: %w", err)
 	}
 	return nil
+}
+
+// TestTPM2Token checks that one TPM2 token opens device now, with pin when
+// the token wants one. A wrong PIN counts towards the TPM lockout.
+func TestTPM2Token(ctx context.Context, device, tokenID, pin string) error {
+	cmd := exec.CommandContext(ctx, "cryptsetup", "open", "--test-passphrase", "--token-only", "--token-id", tokenID, device)
+	cmd.Env = append(os.Environ(), "LD_LIBRARY_PATH="+tokenPluginDir)
+	// With a startup PIN, cryptsetup reads it from stdin.
+	cmd.Stdin = strings.NewReader(pin)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("security chip unlock test: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+// RefreshTPM2KeyslotRecord rewrites the record the first-boot enrollment
+// left at target from the current header of device.
+func RefreshTPM2KeyslotRecord(ctx context.Context, device, target, policy string) error {
+	raw, err := exec.CommandContext(ctx, "cryptsetup", "luksDump", "--dump-json-metadata", device).Output()
+	if err != nil {
+		return fmt.Errorf("read LUKS metadata: %w", err)
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(target), ".metadata-*.json")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp.Name())
+	_, err = tmp.Write(raw)
+	if cerr := tmp.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		return err
+	}
+	return WriteTPM2KeyslotRecord(tmp.Name(), target, device, policy)
 }

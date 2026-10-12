@@ -52,3 +52,16 @@ func TestTPM2MetadataPIN(t *testing.T) {
 		t.Errorf("missing file: code %d", code)
 	}
 }
+
+func TestLUKSArgsValid(t *testing.T) {
+	for _, args := range [][]string{{"status"}, {"recovery-key"}, {"setup"}, {"pin"}, {"pin", "--remove"}, {"record"}} {
+		if !luksArgsValid(args) {
+			t.Errorf("%q refused", args)
+		}
+	}
+	for _, args := range [][]string{nil, {"pin", "--add"}, {"status", "--remove"}, {"pin", "--remove", "x"}, {"new-pin", "x"}} {
+		if luksArgsValid(args) {
+			t.Errorf("%q accepted", args)
+		}
+	}
+}

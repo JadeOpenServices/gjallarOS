@@ -8,14 +8,18 @@ import (
 )
 
 // Headers from cryptsetup luksDump --dump-json-metadata on the e2e-fw13
-// VM, before and after systemd-cryptenroll --recovery-key.
+// VM: before and after systemd-cryptenroll --recovery-key, then a fresh
+// install with a startup PIN and the same disk after gjallarctl luks pin
+// --remove.
 func TestParseKeyslots(t *testing.T) {
 	for _, tc := range []struct {
 		file string
 		want Keyslots
 	}{
-		{"testdata/luks-tpm2-passphrase.json", Keyslots{All: []int{0, 2}, TPM2: []int{2}, Passphrase: []int{0}}},
-		{"testdata/luks-tpm2-recovery-passphrase.json", Keyslots{All: []int{0, 1, 2}, TPM2: []int{2}, Recovery: []int{1}, Passphrase: []int{0}}},
+		{"testdata/luks-tpm2-passphrase.json", Keyslots{All: []int{0, 2}, TPM2: []int{2}, TPM2Token: map[int]string{2: "1"}, Passphrase: []int{0}}},
+		{"testdata/luks-tpm2-recovery-passphrase.json", Keyslots{All: []int{0, 1, 2}, TPM2: []int{2}, TPM2Token: map[int]string{2: "1"}, Recovery: []int{1}, Passphrase: []int{0}}},
+		{"testdata/luks-tpm2pin-recovery.json", Keyslots{All: []int{0, 2}, TPM2: []int{0}, TPM2PIN: true, TPM2Token: map[int]string{0: "0"}, Recovery: []int{2}}},
+		{"testdata/luks-tpm2-recovery.json", Keyslots{All: []int{0, 2}, TPM2: []int{0}, TPM2Token: map[int]string{0: "0"}, Recovery: []int{2}}},
 	} {
 		raw, err := os.ReadFile(tc.file)
 		if err != nil {

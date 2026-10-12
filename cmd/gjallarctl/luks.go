@@ -18,7 +18,7 @@ import (
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/diskcrypto"
 )
 
-const luksUsage = "Usage: gjallarctl luks {status|recovery-key|setup|remind [--open|--refresh]}"
+const luksUsage = "Usage: gjallarctl luks {status|recovery-key|setup|pin [--remove]|remind [--open|--refresh]}"
 
 // runLUKSLifecycle manages how the root disk unlocks. Reading or changing
 // the LUKS header needs root, so it runs itself again through sudo.
@@ -31,7 +31,7 @@ func runLUKSLifecycle(args []string, stdout, stderr io.Writer) int {
 		return runLUKSNewPIN(stdout, stderr)
 	}
 	// record is for gjallar-luks-record.service and not offered to people.
-	if len(args) != 1 || args[0] != "status" && args[0] != "recovery-key" && args[0] != "setup" && args[0] != "record" {
+	if !luksArgsValid(args) {
 		fmt.Fprintln(stderr, luksUsage)
 		return 2
 	}
@@ -47,7 +47,7 @@ func runLUKSLifecycle(args []string, stdout, stderr io.Writer) int {
 			return 1
 		}
 		// -k: ask now and leave no timestamp behind.
-		err = syscall.Exec(sudo, []string{"sudo", "-k", self, "luks", args[0]}, os.Environ())
+		err = syscall.Exec(sudo, append([]string{"sudo", "-k", self, "luks"}, args...), os.Environ())
 		fmt.Fprintf(stderr, "ERROR: sudo: %v\n", err)
 		return 1
 	}
@@ -78,6 +78,8 @@ func runLUKSLifecycle(args []string, stdout, stderr io.Writer) int {
 		return recordOrFail(newLUKSRecord(slots), stderr)
 	case "setup":
 		code = runLUKSSetup(ctx, device, slots, stderr)
+	case "pin":
+		code = runLUKSPIN(ctx, device, slots, len(args) == 2, stdout, stderr)
 	default:
 		code = runRecoveryKey(ctx, device, slots, stderr)
 	}
@@ -89,6 +91,19 @@ func runLUKSLifecycle(args []string, stdout, stderr io.Writer) int {
 		}
 	}
 	return code
+}
+
+func luksArgsValid(args []string) bool {
+	switch {
+	case len(args) == 1:
+		switch args[0] {
+		case "status", "recovery-key", "setup", "pin", "record":
+			return true
+		}
+	case len(args) == 2:
+		return args[0] == "pin" && args[1] == "--remove"
+	}
+	return false
 }
 
 func recordOrFail(r luksRecord, stderr io.Writer) int {
@@ -309,44 +324,9 @@ func runRecoveryKey(ctx context.Context, device string, before diskcrypto.Keyslo
 // The security chip unlocks the header when it can; otherwise the user
 // types a passphrase or the current recovery key.
 func (s *luksSession) enroll(before diskcrypto.Keyslots) (string, int, error) {
-	var out string
-	var err error
-	if len(before.TPM2) > 0 && diskcrypto.TPMAvailable() {
-		var env []string
-		if before.TPM2PIN {
-			pin, perr := credential.ReadSecret(s.tty, s.reader, s.tty, "Startup PIN: ")
-			if perr != nil {
-				return "", 0, perr
-			}
-			env = []string{"PIN=" + pin}
-		}
-		out, err = s.cryptenroll(env, "--unlock-tpm2-device=auto", "--recovery-key")
-		if err != nil {
-			fmt.Fprintln(s.tty, s.wrap("The security chip did not unlock the disk."))
-		}
-	}
-	for attempt := 1; out == ""; attempt++ {
-		secret, rerr := credential.ReadSecret(s.tty, s.reader, s.tty, "Disk passphrase or current recovery key: ")
-		if rerr != nil {
-			return "", 0, rerr
-		}
-		if secret == "" {
-			return "", 0, errCancelled
-		}
-		path, cleanup, kerr := diskcrypto.SecretFile(secret)
-		secret = ""
-		if kerr != nil {
-			return "", 0, kerr
-		}
-		out, err = s.cryptenroll(nil, "--unlock-key-file="+path, "--recovery-key")
-		cleanup()
-		if err == nil {
-			break
-		}
-		if attempt == 3 {
-			return "", 0, fmt.Errorf("that passphrase or key does not unlock %s", s.device)
-		}
-		fmt.Fprintln(s.tty, "That does not unlock the disk. Try again.")
+	out, err := s.unlocked(before, nil, "--recovery-key")
+	if err != nil {
+		return "", 0, err
 	}
 
 	after, err := diskcrypto.ReadKeyslots(s.ctx, s.device)
@@ -376,6 +356,58 @@ func (s *luksSession) enroll(before diskcrypto.Keyslots) (string, int, error) {
 		return "", 0, errCancelled
 	}
 	return key, added[0], nil
+}
+
+// unlocked runs systemd-cryptenroll with args and env. The security chip
+// unlocks the header when it can, tried once, since every wrong startup PIN
+// counts towards the TPM lockout. Otherwise the user types a passphrase or
+// the current recovery key.
+func (s *luksSession) unlocked(before diskcrypto.Keyslots, env []string, args ...string) (string, error) {
+	if len(before.TPM2) > 0 && diskcrypto.TPMAvailable() {
+		chipEnv := append([]string(nil), env...)
+		try := true
+		if before.TPM2PIN {
+			pin, err := credential.ReadSecret(s.tty, s.reader, s.tty, "Current startup PIN (Enter to use the recovery key): ")
+			if err != nil {
+				return "", err
+			}
+			try = pin != ""
+			chipEnv = append(chipEnv, "PIN="+pin)
+		}
+		if try {
+			out, err := s.cryptenroll(chipEnv, append([]string{"--unlock-tpm2-device=auto"}, args...)...)
+			if err == nil {
+				return out, nil
+			}
+			fmt.Fprintln(s.tty, s.wrap("The security chip did not unlock the disk."))
+		}
+	}
+	for attempt := 1; ; attempt++ {
+		secret, err := credential.ReadSecret(s.tty, s.reader, s.tty, "Disk passphrase or current recovery key: ")
+		if err != nil {
+			return "", err
+		}
+		if secret == "" {
+			return "", errCancelled
+		}
+		path, cleanup, err := diskcrypto.SecretFile(secret)
+		secret = ""
+		if err != nil {
+			return "", err
+		}
+		// Test the key alone, so an enrollment error is not taken for a
+		// wrong key.
+		if exec.CommandContext(s.ctx, "cryptsetup", "open", "--test-passphrase", "--key-file", path, s.device).Run() == nil {
+			out, err := s.cryptenroll(env, append([]string{"--unlock-key-file=" + path}, args...)...)
+			cleanup()
+			return out, err
+		}
+		cleanup()
+		if attempt == 3 {
+			return "", fmt.Errorf("that passphrase or key does not unlock %s", s.device)
+		}
+		fmt.Fprintln(s.tty, "That does not unlock the disk. Try again.")
+	}
 }
 
 // confirm shows the key, hides it, and has the user type back three
@@ -479,14 +511,23 @@ func runLUKSNewPIN(stdout, stderr io.Writer) int {
 		return 1
 	}
 	defer tty.Close()
-	reader := bufio.NewReader(tty)
+	pin, err := askNewPIN(tty, bufio.NewReader(tty))
+	if err != nil {
+		fmt.Fprintf(stderr, "ERROR: %v\n", err)
+		return 1
+	}
+	fmt.Fprintln(stdout, pin)
+	return 0
+}
+
+// askNewPIN asks for a new startup PIN twice until both match.
+func askNewPIN(tty *os.File, reader *bufio.Reader) (string, error) {
 	width := terminalWidth(tty) - 1
 	fmt.Fprintln(tty, wrapWords("Choose the startup PIN. You type it at every startup, before the disk unlocks: 6 or more characters, letters, digits and punctuation.", width))
 	for {
 		pin, err := credential.ReadSecret(tty, reader, tty, "New startup PIN: ")
 		if err != nil {
-			fmt.Fprintf(stderr, "ERROR: %v\n", err)
-			return 1
+			return "", err
 		}
 		if problem := startupPINProblem(pin); problem != "" {
 			fmt.Fprintln(tty, wrapWords(problem, width))
@@ -494,14 +535,12 @@ func runLUKSNewPIN(stdout, stderr io.Writer) int {
 		}
 		again, err := credential.ReadSecret(tty, reader, tty, "Type the PIN again: ")
 		if err != nil {
-			fmt.Fprintf(stderr, "ERROR: %v\n", err)
-			return 1
+			return "", err
 		}
 		if again != pin {
 			fmt.Fprintln(tty, "The two PINs differ. Try again.")
 			continue
 		}
-		fmt.Fprintln(stdout, pin)
-		return 0
+		return pin, nil
 	}
 }

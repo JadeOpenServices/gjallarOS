@@ -70,6 +70,7 @@ _gjallarctl_luks() {
     'status:show how the system disk unlocks'
     'recovery-key:create a new recovery key'
     'setup:add a recovery key and remove the install passphrase'
+    'pin:set, change or remove the startup PIN'
     'remind:ask about missing disk protection, as at login'
   )
   if (( CURRENT == 2 )); then
@@ -79,6 +80,8 @@ _gjallarctl_luks() {
   shift words
   (( CURRENT-- ))
   case $words[1] in
+    pin)
+      _arguments '--remove[remove the startup PIN]' ;;
     remind)
       _arguments '(--refresh)--open[start the missing setup right away]' '(--open)--refresh[only update the bar shield]' ;;
   esac
