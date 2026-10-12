@@ -597,10 +597,10 @@ index d9daf64..130ea66 100644
  }
  
 +static void osk_set_visible(struct greeter_server* server, bool visible) {
-+  if (server->osk_pid <= 0 || server->osk_visible == visible) {
++  if (server->osk_pid <= 0 || (!visible && !server->osk_visible)) {
 +    return;
 +  }
-+  // wvkbd(1): SIGUSR1 hides, SIGUSR2 shows.
++  // wvkbd(1): SIGUSR1 hides, SIGUSR2 shows. Always show: it can hide itself.
 +  if (kill(server->osk_pid, visible ? SIGUSR2 : SIGUSR1) == 0) {
 +    server->osk_visible = visible;
 +  }

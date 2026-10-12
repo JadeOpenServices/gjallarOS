@@ -1,0 +1,537 @@
+diff --git a/keyboard.c b/keyboard.c
+index 8950fd0..2b11c1c 100644
+--- a/keyboard.c
++++ b/keyboard.c
+@@ -212,19 +212,29 @@ kbd_init_layout(struct layout *l, uint32_t width, uint32_t height)
+     struct key *k = l->keys;
+     double rowlength = kbd_get_row_length(k);
+     double rowwidth = 0.0;
++    uint32_t fixed = kbd_get_row_fixed(k, l->keyheight), fixed_x = 0;
+     while (k->type != Last) {
+         if (k->type == EndRow) {
+             y += l->keyheight;
+             x = 0;
++            fixed_x = 0;
+             rowwidth = 0.0;
+             rowlength = kbd_get_row_length(k + 1);
++            fixed = kbd_get_row_fixed(k + 1, l->keyheight);
++        } else if (k->type == Hide) {
++            k->x = x;
++            k->y = y;
++            k->w = l->keyheight;
++            x += k->w;
++            fixed_x += k->w;
+         } else if (k->width > 0) {
++            double avail = (double)(width - fixed);
+             k->x = x;
+             k->y = y;
+-            k->w = ((double)width / rowlength) * k->width;
++            k->w = (avail / rowlength) * k->width;
+             x += k->w;
+             rowwidth += k->width;
+-            if (x < (rowwidth / rowlength) * (double)width) {
++            if (x - fixed_x < (rowwidth / rowlength) * avail) {
+                 k->w++;
+                 x++;
+             }
+@@ -239,12 +249,26 @@ kbd_get_row_length(struct key *k)
+ {
+     double l = 0.0;
+     while ((k->type != Last) && (k->type != EndRow)) {
+-        l += k->width;
++        if (k->type != Hide)
++            l += k->width;
+         k++;
+     }
+     return l;
+ }
+ 
++/* Pixels taken by square keys in this row; the others share the rest. */
++uint32_t
++kbd_get_row_fixed(struct key *k, uint32_t keyheight)
++{
++    uint32_t w = 0;
++    while ((k->type != Last) && (k->type != EndRow)) {
++        if (k->type == Hide)
++            w += keyheight;
++        k++;
++    }
++    return w;
++}
++
+ struct key *
+ kbd_get_key(struct kbd *kb, uint32_t x, uint32_t y)
+ {
+@@ -526,6 +550,9 @@ kbd_press_key(struct kbd *kb, struct key *k, uint32_t time)
+             }
+         }
+         break;
++    case Hide:
++        kb->hide_requested = true;
++        break;
+     case Copy:
+         // copy code as unicode chr by setting a temporary keymap
+         kb->last_swipe = kb->last_press = k;
+diff --git a/keyboard.h b/keyboard.h
+index e39f6cf..a091952 100644
+--- a/keyboard.h
++++ b/keyboard.h
+@@ -24,6 +24,7 @@ enum key_type {
+ 	NextLayer, // Layout switch to the next layout in the layers sequence
+ 	Compose,   // Compose modifier key, switches to a specific associated layout
+ 	           // upon next keypress
++	Hide,      // Hides the keyboard; drawn square, the row shares the rest
+ 	EndRow,    // Incidates the end of a key row
+ 	Last,      // Indicated the end of a layout
+ };
+@@ -107,6 +108,7 @@ struct kbd {
+ 	bool landscape;
+ 	bool shift_space_is_tab;
+ 	bool exclusive;
++	bool hide_requested; // set by a Hide key, main.c hides after the event
+ 	uint8_t mods;
+ 	uint8_t compose;
+ 	struct key *last_press;
+@@ -150,6 +152,7 @@ void kbd_draw_layout(struct kbd *kb);
+ void kbd_resize(struct kbd *kb, struct layout *layouts, uint8_t layoutcount);
+ uint8_t kbd_get_rows(struct layout *l);
+ double kbd_get_row_length(struct key *k);
++uint32_t kbd_get_row_fixed(struct key *k, uint32_t keyheight);
+ void kbd_next_layer(struct kbd *kb, struct key *k, bool invert);
+ void kbd_switch_layout(struct kbd *kb, struct layout *l, size_t layer_index);
+ 
+diff --git a/layout.mobintl.h b/layout.mobintl.h
+index 913f392..3058c93 100644
+--- a/layout.mobintl.h
++++ b/layout.mobintl.h
+@@ -241,6 +241,7 @@ static struct key keys_full[] = {
+   {"Enter", "Enter", 1.5, Code, KEY_ENTER, .scheme = 1},
+ 
+   /* end of layout */
++  {"⌨↓", "⌨↓", 1.0, Hide, .scheme = 1},
+   {"", "", 0.0, Last},
+ };
+ 
+@@ -315,6 +316,7 @@ static struct key keys_full_wide[] = {
+   {"Enter", "Enter", 1.5, Code, KEY_ENTER, .scheme = 1},
+ 
+   /* end of layout */
++  {"⌨↓", "⌨↓", 1.0, Hide, .scheme = 1},
+   {"", "", 0.0, Last},
+ };
+ 
+@@ -374,6 +376,7 @@ static struct key keys_special[] = {
+   {"Enter", "Enter", 2.0, Code, KEY_ENTER, .scheme = 1},
+ 
+   /* end of layout */
++  {"⌨↓", "⌨↓", 1.0, Hide, .scheme = 1},
+   {"", "", 0.0, Last},
+ };
+ 
+@@ -426,6 +429,7 @@ static struct key keys_specialpad[] = {
+   {"↵", "↵", 1.0, Code, KEY_ENTER, .scheme = 1},
+   //{",", "'", 1.0, Code, KEY_COMMA},
+   /* end of layout */
++  {"⌨↓", "⌨↓", 1.0, Hide, .scheme = 1},
+   {"", "", 0.0, Last},
+ };
+ 
+@@ -476,6 +480,7 @@ static struct key keys_simple[] = {
+   {"Enter", "Enter", 1.5, Code, KEY_ENTER, .scheme = 1},
+ 
+   /* end of layout */
++  {"⌨↓", "⌨↓", 1.0, Hide, .scheme = 1},
+   {"", "", 0.0, Last},
+ };
+ 
+@@ -504,6 +509,7 @@ static struct key keys_dialer[] = {
+   {"Enter", "Enter", 2.0, Code, KEY_ENTER, .scheme = 1},
+ 
+   /* end of layout */
++  {"⌨↓", "⌨↓", 1.0, Hide, .scheme = 1},
+   {"", "", 0.0, Last},
+ };
+ 
+@@ -570,6 +576,7 @@ static struct key keys_cyrillic[] = {
+   {"Enter", "Enter", 2.0, Code, KEY_ENTER, .scheme = 1},
+ 
+   /* end of layout */
++  {"⌨↓", "⌨↓", 1.0, Hide, .scheme = 1},
+   {"", "", 0.0, Last},
+ };
+ 
+@@ -633,6 +640,7 @@ static struct key keys_arabic[] = {
+   {"Enter", "Enter", 2.0, Code, KEY_ENTER, .scheme = 1},
+ 
+   /* end of layout */
++  {"⌨↓", "⌨↓", 1.0, Hide, .scheme = 1},
+   {"", "", 0.0, Last},
+ };
+ 
+@@ -693,6 +701,7 @@ static struct key keys_georgian[] = {
+   {"Enter", "Enter", 2.0, Code, KEY_ENTER, .scheme = 1},
+ 
+   /* end of layout */
++  {"⌨↓", "⌨↓", 1.0, Hide, .scheme = 1},
+   {"", "", 0.0, Last},
+ };
+ 
+@@ -760,6 +769,7 @@ static struct key keys_persian[] = {
+   {"Enter", "Enter", 2.0, Code, KEY_ENTER, .scheme = 1},
+ 
+   /* end of layout */
++  {"⌨↓", "⌨↓", 1.0, Hide, .scheme = 1},
+   {"", "", 0.0, Last},
+ };
+ 
+@@ -821,6 +831,7 @@ static struct key keys_greek[] = {
+   {"Enter", "Enter", 2, Code, KEY_ENTER, .scheme = 1},
+ 
+   /* end of layout */
++  {"⌨↓", "⌨↓", 1.0, Hide, .scheme = 1},
+   {"", "", 0.0, Last},
+ };
+ 
+@@ -871,6 +882,7 @@ static struct key keys_hebrew[] = {
+   {"Enter", "Enter", 1.5, Code, KEY_ENTER, .scheme = 1},
+ 
+   /* end of layout */
++  {"⌨↓", "⌨↓", 1.0, Hide, .scheme = 1},
+   {"", "", 0.0, Last},
+ };
+ 
+@@ -1053,6 +1065,7 @@ static struct key keys_emoji[] = {
+   {"👍", "✅", 1.0, Copy, 0x1f44d, 0, 0x2705},
+   {"👎", "💪", 1.0, Copy, 0x1f44e, 0, 0x1f4aa},
+   {"Enter", "Enter", 1.0, Code, KEY_ENTER, .scheme = 1},
++  {"⌨↓", "⌨↓", 1.0, Hide, .scheme = 1},
+   {"", "", 0.0, Last},
+ };
+ 
+@@ -1073,6 +1086,7 @@ static struct key keys_nav[] = {
+   {"", "↹", 1.0, Code, KEY_SPACE, .scheme = 1},
+   {"↓", "↓", 1.0, Code, KEY_DOWN, .scheme = 1},
+   {"⇊", "⇊", 1.0, Code, KEY_PAGEDOWN, .scheme = 1},
++  {"⌨↓", "⌨↓", 1.0, Hide, .scheme = 1},
+   {"", "", 0.0, Last},
+ };
+ 
+@@ -1098,6 +1112,7 @@ static struct key keys_index[] = {
+   {"فر", "فر", 1.0, Layout, 0, &layouts[Persian], .scheme = 1},
+   {"აბგ", "აბგ", 1.0, Layout, 0, &layouts[Georgian], .scheme = 1},
+   {"א", "א", 1.0, Layout, 0, &layouts[Hebrew], .scheme = 1},
++  {"⌨↓", "⌨↓", 1.0, Hide, .scheme = 1},
+   {"", "", 0.0, Last},
+ };
+ 
+@@ -1158,6 +1173,7 @@ static struct key keys_landscape[] = {
+   {"Enter", "Enter", 2.0, Code, KEY_ENTER, .scheme = 1},
+ 
+   /* end of layout */
++  {"⌨↓", "⌨↓", 1.0, Hide, .scheme = 1},
+   {"", "", 0.0, Last},
+ };
+ 
+@@ -1217,6 +1233,7 @@ static struct key keys_landscape_special[] = {
+   {"Enter", "Enter", 2.0, Code, KEY_ENTER, .scheme = 1},
+ 
+   /* end of layout */
++  {"⌨↓", "⌨↓", 1.0, Hide, .scheme = 1},
+   {"", "", 0.0, Last},
+ };
+ 
+diff --git a/main.c b/main.c
+index 765abda..ddc3699 100644
+--- a/main.c
++++ b/main.c
+@@ -11,6 +11,8 @@
+ #include <string.h>
+ #include <sys/mman.h>
+ #include <sys/signalfd.h>
++#include <sys/timerfd.h>
++#include <time.h>
+ #include <poll.h>
+ #include <unistd.h>
+ #include <wayland-client-protocol.h>
+@@ -73,8 +75,22 @@ static struct kbd keyboard;
+ static uint32_t height, normal_height, landscape_height;
+ static int rounding = DEFAULT_ROUNDING;
+ static bool hidden = false;
++/* When a hidden keyboard bound the input method (ms, CLOCK_MONOTONIC), until
++ * the first deactivate. */
++static long long im_bound_ms = -1;
++#define IM_STARTUP_MS 1000
+ static bool im_auto = false;
+ 
++/* Touch: a key types when the finger lifts, so a swipe that starts on a key
++ * types nothing. Held for HOLD_MS, it goes down so the compositor repeats it
++ * (backspace). Swiping down from a key hides the keyboard. */
++#define HOLD_MS 300
++static struct key *touch_key;
++static int32_t touch_id;
++static uint32_t touch_time;
++static int touch_start_y;
++static int hold_fd = -1;
++
+ /* event handler prototypes */
+ static void wl_pointer_enter(void *data, struct wl_pointer *wl_pointer,
+                              uint32_t serial, struct wl_surface *surface,
+@@ -243,6 +259,53 @@ estrdup(const char *s)
+     return p;
+ }
+ 
++static void
++hold_timer(uint32_t ms)
++{
++    struct itimerspec t = {0};
++
++    if (hold_fd < 0)
++        return;
++    t.it_value.tv_sec = ms / 1000;
++    t.it_value.tv_nsec = (long)(ms % 1000) * 1000000L;
++    timerfd_settime(hold_fd, 0, &t, NULL);
++}
++
++/* The finger left the key: it types nothing. */
++static void
++touch_cancel_key()
++{
++    if (!touch_key)
++        return;
++    touch_key = NULL;
++    hold_timer(0);
++    kbd_draw_layout(&keyboard);
++    kbd_clear_last_popup(&keyboard);
++}
++
++/* Type the key under the finger now. */
++static void
++touch_commit_key(uint32_t time)
++{
++    struct key *k = touch_key;
++
++    if (!k)
++        return;
++    touch_key = NULL;
++    hold_timer(0);
++    kbd_press_key(&keyboard, k, time);
++    kbd_release_key(&keyboard, time);
++}
++
++static void
++apply_hide_request()
++{
++    if (keyboard.hide_requested) {
++        keyboard.hide_requested = false;
++        hide();
++    }
++}
++
+ void
+ wl_touch_down(void *data, struct wl_touch *wl_touch, uint32_t serial,
+               uint32_t time, struct wl_surface *surface, int32_t id,
+@@ -258,16 +321,26 @@ wl_touch_down(void *data, struct wl_touch *wl_touch, uint32_t serial,
+     touch_x = wl_fixed_to_int(x);
+     touch_y = wl_fixed_to_int(y);
+ 
++    /* Typing with two fingers: the first key types before the next one. */
++    touch_commit_key(time);
+     kbd_unpress_key(&keyboard, time);
+ 
+     next_key = kbd_get_key(&keyboard, touch_x, touch_y);
+-    if (next_key) {
++    if (next_key && !keyboard.print_intersect) {
++        touch_key = next_key;
++        touch_id = id;
++        touch_time = time;
++        touch_start_y = touch_y;
++        kbd_draw_key(&keyboard, next_key, Press);
++        hold_timer(HOLD_MS);
++    } else if (next_key) {
+         kbd_press_key(&keyboard, next_key, time);
+     } else if (keyboard.compose) {
+         keyboard.compose = 0;
+         kbd_switch_layout(&keyboard, keyboard.prevlayout,
+                           keyboard.last_abc_index);
+     }
++    apply_hide_request();
+ }
+ 
+ void
+@@ -278,6 +351,14 @@ wl_touch_up(void *data, struct wl_touch *wl_touch, uint32_t serial,
+         return;
+     }
+ 
++    if (touch_key) {
++        /* Another finger's key is still waiting for its own lift. */
++        if (id == touch_id) {
++            touch_commit_key(time);
++            apply_hide_request();
++        }
++        return;
++    }
+     kbd_release_key(&keyboard, time);
+ }
+ 
+@@ -294,6 +375,18 @@ wl_touch_motion(void *data, struct wl_touch *wl_touch, uint32_t time,
+     touch_x = wl_fixed_to_int(x);
+     touch_y = wl_fixed_to_int(y);
+ 
++    if (touch_key) {
++        if (id != touch_id)
++            return;
++        if ((int)touch_y - touch_start_y > (int)touch_key->h / 2) {
++            touch_cancel_key();
++            hide();
++        } else if (kbd_get_key(&keyboard, touch_x, touch_y) != touch_key) {
++            touch_cancel_key();
++        }
++        return;
++    }
++
+     kbd_motion_key(&keyboard, time, touch_x, touch_y);
+ }
+ 
+@@ -305,6 +398,12 @@ wl_touch_frame(void *data, struct wl_touch *wl_touch)
+ void
+ wl_touch_cancel(void *data, struct wl_touch *wl_touch)
+ {
++    /* A compositor gesture took the touch: type nothing, let go of a held key. */
++    if(!layer_surface_configured || !popup_xdg_surface_configured) {
++        return;
++    }
++    touch_cancel_key();
++    kbd_release_key(&keyboard, touch_time + HOLD_MS);
+ }
+ 
+ void
+@@ -375,6 +474,7 @@ wl_pointer_button(void *data, struct wl_pointer *wl_pointer, uint32_t serial,
+             kbd_switch_layout(&keyboard, keyboard.prevlayout,
+                               keyboard.last_abc_index);
+         }
++        apply_hide_request();
+     }
+ }
+ 
+@@ -516,12 +616,27 @@ static const struct wp_fractional_scale_v1_listener
+ void
+ im_activate(void *data, struct zwp_input_method_v2 *zwp_input_method_v2)
+ {
++    /* A text field that already had focus when a hidden keyboard started
++     * (tablet mode switched on, or a restart) did not just take focus, so
++     * it does not open the keyboard. The compositor re-enters it when the
++     * input method appears and its activate follows a client round trip
++     * later, so it is told apart by arriving early, before any deactivate.
++     * The next focus change opens the keyboard. */
++    if (im_bound_ms >= 0) {
++        struct timespec now;
++        clock_gettime(CLOCK_MONOTONIC, &now);
++        long long ms = now.tv_sec * 1000LL + now.tv_nsec / 1000000;
++        if (ms - im_bound_ms < IM_STARTUP_MS)
++            return;
++        im_bound_ms = -1;
++    }
+     show();
+ }
+ 
+ void
+ im_deactivate(void *data, struct zwp_input_method_v2 *zwp_input_method_v2)
+ {
++    im_bound_ms = -1;
+     hide();
+ }
+ 
+@@ -723,6 +838,15 @@ hide()
+         return;
+     }
+ 
++    touch_key = NULL;
++    hold_timer(0);
++    /* A key held down (touch hold, or a swipe that hides the keyboard
++     * mid-press) gets no touch up once the surface is gone, so the
++     * compositor would keep it pressed and drop that key from every other
++     * keyboard. Release it while the surfaces still exist. */
++    if (keyboard.last_press)
++        kbd_release_key(&keyboard, touch_time + HOLD_MS);
++
+     if (wfs_draw_surf) {
+         wp_fractional_scale_v1_destroy(wfs_draw_surf);
+         wfs_draw_surf = NULL;
+@@ -739,6 +863,15 @@ hide()
+         xdg_surface_destroy(popup_xdg_surface);
+         popup_xdg_surface = NULL;
+     }
++    /* A key popup drawn just before hiding has a frame callback pending;
++     * when it fires after the surface is gone it damages the freed surface
++     * and crashes. Cancel it like the keyboard surface's below. */
++    if (popup_draw_surf.frame_cb) {
++        wl_callback_destroy(popup_draw_surf.frame_cb);
++        popup_draw_surf.frame_cb = NULL;
++    }
++    popup_draw_surf.attached = false;
++    popup_xdg_surface_configured = false;
+     if (popup_draw_surf.surf) {
+         wl_surface_destroy(popup_draw_surf.surf);
+         popup_draw_surf.surf = NULL;
+@@ -1144,6 +1277,11 @@ main(int argc, char **argv)
+         struct zwp_input_method_v2 *input_method =
+             zwp_input_method_manager_v2_get_input_method(im_mgr, seat);
+         zwp_input_method_v2_add_listener(input_method, &input_method_listener, NULL);
++        if (hidden) {
++            struct timespec now;
++            clock_gettime(CLOCK_MONOTONIC, &now);
++            im_bound_ms = now.tv_sec * 1000LL + now.tv_nsec / 1000000;
++        }
+     }
+ 
+     for (i = 0; i < countof(schemes); i++) {
+@@ -1154,11 +1292,19 @@ main(int argc, char **argv)
+     if (!hidden)
+         show();
+ 
+-    struct pollfd fds[2];
++    struct pollfd fds[3];
+     int WAYLAND_FD = 0;
+     int SIGNAL_FD = 1;
++    int HOLD_FD = 2;
+     fds[WAYLAND_FD].events = POLLIN;
+     fds[SIGNAL_FD].events = POLLIN;
++    fds[HOLD_FD].events = POLLIN;
++
++    hold_fd = timerfd_create(CLOCK_MONOTONIC, TFD_CLOEXEC);
++    if (hold_fd == -1) {
++        die("Failed to get timerfd: %d\n", errno);
++    }
++    fds[HOLD_FD].fd = hold_fd;
+ 
+     fds[WAYLAND_FD].fd = wl_display_get_fd(display);
+     if (fds[WAYLAND_FD].fd == -1) {
+@@ -1182,7 +1328,7 @@ main(int argc, char **argv)
+ 
+     while (run_display) {
+         wl_display_flush(display);
+-        poll(fds, 2, -1);
++        poll(fds, 3, -1);
+ 
+         if (fds[WAYLAND_FD].revents & POLLIN)
+             wl_display_dispatch(display);
+@@ -1207,6 +1353,19 @@ main(int argc, char **argv)
+             else if (si.ssi_signo == SIGPIPE)
+                 pipewarn();
+         }
++
++        if (fds[HOLD_FD].revents & POLLIN) {
++            uint64_t expirations;
++
++            if (read(hold_fd, &expirations, sizeof(expirations)) ==
++                    sizeof(expirations) && touch_key) {
++                struct key *k = touch_key;
++
++                touch_key = NULL;
++                kbd_press_key(&keyboard, k, touch_time + HOLD_MS);
++                apply_hide_request();
++            }
++        }
+     }
+ 
+     if (fc_font_pattern) {

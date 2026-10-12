@@ -7,32 +7,61 @@
   ...
 }:
 let
+  # The keyboard runs as one of two user units, so a crash or a stray kill
+  # does not leave the gesture and the bar button with nothing to talk to:
+  # - gjallar-osk-tablet in tablet mode: hidden until a text field takes
+  #   focus (--auto), restarted whenever it stops.
+  # - gjallar-osk otherwise: started shown by the gesture, the shortcut or the
+  #   bar button, for a touchscreen without a tablet mode switch.
+  wvkbd = "${pkgs.wvkbd}/bin/wvkbd-mobintl -H 320 -L 240";
+  # Read by the bar button: on, off, or none when there is no tablet mode switch.
+  tabletState = "gjallar/tablet-mode";
   virtualKeyboard = pkgs.writeShellApplication {
     name = "gjallar-virtual-keyboard";
     runtimeInputs = [
+      pkgs.coreutils
+      pkgs.gnugrep
       pkgs.procps
-      pkgs.wvkbd
+      pkgs.systemd
     ];
     text = ''
-      set -euo pipefail
-      # wvkbd(1): SIGUSR1 hides, SIGUSR2 shows, SIGRTMIN toggles.
+      state="$XDG_RUNTIME_DIR/${tabletState}"
+      setState() {
+        mkdir -p "''${state%/*}"
+        echo "$1" >"$state.new"
+        mv "$state.new" "$state"
+      }
+      # wvkbd(1): SIGUSR1 hides, SIGUSR2 shows, SIGRTMIN toggles. Only our own:
+      # the login screen runs one as the greeter user.
+      signal() {
+        pkill "-$1" -u "$(id -u)" -x wvkbd-mobintl
+      }
+      # Nothing running (it just crashed, or was never started): in tablet
+      # mode bring the text field keyboard back, otherwise start one shown.
+      start() {
+        if grep -qx on "$state" 2>/dev/null; then
+          systemctl --user start gjallar-osk-tablet.service
+        else
+          systemctl --user start gjallar-osk.service
+        fi
+      }
       case "''${1:-toggle}" in
-        show) signal=USR2 ;;
-        hide) signal=USR1 ;;
-        start)
-          # Session start: run hidden unless something already started it.
-          pgrep -x wvkbd-mobintl >/dev/null ||
-            exec ${pkgs.wvkbd}/bin/wvkbd-mobintl --hidden -H 320 -L 240
-          exit 0
+        show) signal USR2 || start ;;
+        hide) signal USR1 || true ;;
+        toggle) signal RTMIN || start ;;
+        tablet-on)
+          setState on
+          systemctl --user start gjallar-osk-tablet.service
           ;;
-        *) signal=RTMIN ;;
+        tablet-off)
+          setState off
+          systemctl --user stop gjallar-osk-tablet.service gjallar-osk.service
+          ;;
+        *)
+          echo "usage: gjallar-virtual-keyboard [show|hide|toggle|tablet-on|tablet-off]" >&2
+          exit 2
+          ;;
       esac
-      if pgrep -x wvkbd-mobintl >/dev/null; then
-        pkill "-$signal" -x wvkbd-mobintl
-      elif [ "$signal" != USR1 ]; then
-        ${pkgs.wvkbd}/bin/wvkbd-mobintl -H 320 -L 240 >/dev/null 2>&1 &
-        disown
-      fi
     '';
   };
   # Hyprland binds a switch by its exact device name, and the names differ
@@ -56,6 +85,7 @@ let
     text = ''
       kbd=${lib.getExe virtualKeyboard}
       known=${lib.escapeShellArg tabletSwitches}
+      state="$XDG_RUNTIME_DIR/${tabletState}"
       declare -A bound=()
       bindSwitches() {
         local caps name words
@@ -78,13 +108,20 @@ let
             echo "tablet mode switch: $name (known)"
             continue
           fi
-          hyprctl keyword bindl ", switch:on:$name, exec, $kbd show" >/dev/null
-          hyprctl keyword bindl ", switch:off:$name, exec, $kbd hide" >/dev/null
+          hyprctl keyword bindl ", switch:on:$name, exec, $kbd tablet-on" >/dev/null
+          hyprctl keyword bindl ", switch:off:$name, exec, $kbd tablet-off" >/dev/null
           # By command name, not store path: the file outlives this generation.
           printf 'bindl = , switch:%s:%s, exec, gjallar-virtual-keyboard %s\n' \
-            on "$name" show off "$name" hide >>"$known"
+            on "$name" tablet-on off "$name" tablet-off >>"$known"
           echo "tablet mode switch: $name"
         done
+        # A switch that is on at login has written "on" already; keep that.
+        mkdir -p "''${state%/*}"
+        if (( ''${#bound[@]} )); then
+          grep -qx on "$state" 2>/dev/null || echo off >"$state"
+        elif [ ! -e "$state" ]; then
+          echo none >"$state"
+        fi
       }
       bindSwitches
       sock="$XDG_RUNTIME_DIR/hypr/$HYPRLAND_INSTANCE_SIGNATURE/.socket2.sock"
@@ -166,8 +203,11 @@ lib.mkIf (settings.touchscreenEnable or false) {
   home.packages = [
     virtualKeyboard
     pkgs.wvkbd
+    (pkgs.writeTextDir "share/zsh/site-functions/_gjallar-virtual-keyboard" ''
+      #compdef gjallar-virtual-keyboard
+      _arguments '1:action:((show\:"show the keyboard" hide\:"hide the keyboard" toggle\:"show or hide" tablet-on\:"tablet mode started" tablet-off\:"tablet mode ended"))'
+    '')
   ];
-
   gjallar.keybindHelp.gestures = map (g: { inherit (g) keys description; }) gestures ++ [
     {
       keys = "Three fingers left or right";
@@ -183,8 +223,8 @@ lib.mkIf (settings.touchscreenEnable or false) {
     }
   ];
 
-  # Detaching the keyboard or folding the screen back shows the on-screen
-  # keyboard; going back to laptop mode hides it.
+  # Detaching the keyboard or folding the screen back starts the on-screen
+  # keyboard for text fields; going back to laptop mode stops it.
   systemd.user.services.gjallar-tablet-mode = {
     Unit = {
       Description = "On-screen keyboard follows tablet mode";
@@ -199,10 +239,44 @@ lib.mkIf (settings.touchscreenEnable or false) {
     Install.WantedBy = [ "graphical-session.target" ];
   };
 
-  # Hyprland reports a missing source file as a config error.
+  systemd.user.services.gjallar-osk-tablet = {
+    Unit = {
+      Description = "On-screen keyboard for text fields in tablet mode";
+      After = [ "graphical-session.target" ];
+      PartOf = [ "graphical-session.target" ];
+      Conflicts = [ "gjallar-osk.service" ];
+    };
+    Service = {
+      ExecStart = "${wvkbd} --hidden --auto";
+      Restart = "always";
+      RestartSec = 1;
+    };
+  };
+
+  systemd.user.services.gjallar-osk = {
+    Unit = {
+      Description = "On-screen keyboard";
+      After = [ "graphical-session.target" ];
+      PartOf = [ "graphical-session.target" ];
+      Conflicts = [ "gjallar-osk-tablet.service" ];
+    };
+    Service = {
+      ExecStart = wvkbd;
+      Restart = "on-failure";
+      RestartSec = 1;
+    };
+  };
+
+  # Hyprland reports a missing source file as a config error. Binds saved
+  # before the tablet units existed showed the keyboard on the switch alone.
   home.activation.gjallarTabletSwitches = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
     if [ ! -e ${lib.escapeShellArg tabletSwitches} ]; then
       run ${pkgs.coreutils}/bin/install -D -m 0644 /dev/null ${lib.escapeShellArg tabletSwitches}
+    else
+      run ${pkgs.gnused}/bin/sed -i -E \
+        -e 's/(gjallar-virtual-keyboard) show$/\1 tablet-on/' \
+        -e 's/(gjallar-virtual-keyboard) hide$/\1 tablet-off/' \
+        ${lib.escapeShellArg tabletSwitches}
     fi
   '';
 
@@ -218,9 +292,6 @@ lib.mkIf (settings.touchscreenEnable or false) {
         # the ZBook Quick Keys send.
         ", code:382, Show or hide on-screen keyboard, exec, ${lib.getExe virtualKeyboard}"
       ];
-
-      # A switch bind from the file above may have started the keyboard already.
-      exec-once = [ "${lib.getExe virtualKeyboard} start" ];
 
       source = [ tabletSwitches ];
 

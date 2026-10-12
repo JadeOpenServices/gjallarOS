@@ -16,6 +16,8 @@ let
   # them get the preset indicator in the bar.
   hasQuickKeys =
     lib.attrByPath [ "oddc" "resolved" "hardware" "input" "quickKeys" ] { } osConfig ? primary;
+  # On-screen keyboard button, same switch as user/wm/hyprland/touch.nix.
+  hasTouchKeyboard = settings.touchscreenEnable or false;
 
   palette = {
     dark = {
@@ -120,7 +122,8 @@ in
         # low and critical battery dialogs; a second toast for them is clutter.
         battery.notify_system_battery =
           !(lib.attrByPath [ "oddc" "resolved" "class" "capabilities" "battery" ] false osConfig);
-        plugins.enabled = lib.optional hasQuickKeys "gjallar/quick-keys";
+        plugins.enabled =
+          lib.optional hasQuickKeys "gjallar/quick-keys" ++ lib.optional hasTouchKeyboard "gjallar/osk";
         shell = {
           clipboard_enabled = false;
           corner_radius_scale = 2.0;
@@ -277,6 +280,11 @@ in
             scale = 0.98;
           };
 
+          touch_keyboard = {
+            type = "gjallar/osk:button";
+            scale = 0.98;
+          };
+
           center_clock = {
             type = "clock";
             format = "{:%a %d %b  %H:%M}";
@@ -350,6 +358,7 @@ in
             "network"
           ]
           ++ lib.optional hasQuickKeys "quick_keys"
+          ++ lib.optional hasTouchKeyboard "touch_keyboard"
           ++ [
             "keyboard_layout"
             "notifications"
@@ -380,6 +389,9 @@ in
   # Noctalia picks up plugins in its local source dir; enabled above.
   xdg.dataFile."noctalia/plugins/gjallar-quick-keys" = lib.mkIf hasQuickKeys {
     source = ./plugins/quick-keys;
+  };
+  xdg.dataFile."noctalia/plugins/gjallar-osk" = lib.mkIf hasTouchKeyboard {
+    source = ./plugins/osk;
   };
 
   xdg.configFile."noctalia/templates/hyprland.conf".text = ''
