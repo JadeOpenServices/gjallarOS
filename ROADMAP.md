@@ -269,16 +269,16 @@ Plan agreed 2026-10-10. Nothing in this section is built yet.
       Open: the default channel for new installs, and what existing installs
       on `main` move to.
 - [ ] **ODDC stays separate.** A release carries whatever ODDC commit its
-      `flake.lock` pins; the next item keeps that pin current. `rebuild --hardware-update --stage main|staging`
+      `flake.lock` pins; the next item keeps that pin current. `rebuild --hardware-update --channel stable|staging`
       keeps working as it does today and is not tied to the GjallarOS
       channel.
-- [ ] **ODDC pin follows ODDC main** (Jade, ODDC item 83). Security
+- [ ] **ODDC pin follows ODDC stable** (Jade, ODDC items 83, 100). Security
       findings and catalog fixes must reach machines without waiting for a
-      GjallarOS release. ODDC promises that every commit on its `main` is a
+      GjallarOS release. ODDC promises that every commit on its `stable` is a
       release and is never force-pushed. A workflow moves the pin; people
       still decide what lands.
       1. **Trigger.** Hourly schedule plus manual start. It polls ODDC
-         `main` with `git ls-remote` and stops when the pin is current. No
+         `stable` with `git ls-remote` and stops when the pin is current. No
          webhook: that would need a token from ODDC that can write here.
       2. **No secrets.** The job has no access to the `release-cache`
          environment and never signs anything. Its token may only push the

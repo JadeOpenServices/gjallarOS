@@ -401,7 +401,7 @@ func TestRebuildHardwareUpdateFailureStopsRebuild(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	status := runRebuild(
-		[]string{"--repo", repo, "--hardware-update", "--stage", "staging"},
+		[]string{"--repo", repo, "--hardware-update", "--channel", "staging"},
 		&stdout,
 		&stderr,
 	)
@@ -410,7 +410,7 @@ func TestRebuildHardwareUpdateFailureStopsRebuild(t *testing.T) {
 		t.Fatalf("status = %d, want 3:\n%s", status, stderr.String())
 	}
 	ran, _ := os.ReadFile(log)
-	if want := "update --flake " + repo + " --stage staging\n"; string(ran) != want {
+	if want := "update --flake " + repo + " --channel staging\n"; string(ran) != want {
 		t.Fatalf("oddc ran %q, want %q", ran, want)
 	}
 	if !strings.Contains(stderr.String(), "nothing rebuilt") {
@@ -418,13 +418,17 @@ func TestRebuildHardwareUpdateFailureStopsRebuild(t *testing.T) {
 	}
 }
 
-func TestRebuildStageRequiresHardwareUpdate(t *testing.T) {
+func TestRebuildChannelRequiresHardwareUpdate(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	if status := runRebuild([]string{"--repo", t.TempDir(), "--stage", "main"}, &stdout, &stderr); status != 2 {
+	if status := runRebuild([]string{"--repo", t.TempDir(), "--channel", "stable"}, &stdout, &stderr); status != 2 {
 		t.Fatalf("status = %d, want 2", status)
 	}
-	if status := runRebuild([]string{"--hardware-update", "--stage", "dev"}, &stdout, &stderr); status != 2 {
-		t.Fatalf("bad stage status = %d, want 2", status)
+	if status := runRebuild([]string{"--hardware-update", "--channel", "dev"}, &stdout, &stderr); status != 2 {
+		t.Fatalf("bad channel status = %d, want 2", status)
+	}
+	stderr.Reset()
+	if status := runRebuild([]string{"--hardware-update", "--stage", "main"}, &stdout, &stderr); status != 2 || !strings.Contains(stderr.String(), "--channel stable|staging") {
+		t.Fatalf("old --stage: status = %d, stderr %q, want 2 and a pointer to --channel", status, stderr.String())
 	}
 	if status := runRebuild([]string{"--repo", t.TempDir(), "--switch", "0"}, &stdout, &stderr); status != 2 {
 		t.Fatalf("switch without hardware-update status = %d, want 2", status)
@@ -456,7 +460,7 @@ func TestRebuildHardwareUpdateSwitchZeroOnlyMovesPin(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	status := runRebuild(
-		[]string{"--repo", repo, "--hardware-update", "--stage", "main", "--switch", "0"},
+		[]string{"--repo", repo, "--hardware-update", "--channel", "stable", "--switch", "0"},
 		&stdout,
 		&stderr,
 	)
@@ -465,7 +469,7 @@ func TestRebuildHardwareUpdateSwitchZeroOnlyMovesPin(t *testing.T) {
 		t.Fatalf("status = %d, want 0:\n%s", status, stderr.String())
 	}
 	ran, _ := os.ReadFile(log)
-	if want := "update --flake " + repo + " --stage main\n"; string(ran) != want {
+	if want := "update --flake " + repo + " --channel stable\n"; string(ran) != want {
 		t.Fatalf("oddc ran %q, want %q", ran, want)
 	}
 	if !strings.Contains(stdout.String(), "not switched") {

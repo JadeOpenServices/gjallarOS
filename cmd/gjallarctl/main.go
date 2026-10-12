@@ -1789,7 +1789,7 @@ func printUsage(out io.Writer) {
 	fmt.Fprintln(out, "       gjallarctl preflight [--repo PATH]")
 	oddccli.Usage(out)
 	fmt.Fprintln(out, "       gjallarctl auth")
-	fmt.Fprintln(out, "       gjallarctl rebuild [--repo PATH] [--host HOST] [-d|--debug] [-n|--no-cleanup] [--update] [--update-inputs] [--hardware-update [--stage main|staging] [--switch 0|1]] [NIXOS-REBUILD-ARGS...]")
+	fmt.Fprintln(out, "       gjallarctl rebuild [--repo PATH] [--host HOST] [-d|--debug] [-n|--no-cleanup] [--update] [--update-inputs] [--hardware-update [--channel stable|staging] [--switch 0|1]] [NIXOS-REBUILD-ARGS...]")
 	fmt.Fprintln(out, "       gjallarctl device-probe refresh [--output PATH]")
 	fmt.Fprintln(out, "       gjallarctl fan {status|list|reconcile}")
 	fmt.Fprintln(out, "       gjallarctl ai profile [--config PATH]")
@@ -1826,7 +1826,7 @@ func normalizeRebuildUserIntent(user *config.User, repo string) (bool, error) {
 func runRebuild(args []string, stdout, stderr io.Writer) int {
 	repo, host := "", ""
 	debug, cleanup := false, true
-	hardwareUpdate, stage, switchNow := false, "", ""
+	hardwareUpdate, channel, switchNow := false, "", ""
 	update, updateInputs := false, false
 	var rebuildArgs []string
 	for i := 0; i < len(args); i++ {
@@ -1840,13 +1840,16 @@ func runRebuild(args []string, stdout, stderr io.Writer) int {
 			updateInputs = true
 		case "--hardware-update":
 			hardwareUpdate = true
-		case "--stage":
-			if i+1 >= len(args) || (args[i+1] != "main" && args[i+1] != "staging") {
-				fmt.Fprintln(stderr, "ERROR: --stage requires main or staging")
+		case "--channel":
+			if i+1 >= len(args) || (args[i+1] != "stable" && args[i+1] != "staging") {
+				fmt.Fprintln(stderr, "ERROR: --channel requires stable or staging")
 				return 2
 			}
 			i++
-			stage = args[i]
+			channel = args[i]
+		case "--stage":
+			fmt.Fprintln(stderr, "ERROR: --stage is now --channel stable|staging (ODDC renamed main to stable)")
+			return 2
 		case "--switch":
 			if i+1 >= len(args) || (args[i+1] != "0" && args[i+1] != "1") {
 				fmt.Fprintln(stderr, "ERROR: --switch requires 0 or 1")
@@ -1914,14 +1917,14 @@ func runRebuild(args []string, stdout, stderr io.Writer) int {
 		}
 	}
 
-	if (stage != "" || switchNow != "") && !hardwareUpdate {
-		fmt.Fprintln(stderr, "ERROR: --stage and --switch require --hardware-update")
+	if (channel != "" || switchNow != "") && !hardwareUpdate {
+		fmt.Fprintln(stderr, "ERROR: --channel and --switch require --hardware-update")
 		return 2
 	}
 	// The oddc pin moves first, so the rebuild below already uses it.
 	// --switch 0 stops after the pin; the next rebuild applies it.
 	if hardwareUpdate {
-		if code := oddccli.HardwareUpdate(repo, stage, stdout, stderr); code != 0 {
+		if code := oddccli.HardwareUpdate(repo, channel, stdout, stderr); code != 0 {
 			fmt.Fprintf(stderr, "[GjallarOS] Error: oddc update failed (exit %d); nothing rebuilt\n", code)
 			return code
 		}
@@ -2309,7 +2312,8 @@ Apply the GjallarOS configuration in the system checkout.
   --update-inputs       Move every flake input to its newest version first.
                         For development checkouts, not normal installs.
   --hardware-update     Move the ODDC hardware catalogue pin first.
-    --stage main|staging  ODDC branch to follow.
+    --channel stable|staging
+                          ODDC channel to follow (default stable).
     --switch 0|1          0 moves the pin without rebuilding.
   --repo PATH           Use this checkout instead of the system one.
   --host HOST           Build this host instead of the configured one.

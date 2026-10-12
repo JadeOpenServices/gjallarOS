@@ -13,7 +13,7 @@ import (
 
 // Real ODDC commits: the one flake.lock pins, and the previous pin.
 const (
-	lockedODDC = "a24366ae7f73b4fefce77bd53b078303b5d1e470"
+	lockedODDC = "eab37c4f3de331d3d7b1d5f273c60e59fe6bd0c2"
 	parentODDC = "d3b91226fd1afb501092d2e022a2c3ca2e2b84cd"
 )
 
@@ -119,7 +119,7 @@ func TestUpdateReportsMovedLock(t *testing.T) {
 	if want := []string{"nix flake update oddc --flake " + repo}; strings.Join(ran, "|") != strings.Join(want, "|") {
 		t.Fatalf("ran %q, want %q", ran, want)
 	}
-	if want := "ODDC: d3b91226fd1a -> a24366ae7f73"; !strings.Contains(out, want) {
+	if want := "ODDC: d3b91226fd1a -> eab37c4f3de3"; !strings.Contains(out, want) {
 		t.Fatalf("output %q lacks %q", out, want)
 	}
 }
@@ -138,7 +138,7 @@ func TestUpdateRebuildReportsAnswer(t *testing.T) {
 	if strings.Join(ran, "|") != strings.Join(want, "|") {
 		t.Fatalf("ran %q, want %q", ran, want)
 	}
-	for _, line := range []string{"ODDC: already at a24366ae7f73", "ODDC answer: at a24366ae7f73"} {
+	for _, line := range []string{"ODDC: already at eab37c4f3de3", "ODDC answer: at eab37c4f3de3"} {
 		if !strings.Contains(out, line) {
 			t.Fatalf("output %q lacks %q", out, line)
 		}
@@ -152,7 +152,7 @@ func TestUpdateSimplePrintsOneLine(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit code %d", code)
 	}
-	if want := "ODDC: already at a24366ae7f73; ODDC answer: at a24366ae7f73\n"; out != want {
+	if want := "ODDC: already at eab37c4f3de3; ODDC answer: at eab37c4f3de3\n"; out != want {
 		t.Fatalf("output %q, want %q", out, want)
 	}
 }

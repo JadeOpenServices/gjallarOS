@@ -14,7 +14,7 @@ _gjallarctl_rebuild() {
     '--update[update the checkout first]' \
     '--update-inputs[update the flake inputs first]' \
     '--hardware-update[move the ODDC hardware catalogue pin first]' \
-    '--stage[ODDC stage]:stage:(main staging)' \
+    '--channel[ODDC channel]:channel:(stable staging)' \
     '--switch[switch after the hardware update]:switch:(0 1)' \
     '*::nixos-rebuild argument:'
 }
