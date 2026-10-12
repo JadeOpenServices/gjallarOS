@@ -104,6 +104,14 @@ lib.mkIf config.gjallar.apps.dolphin.enable {
     '')
   ];
 
+  # Touchpad: pkgs/overlays/dolphin.nix. Touchscreen: built into Dolphin.
+  gjallar.keybindHelp.gestures = [
+    {
+      keys = "Two fingers right or left in Dolphin";
+      description = "Go back or forward";
+    }
+  ];
+
   # Stylix supplies the desktop's dark Kvantum palette and fonts.
   qt.qt6ctSettings.Appearance.icon_theme = lib.mkDefault settings.themeDetails.icons;
 
