@@ -52,7 +52,7 @@ in
 # NixOS cryptsetup only finds through the library path; it ignores
 # --external-tokens-path (e2e-target, 2026-09-29).
 assert nixpkgs.lib.hasInfix
-  (builtins.unsafeDiscardStringContext "LD_LIBRARY_PATH=${evaluated.config.systemd.package}/lib/cryptsetup \\\n  cryptsetup open --test-passphrase --token-only")
+  (builtins.unsafeDiscardStringContext "LD_LIBRARY_PATH=${evaluated.config.systemd.package}/lib/cryptsetup \\\n    cryptsetup open --test-passphrase --token-only --token-id")
   (builtins.unsafeDiscardStringContext tpm2.script);
 assert !(nixpkgs.lib.hasInfix "--external-tokens-path" tpm2.script);
 # pcrlock drops PCRs it cannot predict; enrollment must refuse a policy
@@ -81,7 +81,10 @@ assert builtins.elem "secure-boot-enrollment.service" post.after;
 # and a failed TPM unlock asked for a "LUKS2 token PIN" although only the
 # passphrase works (e2e-target, 2026-10-05).
 assert
-  evaluated.config.boot.initrd.luks.devices.cryptroot.crypttabExtraOpts == [ "tpm2-device=auto" ];
+  evaluated.config.boot.initrd.luks.devices.cryptroot.crypttabExtraOpts == [
+    "tpm2-device=auto"
+    "tpm2-measure-pcr=yes"
+  ];
 # A PCRLock policy that no longer matches the TPM had no way back to TPM2
 # unlock (e2e-target, 2026-10-05).
 assert builtins.any (
