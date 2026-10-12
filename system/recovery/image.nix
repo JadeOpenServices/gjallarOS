@@ -50,6 +50,7 @@ let
       usbTrustEnforce = getSetting "usbTrustEnforce" false;
       usbTrustTpmHandle = getSetting "usbTrustTpmHandle" "";
       dolphinDriveUsage = getSetting "dolphinDriveUsage" false;
+      firmwareFlashReadEntry = getSetting "firmwareFlashReadEntry" false;
 
       name = getSetting "name" "";
       email = getSetting "email" "";

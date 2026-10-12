@@ -35,6 +35,7 @@ type User struct {
 	PrintingEnable         bool                   `json:"printingEnable"`
 	NetworkPrintingEnable  bool                   `json:"networkPrintingEnable"`
 	DolphinDriveUsage      bool                   `json:"dolphinDriveUsage"`
+	FirmwareFlashReadEntry bool                   `json:"firmwareFlashReadEntry"`
 	Name                   string                 `json:"name"`
 	Email                  string                 `json:"email"`
 	GitHubUsername         string                 `json:"githubUsername"`

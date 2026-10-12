@@ -12,7 +12,15 @@ let
   # more, every bootloader install fails ("Failed to calculate super PCR
   # policy: Argument list too long"), e2e-full, 2026-09-29.
   pcrlockAlternatives = 8;
-  ukisPerGeneration = 1 + builtins.length (builtins.attrNames config.specialisation);
+  # The firmware flash read entry (flash-read.nix) has no lockdown and opens
+  # the disk with the recovery key. Its UKI never gets a PCR 4 variant, so
+  # the TPM does not unseal in that boot. lzbt then rebuilds that UKI at
+  # every install, as it does for any UKI without a pcrlock file.
+  unmeasuredEntries = [ "gjallar-flash-read" ];
+  measuredSpecialisations = lib.subtractLists unmeasuredEntries (
+    builtins.attrNames config.specialisation
+  );
+  ukisPerGeneration = 1 + builtins.length measuredSpecialisations;
   esp = lib.escapeShellArg config.boot.loader.efi.efiSysMountPoint;
   cfg = config.boot.lanzaboote;
   systemdLib = "${config.systemd.package}/lib/systemd";
@@ -107,6 +115,12 @@ let
     set -euo pipefail
     shopt -s nullglob
     PATH=${systemdLib}:${pkgs.coreutils}/bin:$PATH
+    # make-policy cannot update the TPM from that boot: it unseals with the
+    # old prediction, which this boot's PCR 4 never matches.
+    if [[ " $(</proc/cmdline) " == *" gjallar.flash-read "* ]]; then
+      echo "error: this is the firmware flash read entry. Restart into the normal entry to rebuild." >&2
+      exit 1
+    fi
     has_tpm2=
     ${lib.optionalString cfg.measuredBoot.enable ''
       if ${config.systemd.package}/bin/systemd-analyze has-tpm2 >/dev/null 2>&1; then
@@ -124,6 +138,11 @@ let
       [ config.boot.loader.efi.efiSysMountPoint ] ++ cfg.extraEfiSysMountPoints
     )}
     ${lib.optionalString cfg.measuredBoot.enable ''
+      ${lib.optionalString (lib.elem 4 cfg.measuredBoot.pcrs) (
+        lib.concatMapStrings (entry: ''
+          rm -f -- ${lib.escapeShellArg (componentDir "635-lanzaboote")}/*-${entry}.pcrlock
+        '') unmeasuredEntries
+      )}
       if [ -n "$has_tpm2" ]; then
         ${lib.optionalString keepBooted restoreBooted}
         echo "Predicting the PCR state for future boots..."

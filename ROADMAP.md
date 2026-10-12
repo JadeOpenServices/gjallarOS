@@ -453,7 +453,9 @@ setup existed) can only get it by running the whole installer again.
         never from cache.nixos.org;
       - a module signing key: a throwaway key per build as Fedora and Arch
         do, plus a kept key for out-of-tree modules like the NVIDIA driver;
-      - giving up hibernation, which lockdown blocks.
+      - giving up hibernation, which lockdown blocks;
+      - leaving it off in the firmware flash read entry
+        (`firmwareFlashReadEntry`), which reads the chip through `/dev/mem`.
       Jade decides whether that trade is worth it before anything is built.
 
 Sources:

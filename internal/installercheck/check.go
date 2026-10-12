@@ -108,6 +108,7 @@ var presetSchema = map[string]presetValueType{
 	"timezone": presetString, "locale": presetString, "keyboardLayout": presetString, "keyboardVariant": presetString,
 	"touchpadWorkspaceSwipe": presetBool, "clamshellEnable": presetBool, "consoleLoginEnable": presetBool, "usbguardEnable": presetBool, "usbTrustEnforce": presetBool, "usbTrustTpmHandle": presetString, "usbReviewTechnicalView": presetBool, "printingEnable": presetBool, "networkPrintingEnable": presetBool,
 	"dolphinDriveUsage":         presetBool,
+	"firmwareFlashReadEntry":    presetBool,
 	"allowUnvalidatedODDCModel": presetBool,
 	"unattendedInstall":         presetBool,
 	"name":                      presetString, "email": presetString, "githubUsername": presetString, "dotfilesDir": presetString,

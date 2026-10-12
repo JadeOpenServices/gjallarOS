@@ -160,6 +160,7 @@
           inherit nixpkgs system;
           lanzabooteModule = inputs.lanzaboote.nixosModules.lanzaboote;
           secureBootModule = ./system/security/secure-boot/lanzaboote.nix;
+          flashReadModule = ./system/security/secure-boot/flash-read.nix;
         };
 
         secure-boot-lifecycle = import ./tests/nix/secure-boot-lifecycle.nix {

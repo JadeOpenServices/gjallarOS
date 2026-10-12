@@ -392,6 +392,23 @@ The new list takes effect at the next restart. With TPM disk unlock, the TPM
 accepts the current and the new state until then, so a rebuild in between
 still unlocks.
 
+### Reading the firmware flash chip
+
+`"firmwareFlashReadEntry": true` adds a boot menu entry tagged
+`firmware-flash-read`. It is for reading the firmware chip on machines whose
+firmware hides the SPI controller from Linux. Only that entry allows
+`flashrom`'s `internal` programmer (`iomem=relaxed`):
+
+```bash
+sudo flashrom -p internal -r flash.bin
+```
+
+Only read with it. With TPM disk unlock, this entry asks for the disk recovery
+key or disk passphrase, never the startup PIN: the TPM never unlocks the disk
+in a boot with these relaxed limits. Rebuilds stop in this entry; restart
+into the normal one first. The setting is off by default; turn it off again
+once the dump is done.
+
 ### USB trust
 
 The installer asks for USB trust review on machines with an ODDC model. On a

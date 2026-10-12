@@ -11,6 +11,7 @@ in
     ./lifecycle.nix
     ./measured-boot.nix
     ./dbx-update.nix
+    ./flash-read.nix
     ./tool.nix
   ];
 }

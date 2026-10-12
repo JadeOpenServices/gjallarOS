@@ -57,6 +57,7 @@
   "name": "Your Name",
   "networkPrintingEnable": false,
   "dolphinDriveUsage": false,
+  "firmwareFlashReadEntry": false,
   "nextcloudEnable": false,
   "nextcloudHost": "",
   "overrideAiSelection": false,
