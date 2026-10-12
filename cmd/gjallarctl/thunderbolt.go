@@ -380,7 +380,7 @@ func tbReviewNotice(d tbDevice, dma tbDMA) desktopNotice {
 	case tbDMAOff:
 		body += "No DMA protection: it can read memory once let in. Allow only your own devices."
 	default:
-		body += "DMA protection is not confirmed for this model, so it may read memory once let in. Allow only your own devices."
+		body += "DMA protection not confirmed for this model. Allow only your own devices."
 	}
 	return desktopNotice{
 		App:     "Thunderbolt",
