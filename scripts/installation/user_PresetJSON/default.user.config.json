@@ -53,6 +53,7 @@
   "keyboardVariant": "",
   "locale": "en_US.UTF-8",
   "luksTpm2Enable": false,
+  "luksTpm2Pin": false,
   "name": "Your Name",
   "networkPrintingEnable": false,
   "dolphinDriveUsage": false,

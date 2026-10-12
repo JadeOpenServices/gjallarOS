@@ -12,6 +12,8 @@ let
   luksMappings = builtins.attrValues config.boot.initrd.luks.devices;
   luksDevice = if builtins.length luksMappings == 1 then (builtins.head luksMappings).device else "";
   tpm2Enabled = settings.secureBootEnable && settings.luksTpm2Enable;
+  # Chosen at install; the first-boot enrollment asks for the PIN.
+  pinEnabled = tpm2Enabled && (settings.luksTpm2Pin or false);
 
   enrollmentPath = [
     pkgs.cryptsetup
@@ -44,8 +46,14 @@ let
     # systemd ships the TPM2 token plugin, and NixOS cryptsetup dlopens
     # it by bare name, ignoring its external tokens path (e2e-target,
     # 2026-09-29: "No usable token is available" after enrollment).
-    LD_LIBRARY_PATH=${config.systemd.package}/lib/cryptsetup \
-      cryptsetup open --test-passphrase --token-only --token-id "$token_id" "$device"
+    # With a startup PIN, cryptsetup reads it from stdin.
+    if [ -n "''${newpin:-}" ]; then
+      printf '%s' "$newpin" | LD_LIBRARY_PATH=${config.systemd.package}/lib/cryptsetup \
+        cryptsetup open --test-passphrase --token-only --token-id "$token_id" "$device"
+    else
+      LD_LIBRARY_PATH=${config.systemd.package}/lib/cryptsetup \
+        cryptsetup open --test-passphrase --token-only --token-id "$token_id" "$device"
+    fi
     gjallarctl installer tpm2-write-keyslot-record \
       "$state/luks/metadata.json.tmp" \
       "$state/luks/keyslots.json" \
@@ -78,7 +86,7 @@ let
       fi
 
       keyfile="$(mktemp /run/gjallar-luks-key.XXXXXX)"
-      trap 'rm -f -- "$keyfile"' EXIT
+      trap 'rm -f -- "$keyfile" "$keyfile.meta"' EXIT
 
       gjallar-verify-secure-boot-artifacts
       gjallar-verify-secure-boot-ownership enrolled
@@ -89,13 +97,23 @@ let
       # Check the key before anything is removed.
       cryptsetup open --test-passphrase --type luks "$device" --key-file "$keyfile"
 
+      # Keep a startup PIN the old token had; a new PIN is asked for.
+      cryptsetup luksDump --dump-json-metadata "$device" >"$keyfile.meta"
+      pin_arg=--tpm2-with-pin=no
+      newpin=
+      if [ "$(gjallarctl installer tpm2-metadata-pin "$keyfile.meta")" = yes ]; then
+        newpin="$(gjallarctl luks new-pin)"
+        pin_arg=--tpm2-with-pin=yes
+      fi
+      rm -f -- "$keyfile.meta"
+
       if [ -e /var/lib/systemd/pcrlock.json ]; then
         ${config.systemd.package}/lib/systemd/systemd-pcrlock remove-policy
       fi
       systemctl restart systemd-pcrlock-make-policy.service
       ${checkPolicy}
-      systemd-cryptenroll --wipe-slot=tpm2 --unlock-key-file="$keyfile" \
-        --tpm2-device=auto --tpm2-pcrlock=/var/lib/systemd/pcrlock.json "$device"
+      NEWPIN="$newpin" systemd-cryptenroll --wipe-slot=tpm2 --unlock-key-file="$keyfile" \
+        --tpm2-device=auto --tpm2-pcrlock=/var/lib/systemd/pcrlock.json "$pin_arg" "$device"
       ${recordEnrollment}
       printf '%s\n' 'GjallarOS TPM2 unlock re-enrolled; human recovery keyslots were preserved.'
     '';
@@ -104,12 +122,19 @@ in
 {
   # Without tpm2-device=auto, systemd-cryptsetup takes its generic token
   # path, and a failed TPM unlock asks for a "LUKS2 token PIN" although the
-  # human passphrase is what it accepts (e2e-target, 2026-10-05). Extending
-  # the submodule sets it on every device without reading the attrset back.
+  # human passphrase is what it accepts (e2e-target, 2026-10-05). That path
+  # also asks for a startup PIN forever and never falls back to the recovery
+  # key (e2e-fw13, 2026-10-09). systemd skips it when it measures the volume
+  # key into PCR 15, which also tells later boot stages which disk was
+  # opened. PCR 15 is not in the pcrlock policy. Extending the submodule sets
+  # both on every device without reading the attrset back.
   options.boot.initrd.luks.devices = lib.mkOption {
     type = lib.types.attrsOf (
       lib.types.submodule {
-        config.crypttabExtraOpts = lib.mkIf tpm2Enabled [ "tpm2-device=auto" ];
+        config.crypttabExtraOpts = lib.mkIf tpm2Enabled [
+          "tpm2-device=auto"
+          "tpm2-measure-pcr=yes"
+        ];
       }
     );
   };
@@ -206,8 +231,14 @@ in
       chmod 0600 "$keyfile"
       cryptsetup open --test-passphrase --type luks "$device" --key-file "$keyfile"
 
-      systemd-cryptenroll --unlock-key-file="$keyfile" --tpm2-device=auto \
-        --tpm2-pcrlock=/var/lib/systemd/pcrlock.json "$device"
+      newpin=
+      pin_arg=--tpm2-with-pin=no
+      ${lib.optionalString pinEnabled ''
+        newpin="$(gjallarctl luks new-pin)"
+        pin_arg=--tpm2-with-pin=yes
+      ''}
+      NEWPIN="$newpin" systemd-cryptenroll --unlock-key-file="$keyfile" --tpm2-device=auto \
+        --tpm2-pcrlock=/var/lib/systemd/pcrlock.json "$pin_arg" "$device"
 
       ${recordEnrollment}
       install -m 0600 /dev/null "$state/tpm2-enrollment-complete"

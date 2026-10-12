@@ -122,6 +122,7 @@ var presetSchema = map[string]presetValueType{
 	"aiEndpoint": presetString, "aiRemoteModel": presetString, "aiRemoteContextTokens": presetInt,
 	"jodsFingerprintEnrollmentAllowed": presetBool,
 	"luksTpm2Enable":                   presetBool,
+	"luksTpm2Pin":                      presetBool,
 	"recoveryEnable":                   presetBool,
 	"recoveryPartitionEnable":          presetBool, "jodsPrebootLockEnable": presetBool,
 	"secureBootEnable": presetBool, "secureBootPrompt": presetBool, "firmwarePasswordLock": presetBool, "endpointManagedDevice": presetBool,

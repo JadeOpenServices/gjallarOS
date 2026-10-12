@@ -26,6 +26,10 @@ func runLUKSLifecycle(args []string, stdout, stderr io.Writer) int {
 	if len(args) > 0 && args[0] == "remind" {
 		return runLUKSRemind(args[1:], stderr)
 	}
+	// new-pin is for the first-boot enrollment and not offered to people.
+	if len(args) == 1 && args[0] == "new-pin" {
+		return runLUKSNewPIN(stdout, stderr)
+	}
 	// record is for gjallar-luks-record.service and not offered to people.
 	if len(args) != 1 || args[0] != "status" && args[0] != "recovery-key" && args[0] != "setup" && args[0] != "record" {
 		fmt.Fprintln(stderr, luksUsage)
@@ -445,4 +449,59 @@ func containsInt(list []int, n int) bool {
 		}
 	}
 	return false
+}
+
+// startupPINProblem says what is wrong with a new startup PIN, or "".
+// The PIN is typed before the system runs, on the boot keyboard layout or
+// the on-screen keyboard, so it keeps to characters every layout has.
+func startupPINProblem(pin string) string {
+	if len(pin) < 6 {
+		return "The PIN needs 6 or more characters."
+	}
+	if len(pin) > 64 {
+		return "The PIN can have at most 64 characters."
+	}
+	for _, r := range pin {
+		if r <= ' ' || r > '~' {
+			return "Use letters a-z and A-Z, digits and punctuation only; no spaces or accented letters."
+		}
+	}
+	return ""
+}
+
+// runLUKSNewPIN asks for the startup PIN twice on the terminal and prints
+// it for the enrollment script. It asks again until both match, since the
+// PIN was chosen at install and stopping here would leave no chip unlock.
+func runLUKSNewPIN(stdout, stderr io.Writer) int {
+	tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
+	if err != nil {
+		fmt.Fprintf(stderr, "ERROR: the startup PIN needs a terminal: %v\n", err)
+		return 1
+	}
+	defer tty.Close()
+	reader := bufio.NewReader(tty)
+	width := terminalWidth(tty) - 1
+	fmt.Fprintln(tty, wrapWords("Choose the startup PIN. You type it at every startup, before the disk unlocks: 6 or more characters, letters, digits and punctuation.", width))
+	for {
+		pin, err := credential.ReadSecret(tty, reader, tty, "New startup PIN: ")
+		if err != nil {
+			fmt.Fprintf(stderr, "ERROR: %v\n", err)
+			return 1
+		}
+		if problem := startupPINProblem(pin); problem != "" {
+			fmt.Fprintln(tty, wrapWords(problem, width))
+			continue
+		}
+		again, err := credential.ReadSecret(tty, reader, tty, "Type the PIN again: ")
+		if err != nil {
+			fmt.Fprintf(stderr, "ERROR: %v\n", err)
+			return 1
+		}
+		if again != pin {
+			fmt.Fprintln(tty, "The two PINs differ. Try again.")
+			continue
+		}
+		fmt.Fprintln(stdout, pin)
+		return 0
+	}
 }

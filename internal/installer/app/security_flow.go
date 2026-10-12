@@ -1,6 +1,13 @@
 package app
 
-import "strings"
+import (
+	"context"
+	"fmt"
+	"strings"
+
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/config"
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/prompt"
+)
 
 // tpm12Notice is printed when the only TPM is a TPM 1.2.
 const tpm12Notice = `This machine has a TPM 1.2. GjallarOS cannot use Secure Boot or TPM disk unlock on it:
@@ -79,4 +86,57 @@ func firmwareSecureBootNotice(firmwareOn bool, firmwareErr error) string {
 		}, "\n") + "\n"
 	}
 	return "Firmware Secure Boot is off; the machine boots as before.\n"
+}
+
+// Startup unlock choices. Both keep the recovery key as the fallback.
+const (
+	unlockAutomatic = "Automatic"
+	unlockPIN       = "PIN at startup"
+)
+
+const startupUnlockText = `How should the disk unlock at startup?
+
+  Automatic (recommended for most): nothing to type at startup; the security
+  chip unlocks the disk only when the boot files are unchanged. This protects
+  a stolen, switched-off device against reading the disk directly.
+
+  PIN at startup (more security): you type a PIN of 6 or more characters at
+  every startup; the security chip checks it and the boot files, and blocks
+  guessing after too many wrong tries. The disk stays locked even when someone
+  starts the device, until the PIN is typed.
+
+You set the PIN at the first startup. Either way you get a recovery key
+there, for when the chip cannot unlock the disk.
+`
+
+// keyboardOnlyAtStartup reports a tablet or detachable (SMBIOS chassis 30 or
+// 32) where no on-screen keyboard can show at the disk prompt. Convertibles
+// (31) keep their keyboard. With a touchscreen, unl0kr shows one.
+func keyboardOnlyAtStartup(chassisType string, touchscreen bool) bool {
+	return !touchscreen && (chassisType == "30" || chassisType == "32")
+}
+
+// collectStartupUnlock asks how the disk unlocks once GjallarOS Secure Boot
+// is chosen. Both choices use the security chip.
+func collectStartupUnlock(ctx context.Context, ui prompt.UI, chassisType string, touchscreen bool, u *config.User) error {
+	label := "Startup unlock"
+	if ui.GTK {
+		label = startupUnlockText
+	} else {
+		fmt.Fprint(ui.Out, startupUnlockText)
+	}
+	def := unlockAutomatic
+	if u.LUKSTPM2Enable && u.LUKSTPM2PIN {
+		def = unlockPIN
+	}
+	choice, err := ui.Choice(ctx, label, def, []string{unlockAutomatic, unlockPIN})
+	if err != nil {
+		return err
+	}
+	u.LUKSTPM2Enable = true
+	u.LUKSTPM2PIN = choice == unlockPIN
+	if keyboardOnlyAtStartup(chassisType, touchscreen) {
+		fmt.Fprintln(ui.Out, "This device has no touchscreen GjallarOS can use at startup: typing the PIN or the recovery key needs a keyboard attached.")
+	}
+	return nil
 }

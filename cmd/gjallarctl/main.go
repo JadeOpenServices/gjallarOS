@@ -168,6 +168,9 @@ func runInstaller(args []string, stdout, stderr io.Writer) int {
 	if args[0] == "tpm2-metadata-token-id" {
 		return runTPM2MetadataTokenID(args[1:], stdout, stderr)
 	}
+	if args[0] == "tpm2-metadata-pin" {
+		return runTPM2MetadataPIN(args[1:], stdout, stderr)
+	}
 	if args[0] == "tpm2-check-pcrlock-policy" {
 		return runTPM2CheckPCRLockPolicy(args[1:], stdout, stderr)
 	}
@@ -493,6 +496,31 @@ func runTPM2MetadataTokenID(args []string, stdout, stderr io.Writer) int {
 	}
 
 	fmt.Fprintln(stdout, id)
+	return 0
+}
+
+// runTPM2MetadataPIN prints yes when a TPM2 token of the LUKS header asks
+// for a startup PIN, so a re-enrollment keeps it.
+func runTPM2MetadataPIN(args []string, stdout, stderr io.Writer) int {
+	if len(args) != 1 {
+		fmt.Fprintln(stderr, "Usage: gjallarctl installer tpm2-metadata-pin <metadata-json>")
+		return 2
+	}
+	raw, err := os.ReadFile(args[0])
+	if err != nil {
+		fmt.Fprintf(stderr, "ERROR: %v\n", err)
+		return 1
+	}
+	slots, err := diskcrypto.ParseKeyslots(raw)
+	if err != nil {
+		fmt.Fprintf(stderr, "ERROR: %v\n", err)
+		return 1
+	}
+	if slots.TPM2PIN {
+		fmt.Fprintln(stdout, "yes")
+	} else {
+		fmt.Fprintln(stdout, "no")
+	}
 	return 0
 }
 

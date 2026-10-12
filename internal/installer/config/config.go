@@ -67,6 +67,7 @@ type User struct {
 	AIRemoteModel             string `json:"aiRemoteModel"`
 	AIRemoteContextTokens     int    `json:"aiRemoteContextTokens"`
 	LUKSTPM2Enable            bool   `json:"luksTpm2Enable"`
+	LUKSTPM2PIN               bool   `json:"luksTpm2Pin"`
 	RecoveryEnable            bool   `json:"recoveryEnable"`
 	RecoveryPartitionEnable   bool   `json:"recoveryPartitionEnable"`
 	JODSPrebootLockEnable     bool   `json:"jodsPrebootLockEnable"`

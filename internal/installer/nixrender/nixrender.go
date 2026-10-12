@@ -107,7 +107,7 @@ type Settings struct {
 	AIContextTokens, AIVRAMMB                                                               int
 	AIEndpoint, AIRemoteModel                                                               string
 	AIRemoteContextTokens                                                                   int
-	LUKSTPM2Enable                                                                          bool
+	LUKSTPM2Enable, LUKSTPM2PIN                                                             bool
 	RecoveryEnable, RecoveryPartitionEnable, JODSPrebootLockEnable                          bool
 	SecureBootEnable                                                                        bool
 	EndpointManagedDevice                                                                   bool
@@ -165,6 +165,7 @@ func FromUser(user config.User) Settings {
 		AIRemoteModel:                       user.AIRemoteModel,
 		AIRemoteContextTokens:               user.AIRemoteContextTokens,
 		LUKSTPM2Enable:                      user.LUKSTPM2Enable,
+		LUKSTPM2PIN:                         user.LUKSTPM2PIN,
 		RecoveryEnable:                      user.RecoveryEnable,
 		RecoveryPartitionEnable:             user.RecoveryPartitionEnable,
 		JODSPrebootLockEnable:               user.JODSPrebootLockEnable,
@@ -250,6 +251,7 @@ var userIntentKeys = []string{
 	"aiRemoteModel",
 	"aiRemoteContextTokens",
 	"luksTpm2Enable",
+	"luksTpm2Pin",
 	"recoveryEnable",
 	"recoveryPartitionEnable",
 	"jodsPrebootLockEnable",
@@ -434,6 +436,7 @@ func Render(s Settings) []byte {
 	str("aiRemoteModel", s.AIRemoteModel)
 	integer("aiRemoteContextTokens", s.AIRemoteContextTokens)
 	boolean("luksTpm2Enable", s.LUKSTPM2Enable)
+	boolean("luksTpm2Pin", s.LUKSTPM2Enable && s.LUKSTPM2PIN)
 	boolean("recoveryEnable", s.RecoveryEnable)
 	boolean("recoveryPartitionEnable", s.RecoveryPartitionEnable)
 	boolean("jodsPrebootLockEnable", s.JODSPrebootLockEnable)

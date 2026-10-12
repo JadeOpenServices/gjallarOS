@@ -67,6 +67,7 @@ type state struct {
 	preset, existing         bool
 	control                  string
 	touchscreen              bool
+	chassisType              string
 	penTablet                bool
 	orientationSensor        bool
 	recoveryDisk             string
@@ -479,6 +480,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 	}
 
 	s.touchscreen = hardware.Touchscreen
+	s.chassisType = hardware.ChassisType
 	s.penTablet = hardware.PenTablet
 	s.orientationSensor = hardware.OrientationSensor
 	// ODDC owns the fact when the model states it; local IIO discovery
@@ -694,6 +696,9 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 				true,
 			)
 			if err != nil {
+				return fail(errOut, err)
+			}
+			if err := collectStartupUnlock(ctx, ui, s.chassisType, s.touchscreen, &s.user); err != nil {
 				return fail(errOut, err)
 			}
 		}

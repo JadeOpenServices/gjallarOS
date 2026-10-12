@@ -13,6 +13,9 @@ import (
 
 type Hardware struct {
 	FormFactor string
+	// ChassisType is the SMBIOS chassis type number, e.g. "32" for a
+	// detachable.
+	ChassisType string
 
 	SysVendor      string
 	ProductName    string
@@ -37,6 +40,7 @@ func DetectHardware(sysRoot string) Hardware {
 		BoardVendor:     readDMI(sysRoot, "board_vendor"),
 		BoardName:       readDMI(sysRoot, "board_name"),
 		BoardVersion:    readDMI(sysRoot, "board_version"),
+		ChassisType:     readDMI(sysRoot, "chassis_type"),
 		DeviceInventory: deviceprobe.CollectLocal(sysRoot),
 	}
 

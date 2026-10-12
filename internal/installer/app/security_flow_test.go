@@ -1,9 +1,14 @@
 package app
 
 import (
+	"bytes"
+	"context"
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/config"
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/prompt"
 )
 
 func TestMayOfferSecureBootFallback(t *testing.T) {
@@ -102,5 +107,59 @@ func TestFirmwareSecureBootNotice(t *testing.T) {
 	}
 	if bad := firmwareSecureBootNotice(false, errors.New("boom")); !strings.Contains(bad, "could not be read (boom)") {
 		t.Fatalf("unreadable state not reported:\n%s", bad)
+	}
+}
+
+func TestCollectStartupUnlock(t *testing.T) {
+	for _, tc := range []struct {
+		input string
+		pin   bool
+	}{
+		{"\n", false},
+		{"1\n", false},
+		{"2\n", true},
+		{"PIN at startup\n", true},
+	} {
+		var out bytes.Buffer
+		u := config.User{}
+		if err := collectStartupUnlock(context.Background(), prompt.New(strings.NewReader(tc.input), &out), "10", false, &u); err != nil {
+			t.Fatalf("%q: %v", tc.input, err)
+		}
+		if !u.LUKSTPM2Enable || u.LUKSTPM2PIN != tc.pin {
+			t.Fatalf("%q: enable=%t pin=%t", tc.input, u.LUKSTPM2Enable, u.LUKSTPM2PIN)
+		}
+		if strings.Contains(out.String(), "keyboard attached") {
+			t.Fatalf("%q: keyboard note on a notebook:\n%s", tc.input, out.String())
+		}
+	}
+}
+
+func TestStartupUnlockKeepsPINDefault(t *testing.T) {
+	var out bytes.Buffer
+	u := config.User{LUKSTPM2Enable: true, LUKSTPM2PIN: true}
+	if err := collectStartupUnlock(context.Background(), prompt.New(strings.NewReader("\n"), &out), "", false, &u); err != nil {
+		t.Fatal(err)
+	}
+	if !u.LUKSTPM2PIN {
+		t.Fatal("empty answer dropped the PIN chosen before")
+	}
+}
+
+func TestKeyboardOnlyAtStartup(t *testing.T) {
+	for _, tc := range []struct {
+		chassis string
+		touch   bool
+		want    bool
+	}{
+		{"30", false, true},
+		{"32", false, true},
+		{"32", true, false},
+		{"31", false, false},
+		{"10", false, false},
+		{"", false, false},
+	} {
+		if got := keyboardOnlyAtStartup(tc.chassis, tc.touch); got != tc.want {
+			t.Errorf("chassis %q touch %t: %t, want %t", tc.chassis, tc.touch, got, tc.want)
+		}
 	}
 }
