@@ -269,9 +269,57 @@ Plan agreed 2026-10-10. Nothing in this section is built yet.
       Open: the default channel for new installs, and what existing installs
       on `main` move to.
 - [ ] **ODDC stays separate.** A release carries whatever ODDC commit its
-      `flake.lock` pins. `rebuild --hardware-update --stage main|staging`
+      `flake.lock` pins; the next item keeps that pin current. `rebuild --hardware-update --stage main|staging`
       keeps working as it does today and is not tied to the GjallarOS
       channel.
+- [ ] **ODDC pin follows ODDC main** (Jade, ODDC item 83). Security
+      findings and catalog fixes must reach machines without waiting for a
+      GjallarOS release. ODDC promises that every commit on its `main` is a
+      release and is never force-pushed. A workflow moves the pin; people
+      still decide what lands.
+      1. **Trigger.** Hourly schedule plus manual start. It polls ODDC
+         `main` with `git ls-remote` and stops when the pin is current. No
+         webhook: that would need a token from ODDC that can write here.
+      2. **No secrets.** The job has no access to the `release-cache`
+         environment and never signs anything. Its token may only push the
+         branch `ci/oddc-pin` and open or update one pull request.
+      3. **Forward only.** The new commit must descend from the pinned one
+         (`git merge-base --is-ancestor`), so no rollback and no side
+         branch. `nix flake update oddc` must change only the `oddc` node in
+         `flake.lock`, and nothing else in the tree.
+      4. **Checks**, all at the old and the new commit, for each model we
+         ship or test (`fw13`, ZBook x2 G4, HP, book12):
+         - `oddc validate --root DIR --json` passes.
+         - `oddc status --root DIR --json`: a model that was verified and is
+           no longer verified fails the job, and the pull request says
+           which one.
+         - `oddc security --json`: a flag GjallarOS reads that existed at the
+           old commit and is gone at the new one fails the job (job 29.1).
+           The flags GjallarOS reads are listed in one file next to the
+           code that reads them, with no per-model values.
+         - `prebuilt` keeps its drvPath. An ODDC bump then never makes slow
+           devices compile, so it needs no release cache build (item 80).
+           If the drvPath changes, the job fails and says so.
+         - Every `nixosConfigurations` entry still evaluates.
+      5. **The pull request** says what the bump brings from
+         `oddc changes --from OLD --to NEW --json` (data, evidence, schema,
+         nix, go, docs) and lists new or changed security findings by id.
+         A failed check leaves the pull request open with the failure in
+         it, so nobody misses it.
+      6. **Landing.** A maintainer merges it like any other change. Once
+         commit signatures (below) exist, they land it with their own signed
+         commit, because a key the workflow holds must never be able to
+         update machines.
+      7. **Reaching machines.** `dev` gets it with the next
+         `rebuild --update`. For `staging` and `stable`, a bump whose
+         `oddc changes` classes are only data, evidence or docs may get its
+         own tag on top of the current one without the soak, because flags
+         only lower trust. A bump that changes ODDC's nix or Go code waits
+         for the normal release. The tag is still signed by a person. The
+         notice from job 39 tells the user about a new finding after the
+         rebuild.
+      Open for Jade: poll interval, who may land these pull requests, and
+      whether the data-only fast lane to `stable` is wanted.
 - [ ] **Verifying updates.** Goes through the research flow again before
       any code. Ideas so far, from the sources below:
       - The trust root comes with the install, not from the server: the
