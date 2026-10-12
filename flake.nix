@@ -184,6 +184,12 @@
           ];
         };
 
+        oddc-security-flags = import ./tests/nix/oddc-security-flags.nix {
+          inherit nixpkgs system;
+          inherit (inputs) oddc;
+          gjallarctlSource = ./cmd/gjallarctl;
+        };
+
         recovery-maintenance = import ./tests/nix/recovery-maintenance.nix {
           inherit nixpkgs system;
           recoveryModule = ./system/recovery;
