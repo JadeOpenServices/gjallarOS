@@ -292,7 +292,7 @@ func TestEnrollFirmwareRejectsModifiedUntouchedVariable(t *testing.T) {
 func TestEnrollKeysArgsKeepsOptionROMCheckWithoutBuiltinDB(t *testing.T) {
 	snapshot := enrollmentTestSnapshot()
 	snapshot.PreserveFirmwareBuiltin = []string{"KEK"}
-	got := enrollKeysArgs(snapshot)
+	got := enrollKeysArgs(snapshot, false)
 	want := []string{"enroll-keys", "--firmware-builtin=KEK"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("args = %v, want %v", got, want)

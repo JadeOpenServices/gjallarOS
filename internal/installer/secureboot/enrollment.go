@@ -27,6 +27,7 @@ type enrollmentOps struct {
 	glob            func(string) ([]string, error)
 	armed           func() (bool, error)
 	writeDBX        func(context.Context, []byte) error
+	stageCustomKEK  func([]byte) error
 }
 
 func EnrollFirmware(ctx context.Context) (EnrollmentResult, error) {
@@ -57,7 +58,8 @@ func EnrollFirmware(ctx context.Context) (EnrollmentResult, error) {
 			}
 			return err == nil, err
 		},
-		writeDBX: writeSignedDBX,
+		writeDBX:       writeSignedDBX,
+		stageCustomKEK: stageMicrosoftKEK2023,
 	}
 
 	return enrollFirmware(ctx, snapshot, ops)
@@ -152,6 +154,16 @@ func enrollFirmware(
 		untouchedBefore[name] = append([]byte(nil), payload...)
 	}
 
+	custom, err := needsMicrosoftKEK2023(snapshot, ops)
+	if err != nil {
+		return "", err
+	}
+	if custom {
+		if err := ops.stageCustomKEK(microsoftKEK2023); err != nil {
+			return "", fmt.Errorf("stage Microsoft KEK 2K CA 2023: %w", err)
+		}
+	}
+
 	for _, name := range snapshot.PreserveFirmwareBuiltin {
 		matches, err := ops.glob("/sys/firmware/efi/efivars/" + name + "-*")
 		if err != nil {
@@ -173,7 +185,7 @@ func enrollFirmware(
 		}
 	}
 
-	if err := ops.command(ctx, "sbctl", enrollKeysArgs(snapshot)...); err != nil {
+	if err := ops.command(ctx, "sbctl", enrollKeysArgs(snapshot, custom)...); err != nil {
 		return "", fmt.Errorf("enroll Secure Boot keys: %w", err)
 	}
 
@@ -330,13 +342,16 @@ func finishEnrollment(ctx context.Context, ops enrollmentOps) (EnrollmentResult,
 	return EnrollmentCompleted, nil
 }
 
-func enrollKeysArgs(snapshot FirmwarePolicySnapshot) []string {
+func enrollKeysArgs(snapshot FirmwarePolicySnapshot, custom bool) []string {
 	args := []string{"enroll-keys"}
 	if len(snapshot.PreserveFirmwareBuiltin) != 0 {
 		args = append(
 			args,
 			"--firmware-builtin="+strings.Join(snapshot.PreserveFirmwareBuiltin, ","),
 		)
+	}
+	if custom {
+		args = append(args, "--custom")
 	}
 	// sbctl refuses when the TPM event log lists option ROMs, unless told the
 	// new db still trusts their signer; it ignores --firmware-builtin for
