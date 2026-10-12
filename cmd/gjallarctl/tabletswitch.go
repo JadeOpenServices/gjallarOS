@@ -138,6 +138,11 @@ func watchTabletSwitch(sysRoot, devRoot, name string, states chan<- tabletSwitch
 		if path := findSwitchDevice(sysRoot, devRoot, name); path != "" {
 			f, err := os.Open(path)
 			if err == nil {
+				// One line after a problem, so a log that ends in a warning
+				// means the switch is still unusable.
+				if lastProblem != "" {
+					fmt.Fprintf(stderr, "tablet mode switch %q: readable again\n", name)
+				}
 				lastProblem = ""
 				err = readTabletSwitch(f, states)
 				f.Close()
