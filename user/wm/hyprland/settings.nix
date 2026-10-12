@@ -9,14 +9,21 @@
 }:
 let
   # Paste once: on a paste shortcut the clipboard is handed to a wl-copy that
-  # serves exactly one read and then exits, so it empties after the app has
-  # read it, however slow the app is. A timer here lost the race on slow
-  # machines (ZBook x2) and pasted nothing. Only one type survives the
+  # serves exactly one read and then has nothing left to give, so it empties
+  # after the app has read it, however slow the app is. A timer here lost the
+  # race on slow machines (ZBook x2) and pasted nothing. Stock --paste-once
+  # exits after the read, which changes the clipboard while the app is still
+  # pasting; Chromium apps (Codium) then drop what they read and paste
+  # nothing about half the time. The patched wl-copy stays the owner with no
+  # data until the next copy replaces it. Only one type survives the
   # hand-over (text first, else the first offered), so rich formatting is
   # pasted as plain text.
+  wlClipboardPasteOnce = pkgs.wl-clipboard.overrideAttrs (old: {
+    patches = (old.patches or [ ]) ++ [ ./wl-copy-paste-once-keep-owner.patch ];
+  });
   gjallarPasteOnce = pkgs.writeShellScript "gjallar-paste-once" ''
     set -eu
-    PATH=${lib.makeBinPath [ pkgs.wl-clipboard pkgs.gnugrep pkgs.coreutils ]}
+    PATH=${lib.makeBinPath [ wlClipboardPasteOnce pkgs.gnugrep pkgs.coreutils ]}
 
     hand_over() {
       types="$(wl-paste --list-types 2>/dev/null)" || return 0
