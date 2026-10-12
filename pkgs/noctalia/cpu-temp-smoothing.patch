@@ -1,0 +1,46 @@
+diff --git a/src/system/system_monitor_service.cpp b/src/system/system_monitor_service.cpp
+index 97c2f48..f6861ad 100644
+--- a/src/system/system_monitor_service.cpp
++++ b/src/system/system_monitor_service.cpp
+@@ -11,6 +11,7 @@
+ 
+ #include <algorithm>
+ #include <chrono>
++#include <cmath>
+ #include <cstdlib>
+ #include <cstring>
+ #include <dlfcn.h>
+@@ -1257,6 +1258,12 @@ void SystemMonitorService::samplingLoop() {
+   std::optional<std::vector<cpu_stat::Totals>> prevCpuCores;
+   bool cpuCoresWasEnabled = false;
+   auto nextCpu = Clock::now();
++  // The CPU package sensor sits on the cores and jumps 10-15 °C on every short load burst, so
++  // the raw value made the bar flicker. Show a moving average instead: it follows real heating
++  // within half a minute and moves only a few degrees for a burst of a second or two.
++  constexpr double kCpuTempSmoothingSeconds = 8.0;
++  std::optional<double> smoothedCpuTemp;
++  auto lastCpuTempAt = Clock::now();
+   auto nextCpuCores = Clock::now();
+   auto nextGpu = Clock::now();
+   auto nextMemory = Clock::now();
+@@ -1333,9 +1340,19 @@ void SystemMonitorService::samplingLoop() {
+ 
+       if (m_cpuTempRefs.load(std::memory_order_relaxed) > 0) {
+         std::optional<double> cpuTemp = readCpuTempCelsius(pollCfg);
++        if (cpuTemp.has_value()) {
++          // Start over from the raw value after a long pause (nothing showed the stat).
++          const double elapsed = std::chrono::duration<double>(now - lastCpuTempAt).count();
++          if (!smoothedCpuTemp.has_value() || elapsed > 3.0 * kCpuTempSmoothingSeconds) {
++            smoothedCpuTemp = cpuTemp;
++          } else {
++            *smoothedCpuTemp += (1.0 - std::exp(-elapsed / kCpuTempSmoothingSeconds)) * (*cpuTemp - *smoothedCpuTemp);
++          }
++          lastCpuTempAt = now;
++        }
+         std::scoped_lock lock{m_statsMutex};
+         if (cpuTemp.has_value()) {
+-          m_latest.cpuTempC = cpuTemp;
++          m_latest.cpuTempC = smoothedCpuTemp;
+           m_latest.cpuTempAvailable = true;
+         } else if (!m_latest.cpuTempC.has_value()) {
+           m_latest.cpuTempC = 40.0;

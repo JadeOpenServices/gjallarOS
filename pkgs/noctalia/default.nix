@@ -32,6 +32,10 @@
 # for a request while the Bluetooth tab is not open. The panel is not opened by
 # itself: any device in range could otherwise pop it up and take the keyboard.
 #
+# The CPU package sensor jumps 10-15 °C on every short load burst, so the bar's
+# temperature flickered (47 -> 63 -> 56 -> 47 within seconds on the ZBook x2).
+# cpu-temp-smoothing.patch shows an 8 s moving average of it instead.
+#
 # libqalculate 5.10 frees its random state on exit even when nothing ever
 # created it, so the shell crashes every time it stops. Upstream fixed that in
 # 931c2aa9 (5.11); drop the patch once nixpkgs ships libqalculate 5.11 or newer.
@@ -55,5 +59,6 @@
       ./notification-input-region.patch
       ./wallpaper-store-path.patch
       ./bluetooth-pairing.patch
+      ./cpu-temp-smoothing.patch
     ];
   })
