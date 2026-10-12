@@ -50,6 +50,21 @@ _gjallarctl_usb() {
     '--media[storage medium id (H:C:T:L)]:id:'
 }
 
+_gjallarctl_thunderbolt() {
+  local -a cmds=(
+    'status:list Thunderbolt devices and DMA protection'
+    'review:ask about blocked devices (session service)'
+    'allow-once:let a device in until it is unplugged'
+    'always-allow:let a device in now and on every later connect'
+    'forget:stop always allowing a device'
+  )
+  if (( CURRENT == 2 )); then
+    _describe -t commands 'thunderbolt command' cmds
+    return
+  fi
+  _arguments '--uid[device UID from thunderbolt status]:uid:'
+}
+
 _gjallarctl_vpn() {
   local -a cmds=(
     'status:show VPN and Wi-Fi trust state'
@@ -115,6 +130,7 @@ _gjallarctl() {
     'check:run the safe repository checks'
     'preflight:check the repository before a rebuild'
     'usb:USB trust enforcement'
+    'thunderbolt:Thunderbolt and USB4 device authorization'
     'vpn:VPN and trusted Wi-Fi'
     'tpm2:TPM2 disk unlock'
     'luks:system disk unlock methods and recovery key'
@@ -137,6 +153,7 @@ _gjallarctl() {
       case $words[1] in
         rebuild) _gjallarctl_rebuild ;;
         usb) _gjallarctl_usb ;;
+        thunderbolt) _gjallarctl_thunderbolt ;;
         vpn) _gjallarctl_vpn ;;
         oddc) _gjallarctl_oddc ;;
         helpme) _arguments '--text[print instead of opening a window]' ;;

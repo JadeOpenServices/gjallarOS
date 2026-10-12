@@ -18,6 +18,7 @@
     ./hardware/networking.nix
     ./hardware/firmware.nix
     ./hardware/fingerprint.nix
+    ./hardware/thunderbolt.nix
     ./hardware/input.nix
     ./hardware/quick-keys.nix
     ./hardware/fan-control.nix

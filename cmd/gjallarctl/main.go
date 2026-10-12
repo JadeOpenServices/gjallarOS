@@ -80,6 +80,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 	switch args[0] {
 	case "usb":
 		return runUSB(args[1:], stdout, stderr)
+	case "thunderbolt":
+		return runThunderbolt(args[1:], stdout, stderr)
 	case "installer":
 		return runInstaller(args[1:], stdout, stderr)
 	case "check":
@@ -1748,6 +1750,7 @@ func runCheck(args []string, stdout, stderr io.Writer) int {
 
 func printUsage(out io.Writer) {
 	fmt.Fprintln(out, "Usage: gjallarctl usb {status|audit|policy|review|provision-key|allow-once|trust-permanent|keep-blocked|enroll-internal|accept-replacement|forget} [OPTIONS]")
+	fmt.Fprintln(out, "       gjallarctl thunderbolt {status|review|allow-once|always-allow|forget} [--uid UID]")
 	fmt.Fprintln(out, "Usage: gjallarctl check [--repo PATH] [--timeout DURATION]")
 	fmt.Fprintln(out, "       gjallarctl preflight [--repo PATH]")
 	oddccli.Usage(out)
