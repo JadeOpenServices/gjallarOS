@@ -49,7 +49,7 @@ func TestThunderboltAnswerEndsWhenDeviceMovesOrGoes(t *testing.T) {
 }
 
 func TestThunderboltNoticeEscapesDeviceStrings(t *testing.T) {
-	n := tbReviewNotice(tbDevice{Vendor: "<b>Evil</b>", Name: "Dock & Co"}, true)
+	n := tbReviewNotice(tbDevice{Vendor: "<b>Evil</b>", Name: "Dock & Co"}, tbDMAOn)
 	if strings.Contains(n.Body, "<b>") || !strings.Contains(n.Body, "&lt;b&gt;Evil&lt;/b&gt; Dock &amp; Co") {
 		t.Fatalf("device strings not escaped: %q", n.Body)
 	}
@@ -63,11 +63,15 @@ func TestThunderboltNoticeEscapesDeviceStrings(t *testing.T) {
 }
 
 func TestThunderboltNoticeStatesDMAProtection(t *testing.T) {
-	if body := tbReviewNotice(tbDevice{Name: "Dock"}, true).Body; !strings.Contains(body, "DMA protection is on") {
+	if body := tbReviewNotice(tbDevice{Name: "Dock"}, tbDMAOn).Body; !strings.Contains(body, "DMA protection is on") {
 		t.Errorf("protected body = %q", body)
 	}
-	if body := tbReviewNotice(tbDevice{Name: "Dock"}, false).Body; !strings.Contains(body, "No DMA protection") {
+	if body := tbReviewNotice(tbDevice{Name: "Dock"}, tbDMAOff).Body; !strings.Contains(body, "No DMA protection") {
 		t.Errorf("unprotected body = %q", body)
+	}
+	body := tbReviewNotice(tbDevice{Name: "Dock"}, tbDMAUnconfirmed).Body
+	if !strings.Contains(body, "not confirmed") || !strings.Contains(body, "Allow only your own devices") {
+		t.Errorf("unconfirmed body = %q", body)
 	}
 }
 
@@ -82,18 +86,18 @@ func TestThunderboltDMAWorstWins(t *testing.T) {
 	for _, c := range []struct {
 		kernel  bool
 		oddc    tbFlag
-		want    bool
+		want    tbDMA
 		warning bool
 	}{
-		{true, tbFlagYes, true, false},
-		{true, tbFlagNo, false, false},
-		{true, tbFlagUnknown, false, false},
-		{false, tbFlagYes, false, true},
-		{false, tbFlagNo, false, false},
-		{false, tbFlagUnknown, false, false},
+		{true, tbFlagYes, tbDMAOn, false},
+		{true, tbFlagNo, tbDMAOff, false},
+		{true, tbFlagUnknown, tbDMAUnconfirmed, false},
+		{false, tbFlagYes, tbDMAOff, true},
+		{false, tbFlagNo, tbDMAOff, false},
+		{false, tbFlagUnknown, tbDMAOff, false},
 	} {
-		if got := tbDMAProtected(c.kernel, c.oddc); got != c.want {
-			t.Errorf("kernel %v, ODDC %v: protected = %v", c.kernel, c.oddc, got)
+		if got := tbDMAState(c.kernel, c.oddc); got != c.want {
+			t.Errorf("kernel %v, ODDC %v: state = %v", c.kernel, c.oddc, got)
 		}
 		if warn := tbDMAContradiction(c.kernel, c.oddc, "d0"); (warn != "") != c.warning {
 			t.Errorf("kernel %v, ODDC %v: warning = %q", c.kernel, c.oddc, warn)

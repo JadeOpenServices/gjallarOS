@@ -139,7 +139,7 @@ func runThunderboltStatus(stdout, stderr io.Writer) int {
 		dma := oddcDMAFlag(ctx)
 		for _, d := range domains {
 			fmt.Fprintf(stdout, "domain %s: security %s, DMA protection %s (kernel %s, ODDC %s)\n",
-				d.id, d.security, onOff(tbDMAProtected(d.iommu, dma)), onOff(d.iommu), dma)
+				d.id, d.security, tbDMAState(d.iommu, dma), onOff(d.iommu), dma)
 			if warn := tbDMAContradiction(d.iommu, dma, d.id); warn != "" {
 				fmt.Fprintln(stderr, warn)
 			}
@@ -229,7 +229,7 @@ func tbListDomains(ctx context.Context, conn *dbus.Conn) []tbDomainInfo {
 }
 
 // tbKernelDMA reports whether the kernel has DMA protection on the domain a
-// device hangs off. Unknown counts as unprotected.
+// device hangs off. A domain it cannot find counts as unprotected.
 func tbKernelDMA(domains []tbDomainInfo, uid string) bool {
 	for _, d := range domains {
 		if d.id == uid {
@@ -239,11 +239,38 @@ func tbKernelDMA(domains []tbDomainInfo, uid string) bool {
 	return false
 }
 
-// tbDMAProtected combines the kernel with ODDC's word on the model, and the
+// tbDMA is what the card says about DMA protection. Only tbDMAOn is
+// protected; tbDMAUnconfirmed is handled like tbDMAOff, but the card does not
+// claim a gap nobody has found.
+type tbDMA int
+
+const (
+	tbDMAUnconfirmed tbDMA = iota
+	tbDMAOn
+	tbDMAOff
+)
+
+func (s tbDMA) String() string {
+	switch s {
+	case tbDMAOn:
+		return "on"
+	case tbDMAOff:
+		return "off"
+	}
+	return "not confirmed"
+}
+
+// tbDMAState combines the kernel with ODDC's word on the model, and the
 // worse one wins: ODDC knows when firmware leaves a gap the kernel cannot
-// see. A model ODDC has not vouched for counts as unprotected.
-func tbDMAProtected(kernel bool, oddc tbFlag) bool {
-	return kernel && oddc == tbFlagYes
+// see. A model ODDC has not vouched for is unconfirmed, never protected.
+func tbDMAState(kernel bool, oddc tbFlag) tbDMA {
+	switch {
+	case !kernel || oddc == tbFlagNo:
+		return tbDMAOff
+	case oddc == tbFlagYes:
+		return tbDMAOn
+	}
+	return tbDMAUnconfirmed
 }
 
 type tbFlag int
@@ -345,12 +372,15 @@ func tbDisplayName(d tbDevice) string {
 
 // tbReviewNotice announces a blocked device. Its strings come from the
 // device and are escaped.
-func tbReviewNotice(d tbDevice, protected bool) desktopNotice {
+func tbReviewNotice(d tbDevice, dma tbDMA) desktopNotice {
 	body := html.EscapeString(tbDisplayName(d)) + "\n"
-	if protected {
+	switch dma {
+	case tbDMAOn:
 		body += "DMA protection is on."
-	} else {
+	case tbDMAOff:
 		body += "No DMA protection: it can read memory once let in. Allow only your own devices."
+	default:
+		body += "DMA protection is not confirmed for this model, so it may read memory once let in. Allow only your own devices."
 	}
 	return desktopNotice{
 		App:     "Thunderbolt",
@@ -449,11 +479,11 @@ func runThunderboltReview(stderr io.Writer) int {
 			if warn := tbDMAContradiction(kernel, dma, d.Domain); warn != "" {
 				fmt.Fprintln(stderr, warn)
 			}
-			protected := tbDMAProtected(kernel, dma)
+			state := tbDMAState(kernel, dma)
 			promptCtx, cancel := context.WithCancel(ctx)
 			open[d.UID] = cancel
 			go func() {
-				outcomes <- tbOutcome{d.UID, tbReviewDevice(promptCtx, executable, d, protected)}
+				outcomes <- tbOutcome{d.UID, tbReviewDevice(promptCtx, executable, d, state)}
 			}()
 		}
 		// A card closes once its device is let in elsewhere or unplugged.
@@ -497,8 +527,8 @@ func runThunderboltReview(stderr io.Writer) int {
 
 // tbReviewDevice shows the notice for one device and carries out the answer.
 // It reports whether the device should be offered again.
-func tbReviewDevice(ctx context.Context, executable string, d tbDevice, protected bool) bool {
-	picked, err := showNotice(ctx, tbReviewNotice(d, protected))
+func tbReviewDevice(ctx context.Context, executable string, d tbDevice, dma tbDMA) bool {
+	picked, err := showNotice(ctx, tbReviewNotice(d, dma))
 	if ctx.Err() != nil {
 		return false
 	}
