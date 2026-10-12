@@ -682,8 +682,11 @@ func usbAuthorize(ctx context.Context, name string, command []string) ([]byte, e
 		password := exec.CommandContext(ctx, sudo, "-A", authHelper)
 		password.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 		password.Cancel = func() error { return syscall.Kill(-password.Process.Pid, syscall.SIGKILL) }
-		if output, err := password.CombinedOutput(); err != nil {
-			return append([]byte("Authentication failed.\n"), output...), err
+		// sudo and the askpass dialog report to the journal; their toolkit
+		// warnings mean nothing in the error shown to the user.
+		password.Stderr = os.Stderr
+		if err := password.Run(); err != nil {
+			return []byte("Authentication failed or was cancelled."), err
 		}
 	}
 	return exec.CommandContext(ctx, sudo, append([]string{"-n", "--"}, command...)...).CombinedOutput()
