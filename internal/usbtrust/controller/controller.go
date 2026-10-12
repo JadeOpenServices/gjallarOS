@@ -133,7 +133,59 @@ func (c *Controller) Reconcile(ctx context.Context) error {
 			return fmt.Errorf("arm USB enforcement: %w", err)
 		}
 	}
+	if c.persistenceReady {
+		if err := c.enrollPortMatches(ctx, &input); err != nil {
+			return fmt.Errorf("store built-in USB parts: %w", err)
+		}
+	}
 	return c.apply(ctx, input)
+}
+
+// enrollPortMatches stores built-in parts that sit exactly on their ODDC
+// port and have no stored identity yet. Until the store is ready they are
+// allowed for this boot only.
+func (c *Controller) enrollPortMatches(ctx context.Context, input *usbtrust.AuditInput) error {
+	audit, err := usbtrust.Audit(*input)
+	if err != nil {
+		return err
+	}
+	doc, err := c.next(input.Trusted)
+	if err != nil {
+		return err
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	added := false
+	for _, finding := range audit.Findings {
+		if finding.Code != usbtrust.CodeInternalPortMatch {
+			continue
+		}
+		for _, observed := range input.Observed {
+			if observed.RuntimeID != finding.RuntimeID || !hasTopology(observed.Identity) {
+				continue
+			}
+			device, err := newDevice(observed.Identity, now)
+			if err != nil {
+				return err
+			}
+			device.Class, device.Role, device.ExpectedByODDC = usbtrust.ClassInternal, finding.Role, true
+			if device.Identity.Serial != "" {
+				device.Strength = usbtrust.StrengthSerialDescriptorTopology
+			}
+			doc.Devices = append(doc.Devices, device)
+			added = true
+		}
+	}
+	if !added {
+		return nil
+	}
+	if err := doc.Validate(); err != nil {
+		return err
+	}
+	if err := c.commit(ctx, doc); err != nil {
+		return err
+	}
+	input.Trusted = &doc
+	return c.sessions.Observe(input.Observed)
 }
 
 // arm signs the armed state. Automatic internal enrollment happens only the
@@ -343,6 +395,9 @@ func (c *Controller) Mutate(ctx context.Context, request broker.Request) (broker
 		if err := c.sessions.Check(request.RuntimeID, request.Connection); err != nil {
 			return broker.Response{}, err
 		}
+		if err := c.offered(input, request); err != nil {
+			return broker.Response{}, err
+		}
 	}
 	if request.Action == broker.ActionAllowOnce || request.Action == broker.ActionKeepBlocked {
 		target := usbtrust.TargetAllow
@@ -380,6 +435,31 @@ func (c *Controller) Mutate(ctx context.Context, request broker.Request) (broker
 		return broker.Response{}, fmt.Errorf("decision recorded; enforcement failed: %w", err)
 	}
 	return broker.Response{OK: true, Revision: revision(input), Message: "USB trust decision recorded", Enforcing: c.EnforcementEnabled()}, nil
+}
+
+// offered accepts only the actions the policy lists for this device, so a
+// client cannot reach a mutation the review never showed. Keeping a device
+// blocked is always allowed.
+func (c *Controller) offered(input usbtrust.AuditInput, request broker.Request) error {
+	if request.Action == broker.ActionKeepBlocked {
+		return nil
+	}
+	policy, err := c.sessions.Derive(input)
+	if err != nil {
+		return err
+	}
+	for _, decision := range policy {
+		if decision.RuntimeID != request.RuntimeID {
+			continue
+		}
+		for _, action := range decision.Actions {
+			if action == request.Action {
+				return nil
+			}
+		}
+		return fmt.Errorf("%s is not offered for this USB device (%s)", request.Action, decision.Reason)
+	}
+	return fmt.Errorf("USB device is not connected")
 }
 
 func persistentMutation(action broker.Action) bool {

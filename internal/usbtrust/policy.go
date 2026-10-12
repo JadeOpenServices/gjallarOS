@@ -97,8 +97,9 @@ func (s *Sessions) Choose(runtimeID, token string, target Target) error {
 	return nil
 }
 
-// Derive never grants trust from ODDC expectations or parent trust alone.
-// Only an accepted identity or an explicit current-connection choice allows.
+// Derive never grants trust from parent trust alone. An accepted identity,
+// an explicit current-connection choice, or a built-in part on the exact
+// root port ODDC names allows.
 func (s *Sessions) Derive(input AuditInput) ([]Decision, error) {
 	audit, err := Audit(input)
 	if err != nil {
@@ -142,6 +143,9 @@ func (s *Sessions) Derive(input AuditInput) ([]Decision, error) {
 			d.Actions = append(d.Actions, ActionEnrollInternal)
 		case CodeInternalChanged, CodeTrustedExternalChanged:
 			d.Actions = append(d.Actions, ActionAcceptReplacement)
+		case CodeInternalDebug:
+			// ODDC does not stand behind this part; no one-off allow either.
+			d.Actions = []Action{ActionKeepBlocked}
 		}
 		if current.choice != "" {
 			d.Target = current.choice

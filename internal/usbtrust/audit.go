@@ -92,6 +92,14 @@ const (
 	CodeTrustedExternal        AuditCode = "trusted-external"
 	CodeTrustedExternalChanged AuditCode = "trusted-external-changed"
 	CodeUnknownExternal        AuditCode = "unknown-external"
+
+	// CodeInternalPortMatch: the part sits exactly where ODDC says and has
+	// no stored identity yet. It is allowed and stored once the store is
+	// ready.
+	CodeInternalPortMatch AuditCode = "internal-port-match"
+	// CodeInternalDebug: ODDC marks the part unsupported or not proven.
+	// It stays blocked without a pop-up.
+	CodeInternalDebug AuditCode = "internal-debug"
 )
 
 type Finding struct {
@@ -144,6 +152,14 @@ func Audit(input AuditInput) (AuditResult, error) {
 
 	var findings []Finding
 
+	builtInPorts := make(map[ObservedPort]struct{})
+
+	for _, expected := range input.Expected {
+		if port := expected.Port; port != nil {
+			builtInPorts[ObservedPort{Controller: port.Controller, Hub: port.Hub, RootPort: port.RootPort}] = struct{}{}
+		}
+	}
+
 	for _, expected := range input.Expected {
 		var candidates []int
 
@@ -152,12 +168,22 @@ func Audit(input AuditInput) (AuditResult, error) {
 				continue
 			}
 
-			if matchesExpectation(expected, observed.Identity) {
+			if matchesExpectation(expected, observed) {
 				candidates = append(candidates, i)
 			}
 		}
 
 		trusted, hasTrusted := trustedInternal[expected.Role]
+
+		if expected.Port != nil {
+			for _, i := range candidates {
+				consumed[i] = true
+			}
+
+			findings = append(findings, auditPort(expected, trusted, hasTrusted, candidates, input.Observed)...)
+
+			continue
+		}
 
 		if !hasTrusted {
 			switch len(candidates) {
@@ -307,7 +333,7 @@ func Audit(input AuditInput) (AuditResult, error) {
 			continue
 		}
 
-		if observed.Identity.ConnectType == "hardwired" {
+		if observed.Identity.ConnectType == "hardwired" || onBuiltInPort(observed, builtInPorts) {
 			findings = append(findings, Finding{
 				State:     AuditBlock,
 				Code:      CodeUnexpectedInternal,
@@ -342,6 +368,106 @@ func Audit(input AuditInput) (AuditResult, error) {
 	return AuditResult{
 		Findings: findings,
 	}, nil
+}
+
+// auditPort judges a part that ODDC lists with a usbPort. Candidates
+// already sit on the exact root port ODDC names.
+func auditPort(
+	expected ExpectedDevice,
+	trusted Device,
+	hasTrusted bool,
+	candidates []int,
+	observed []ObservedDevice,
+) []Finding {
+	base := Finding{Role: expected.Role}
+	if hasTrusted {
+		base.TrustedID = trusted.ID
+	}
+
+	if len(candidates) == 0 {
+		if !expected.Required || expected.Port.Debug {
+			return nil
+		}
+
+		finding := base
+		finding.State, finding.Code = AuditWarn, CodeInternalMissing
+		finding.Message = "built-in USB part is not present on its port"
+
+		return []Finding{finding}
+	}
+
+	if len(candidates) > 1 {
+		var findings []Finding
+
+		for _, i := range candidates {
+			finding := base
+			finding.State, finding.Code, finding.RuntimeID = AuditReview, CodeInternalAmbiguous, observed[i].RuntimeID
+			finding.Message = "more than one USB device sits on the port of this built-in part"
+			findings = append(findings, finding)
+		}
+
+		return findings
+	}
+
+	device := observed[candidates[0]]
+	finding := base
+	finding.RuntimeID = device.RuntimeID
+
+	switch {
+	case device.Wiring.Shared:
+		// The worse of ODDC and the kernel wins: when ODDC's port names
+		// more than one root hub, the port proves nothing.
+		finding.State, finding.Code = AuditReview, CodeInternalAmbiguous
+		finding.Message = "two USB controllers share this controller ID, so the port does not name one part"
+	case device.Identity.ConnectType == "hotplug":
+		finding.State, finding.Code = AuditReview, CodeInternalAmbiguous
+		finding.Message = "the kernel reports this port as external, ODDC lists a built-in part there"
+	case expected.Port.Debug:
+		finding.State, finding.Code = AuditBlock, CodeInternalDebug
+		finding.Message = "ODDC marks this built-in part as unsupported or not proven"
+	case hasTrusted && portIdentityMatches(trusted, device.Identity, expected.Port.Serial):
+		finding.State, finding.Code = AuditPass, CodeInternalMatch
+		finding.Message = "built-in USB part sits on its ODDC port and matches its stored identity"
+	case hasTrusted:
+		finding.State, finding.Code = AuditBlock, CodeInternalChanged
+		finding.Message = "built-in USB part sits on its ODDC port but its stored identity changed"
+	default:
+		finding.State, finding.Code = AuditPass, CodeInternalPortMatch
+		finding.Message = "built-in USB part sits on its ODDC port; identity not stored yet"
+	}
+
+	return []Finding{finding}
+}
+
+// portIdentityMatches compares a built-in part with its stored identity.
+// A serial counts only when ODDC says it differs per unit; otherwise the
+// port is the anchor.
+func portIdentityMatches(
+	trusted Device,
+	observed Identity,
+	serial SerialMode,
+) bool {
+	if serial != SerialPerUnit {
+		trusted.Identity.Serial = ""
+		observed.Serial = ""
+	}
+
+	return identityMatchesTrusted(trusted, observed)
+}
+
+func onBuiltInPort(
+	observed ObservedDevice,
+	ports map[ObservedPort]struct{},
+) bool {
+	if observed.Wiring == nil {
+		return false
+	}
+
+	wiring := *observed.Wiring
+	wiring.Shared = false
+	_, ok := ports[wiring]
+
+	return ok
 }
 
 func likelySameTrustedExternal(
@@ -382,6 +508,7 @@ func likelySameTrustedExternal(
 
 func validateExpectations(expected []ExpectedDevice) error {
 	roles := make(map[string]struct{}, len(expected))
+	ports := make(map[ObservedPort]string)
 
 	for _, device := range expected {
 		if strings.TrimSpace(device.Role) == "" {
@@ -403,6 +530,18 @@ func validateExpectations(expected []ExpectedDevice) error {
 		}
 
 		roles[device.Role] = struct{}{}
+
+		if port := device.Port; port != nil {
+			key := ObservedPort{Controller: port.Controller, Hub: port.Hub, RootPort: port.RootPort}
+			if other, exists := ports[key]; exists {
+				return fmt.Errorf(
+					"ODDC USB expectations %q and %q share one port",
+					other,
+					device.Role,
+				)
+			}
+			ports[key] = device.Role
+		}
 	}
 
 	return nil
@@ -410,10 +549,26 @@ func validateExpectations(expected []ExpectedDevice) error {
 
 func matchesExpectation(
 	expected ExpectedDevice,
-	observed Identity,
+	device ObservedDevice,
 ) bool {
+	observed := device.Identity
+
 	if expected.VIDPID != observed.VIDPID {
 		return false
+	}
+
+	// A part with a port matches only on that exact root port. The
+	// kernel's connect type is judged in auditPort, not here.
+	if port := expected.Port; port != nil {
+		wiring := device.Wiring
+		if wiring == nil ||
+			wiring.Controller != port.Controller ||
+			wiring.Hub != port.Hub ||
+			wiring.RootPort != port.RootPort {
+			return false
+		}
+
+		return containsAllInterfaces(observed.Interfaces, expected.Interfaces)
 	}
 
 	if expected.ConnectType != "" &&

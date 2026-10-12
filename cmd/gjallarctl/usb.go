@@ -132,6 +132,11 @@ func runUSBReview(args []string, stderr io.Writer) int {
 				if seen[d.Connection] || answered[usbReviewKey(d)] || d.Target != usbtrust.TargetBlock {
 					continue
 				}
+				// Unsupported built-in parts stay blocked; asking would offer
+				// nothing but "keep blocked".
+				if usbtrust.AuditCode(d.Reason) == usbtrust.CodeInternalDebug {
+					continue
+				}
 				seen[d.Connection] = true
 				switch usbReviewDecision(ctx, executable, d, response.Enforcing) {
 				case usbReviewAnswered:
@@ -451,6 +456,10 @@ func usbReviewFacts(d usbtrust.Decision) []usbFact {
 		add(usbBad, "Unexpected device inside this computer")
 	case usbtrust.CodeInternalAmbiguous:
 		add(usbUnknown, "Cannot tell which built-in part this is")
+	case usbtrust.CodeInternalDebug:
+		add(usbUnknown, "Built-in "+role+" is not supported on this model yet, so it stays blocked")
+	case usbtrust.CodeInternalPortMatch:
+		add(usbFine, "Built-in "+role+" on its known port")
 	default:
 		add(usbUnknown, "Never trusted on this computer")
 	}

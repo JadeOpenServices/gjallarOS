@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/JadeOpenServices/gjallarOS/internal/usbtrust"
@@ -257,5 +258,21 @@ func TestAmbiguousInternalDevicesCannotBecomePermanentExternalTrust(t *testing.T
 				t.Fatalf("ambiguous device accepted: %v", r)
 			}
 		}
+	}
+}
+
+func TestMutateRejectsActionsPolicyDidNotOffer(t *testing.T) {
+	c, _ := fixture()
+	ctx := context.Background()
+	policy, _, err := c.Policy(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = c.Mutate(ctx, broker.Request{Action: broker.ActionEnrollInternal, RuntimeID: "12", Connection: policy[0].Connection, Role: "hardware.camera.front"})
+	if err == nil || !strings.Contains(err.Error(), "not offered") {
+		t.Fatalf("unoffered enrollment: %v", err)
+	}
+	if _, err := c.Mutate(ctx, broker.Request{Action: broker.ActionKeepBlocked, RuntimeID: "12", Connection: policy[0].Connection}); err != nil {
+		t.Fatalf("keep blocked must always work: %v", err)
 	}
 }
