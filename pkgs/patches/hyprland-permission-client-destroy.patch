@@ -1,0 +1,31 @@
+Hyprland main fix, PR #16353 (Vaxry), not in a release yet (0.56.2 lacks it).
+https://github.com/hyprwm/Hyprland/pull/16353
+
+--- a/src/managers/permissions/DynamicPermissionManager.cpp
++++ b/src/managers/permissions/DynamicPermissionManager.cpp
+@@ -30,7 +30,8 @@ CDynamicPermissionRule::CDynamicPermissionRule(wl_client* const client, eDynamic
+     wl_list_init(&m_destroyWrapper.listener.link);
+     m_destroyWrapper.listener.notify = ::clientDestroyInternal;
+     m_destroyWrapper.parent          = this;
+-    wl_display_add_destroy_listener(g_pCompositor->m_wlDisplay, &m_destroyWrapper.listener);
++    if (client)
++        wl_client_add_destroy_listener(client, &m_destroyWrapper.listener);
+ }
+ 
+ CDynamicPermissionRule::~CDynamicPermissionRule() {
+--- a/src/managers/permissions/DynamicPermissionManager.hpp
++++ b/src/managers/permissions/DynamicPermissionManager.hpp
+@@ -55,6 +55,13 @@ class CDynamicPermissionRule {
+ 
+     wl_client* client() const;
+ 
++    CDynamicPermissionRule(CDynamicPermissionRule&&)      = delete;
++    CDynamicPermissionRule(CDynamicPermissionRule&)       = delete;
++    CDynamicPermissionRule(const CDynamicPermissionRule&) = delete;
++
++    CDynamicPermissionRule& operator=(const CDynamicPermissionRule&) = delete;
++    CDynamicPermissionRule& operator=(CDynamicPermissionRule&&)      = delete;
++
+   private:
+     // config rule
+     CDynamicPermissionRule(const std::string& binaryPathRegex, eDynamicPermissionType type, eDynamicPermissionAllowMode defaultAllowMode = PERMISSION_RULE_ALLOW_MODE_ASK);
