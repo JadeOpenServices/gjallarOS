@@ -43,9 +43,15 @@ in
   nix.daemonCPUSchedPolicy = "batch";
   nix.daemonIOSchedClass = "best-effort";
   nix.daemonIOSchedPriority = 7;
+  # Out of memory, the kernel kills a build before the desktop. User session
+  # processes run at 200 and build workers inherited 0, so a compile on a
+  # 4 GiB Galaxy Book 12-like VM killed dbus-broker, Noctalia and Hyprland
+  # clients first and ended the session (2026-10-12). A failed build can
+  # be rerun; lost windows cannot.
   systemd.services.nix-daemon.serviceConfig = {
     CPUWeight = 20;
     IOWeight = 20;
+    OOMScoreAdjust = 1000;
   };
 
   systemd.services.nix-gc.serviceConfig = {
