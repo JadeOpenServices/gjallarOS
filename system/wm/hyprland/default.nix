@@ -73,6 +73,18 @@ let
           [ -e "$hypr_config_dir/$display_config" ] || : >"$hypr_config_dir/$display_config"
         done
 
+        # Render on the GPU that drives the screens connected now, as ODDC's
+        # render quirk says (ODDC 78). Models without the quirk, ODDC pins
+        # without the command, and battery saver leave AQ_DRM_DEVICES unset,
+        # so Hyprland renders on the boot GPU (the integrated one). Hyprland
+        # keeps its render GPU until the next login.
+        profile="$(${pkgs.power-profiles-daemon}/bin/powerprofilesctl get 2>/dev/null || true)"
+        if [ "$profile" != power-saver ] && command -v oddc >/dev/null &&
+          render_gpus="$(oddc rendergpu --explain 2>>"$state_dir/startup.log")" &&
+          [ -n "$render_gpus" ]; then
+          export AQ_DRM_DEVICES="$render_gpus"
+        fi
+
         export HYPRLAND_CONFIG="$hypr_config_dir/hyprland.conf"
         exec ${pkgs.hyprland}/bin/start-hyprland >>"$state_dir/startup.log" 2>&1
   '';
