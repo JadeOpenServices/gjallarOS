@@ -44,6 +44,10 @@ type Controller struct {
 	sessions         usbtrust.Sessions
 	persistenceReady bool
 	implicit         usbtrust.Target
+	// bluetooth keeps the last Bluetooth address read per runtime ID. A
+	// blocked part loses its driver and its address with it; without the
+	// cache it would read as "not checked" and be allowed again.
+	bluetooth map[string]string
 	// armed mirrors the last verified document; disarmed withdraws ArmOnStart
 	// until the daemon restarts.
 	armed, disarmed atomic.Bool
@@ -136,6 +140,9 @@ func (c *Controller) Reconcile(ctx context.Context) error {
 		if err := c.enrollPortMatches(ctx, &input); err != nil {
 			return fmt.Errorf("store built-in USB parts: %w", err)
 		}
+		if err := c.learnBluetoothAddresses(ctx, &input); err != nil {
+			return fmt.Errorf("store Bluetooth addresses: %w", err)
+		}
 	}
 	return c.apply(ctx, input)
 }
@@ -185,6 +192,47 @@ func (c *Controller) enrollPortMatches(ctx context.Context, input *usbtrust.Audi
 	}
 	input.Trusted = &doc
 	return c.sessions.Observe(input.Observed)
+}
+
+// learnBluetoothAddresses stores the address of a built-in Bluetooth part
+// the first time it is read; it is readable only after the part is allowed.
+func (c *Controller) learnBluetoothAddresses(ctx context.Context, input *usbtrust.AuditInput) error {
+	if input.Trusted == nil {
+		return nil
+	}
+	doc, err := c.next(input.Trusted)
+	if err != nil {
+		return err
+	}
+	changed, err := usbtrust.LearnBluetoothAddresses(*input, &doc)
+	if err != nil || !changed {
+		return err
+	}
+	if err := doc.Validate(); err != nil {
+		return err
+	}
+	if err := c.commit(ctx, doc); err != nil {
+		return err
+	}
+	input.Trusted = &doc
+	return nil
+}
+
+// rememberBluetooth fills in addresses that cannot be read right now from
+// the last reading of the same connection, and forgets connections that
+// are gone.
+func (c *Controller) rememberBluetooth(observed []usbtrust.ObservedDevice) {
+	seen := make(map[string]string, len(c.bluetooth))
+	for i := range observed {
+		id := observed[i].RuntimeID
+		if observed[i].Identity.BluetoothAddress == "" {
+			observed[i].Identity.BluetoothAddress = c.bluetooth[id]
+		}
+		if address := observed[i].Identity.BluetoothAddress; address != "" {
+			seen[id] = address
+		}
+	}
+	c.bluetooth = seen
 }
 
 // arm signs the armed state. Automatic internal enrollment happens only the
@@ -347,6 +395,7 @@ func (c *Controller) snapshot(ctx context.Context) (input usbtrust.AuditInput, e
 	if err != nil {
 		return input, err
 	}
+	c.rememberBluetooth(input.Observed)
 	err = c.sessions.Observe(input.Observed)
 	return input, err
 }

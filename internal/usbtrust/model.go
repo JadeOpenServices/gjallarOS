@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 )
@@ -35,7 +36,14 @@ type Identity struct {
 	Interfaces  []string `json:"interfaces,omitempty"`
 	ConnectType string   `json:"connectType,omitempty"`
 	Port        string   `json:"port,omitempty"`
+	// BluetoothAddress is what a Bluetooth controller reports as its own
+	// address, read after it is allowed. It is not part of the USB
+	// identity match; ODDC asks for it as a second check (usbIdentity
+	// anchor "bluetooth-address").
+	BluetoothAddress string `json:"bluetoothAddress,omitempty"`
 }
+
+var bluetoothAddressPattern = regexp.MustCompile(`^[0-9A-F]{2}(:[0-9A-F]{2}){5}$`)
 
 type Attestation struct {
 	Type        string `json:"type"`
@@ -138,6 +146,10 @@ func (d Document) Validate() error {
 				device.ID,
 				device.Class,
 			)
+		}
+
+		if address := device.Identity.BluetoothAddress; address != "" && !bluetoothAddressPattern.MatchString(address) {
+			return fmt.Errorf("device %q has an invalid Bluetooth address", device.ID)
 		}
 
 		switch device.Strength {

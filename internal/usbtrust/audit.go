@@ -109,6 +109,9 @@ type Finding struct {
 	TrustedID string     `json:"trustedId,omitempty"`
 	RuntimeID string     `json:"runtimeId,omitempty"`
 	Message   string     `json:"message"`
+	// Anchor names the second check that failed, e.g. "bluetooth-address"
+	// when the USB identity matches but the Bluetooth address changed.
+	Anchor string `json:"anchor,omitempty"`
 }
 
 type AuditInput struct {
@@ -425,6 +428,10 @@ func auditPort(
 	case expected.Port.Debug:
 		finding.State, finding.Code = AuditBlock, CodeInternalDebug
 		finding.Message = "ODDC marks this built-in part as unsupported or not proven"
+	case hasTrusted && portIdentityMatches(trusted, device.Identity, expected.Port.Serial) &&
+		bluetoothAddressChanged(*expected.Port, trusted.Identity, device.Identity):
+		finding.State, finding.Code, finding.Anchor = AuditBlock, CodeInternalChanged, AnchorBluetoothAddress
+		finding.Message = "built-in Bluetooth part reports a different address than the one stored"
 	case hasTrusted && portIdentityMatches(trusted, device.Identity, expected.Port.Serial):
 		finding.State, finding.Code = AuditPass, CodeInternalMatch
 		finding.Message = "built-in USB part sits on its ODDC port and matches its stored identity"
@@ -453,6 +460,17 @@ func portIdentityMatches(
 	}
 
 	return identityMatchesTrusted(trusted, observed)
+}
+
+// bluetoothAddressChanged is true when ODDC asks for the Bluetooth address
+// check and both the stored and the live address are known and differ. An
+// address not read yet is no finding: it shows up only after the part is
+// allowed and its driver has started.
+func bluetoothAddressChanged(port ExpectedPort, trusted, observed Identity) bool {
+	return port.Anchor == AnchorBluetoothAddress &&
+		trusted.BluetoothAddress != "" &&
+		observed.BluetoothAddress != "" &&
+		trusted.BluetoothAddress != observed.BluetoothAddress
 }
 
 func onBuiltInPort(

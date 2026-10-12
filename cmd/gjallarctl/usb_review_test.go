@@ -77,6 +77,16 @@ func TestUSBReviewLabelsReplacementExplicitly(t *testing.T) {
 	}
 }
 
+func TestUSBReviewNamesBluetoothAddressCheck(t *testing.T) {
+	d := usbtrust.Decision{Reason: string(usbtrust.CodeInternalChanged), Role: "Bluetooth"}
+	without := usbReviewFacts(d)
+	d.Anchor = usbtrust.AnchorBluetoothAddress
+	with := usbReviewFacts(d)
+	if len(with) != len(without)+1 || !strings.Contains(with[1].text, "Bluetooth address differs") {
+		t.Fatalf("address check not named: %+v", with)
+	}
+}
+
 func TestUSBReviewIgnoresUnknownActions(t *testing.T) {
 	for _, actions := range [][]usbtrust.Action{
 		{"future-action"},

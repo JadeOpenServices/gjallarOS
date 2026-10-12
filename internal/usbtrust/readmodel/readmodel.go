@@ -40,6 +40,12 @@ type RootHubSource interface {
 	RootHubs(context.Context) ([]roothub.RootHub, error)
 }
 
+// BluetoothSource maps USB port paths to Bluetooth controller addresses.
+// It is best effort; see btaddr.Sysfs.
+type BluetoothSource interface {
+	Addresses(context.Context) map[string]string
+}
+
 type Reader struct {
 	Resolved     ResolvedSource
 	Observations ObservationSource
@@ -48,6 +54,8 @@ type Reader struct {
 	// usbPort are judged by their root port.
 	Devices  DevicesSource
 	RootHubs RootHubSource
+	// Bluetooth is optional and fills Identity.BluetoothAddress.
+	Bluetooth BluetoothSource
 }
 
 // Expected returns the USB expectations for this machine. Parts with a
@@ -98,6 +106,17 @@ func (r Reader) Observed(ctx context.Context) ([]usbtrust.ObservedDevice, error)
 			return nil, fmt.Errorf("read USB root hubs: %w", err)
 		}
 		roothub.AttachWiring(observed, hubs)
+	}
+
+	if r.Bluetooth != nil {
+		addresses := r.Bluetooth.Addresses(ctx)
+		for i := range observed {
+			port := observed[i].Identity.Port
+			if port == "" {
+				port = observed[i].RuntimeID
+			}
+			observed[i].Identity.BluetoothAddress = addresses[port]
+		}
 	}
 
 	return observed, nil

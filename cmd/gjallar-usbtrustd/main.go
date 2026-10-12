@@ -18,6 +18,7 @@ import (
 
 	"github.com/JadeOpenServices/gjallarOS/internal/usbtrust"
 	"github.com/JadeOpenServices/gjallarOS/internal/usbtrust/broker"
+	"github.com/JadeOpenServices/gjallarOS/internal/usbtrust/btaddr"
 	"github.com/JadeOpenServices/gjallarOS/internal/usbtrust/controller"
 	"github.com/JadeOpenServices/gjallarOS/internal/usbtrust/daemon"
 	"github.com/JadeOpenServices/gjallarOS/internal/usbtrust/mediagate"
@@ -429,6 +430,7 @@ func buildReader(
 	if cfg.devicesFile != "" {
 		reader.Devices = readmodel.DevicesFile{Path: cfg.devicesFile, Model: cfg.oddcModel}
 		reader.RootHubs = roothub.Sysfs("/sys")
+		reader.Bluetooth = btaddr.Sysfs{Root: "/sys"}
 	}
 	return reader, nil
 }

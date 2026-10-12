@@ -50,6 +50,29 @@ func TestChangedInterfaceInvalidatesReviewAndTransientTrust(t *testing.T) {
 	}
 }
 
+func TestBluetoothAddressKeepsConnectionChoice(t *testing.T) {
+	// SYNTHETIC: a dongle allowed once; its address shows up once the
+	// Bluetooth driver binds to it.
+	d := ObservedDevice{RuntimeID: "7", Identity: syntheticDock().Identity}
+	s := &Sessions{}
+	_ = s.Observe([]ObservedDevice{d})
+	before, _ := s.Derive(AuditInput{Observed: []ObservedDevice{d}})
+	if err := s.Choose("7", before[0].Connection, TargetAllow); err != nil {
+		t.Fatal(err)
+	}
+	d.Identity.BluetoothAddress = "02:11:22:33:44:55"
+	if err := s.Observe([]ObservedDevice{d}); err != nil {
+		t.Fatal(err)
+	}
+	after, err := s.Derive(AuditInput{Observed: []ObservedDevice{d}})
+	if err != nil || after[0].Target != TargetAllow || after[0].Connection != before[0].Connection {
+		t.Fatalf("allow-once lost when the address appeared: %+v %v", after, err)
+	}
+	if after[0].Identity.BluetoothAddress != "02:11:22:33:44:55" {
+		t.Fatal("decision dropped the address")
+	}
+}
+
 func TestDerivedPolicyNeverTrustsDockChildren(t *testing.T) {
 	dock := syntheticDock()
 	child := ObservedDevice{RuntimeID: "22", Identity: Identity{VIDPID: "2222:0001", Hash: "child", ParentHash: dock.Identity.Hash, Interfaces: []string{"03:01:01"}}}

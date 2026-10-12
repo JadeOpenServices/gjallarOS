@@ -450,6 +450,9 @@ func usbReviewFacts(d usbtrust.Decision) []usbFact {
 		add(usbUnknown, "Not yet confirmed as the built-in "+role)
 	case usbtrust.CodeInternalChanged:
 		add(usbBad, "Differs from the built-in "+role+" trusted before")
+		if d.Anchor == usbtrust.AnchorBluetoothAddress {
+			add(usbBad, "Its Bluetooth address differs from the stored one (this catches a swapped part, not a copied one)")
+		}
 	case usbtrust.CodeTrustedExternalChanged:
 		add(usbBad, "Claims to be a trusted device, but its details changed")
 	case usbtrust.CodeUnexpectedInternal:

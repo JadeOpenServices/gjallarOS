@@ -25,6 +25,7 @@ type Decision struct {
 	Reason     string        `json:"reason"`
 	Role       string        `json:"role,omitempty"`
 	TrustedID  string        `json:"trustedId,omitempty"`
+	Anchor     string        `json:"anchor,omitempty"` // extra check that failed
 	Risks      []RiskFinding `json:"risks"`
 	Actions    []Action      `json:"actions"`
 }
@@ -59,9 +60,7 @@ func (s *Sessions) Observe(observed []ObservedDevice) error {
 		if device.Identity.VIDPID == "" || device.Identity.Hash == "" {
 			return fmt.Errorf("USB observation %s has incomplete identity", device.RuntimeID)
 		}
-		identity := device.Identity
-		identity.Interfaces = append([]string(nil), identity.Interfaces...)
-		sort.Strings(identity.Interfaces)
+		identity := connectionIdentity(device.Identity)
 		previous, exists := s.connected[device.RuntimeID]
 		if !exists || !reflect.DeepEqual(previous.identity, identity) {
 			var token [16]byte
@@ -74,6 +73,16 @@ func (s *Sessions) Observe(observed []ObservedDevice) error {
 	}
 	s.connected = next
 	return nil
+}
+
+// connectionIdentity is what makes a connection the same one. The
+// Bluetooth address is left out: it is read only once a part is allowed,
+// and its appearing must not undo that choice.
+func connectionIdentity(identity Identity) Identity {
+	identity.Interfaces = append([]string(nil), identity.Interfaces...)
+	sort.Strings(identity.Interfaces)
+	identity.BluetoothAddress = ""
+	return identity
 }
 
 func (s *Sessions) Check(runtimeID, token string) error {
@@ -111,10 +120,7 @@ func (s *Sessions) Derive(input AuditInput) ([]Decision, error) {
 		if !ok {
 			return nil, fmt.Errorf("USB observation has no current session")
 		}
-		identity := device.Identity
-		identity.Interfaces = append([]string(nil), identity.Interfaces...)
-		sort.Strings(identity.Interfaces)
-		if !reflect.DeepEqual(current.identity, identity) {
+		if !reflect.DeepEqual(current.identity, connectionIdentity(device.Identity)) {
 			return nil, fmt.Errorf("USB policy observation differs from current session")
 		}
 		risks, err := AssessIdentityRisk(device.Identity)
@@ -129,7 +135,7 @@ func (s *Sessions) Derive(input AuditInput) ([]Decision, error) {
 			if finding.RuntimeID != device.RuntimeID {
 				continue
 			}
-			d.Reason, d.Role, d.TrustedID = string(finding.Code), finding.Role, finding.TrustedID
+			d.Reason, d.Role, d.TrustedID, d.Anchor = string(finding.Code), finding.Role, finding.TrustedID, finding.Anchor
 			if finding.State == AuditPass {
 				d.Target = TargetAllow
 			}
