@@ -188,7 +188,7 @@ func diskProtectionTexts(state string, r luksRecord) diskProtectionText {
 	case diskProtectionRecoveryKey:
 		return diskProtectionText{
 			summary: "No recovery key",
-			body:    "Without a recovery key, a forgotten passphrase loses your files.",
+			body:    "Forget your passphrase and your files are lost.",
 			risk:    "a forgotten passphrase means your files are lost",
 			command: []string{"luks", "recovery-key"},
 		}
@@ -204,9 +204,11 @@ func diskProtectionTexts(state string, r luksRecord) diskProtectionText {
 
 // runLUKSRemind is the login reminder (user unit disk-protection-reminder).
 // It writes the state for the bar widget and, until protection is done,
-// shows a card with Set up now, Later and, on standalone installs, Don't
-// ask again. --open runs the setup right away (the bar widget's click);
-// --refresh only updates the state (after a keyslot change).
+// shows a card with Set up, Later and, on standalone installs, Don't ask.
+// The labels stay short: Noctalia puts a button that does not fit onto its
+// own full-width row, where it looks like the main choice. --open runs the
+// setup right away (the bar widget's click); --refresh only updates the
+// state (after a keyslot change).
 func runLUKSRemind(args []string, stderr io.Writer) int {
 	mode := ""
 	if len(args) > 1 || len(args) == 1 && args[0] != "--open" && args[0] != "--refresh" {
@@ -251,11 +253,11 @@ func runLUKSRemind(args []string, stderr io.Writer) int {
 	}
 	actions := []noticeAction{}
 	if text.command != nil {
-		actions = append(actions, noticeAction{"open", "Set up now"})
+		actions = append(actions, noticeAction{"open", "Set up"})
 	}
 	actions = append(actions, noticeAction{"later", "Later"})
 	if os.Getenv("GJALLAR_MANAGED_DEVICE") != "1" {
-		actions = append(actions, noticeAction{"never", "Don't ask again"})
+		actions = append(actions, noticeAction{"never", "Don't ask"})
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

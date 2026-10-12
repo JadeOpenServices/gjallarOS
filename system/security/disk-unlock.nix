@@ -70,8 +70,8 @@ in
     };
   };
 
-  # Until the disk is protected: a card at every login (Set up now, Later,
-  # Don't ask again on standalone installs) and a shield in the bar
+  # Until the disk is protected: a card at every login (Set up, Later,
+  # Don't ask on standalone installs) and a shield in the bar
   # (user/wm/shells/noctalia/plugins/disk-protection).
   config.home-manager.users.${settings.username} = {
     systemd.user.services.disk-protection-reminder = {
