@@ -333,3 +333,93 @@ Sources:
   https://doc.qubes-os.org/en/latest/project-security/verifying-signatures.html
 - The Update Framework, attacks and weaknesses:
   https://theupdateframework.io/docs/security/
+
+## 12. Secure Boot on installed systems
+
+Plan written 2026-10-12. Today only the installer sets up Secure Boot. An
+installed system without it (the ZBook x2 G4, installed before its ODDC
+setup existed) can only get it by running the whole installer again.
+
+- [ ] **`sudo gjallarctl secure-boot setup`.** Does what the installer does,
+      in the same order, from the installed system:
+      1. Resolve the device and its ODDC Secure Boot setup the way the
+         installer does. No setup for this model: stop and point to §8.
+      2. Read the firmware state. Factory keys with Secure Boot off is the
+         start. A pending or finished GjallarOS enrollment resumes where it
+         stopped. Setup Mode without our record, someone else's keys, or a
+         mixed state: stop and say what to do (for HP: restore the factory
+         keys in firmware setup, then run the command again).
+      3. Show the plan, create the keys, show the recovery archive and
+         passphrase, ask twice that they are stored.
+      4. Set `secureBootEnable` in `user.config.json` and rebuild, so the
+         next boot loads signed images through lanzaboote.
+      5. `sbctl verify`, save the firmware setup, arm the enrollment, show
+         the firmware steps and reboot into firmware setup.
+      The boot services that exist for the installer then enroll the keys,
+      ask to turn on Secure Boot and verify it. The installer and this
+      command call the same code for steps 2, 3 and 5; nothing is copied.
+      zsh completion like every other command.
+- [ ] **Restore dbx before enrolling.** HP's "Clear Secure Boot Keys" also
+      empties dbx, the list of revoked boot files. Without it, Secure Boot
+      starts boot loaders that are known to be exploitable. Rule: in Setup
+      Mode, when the ODDC setup wants dbx present, dbx is empty and the
+      firmware has a default dbx (dbxDefault), write dbxDefault to dbx,
+      signed with our KEK, read it back and compare, then enroll. Any
+      mismatch stops before the PK is written. sbctl cannot write dbx since
+      0.13, so this uses efitools (`sign-efi-sig-list`, `efi-updatevar`),
+      as the Arch wiki describes. Ask ODDC for a structured field instead
+      of matching on the instruction text.
+- [ ] **Microsoft KEK 2023.** Microsoft's KEK CA 2011 expired in June
+      2026. New dbx updates are signed with KEK 2K CA 2023. A KEK update
+      has to be signed by the PK, and after enrollment the PK is ours, so
+      neither Microsoft nor HP can add it later. When the ODDC setup keeps
+      the firmware KEKs, enroll KEK 2K CA 2023 as well, through sbctl's
+      custom KEK folder (`-c`). The certificate is pinned by hash. db stays
+      as the firmware had it (no `-m`), so nothing new is trusted to boot.
+      Ask ODDC whether the ZBook's KEKDefault already has it.
+- [ ] **dbx updates after enrollment.** The fwupd refresh timer is off, so
+      no dbx update arrives on its own. After Secure Boot is verified, the
+      command offers a dbx update through fwupd (2.0.8 or newer handles
+      the 2023 KEK). dbx is measured into PCR 7, which TPM disk unlock is
+      bound to, so before the reboot the Secure Boot policy is locked again
+      and the TPM policy predicted for the new dbx. Otherwise the next boot
+      asks for the recovery key.
+- [ ] **Kernel lockdown (job 25.5, decision needed).** With Secure Boot on,
+      root can still reach the firmware and the running kernel: /dev/mem,
+      MSR writes, unsigned kexec, unsigned kernel modules. Fedora and Arch
+      turn on lockdown with Secure Boot for this. The NixOS kernel we use
+      (`linuxPackages_latest`) is built without the lockdown LSM and without
+      module signing, so `lockdown=integrity` alone does nothing. It needs:
+      - our own kernel config (lockdown LSM, module signing, enforced
+        signatures), so the kernel and its modules always build locally,
+        never from cache.nixos.org;
+      - a module signing key: a throwaway key per build as Fedora and Arch
+        do, plus a kept key for out-of-tree modules like the NVIDIA driver;
+      - giving up hibernation, which lockdown blocks.
+      Jade decides whether that trade is worth it before anything is built.
+
+Sources:
+
+- sbctl manual (enroll-keys, custom KEK and db):
+  https://man.archlinux.org/man/sbctl.8.raw
+- sbctl 0.13 dropped dbx enrollment:
+  https://src.opensuse.org/utilities/sbctl/src/branch/main/sbctl.changes
+- Lanzaboote quick start:
+  https://github.com/nix-community/lanzaboote/blob/999c0cb03f748fe311bca78961dbf0562dc91659/docs/QUICK_START.md
+- Arch wiki, Secure Boot (efitools, dbx):
+  https://wiki.archlinux.org/title/Unified_Extensible_Firmware_Interface/Secure_Boot
+- Microsoft certificates expiring in 2026:
+  https://eclypsium.com/blog/microsoft-secure-boot-certificates-expire-2026/
+- AlmaLinux, 2023 certificates:
+  https://wiki.almalinux.org/documentation/secure-boot-2023-certificates.html
+- Rocky Linux, CA and KEK transition:
+  https://rockylinux.org/news/2026-06-02-secure-boot-ca-kek-transition
+- Google Cloud, Microsoft Secure Boot certificate update:
+  https://docs.cloud.google.com/compute/docs/security/ms-secure-boot-certificates-update
+- fwupd, db and KEK updates:
+  https://github.com/fwupd/fwupd/issues/9191
+- Lockdown on NixOS:
+  https://git.afnix.fr/raito/lanzaboote/issues/88
+  https://discourse.nixos.org/t/how-to-enable-secureboot/28820/10
+- Lockdown and hibernation:
+  https://lkml.iu.edu/hypermail/linux/kernel/1908.2/02835.html
