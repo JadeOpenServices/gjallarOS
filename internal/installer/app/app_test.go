@@ -13,7 +13,6 @@ import (
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/discovery"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/geolocation"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/prompt"
-	"github.com/JadeOpenServices/gjallarOS/internal/installer/secureboot"
 )
 
 func TestRequireNixOS(t *testing.T) {
@@ -118,16 +117,6 @@ func TestExistingInstallRejectsUnmarkedGeneratedState(t *testing.T) {
 func TestExistingInstallMissingGeneratedStateIsNew(t *testing.T) {
 	if existingInstall(t.TempDir()) {
 		t.Fatal("missing generated/state.nix detected as an existing GjallarOS install")
-	}
-}
-
-func TestCompletedSecureBootDoesNotRebootFirmware(t *testing.T) {
-	if secureBootNeedsFirmwareReboot(secureboot.ContinuationNone) {
-		t.Fatal("completed Secure Boot transaction requested a firmware reboot")
-	}
-	if !secureBootNeedsFirmwareReboot(secureboot.ContinuationEnroll) ||
-		!secureBootNeedsFirmwareReboot(secureboot.ContinuationEnable) {
-		t.Fatal("incomplete Secure Boot transaction did not request its firmware handoff")
 	}
 }
 

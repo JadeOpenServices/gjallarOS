@@ -1035,56 +1035,8 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 		}
 	}
 	if s.render.SecureBootEnable {
-		inspection, err := secureboot.Inspect(ctx)
-		if err != nil {
-			return fail(errOut, fmt.Errorf("inspect existing Secure Boot ownership: %w", err))
-		}
-		fmt.Fprintf(out, "Secure Boot state: %s -- %s\n", inspection.State, inspection.Description)
-
-		switch inspection.State {
-		case secureboot.StateGjallarManaged:
-			fmt.Fprintln(out, "Existing GjallarOS Secure Boot ownership detected; reusing the current PK/KEK/db key set.")
-			if !inspection.Recorded {
-				if err := secureboot.RecordOwnership(ctx, "enrolled"); err != nil {
-					return fail(errOut, err)
-				}
-				fmt.Fprintln(out, "Recorded legacy GjallarOS/sbctl Secure Boot ownership without rotating keys.")
-			}
-
-		case secureboot.StatePendingEnrollment:
-			fmt.Fprintln(out, "Existing GjallarOS Secure Boot provisioning is pending; reusing the prepared key set.")
-
-		case secureboot.StateOEMFactoryDerived:
-			if inspection.SecureBoot {
-				return fail(errOut, errors.New("factory Secure Boot is currently enforced; disable Secure Boot before transferring ownership to GjallarOS"))
-			}
-
-			fmt.Fprintln(out, "OEM/factory-derived Secure Boot root detected; preparing machine-specific GjallarOS ownership.")
-
-			// Provision() creates a root-only temporary recovery
-			// checkpoint so an interrupted installer can resume with the
-			// same recovery archive/passphrase.
-			recovery, err := secureboot.Provision(ctx)
-			if err != nil {
-				return fail(errOut, err)
-			}
-			recovery.Passphrase = ""
-
-			if err := secureboot.RecordOwnership(ctx, "pending-enrollment"); err != nil {
-				return fail(errOut, err)
-			}
-
-		case secureboot.StateSetupModeUnknown:
-			return fail(errOut, errors.New("firmware is already in Secure Boot Setup Mode but GjallarOS cannot prove that it initiated the transition; refusing automatic enrollment"))
-
-		case secureboot.StateForeignManaged:
-			return fail(errOut, errors.New("an existing non-GjallarOS Secure Boot owner configuration was detected; refusing to replace it automatically"))
-
-		case secureboot.StateInconsistent:
-			return fail(errOut, errors.New("GjallarOS Secure Boot ownership metadata does not match the current key material; refusing to continue"))
-
-		default:
-			return fail(errOut, fmt.Errorf("unsupported Secure Boot ownership state %q", inspection.State))
+		if err := secureboot.Prepare(ctx, out); err != nil {
+			return fail(errOut, err)
 		}
 	}
 	hostOverlayToCommit, err := hostOverlayForCommit(
@@ -1422,197 +1374,21 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 	// -no-rebuild means "do not install another NixOS generation"; it must
 	// never mean "skip an already-started Secure Boot transaction".
 	if s.render.SecureBootEnable {
-		inspection, err := secureboot.Inspect(ctx)
-		if err != nil {
-			return fail(
-				errOut,
-				fmt.Errorf(
-					"inspect Secure Boot state before continuation: %w",
-					err,
-				),
-			)
-		}
-
-		needsRecoveryGate :=
-			inspection.State == secureboot.StateOEMFactoryDerived ||
-				inspection.State == secureboot.StatePendingEnrollment ||
-				inspection.State == secureboot.StateGjallarManaged
-
-		if needsRecoveryGate {
-			confirmed, err := secureboot.RecoveryConfirmed(ctx)
-			if err != nil {
-				return fail(errOut, err)
-			}
-
-			if confirmed {
-				fmt.Fprintln(
-					out,
-					"Secure Boot recovery material was already confirmed saved; resuming provisioning.",
-				)
-			} else {
-				recovery, err := secureboot.Provision(ctx)
-				if err != nil {
-					return fail(
-						errOut,
-						fmt.Errorf(
-							"prepare Secure Boot recovery material: %w",
-							err,
-						),
-					)
-				}
-
-				for {
-					if err := ui.ShowSecureBootRecovery(
-						ctx,
-						recovery.ArchivePath,
-						recovery.Passphrase,
-					); err != nil {
-						recovery.Passphrase = ""
-						return fail(
-							errOut,
-							fmt.Errorf(
-								"display Secure Boot recovery material: %w",
-								err,
-							),
-						)
-					}
-
-					saved, err := ui.Confirm(
-						ctx,
-						"Have you saved BOTH the Secure Boot recovery archive and passphrase?",
-						false,
-					)
-					if err != nil {
-						recovery.Passphrase = ""
-						return fail(errOut, err)
-					}
-
-					if !saved {
-						fmt.Fprintln(
-							out,
-							"Recovery material not confirmed saved; showing it again.",
-						)
-						continue
-					}
-
-					savedAgain, err := ui.Confirm(
-						ctx,
-						"Are you absolutely sure the Secure Boot recovery material is saved offline?",
-						false,
-					)
-					if err != nil {
-						recovery.Passphrase = ""
-						return fail(errOut, err)
-					}
-
-					if !savedAgain {
-						fmt.Fprintln(
-							out,
-							"Second confirmation declined; showing the recovery material again.",
-						)
-						continue
-					}
-
-					break
-				}
-
-				recovery.Passphrase = ""
-
-				if err := secureboot.MarkRecoveryConfirmed(ctx); err != nil {
-					return fail(errOut, err)
-				}
-
-				fmt.Fprintln(
-					out,
-					"Secure Boot recovery checkpoint completed; future interrupted runs resume after this gate.",
-				)
-			}
-		}
-
-		firmwarePolicy, err := secureboot.SnapshotFirmwarePolicy(
+		next, err := secureboot.Continue(
+			ctx,
+			ui,
+			out,
 			resolvedDevice.ModelID,
 			s.secureBootFirmware,
-		)
-		if err != nil {
-			return fail(
-				errOut,
-				fmt.Errorf(
-					"prepare detected Secure Boot firmware policy: %w",
-					err,
-				),
-			)
-		}
-
-		next, err := secureboot.VerifyAndArmEnrollment(
-			ctx,
-			firmwarePolicy,
+			s.user.FirmwarePasswordLock,
 		)
 		if err != nil {
 			return fail(errOut, err)
 		}
 
-		switch next {
-		case secureboot.ContinuationNone:
-			fmt.Fprintln(
-				out,
-				"Secure Boot is active and the GjallarOS boot chain is verified.",
-			)
-			// Secure Boot is one installer stage, not the definition of
-			// installation completion. Continue into the normal final
-			// completion path below.
-
-		case secureboot.ContinuationEnable:
-			fmt.Fprintln(
-				out,
-				"GjallarOS Secure Boot ownership is already enrolled.",
-			)
-			fmt.Fprintln(
-				out,
-				"Only Secure Boot enforcement still needs to be enabled in firmware.",
-			)
-
-			if err := ui.SecureBootEnableHandoff(
-				ctx,
-				firmwarePolicy.FirmwareName,
-				secureboot.FirmwareLockSteps(s.user.FirmwarePasswordLock),
-			); err != nil {
-				return fail(
-					errOut,
-					fmt.Errorf("Secure Boot enable handoff: %w", err),
-				)
-			}
-
-		case secureboot.ContinuationEnroll:
-			fmt.Fprintln(
-				out,
-				"Secure Boot ownership transfer armed and boot artifacts verified.",
-			)
-
-			if err := ui.SecureBootFirmwareHandoff(
-				ctx,
-				firmwarePolicy.FirmwareName,
-				firmwarePolicy.Instructions,
-				secureboot.FirmwareLockSteps(s.user.FirmwarePasswordLock),
-			); err != nil {
-				return fail(
-					errOut,
-					fmt.Errorf("Secure Boot firmware handoff: %w", err),
-				)
-			}
-
-		default:
-			return fail(
-				errOut,
-				fmt.Errorf(
-					"unknown Secure Boot continuation state %q",
-					next,
-				),
-			)
-		}
-
 		// A completed Secure Boot transaction needs no marker, firmware
 		// handoff, or reboot. This is especially important on installer reruns.
-		if secureBootNeedsFirmwareReboot(next) {
+		if secureboot.NeedsFirmwareReboot(next) {
 			if err := attached(
 				ctx,
 				"sudo", "install",
@@ -3244,9 +3020,6 @@ func freshPasswordFiles(r nixrender.Settings) []string {
 	return files
 }
 
-func secureBootNeedsFirmwareReboot(next secureboot.Continuation) bool {
-	return next == secureboot.ContinuationEnroll || next == secureboot.ContinuationEnable
-}
 func requireNixOS(path string) error {
 	data, err := os.ReadFile(path)
 	if err != nil {

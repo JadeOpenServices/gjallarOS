@@ -134,6 +134,7 @@ _gjallarctl() {
     'vpn:VPN and trusted Wi-Fi'
     'tpm2:TPM2 disk unlock'
     'luks:system disk unlock methods and recovery key'
+    'secure-boot:Secure Boot with GjallarOS keys'
     'oddc:ODDC hardware catalogue'
     'fan:fan control'
     'thermal-status:show temperatures and fan state'
@@ -159,6 +160,9 @@ _gjallarctl() {
         helpme) _arguments '--text[print instead of opening a window]' ;;
         tpm2) _arguments '1:tpm2 command:((reenroll\:"enroll the TPM2 key again"))' ;;
         luks) _arguments '1:luks command:((status\:"show how the system disk unlocks" recovery-key\:"create a new recovery key" setup\:"add a recovery key and remove the install passphrase"))' ;;
+        secure-boot)
+          _arguments '1:secure-boot command:((status\:"show Secure Boot ownership" setup\:"set up Secure Boot on this installed system"))' \
+            '--repo[GjallarOS checkout]:checkout:_files -/' ;;
         fan) _arguments '1:fan command:(status list reconcile)' ;;
         cleanup) _arguments '(-k --keep)'{-k,--keep}'[generations to keep]:count:' ;;
         thermal-test) _arguments '1:mode:(off on status)' '2:process pattern:_process_names' ;;
