@@ -22,7 +22,7 @@ import (
 	"github.com/JadeOpenServices/gjallarOS/internal/usbtrust/daemon"
 	"github.com/JadeOpenServices/gjallarOS/internal/usbtrust/mediagate"
 	"github.com/JadeOpenServices/gjallarOS/internal/usbtrust/readmodel"
-	"github.com/JadeOpenServices/gjallarOS/internal/usbtrust/sysfssource"
+	"github.com/JadeOpenServices/gjallarOS/internal/usbtrust/roothub"
 	"github.com/JadeOpenServices/gjallarOS/internal/usbtrust/usbguardsource"
 )
 
@@ -428,7 +428,7 @@ func buildReader(
 	}
 	if cfg.devicesFile != "" {
 		reader.Devices = readmodel.DevicesFile{Path: cfg.devicesFile, Model: cfg.oddcModel}
-		reader.RootHubs = sysfssource.Sysfs("/sys")
+		reader.RootHubs = roothub.Sysfs("/sys")
 	}
 	return reader, nil
 }

@@ -1,4 +1,7 @@
-package sysfssource
+// Package roothub names the USB root port behind each device from sysfs.
+// It has no dependency on the hardware probe, so the USB trust broker can
+// use it without building the installer's device scanner.
+package roothub
 
 import (
 	"context"
@@ -23,6 +26,8 @@ type RootHub struct {
 	// Hub is "usb2" or "usb3", empty for other root hub versions.
 	Hub string
 }
+
+var rootHubPath = regexp.MustCompile(`^usb[0-9]+$`)
 
 var rootPortPath = regexp.MustCompile(`^([0-9]+)-([0-9]+)$`)
 

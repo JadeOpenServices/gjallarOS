@@ -10,7 +10,7 @@ import (
 	"github.com/JadeOpenServices/gjallarOS/internal/usbtrust/broker"
 	"github.com/JadeOpenServices/gjallarOS/internal/usbtrust/oddcsource"
 	"github.com/JadeOpenServices/gjallarOS/internal/usbtrust/readmodel"
-	"github.com/JadeOpenServices/gjallarOS/internal/usbtrust/sysfssource"
+	"github.com/JadeOpenServices/gjallarOS/internal/usbtrust/roothub"
 )
 
 type sources struct {
@@ -287,9 +287,9 @@ func (p portDevices) Devices(context.Context) (oddcsource.Devices, error) {
 
 type oneHub struct{}
 
-func (oneHub) RootHubs(context.Context) ([]sysfssource.RootHub, error) {
+func (oneHub) RootHubs(context.Context) ([]roothub.RootHub, error) {
 	// SYNTHETIC: one USB 2 root hub on bus 1.
-	return []sysfssource.RootHub{{Bus: "1", Controller: "8086:9d2f", Hub: "usb2"}}, nil
+	return []roothub.RootHub{{Bus: "1", Controller: "8086:9d2f", Hub: "usb2"}}, nil
 }
 
 func TestReconcileStoresPortMatchOnceStoreIsReady(t *testing.T) {

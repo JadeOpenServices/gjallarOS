@@ -7,7 +7,7 @@ import (
 	"github.com/JadeOpenServices/gjallarOS/internal/usbtrust"
 	"github.com/JadeOpenServices/gjallarOS/internal/usbtrust/broker"
 	"github.com/JadeOpenServices/gjallarOS/internal/usbtrust/oddcsource"
-	"github.com/JadeOpenServices/gjallarOS/internal/usbtrust/sysfssource"
+	"github.com/JadeOpenServices/gjallarOS/internal/usbtrust/roothub"
 )
 
 // ResolvedSource returns the already-resolved ODDC machine view.
@@ -37,7 +37,7 @@ type TrustSource interface {
 // RootHubSource names the USB root hubs, so observations can carry the
 // root port they sit on.
 type RootHubSource interface {
-	RootHubs(context.Context) ([]sysfssource.RootHub, error)
+	RootHubs(context.Context) ([]roothub.RootHub, error)
 }
 
 type Reader struct {
@@ -97,7 +97,7 @@ func (r Reader) Observed(ctx context.Context) ([]usbtrust.ObservedDevice, error)
 		if err != nil {
 			return nil, fmt.Errorf("read USB root hubs: %w", err)
 		}
-		sysfssource.AttachWiring(observed, hubs)
+		roothub.AttachWiring(observed, hubs)
 	}
 
 	return observed, nil
