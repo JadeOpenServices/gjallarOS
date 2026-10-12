@@ -1,0 +1,148 @@
+--- a/src/apprt/gtk/cgroup.zig
++++ b/src/apprt/gtk/cgroup.zig
+@@ -8,6 +8,7 @@
+ const glib = @import("glib");
+ 
+ const internal_os = @import("../../os/main.zig");
++const ApprtApp = @import("App.zig");
+ 
+ const log = std.log.scoped(.gtk_systemd_cgroup);
+ 
+@@ -16,24 +17,71 @@
+     tasks_max: ?u64 = null,
+ };
+ 
+-pub fn fmtScope(buf: []u8, pid: u32) [:0]const u8 {
+-    const fmt = "app-ghostty-surface-transient-{}.scope";
++/// The application ID GTK registered, which follows the `class` config.
++pub fn appId() [:0]const u8 {
++    const app = gio.Application.getDefault() orelse return ApprtApp.application_id;
++    const id = app.getApplicationId() orelse return ApprtApp.application_id;
++    return std.mem.span(id);
++}
++
++/// Format the scope name as app-<launcher>-<ApplicationID>-<RANDOM>.scope
++/// (https://systemd.io/DESKTOP_ENVIRONMENTS/), so that xdg-desktop-portal
++/// and others can tell which application a process belongs to. Dashes in
++/// the application ID are escaped as \x2d, like systemd-escape does.
++pub fn fmtScope(buf: []u8, app_id: []const u8, pid: u32) [:0]const u8 {
++    return fmtScopeId(buf, app_id, pid) catch
++        fmtScopeId(buf, "com.mitchellh.ghostty", pid) catch unreachable;
++}
+ 
+-    assert(buf.len >= fmt.len - 2 + std.math.log10_int(@as(usize, std.math.maxInt(@TypeOf(pid)))) + 1);
++fn fmtScopeId(buf: []u8, app_id: []const u8, pid: u32) error{NoSpaceLeft}![:0]const u8 {
++    const prefix = "app-ghostty-";
++    if (buf.len < prefix.len) return error.NoSpaceLeft;
++    @memcpy(buf[0..prefix.len], prefix);
++    var i: usize = prefix.len;
++
++    for (app_id) |c| {
++        if (c == '-') {
++            if (buf.len - i < 4) return error.NoSpaceLeft;
++            @memcpy(buf[i..][0..4], "\\x2d");
++            i += 4;
++        } else {
++            if (buf.len - i < 1) return error.NoSpaceLeft;
++            buf[i] = c;
++            i += 1;
++        }
++    }
++
++    const tail = try std.fmt.bufPrintZ(buf[i..], "-{}.scope", .{pid});
++    return buf[0 .. i + tail.len :0];
++}
+ 
+-    return std.fmt.bufPrintZ(buf, fmt, .{pid}) catch unreachable;
++test fmtScope {
++    var buf: [256]u8 = undefined;
++    try std.testing.expectEqualStrings(
++        "app-ghostty-com.mitchellh.ghostty-42.scope",
++        fmtScope(&buf, "com.mitchellh.ghostty", 42),
++    );
++    try std.testing.expectEqualStrings(
++        "app-ghostty-com.mitchellh.ghostty\\x2ddebug-42.scope",
++        fmtScope(&buf, "com.mitchellh.ghostty-debug", 42),
++    );
++    try std.testing.expectEqualStrings(
++        "app-ghostty-com.mitchellh.ghostty-42.scope",
++        fmtScope(&buf, "a" ** 250, 42),
++    );
+ }
+ 
+ /// Create a transient systemd scope unit for the given process and
+ /// move the process into it.
+ pub fn createScope(
+     dbus: *gio.DBusConnection,
++    app_id: []const u8,
+     pid: u32,
+     options: Options,
+ ) error{DbusCallFailed}!void {
+     // The unit name needs to be unique. We use the PID for this.
+     var name_buf: [256]u8 = undefined;
+-    const name = fmtScope(&name_buf, pid);
++    const name = fmtScope(&name_buf, app_id, pid);
+ 
+     const builder_type = glib.VariantType.new("(ssa(sv)a(sa(sv)))");
+     defer glib.free(builder_type);
+--- a/src/apprt/gtk/post_fork.zig
++++ b/src/apprt/gtk/post_fork.zig
+@@ -16,6 +16,7 @@
+     gtk_single_instance: configpkg.Config.GtkSingleInstance,
+     linux_cgroup: configpkg.Config.LinuxCgroup,
+     linux_cgroup_hard_fail: bool,
++    app_id: [:0]const u8,
+     linux_cgroup_memory_limit: ?u64,
+     linux_cgroup_processes_limit: ?u64,
+ 
+@@ -24,6 +25,7 @@
+             .gtk_single_instance = cfg.@"gtk-single-instance",
+             .linux_cgroup = cfg.@"linux-cgroup",
+             .linux_cgroup_hard_fail = cfg.@"linux-cgroup-hard-fail",
++            .app_id = cgroup.appId(),
+             .linux_cgroup_memory_limit = cfg.@"linux-cgroup-memory-limit",
+             .linux_cgroup_processes_limit = cfg.@"linux-cgroup-processes-limit",
+         };
+@@ -55,7 +57,7 @@
+     });
+ 
+     var expected_cgroup_buf: [256]u8 = undefined;
+-    const expected_cgroup = cgroup.fmtScope(&expected_cgroup_buf, pid);
++    const expected_cgroup = cgroup.fmtScope(&expected_cgroup_buf, cmd.rt_post_fork_info.app_id, pid);
+ 
+     log.debug("beginning transition to transient systemd scope {s}", .{expected_cgroup});
+ 
+@@ -71,6 +73,7 @@
+ 
+     cgroup.createScope(
+         dbus,
++        cmd.rt_post_fork_info.app_id,
+         pid,
+         .{
+             .memory_high = cmd.rt_post_fork_info.linux_cgroup_memory_limit,
+--- a/src/apprt/gtk/pre_exec.zig
++++ b/src/apprt/gtk/pre_exec.zig
+@@ -12,12 +12,14 @@
+     gtk_single_instance: configpkg.Config.GtkSingleInstance,
+     linux_cgroup: configpkg.Config.LinuxCgroup,
+     linux_cgroup_hard_fail: bool,
++    app_id: [:0]const u8,
+ 
+     pub fn init(cfg: *const configpkg.Config) PreExecInfo {
+         return .{
+             .gtk_single_instance = cfg.@"gtk-single-instance",
+             .linux_cgroup = cfg.@"linux-cgroup",
+             .linux_cgroup_hard_fail = cfg.@"linux-cgroup-hard-fail",
++            .app_id = cgroup.appId(),
+         };
+     }
+ };
+@@ -45,7 +47,7 @@
+     const pid: u32 = @intCast(std.os.linux.getpid());
+ 
+     var expected_cgroup_buf: [256]u8 = undefined;
+-    const expected_cgroup = cgroup.fmtScope(&expected_cgroup_buf, pid);
++    const expected_cgroup = cgroup.fmtScope(&expected_cgroup_buf, cmd.rt_pre_exec_info.app_id, pid);
+ 
+     const start = std.time.Instant.now() catch unreachable;
+ 
