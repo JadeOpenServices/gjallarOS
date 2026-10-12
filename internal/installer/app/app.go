@@ -10,7 +10,6 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"os/user"
 	"path/filepath"
 	"runtime"
 	"slices"
@@ -1700,33 +1699,15 @@ func containsValue(values []string, want string) bool {
 
 // partitionable is false for an in-place install on an unencrypted root,
 // which recovery partitioning cannot resize.
-// defaultUsername suggests the account that owns the configuration checkout.
-// The installer runs as root (recovery, or sudo on a rerun), so the running
-// account is never the desktop account. Live media keep the repository as
-// root or as the live user, which suggest nothing.
-func defaultUsername(root string) string {
-	uid, _, err := checkoutowner.Owner(root)
-	if err != nil || uid == 0 {
-		return "user"
-	}
-	account, err := user.LookupId(strconv.Itoa(uid))
-	if err != nil || account.Username == "nixos" {
-		return "user"
-	}
-	return account.Username
-}
-
+//
+// Personal values (account, name, email) are never filled in from this
+// machine or the checkout; the prompts show made-up examples instead.
 func collectInteractive(ctx context.Context, ui prompt.UI, root string, partitionable, modelSelected, tpm2 bool, managedBlocker string, hardware discovery.Hardware, o discovery.Options, u *config.User) error {
 	var err error
-	host, _ := os.Hostname()
-	if host == "" || host == "nixos" {
-		host = "gjallarOS"
-	}
-	username := defaultUsername(root)
-	if u.Hostname, err = ui.Value(ctx, "Hostname", host); err != nil {
+	if u.Hostname, err = ui.Value(ctx, "Hostname", "gjallarOS"); err != nil {
 		return err
 	}
-	if u.Username, err = ui.Value(ctx, "Username", username); err != nil {
+	if u.Username, err = ui.Example(ctx, "Username", "alex", true); err != nil {
 		return err
 	}
 	if err := collectJODSManagement(ctx, ui, managedBlocker, u); err != nil {
@@ -1808,15 +1789,15 @@ func collectInteractive(ctx context.Context, ui prompt.UI, root string, partitio
 	if err := collectUSBTrust(ctx, ui, modelSelected, partitionable, tpm2, u); err != nil {
 		return err
 	}
-	u.Name, err = ui.Value(ctx, "Full name", u.Username)
+	u.Name, err = ui.Example(ctx, "Full name", "Alex Example", true)
 	if err != nil {
 		return err
 	}
-	u.Email, err = ui.Value(ctx, "Git email", u.Username+"@example.com")
+	u.Email, err = ui.Example(ctx, "Git email", "alex@example.com", true)
 	if err != nil {
 		return err
 	}
-	u.GitHubUsername, err = ui.Value(ctx, "GitHub username", "")
+	u.GitHubUsername, err = ui.Example(ctx, "GitHub username", "alex-example", false)
 	if err != nil {
 		return err
 	}

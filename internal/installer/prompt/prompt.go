@@ -540,6 +540,40 @@ func (u UI) Value(ctx context.Context, label, def string) (string, error) {
 	return line, nil
 }
 
+// Example asks for a personal value with nothing filled in; example only
+// shows what an answer looks like. A required value is asked again until
+// one is given.
+func (u UI) Example(ctx context.Context, label, example string, required bool) (string, error) {
+	text := label + " (e.g. " + example + ")"
+	if !required {
+		text = label + " (optional, e.g. " + example + ")"
+	}
+	for {
+		var line string
+		if u.GTK {
+			out, err := zenityCommand(ctx, "--entry", "--title=GjallarOS installer", "--text="+text).Output()
+			if err != nil {
+				return "", ErrCancelled
+			}
+			line = string(out)
+		} else {
+			fmt.Fprintf(u.Out, "%s: ", text)
+			read, err := u.readLine(ctx)
+			if err != nil {
+				return "", err
+			}
+			line = read
+		}
+		line = strings.TrimSpace(line)
+		if line != "" || !required {
+			return line, nil
+		}
+		if !u.GTK {
+			fmt.Fprintf(u.Out, "%s is required.\n", label)
+		}
+	}
+}
+
 func (u UI) Choice(ctx context.Context, label, def string, options []string) (string, error) {
 	if len(options) == 0 {
 		return "", fmt.Errorf("no options for %s", label)

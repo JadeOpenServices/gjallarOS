@@ -298,3 +298,38 @@ func TestTerminalPromptStopsOnCancel(t *testing.T) {
 		t.Fatalf("Confirm after cancel = %v", err)
 	}
 }
+
+func TestExampleFillsNothingIn(t *testing.T) {
+	var out strings.Builder
+	u := UI{Reader: bufio.NewReader(strings.NewReader("\n  \nsam\n\n")), Out: &out}
+
+	value, err := u.Example(context.Background(), "Username", "alex", true)
+	if err != nil || value != "sam" {
+		t.Fatalf("required: got %q, %v, want sam", value, err)
+	}
+	if got := strings.Count(out.String(), "Username is required."); got != 2 {
+		t.Fatalf("asked again %d times, want 2; output %q", got, out.String())
+	}
+
+	value, err = u.Example(context.Background(), "GitHub username", "alex-example", false)
+	if err != nil || value != "" {
+		t.Fatalf("optional: got %q, %v, want empty", value, err)
+	}
+
+	text := out.String()
+	for _, want := range []string{"Username (e.g. alex): ", "GitHub username (optional, e.g. alex-example): "} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("output %q lacks %q", text, want)
+		}
+	}
+	if strings.Contains(text, "[") {
+		t.Fatalf("output %q shows a filled-in default", text)
+	}
+}
+
+func TestExampleStopsAtEndOfInput(t *testing.T) {
+	u := UI{Reader: bufio.NewReader(strings.NewReader("\n")), Out: io.Discard}
+	if _, err := u.Example(context.Background(), "Username", "alex", true); err == nil {
+		t.Fatal("Example kept asking after the input ended")
+	}
+}
