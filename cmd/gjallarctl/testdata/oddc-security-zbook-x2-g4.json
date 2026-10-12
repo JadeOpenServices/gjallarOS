@@ -1,0 +1,58 @@
+{
+  "findings": [
+    {
+      "id": "security/firmware/boot-chain-not-verified",
+      "name": "Firmware not verified at boot",
+      "severity": "medium",
+      "status": "open",
+      "reported": "2026-10-12",
+      "modified": "2026-10-12",
+      "summary": "The computer does not check its own firmware when it starts, so changed firmware would still run. Keep the machine physically safe.",
+      "flags": {
+        "firmwareVerifiedAtBoot": false
+      }
+    },
+    {
+      "id": "security/firmware/intel-amt-unprovisioned",
+      "name": "Intel AMT present and not set up",
+      "severity": "medium",
+      "status": "open",
+      "reported": "2026-10-12",
+      "modified": "2026-10-12",
+      "summary": "The machine has Intel's remote management (AMT), switched on but not set up. Someone with physical access could set it up for remote control; disable AMT in the firmware settings if you do not use it.",
+      "flags": {
+        "remoteManagementOff": false
+      }
+    },
+    {
+      "id": "security/firmware/intel-me-flagged-version",
+      "name": "Intel ME firmware with known vulnerabilities",
+      "severity": "medium",
+      "status": "open",
+      "reported": "2026-10-12",
+      "modified": "2026-10-12",
+      "summary": "The Intel Management Engine firmware is a version with known security flaws, and HP no longer ships updates for it. Install software only from sources you trust.",
+      "flags": {
+        "managementFirmwareCurrent": false
+      }
+    },
+    {
+      "id": "security/thunderbolt/no-kernel-dma-protection",
+      "name": "Thunderbolt without DMA protection",
+      "severity": "medium",
+      "status": "open",
+      "reported": "2026-10-12",
+      "modified": "2026-10-12",
+      "summary": "A Thunderbolt device you approve can read and write all of the computer's memory. Only approve Thunderbolt devices you trust. USB-C hubs and screens are not affected.",
+      "flags": {
+        "thunderboltDmaProtected": false
+      }
+    }
+  ],
+  "flags": {
+    "firmwareVerifiedAtBoot": false,
+    "managementFirmwareCurrent": false,
+    "remoteManagementOff": false,
+    "thunderboltDmaProtected": false
+  }
+}

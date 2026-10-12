@@ -77,7 +77,9 @@ func runSecurityNotice(stderr io.Writer) int {
 			return 1
 		}
 		if choice == "details" {
-			script := `oddc security --details; printf '\nPress Enter to close. '; read -r _`
+			// Plain `oddc security` is ODDC's text for users. --details is
+			// for contributors and spells out how each weakness is used.
+			script := `oddc security; printf '\nPress Enter to close. '; read -r _`
 			if err := exec.Command("ghostty", "--title=Security notes for this device", "-e", "sh", "-c", script).Run(); err != nil {
 				fmt.Fprintf(stderr, "ERROR: terminal: %v\n", err)
 			}
@@ -133,24 +135,29 @@ func unseenFindings(findings []securityFinding, seen map[string]string) []securi
 	return fresh
 }
 
+// securityNoticeText words the notice. Each ODDC summary already says what
+// to be careful with, so one finding shows its summary, and several show
+// their names with the full text one click away.
 func securityNoticeText(fresh []securityFinding) (summary, body string) {
-	summary = "Security note for this device"
-	team := "The ODDC team is on it; nothing for you to do."
-	if len(fresh) > 1 {
-		summary = "Security notes for this device"
-		team = "The ODDC team is on them; nothing for you to do."
+	if len(fresh) == 1 {
+		text := strings.TrimSpace(fresh[0].Summary)
+		if text == "" {
+			text = fresh[0].Name
+		}
+		return "Security note for this device", html.EscapeString(text)
 	}
 	var b strings.Builder
 	for _, f := range fresh {
-		text := strings.TrimSpace(f.Summary)
-		if text == "" {
-			text = f.Name
+		name := strings.TrimSpace(f.Name)
+		if name == "" {
+			name = f.ID
 		}
-		b.WriteString(html.EscapeString(text))
-		b.WriteString("\n\n")
+		b.WriteString("• ")
+		b.WriteString(html.EscapeString(name))
+		b.WriteString("\n")
 	}
-	b.WriteString(team)
-	return summary, b.String()
+	b.WriteString("\nDetails says what to be careful with.")
+	return fmt.Sprintf("%d security notes for this device", len(fresh)), b.String()
 }
 
 func seenFindingsPath() string {
