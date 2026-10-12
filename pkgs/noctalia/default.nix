@@ -23,6 +23,15 @@
 # lost their wallpaper and the lock screen retried the dead path on every key
 # (wallpaper-store-path.patch maps it to the running build's asset).
 #
+# Keyboards that show a code to type (DisplayPasskey, DisplayPinCode) never
+# showed it: the pairing card only appeared for requests that wait for a reply.
+# Upstream fixed the passkey card in 2a80c854 (#4232). bluetooth-pairing.patch
+# also shows the PIN while BlueZ waits for the device, closes the card when the
+# device pairs or goes away, makes Cancel on a code card stop the pairing,
+# re-registers the agent when bluetoothd restarts, and posts a notification
+# for a request while the Bluetooth tab is not open. The panel is not opened by
+# itself: any device in range could otherwise pop it up and take the keyboard.
+#
 # libqalculate 5.10 frees its random state on exit even when nothing ever
 # created it, so the shell crashes every time it stops. Upstream fixed that in
 # 931c2aa9 (5.11); drop the patch once nixpkgs ships libqalculate 5.11 or newer.
@@ -45,5 +54,6 @@
       ./battery-notify.patch
       ./notification-input-region.patch
       ./wallpaper-store-path.patch
+      ./bluetooth-pairing.patch
     ];
   })

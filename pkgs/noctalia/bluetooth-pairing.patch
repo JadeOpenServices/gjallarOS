@@ -1,0 +1,493 @@
+diff --git a/assets/translations/de.json b/assets/translations/de.json
+index 83f7dfc..f5c0021 100644
+--- a/assets/translations/de.json
++++ b/assets/translations/de.json
+@@ -212,11 +212,14 @@
+         "authorize": "Eingehende Kopplungsanfrage annehmen?",
+         "authorize-service": "Zugriff auf Dienst {uuid} erlauben?",
+         "confirm": "Bestätige, dass dieser Code mit dem auf dem Gerät angezeigten übereinstimmt:",
+-        "display-passkey": "Diesen Code auf dem Gerät eingeben:",
+-        "display-pin": "Diese PIN auf dem Gerät eingeben:",
++        "display-passkey": "Diesen Code auf dem Gerät eintippen, dann Enter drücken:",
++        "display-pin": "Diese PIN auf dem Gerät eintippen, dann Enter drücken:",
+         "passkey": "Den auf dem Gerät angezeigten Zugangscode eingeben:",
+         "pin-code": "Die auf dem Gerät angezeigte PIN eingeben:"
+       },
++      "pairing-notify-body": "{device} möchte sich koppeln. Zum Antworten Bluetooth im Kontrollzentrum öffnen.",
++      "pairing-notify-title": "Bluetooth-Kopplung",
++      "pairing-notify-unknown": "Ein Gerät",
+       "reject": "Ablehnen",
+       "rfkill-blocked": "Bluetooth wird vom System blockiert. Schalte es ein, um die Blockierung aufzuheben.",
+       "sections": {
+diff --git a/assets/translations/en.json b/assets/translations/en.json
+index c40edce..2c3c9d8 100644
+--- a/assets/translations/en.json
++++ b/assets/translations/en.json
+@@ -212,11 +212,14 @@
+         "authorize": "Accept the incoming pairing request?",
+         "authorize-service": "Allow access to service {uuid}?",
+         "confirm": "Confirm that this code matches the one shown on the device:",
+-        "display-passkey": "Enter this code on the device:",
+-        "display-pin": "Enter this PIN on the device:",
++        "display-passkey": "Type this code on the device, then press Enter:",
++        "display-pin": "Type this PIN on the device, then press Enter:",
+         "passkey": "Enter the passkey shown on the device:",
+         "pin-code": "Enter the PIN shown on the device:"
+       },
++      "pairing-notify-body": "{device} wants to pair. Open Bluetooth in the control center to answer.",
++      "pairing-notify-title": "Bluetooth pairing",
++      "pairing-notify-unknown": "A device",
+       "reject": "Reject",
+       "rfkill-blocked": "Bluetooth is blocked by the system. Turn it on to clear the block.",
+       "sections": {
+diff --git a/src/app/application_services.cpp b/src/app/application_services.cpp
+index ef940cf..b06d5c6 100644
+--- a/src/app/application_services.cpp
++++ b/src/app/application_services.cpp
+@@ -1303,11 +1303,51 @@ void Application::initSystemBusServices() {
+     if (m_bluetoothService != nullptr) {
+       try {
+         m_bluetoothAgent = std::make_unique<BluetoothAgent>(*m_systemBus);
+-        m_bluetoothAgent->setRequestCallback([this,
+-                                              shouldRefreshControlCenter](const BluetoothPairingRequest& /*request*/) {
++        // With the Bluetooth tab closed a request would wait unseen until
++        // BlueZ times out, so it is announced by a notification that
++        // stays until the request ends. The panel is not opened by itself: any
++        // device in range can ask to pair, and that must not take the
++        // keyboard from the window being typed in.
++        m_bluetoothAgent->setRequestCallback([this, shouldRefreshControlCenter,
++                                              shownRequest = std::make_shared<std::pair<std::uint32_t, std::string>>()](
++                                                 const BluetoothPairingRequest& request
++                                             ) {
+           if (shouldRefreshControlCenter()) {
+             m_panelManager.refresh();
+           }
++          auto* notifications = notify::instance();
++          if (notifications == nullptr) {
++            return;
++          }
++          const bool shown =
++              m_panelManager.isOpenPanel("control-center") && m_panelManager.isActivePanelContext("bluetooth");
++          // One notification per request; code updates for it change nothing.
++          const std::string key = request.kind == BluetoothPairingKind::None || shown
++              ? std::string()
++              : std::to_string(static_cast<int>(request.kind)) + request.devicePath;
++          if (key == shownRequest->second) {
++            return;
++          }
++          if (shownRequest->first != 0) {
++            (void)notifications->close(shownRequest->first);
++          }
++          *shownRequest = {0, key};
++          if (key.empty()) {
++            return;
++          }
++          std::string device = i18n::tr("control-center.bluetooth.pairing-notify-unknown");
++          if (m_bluetoothService != nullptr) {
++            for (const auto& d : m_bluetoothService->devices()) {
++              if (d.path == request.devicePath && !d.alias.empty()) {
++                device = d.alias;
++                break;
++              }
++            }
++          }
++          shownRequest->first = notifications->addInternal(
++              "Bluetooth", i18n::tr("control-center.bluetooth.pairing-notify-title"),
++              i18n::tr("control-center.bluetooth.pairing-notify-body", "device", device), Urgency::Normal, 0
++          );
+         });
+       } catch (const std::exception& e) {
+         kLog.warn("bluetooth agent disabled: {}", e.what());
+diff --git a/src/dbus/bluetooth/bluetooth_agent.cpp b/src/dbus/bluetooth/bluetooth_agent.cpp
+index fc99467..06b6dfd 100644
+--- a/src/dbus/bluetooth/bluetooth_agent.cpp
++++ b/src/dbus/bluetooth/bluetooth_agent.cpp
+@@ -3,9 +3,12 @@
+ #include "core/log.h"
+ #include "dbus/system_bus.h"
+ 
++#include <map>
+ #include <optional>
+ #include <sdbus-c++/IConnection.h>
+ #include <sdbus-c++/IObject.h>
++#include <sdbus-c++/IProxy.h>
++#include <sdbus-c++/Message.h>
+ #include <sdbus-c++/MethodResult.h>
+ #include <sdbus-c++/Types.h>
+ #include <sdbus-c++/VTableItems.h>
+@@ -20,6 +23,7 @@ namespace {
+   const sdbus::ObjectPath kAgentObjectPath{"/org/noctalia/BluetoothAgent"};
+   constexpr auto kAgentInterface = "org.bluez.Agent1";
+   constexpr auto kAgentManagerInterface = "org.bluez.AgentManager1";
++  constexpr auto kDeviceInterface = "org.bluez.Device1";
+   constexpr auto kCapability = "KeyboardDisplay";
+ 
+   const sdbus::Error::Name kErrRejected{"org.bluez.Error.Rejected"};
+@@ -32,17 +36,97 @@ struct BluetoothAgent::Impl {
+   std::unique_ptr<sdbus::IObject> object;
+   BluetoothAgent::RequestCallback requestCallback;
+ 
++  std::unique_ptr<sdbus::IProxy> busProxy; // NameOwnerChanged for org.bluez
++  sdbus::Slot devicePropertiesMatch;
++
+   BluetoothPairingRequest pending;
+   std::optional<sdbus::Result<std::string>> pendingString;
+   std::optional<sdbus::Result<std::uint32_t>> pendingUint;
+   std::optional<sdbus::Result<>> pendingVoid;
++  // Device whose pairing the user answered (or was shown a code for). It is
++  // trusted once BlueZ reports it paired, as GNOME does, so it can reconnect
++  // without asking again.
++  std::string trustOnPair;
+ 
+   explicit Impl(SystemBus& b) : bus(b) {}
+ 
+-  [[nodiscard]] bool hasPending() const noexcept {
++  // A request is shown while it has a kind. Display requests (DisplayPasskey,
++  // DisplayPinCode) have no reply slot; BlueZ never cancels them, so they end
++  // when the device pairs, disconnects, or a new request replaces them.
++  [[nodiscard]] bool hasPending() const noexcept { return pending.kind != BluetoothPairingKind::None; }
++
++  [[nodiscard]] bool hasReply() const noexcept {
+     return pendingString.has_value() || pendingUint.has_value() || pendingVoid.has_value();
+   }
+ 
++  [[nodiscard]] bool isDisplay() const noexcept {
++    return pending.kind == BluetoothPairingKind::DisplayPasskey || pending.kind == BluetoothPairingKind::DisplayPinCode;
++  }
++
++  void notifyUi() {
++    if (requestCallback) {
++      requestCallback(pending);
++    }
++  }
++
++  void registerWithBluez() {
++    try {
++      auto agentManager = sdbus::createProxy(bus.connection(), kBluezBusName, kBluezRoot);
++      agentManager->callMethod("RegisterAgent")
++          .onInterface(kAgentManagerInterface)
++          .withArguments(kAgentObjectPath, std::string(kCapability));
++      agentManager->callMethod("RequestDefaultAgent").onInterface(kAgentManagerInterface).withArguments(kAgentObjectPath);
++      kLog.info("registered BlueZ agent at {}", std::string(kAgentObjectPath));
++    } catch (const sdbus::Error& e) {
++      kLog.warn("BlueZ agent registration failed: {}", e.what());
++    }
++  }
++
++  // bluetoothd forgets its agents when it stops. Register again when it comes
++  // back, and drop requests the old daemon can no longer finish.
++  void onBluezOwnerChanged(const std::string& newOwner) {
++    trustOnPair.clear();
++    if (hasPending()) {
++      cancelPending();
++      notifyUi();
++    }
++    if (!newOwner.empty()) {
++      registerWithBluez();
++    }
++  }
++
++  void onDevicePropertiesChanged(const std::string& path, const std::map<std::string, sdbus::Variant>& changed) {
++    const auto flag = [&](const char* name) -> std::optional<bool> {
++      auto it = changed.find(name);
++      if (it == changed.end() || !it->second.containsValueOfType<bool>()) {
++        return std::nullopt;
++      }
++      return it->second.get<bool>();
++    };
++    const auto paired = flag("Paired");
++    const auto connected = flag("Connected");
++    if (paired.value_or(false) && path == trustOnPair) {
++      trustOnPair.clear();
++      try {
++        auto device = sdbus::createProxy(bus.connection(), kBluezBusName, sdbus::ObjectPath{path});
++        device->setProperty("Trusted").onInterface(kDeviceInterface).toValue(true);
++      } catch (const sdbus::Error& e) {
++        kLog.warn("setTrusted failed {}: {}", path, e.what());
++      }
++    }
++    if (isDisplay() && pending.devicePath == path && (paired.value_or(false) || !connected.value_or(true))) {
++      clearPending();
++      notifyUi();
++    }
++  }
++
++  // A shown code without a reply slot gives way to any new request.
++  void dropDisplay() {
++    if (!hasReply()) {
++      pending = BluetoothPairingRequest{};
++    }
++  }
++
+   void rejectIfBusy(auto& result, const char* what) {
+     kLog.debug("{} while another request pending -> rejected", what);
+     result.returnError(sdbus::Error{kErrRejected, "another pairing request is already pending"});
+@@ -78,10 +162,11 @@ struct BluetoothAgent::Impl {
+   }
+ 
+   void onRequestPinCode(sdbus::Result<std::string>&& result, sdbus::ObjectPath device) {
+-    if (hasPending()) {
++    if (hasReply()) {
+       rejectIfBusy(result, "RequestPinCode");
+       return;
+     }
++    dropDisplay();
+     pending.kind = BluetoothPairingKind::PinCode;
+     pending.devicePath = device;
+     pendingString = std::move(result);
+@@ -89,22 +174,27 @@ struct BluetoothAgent::Impl {
+   }
+ 
+   void onDisplayPinCode(sdbus::Result<>&& result, sdbus::ObjectPath device, std::string pincode) {
+-    if (hasPending()) {
++    if (hasReply()) {
+       rejectIfBusy(result, "DisplayPinCode");
+       return;
+     }
++    // BlueZ hands the PIN to the device only after this reply, so answer at
++    // once (as GNOME does) and keep showing the PIN until the device pairs.
++    result.returnResults();
++    pending = BluetoothPairingRequest{};
+     pending.kind = BluetoothPairingKind::DisplayPinCode;
+     pending.devicePath = device;
+     pending.pin = std::move(pincode);
+-    pendingVoid = std::move(result);
+-    fireCallback();
++    trustOnPair = pending.devicePath;
++    notifyUi();
+   }
+ 
+   void onRequestPasskey(sdbus::Result<std::uint32_t>&& result, sdbus::ObjectPath device) {
+-    if (hasPending()) {
++    if (hasReply()) {
+       rejectIfBusy(result, "RequestPasskey");
+       return;
+     }
++    dropDisplay();
+     pending.kind = BluetoothPairingKind::Passkey;
+     pending.devicePath = device;
+     pendingUint = std::move(result);
+@@ -117,28 +207,27 @@ struct BluetoothAgent::Impl {
+     if (pending.kind == BluetoothPairingKind::DisplayPasskey && pending.devicePath == std::string(device)) {
+       pending.passkey = passkey;
+       pending.entered = entered;
+-      if (requestCallback) {
+-        requestCallback(pending);
+-      }
++      notifyUi();
+       return;
+     }
+-    if (hasPending()) {
++    if (hasReply()) {
+       return;
+     }
++    pending = BluetoothPairingRequest{};
+     pending.kind = BluetoothPairingKind::DisplayPasskey;
+     pending.devicePath = device;
+     pending.passkey = passkey;
+     pending.entered = entered;
+-    if (requestCallback) {
+-      requestCallback(pending);
+-    }
++    trustOnPair = pending.devicePath;
++    notifyUi();
+   }
+ 
+   void onRequestConfirmation(sdbus::Result<>&& result, sdbus::ObjectPath device, std::uint32_t passkey) {
+-    if (hasPending()) {
++    if (hasReply()) {
+       rejectIfBusy(result, "RequestConfirmation");
+       return;
+     }
++    dropDisplay();
+     pending.kind = BluetoothPairingKind::Confirm;
+     pending.devicePath = device;
+     pending.passkey = passkey;
+@@ -147,10 +236,11 @@ struct BluetoothAgent::Impl {
+   }
+ 
+   void onRequestAuthorization(sdbus::Result<>&& result, sdbus::ObjectPath device) {
+-    if (hasPending()) {
++    if (hasReply()) {
+       rejectIfBusy(result, "RequestAuthorization");
+       return;
+     }
++    dropDisplay();
+     pending.kind = BluetoothPairingKind::Authorize;
+     pending.devicePath = device;
+     pendingVoid = std::move(result);
+@@ -158,10 +248,11 @@ struct BluetoothAgent::Impl {
+   }
+ 
+   void onAuthorizeService(sdbus::Result<>&& result, sdbus::ObjectPath device, std::string uuid) {
+-    if (hasPending()) {
++    if (hasReply()) {
+       rejectIfBusy(result, "AuthorizeService");
+       return;
+     }
++    dropDisplay();
+     pending.kind = BluetoothPairingKind::AuthorizeService;
+     pending.devicePath = device;
+     pending.uuid = std::move(uuid);
+@@ -170,11 +261,13 @@ struct BluetoothAgent::Impl {
+   }
+ 
+   void onCancel() {
++    trustOnPair.clear();
+     if (!hasPending()) {
+       return;
+     }
+     kLog.debug("BlueZ canceled pending pairing");
+     cancelPending();
++    notifyUi();
+   }
+ };
+ 
+@@ -225,16 +318,37 @@ BluetoothAgent::BluetoothAgent(SystemBus& bus) : m_impl(std::make_unique<Impl>(b
+       )
+       .forInterface(kAgentInterface);
+ 
+-  try {
+-    auto agentManager = sdbus::createProxy(bus.connection(), kBluezBusName, kBluezRoot);
+-    agentManager->callMethod("RegisterAgent")
+-        .onInterface(kAgentManagerInterface)
+-        .withArguments(kAgentObjectPath, std::string(kCapability));
+-    agentManager->callMethod("RequestDefaultAgent").onInterface(kAgentManagerInterface).withArguments(kAgentObjectPath);
+-    kLog.info("registered BlueZ agent at {}", std::string(kAgentObjectPath));
+-  } catch (const sdbus::Error& e) {
+-    kLog.warn("BlueZ agent registration failed: {}", e.what());
+-  }
++  m_impl->busProxy = sdbus::createProxy(
++      bus.connection(), sdbus::ServiceName{"org.freedesktop.DBus"}, sdbus::ObjectPath{"/org/freedesktop/DBus"}
++  );
++  m_impl->busProxy->uponSignal("NameOwnerChanged")
++      .onInterface("org.freedesktop.DBus")
++      .call([this](const std::string& name, const std::string& /*oldOwner*/, const std::string& newOwner) {
++        if (name == std::string(kBluezBusName)) {
++          m_impl->onBluezOwnerChanged(newOwner);
++        }
++      });
++
++  m_impl->devicePropertiesMatch = bus.connection().addMatch(
++      std::string("type='signal',sender='") + std::string(kBluezBusName) +
++          "',interface='org.freedesktop.DBus.Properties',member='PropertiesChanged',arg0='" + kDeviceInterface + "'",
++      [this](sdbus::Message msg) {
++        try {
++          const char* objectPath = msg.getPath();
++          std::string interfaceName;
++          std::map<std::string, sdbus::Variant> changed;
++          msg >> interfaceName >> changed;
++          if (objectPath != nullptr) {
++            m_impl->onDevicePropertiesChanged(objectPath, changed);
++          }
++        } catch (const sdbus::Error& e) {
++          kLog.debug("device PropertiesChanged decode failed: {}", e.what());
++        }
++      },
++      sdbus::return_slot
++  );
++
++  m_impl->registerWithBluez();
+ }
+ 
+ BluetoothAgent::~BluetoothAgent() {
+@@ -257,18 +371,41 @@ void BluetoothAgent::setRequestCallback(RequestCallback callback) {
+ }
+ 
+ void BluetoothAgent::acceptConfirm() {
+-  if (m_impl == nullptr || !m_impl->pendingVoid) {
++  if (m_impl == nullptr) {
++    return;
++  }
++  if (!m_impl->pendingVoid) {
+     m_impl->clearPending();
+     return;
+   }
++  // A service authorisation is not a pairing; only pairings get trusted.
++  const bool pairing = m_impl->pending.kind == BluetoothPairingKind::Confirm
++      || m_impl->pending.kind == BluetoothPairingKind::Authorize;
++  const std::string device = m_impl->pending.devicePath;
+   m_impl->pendingVoid->returnResults();
+   m_impl->clearPending();
++  if (pairing) {
++    m_impl->trustOnPair = device;
++  }
+ }
+ 
+ void BluetoothAgent::rejectConfirm() {
+   if (m_impl == nullptr) {
+     return;
+   }
++  // Closing a shown code stops the pairing; BlueZ is not waiting on a reply.
++  if (m_impl->isDisplay()) {
++    const std::string device = m_impl->pending.devicePath;
++    m_impl->clearPending();
++    m_impl->trustOnPair.clear();
++    try {
++      auto proxy = sdbus::createProxy(m_impl->bus.connection(), kBluezBusName, sdbus::ObjectPath{device});
++      proxy->callMethod("CancelPairing").onInterface(kDeviceInterface);
++    } catch (const sdbus::Error& e) {
++      kLog.debug("CancelPairing {}: {}", device, e.what());
++    }
++    return;
++  }
+   m_impl->cancelPending();
+ }
+ 
+@@ -276,16 +413,20 @@ void BluetoothAgent::submitPin(const std::string& pin) {
+   if (m_impl == nullptr || !m_impl->pendingString) {
+     return;
+   }
++  const std::string device = m_impl->pending.devicePath;
+   m_impl->pendingString->returnResults(pin);
+   m_impl->clearPending();
++  m_impl->trustOnPair = device;
+ }
+ 
+ void BluetoothAgent::submitPasskey(std::uint32_t passkey) {
+   if (m_impl == nullptr || !m_impl->pendingUint) {
+     return;
+   }
++  const std::string device = m_impl->pending.devicePath;
+   m_impl->pendingUint->returnResults(passkey);
+   m_impl->clearPending();
++  m_impl->trustOnPair = device;
+ }
+ 
+ void BluetoothAgent::cancelPending() {
+diff --git a/src/shell/control_center/tabs/bluetooth_tab.cpp b/src/shell/control_center/tabs/bluetooth_tab.cpp
+index 48d7931..0e7de5f 100644
+--- a/src/shell/control_center/tabs/bluetooth_tab.cpp
++++ b/src/shell/control_center/tabs/bluetooth_tab.cpp
+@@ -452,9 +452,11 @@ std::unique_ptr<Flex> BluetoothTab::create() {
+                 case BluetoothPairingKind::Confirm:
+                 case BluetoothPairingKind::Authorize:
+                 case BluetoothPairingKind::AuthorizeService:
+-                case BluetoothPairingKind::DisplayPinCode:
+                   m_agent->acceptConfirm();
+                   break;
++                case BluetoothPairingKind::DisplayPinCode:
++                case BluetoothPairingKind::DisplayPasskey:
++                  break;
+                 case BluetoothPairingKind::PinCode:
+                   if (m_pairingInput != nullptr) {
+                     m_agent->submitPin(m_pairingInput->value());
+@@ -704,6 +706,18 @@ void BluetoothTab::syncPairingCard() {
+   if (m_pairingInputRow != nullptr) {
+     m_pairingInputRow->setVisible(needsInput);
+   }
++  // A shown code needs nothing from the user here; the card closes by itself
++  // once the device is paired, and Cancel stops the pairing.
++  const bool displayOnly =
++      req.kind == BluetoothPairingKind::DisplayPasskey || req.kind == BluetoothPairingKind::DisplayPinCode;
++  if (m_pairingAccept != nullptr) {
++    m_pairingAccept->setVisible(!displayOnly);
++  }
++  if (m_pairingReject != nullptr) {
++    m_pairingReject->setText(
++        i18n::tr(displayOnly ? "common.actions.cancel" : "control-center.bluetooth.reject")
++    );
++  }
+ }
+ 
+ // Identity of the built list: which rows exist, in which order, and which controls
