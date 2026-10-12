@@ -153,6 +153,19 @@ let
       keys = "Swipe down from the top edge";
       description = "Open control center";
     }
+    # Three fingers up and down, as on GNOME and as people try first (ODDC
+    # 20.7). hyprgrass only starts a workspace swipe on a sideways drag, so
+    # these do not get in the way of three fingers left and right.
+    {
+      bind = ", swipe:3:u, exec, ${shell.launcher}";
+      keys = "Three fingers up";
+      description = "Open launcher";
+    }
+    {
+      bind = ", swipe:3:d, exec, ${shell.controlCenter}";
+      keys = "Three fingers down";
+      description = "Open control center";
+    }
     {
       bind = ", swipe:4:u, exec, ${shell.launcher}";
       keys = "Four fingers up";
