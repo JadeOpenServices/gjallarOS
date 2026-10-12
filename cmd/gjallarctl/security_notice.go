@@ -80,6 +80,7 @@ func runSecurityNotice(stderr io.Writer) int {
 			// Plain `oddc security` is ODDC's text for users. --details is
 			// for contributors and spells out how each weakness is used.
 			script := `oddc security; printf '\nPress Enter to close. '; read -r _`
+			// The title gives it a floating window, see user/wm/hyprland/rules.nix.
 			if err := exec.Command("ghostty", "--title=Security notes for this device", "-e", "sh", "-c", script).Run(); err != nil {
 				fmt.Fprintf(stderr, "ERROR: terminal: %v\n", err)
 			}
