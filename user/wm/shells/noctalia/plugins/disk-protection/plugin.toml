@@ -1,0 +1,12 @@
+id          = "gjallar/disk-protection"
+name        = "Disk protection"
+version     = "1.0.0"
+plugin_api  = 3
+author      = "gjallar"
+license     = "AGPL-3.0"
+icon        = "shield-exclamation"
+description = "Shows a shield until disk protection is set up."
+
+[[widget]]
+id    = "status"
+entry = "widget.luau"

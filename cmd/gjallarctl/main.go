@@ -1764,7 +1764,7 @@ func printUsage(out io.Writer) {
 	fmt.Fprintln(out, "       gjallarctl normalize keyboard --layout VALUE")
 	fmt.Fprintln(out, "       gjallarctl preset {validate|get|list|bool} --config PATH [--key NAME]")
 	fmt.Fprintln(out, "       gjallarctl tpm2 reenroll")
-	fmt.Fprintln(out, "       gjallarctl luks {status|recovery-key|setup}")
+	fmt.Fprintln(out, "       gjallarctl luks {status|recovery-key|setup|remind [--open|--refresh]}")
 	fmt.Fprintln(out, "       gjallarctl vpn status")
 	fmt.Fprintln(out, "       gjallarctl secure-boot {status|setup|update-dbx} [--repo PATH]")
 	fmt.Fprintln(out)

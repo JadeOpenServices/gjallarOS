@@ -18,12 +18,16 @@ import (
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/diskcrypto"
 )
 
-const luksUsage = "Usage: gjallarctl luks {status|recovery-key|setup}"
+const luksUsage = "Usage: gjallarctl luks {status|recovery-key|setup|remind [--open|--refresh]}"
 
 // runLUKSLifecycle manages how the root disk unlocks. Reading or changing
 // the LUKS header needs root, so it runs itself again through sudo.
 func runLUKSLifecycle(args []string, stdout, stderr io.Writer) int {
-	if len(args) != 1 || args[0] != "status" && args[0] != "recovery-key" && args[0] != "setup" {
+	if len(args) > 0 && args[0] == "remind" {
+		return runLUKSRemind(args[1:], stderr)
+	}
+	// record is for gjallar-luks-record.service and not offered to people.
+	if len(args) != 1 || args[0] != "status" && args[0] != "recovery-key" && args[0] != "setup" && args[0] != "record" {
 		fmt.Fprintln(stderr, luksUsage)
 		return 2
 	}
@@ -50,6 +54,9 @@ func runLUKSLifecycle(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	if device == "" {
+		if args[0] == "record" {
+			return recordOrFail(luksRecord{}, stderr)
+		}
 		fmt.Fprintln(stdout, "The system disk is not encrypted.")
 		return 0
 	}
@@ -58,14 +65,34 @@ func runLUKSLifecycle(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "ERROR: %v\n", err)
 		return 1
 	}
+	var code int
 	switch args[0] {
 	case "status":
 		printLUKSStatus(stdout, device, slots)
 		return 0
+	case "record":
+		return recordOrFail(newLUKSRecord(slots), stderr)
 	case "setup":
-		return runLUKSSetup(ctx, device, slots, stderr)
+		code = runLUKSSetup(ctx, device, slots, stderr)
+	default:
+		code = runRecoveryKey(ctx, device, slots, stderr)
 	}
-	return runRecoveryKey(ctx, device, slots, stderr)
+	// The bar and the login reminder follow the keyslots, also when the
+	// change stopped halfway.
+	if after, err := diskcrypto.ReadKeyslots(ctx, device); err == nil {
+		if err := writeLUKSRecord(luksRecordPath, newLUKSRecord(after)); err != nil && !errors.Is(err, os.ErrNotExist) {
+			fmt.Fprintf(stderr, "WARNING: %v\n", err)
+		}
+	}
+	return code
+}
+
+func recordOrFail(r luksRecord, stderr io.Writer) int {
+	if err := writeLUKSRecord(luksRecordPath, r); err != nil {
+		fmt.Fprintf(stderr, "ERROR: %v\n", err)
+		return 1
+	}
+	return 0
 }
 
 func printLUKSStatus(out io.Writer, device string, slots diskcrypto.Keyslots) {

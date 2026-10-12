@@ -18,6 +18,8 @@ let
     lib.attrByPath [ "oddc" "resolved" "hardware" "input" "quickKeys" ] { } osConfig ? primary;
   # On-screen keyboard button, same switch as user/wm/hyprland/touch.nix.
   hasTouchKeyboard = settings.touchscreenEnable or false;
+  # The shield until disk protection is set up (system/security/disk-unlock.nix).
+  hasEncryptedDisk = lib.attrByPath [ "boot" "initrd" "luks" "devices" ] { } osConfig != { };
 
   palette = {
     dark = {
@@ -123,7 +125,9 @@ in
         battery.notify_system_battery =
           !(lib.attrByPath [ "oddc" "resolved" "class" "capabilities" "battery" ] false osConfig);
         plugins.enabled =
-          lib.optional hasQuickKeys "gjallar/quick-keys" ++ lib.optional hasTouchKeyboard "gjallar/osk";
+          lib.optional hasQuickKeys "gjallar/quick-keys"
+          ++ lib.optional hasTouchKeyboard "gjallar/osk"
+          ++ lib.optional hasEncryptedDisk "gjallar/disk-protection";
         shell = {
           clipboard_enabled = false;
           corner_radius_scale = 2.0;
@@ -275,6 +279,11 @@ in
             interactive = false;
           };
 
+          disk_protection = {
+            type = "gjallar/disk-protection:status";
+            scale = 0.98;
+          };
+
           quick_keys = {
             type = "gjallar/quick-keys:preset";
             scale = 0.98;
@@ -357,6 +366,7 @@ in
             "tray"
             "network"
           ]
+          ++ lib.optional hasEncryptedDisk "disk_protection"
           ++ lib.optional hasQuickKeys "quick_keys"
           ++ lib.optional hasTouchKeyboard "touch_keyboard"
           ++ [
@@ -392,6 +402,9 @@ in
   };
   xdg.dataFile."noctalia/plugins/gjallar-osk" = lib.mkIf hasTouchKeyboard {
     source = ./plugins/osk;
+  };
+  xdg.dataFile."noctalia/plugins/gjallar-disk-protection" = lib.mkIf hasEncryptedDisk {
+    source = ./plugins/disk-protection;
   };
 
   xdg.configFile."noctalia/templates/hyprland.conf".text = ''

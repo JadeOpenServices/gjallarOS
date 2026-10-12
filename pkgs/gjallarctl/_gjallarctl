@@ -65,6 +65,25 @@ _gjallarctl_thunderbolt() {
   _arguments '--uid[device UID from thunderbolt status]:uid:'
 }
 
+_gjallarctl_luks() {
+  local -a cmds=(
+    'status:show how the system disk unlocks'
+    'recovery-key:create a new recovery key'
+    'setup:add a recovery key and remove the install passphrase'
+    'remind:ask about missing disk protection, as at login'
+  )
+  if (( CURRENT == 2 )); then
+    _describe -t commands 'luks command' cmds
+    return
+  fi
+  shift words
+  (( CURRENT-- ))
+  case $words[1] in
+    remind)
+      _arguments '(--refresh)--open[start the missing setup right away]' '(--open)--refresh[only update the bar shield]' ;;
+  esac
+}
+
 _gjallarctl_vpn() {
   local -a cmds=(
     'status:show VPN and Wi-Fi trust state'
@@ -159,7 +178,7 @@ _gjallarctl() {
         oddc) _gjallarctl_oddc ;;
         helpme) _arguments '--text[print instead of opening a window]' ;;
         tpm2) _arguments '1:tpm2 command:((reenroll\:"enroll the TPM2 key again"))' ;;
-        luks) _arguments '1:luks command:((status\:"show how the system disk unlocks" recovery-key\:"create a new recovery key" setup\:"add a recovery key and remove the install passphrase"))' ;;
+        luks) _gjallarctl_luks ;;
         secure-boot)
           _arguments '1:secure-boot command:((status\:"show Secure Boot ownership" setup\:"set up Secure Boot on this installed system" update-dbx\:"install the newest dbx revocation list from LVFS"))' \
             '--repo[GjallarOS checkout]:checkout:_files -/' ;;
