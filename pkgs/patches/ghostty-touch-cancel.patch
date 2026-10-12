@@ -1,0 +1,74 @@
+--- a/src/apprt/gtk/class/surface.zig
++++ b/src/apprt/gtk/class/surface.zig
+@@ -698,6 +698,12 @@
+         /// and the matching left mouse release should also be suppressed.
+         suppress_left_mouse_release: bool = false,
+ 
++        /// The button whose press went to the terminal and has no release
++        /// yet. A touch the compositor cancels (wl_touch.cancel, e.g. when
++        /// it takes the touch as a gesture) never gets "released", so
++        /// "cancel" releases this button instead.
++        pressed_button: ?input.MouseButton = null,
++
+         /// How much pending horizontal scroll do we have?
+         pending_horizontal_scroll: f64 = 0.0,
+ 
+@@ -2795,6 +2801,8 @@
+             return;
+         }
+ 
++        priv.pressed_button = button;
++
+         const consumed = consumed: {
+             const gtk_mods = event.getModifierState();
+             const mods = gtk_key.translateMods(gtk_mods);
+@@ -2855,6 +2863,8 @@
+             return;
+         }
+ 
++        priv.pressed_button = null;
++
+         const mods = gtk_key.translateMods(gtk_mods);
+         const consumed = surface.mouseButtonCallback(
+             .release,
+@@ -2877,6 +2887,22 @@
+         }
+     }
+ 
++    fn gcMouseCancel(
++        _: *gtk.GestureClick,
++        _: ?*gdk.EventSequence,
++        self: *Self,
++    ) callconv(.c) void {
++        const priv = self.private();
++        priv.suppress_left_mouse_release = false;
++        const button = priv.pressed_button orelse return;
++        priv.pressed_button = null;
++        const surface = priv.core_surface orelse return;
++        _ = surface.mouseButtonCallback(.release, button, .{}) catch |err| err: {
++            log.warn("error in key callback err={}", .{err});
++            break :err false;
++        };
++    }
++
+     fn ecMouseMotion(
+         ec: *gtk.EventControllerMotion,
+         x: f64,
+@@ -3596,6 +3622,7 @@
+             class.bindTemplateCallback("key_released", &ecKeyReleased);
+             class.bindTemplateCallback("mouse_down", &gcMouseDown);
+             class.bindTemplateCallback("mouse_up", &gcMouseUp);
++            class.bindTemplateCallback("mouse_cancel", &gcMouseCancel);
+             class.bindTemplateCallback("mouse_motion", &ecMouseMotion);
+             class.bindTemplateCallback("mouse_leave", &ecMouseLeave);
+             class.bindTemplateCallback("scroll_vertical", &ecMouseScrollVertical);
+--- a/src/apprt/gtk/ui/1.2/surface.blp
++++ b/src/apprt/gtk/ui/1.2/surface.blp
+@@ -72,6 +72,7 @@
+     GestureClick {
+       pressed => $mouse_down();
+       released => $mouse_up();
++      cancel => $mouse_cancel();
+       button: 0;
+     }
+   };
