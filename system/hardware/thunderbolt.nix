@@ -54,7 +54,14 @@ in
         Service = {
           ExecStart = "${gjallarctl}/bin/gjallarctl thunderbolt review";
           Environment = [
-            "PATH=${lib.makeBinPath [ pkgs.zenity ]}"
+            # oddc comes with the system and says whether the model's DMA
+            # protection holds.
+            "PATH=${
+              lib.makeBinPath [
+                pkgs.zenity
+                "/run/current-system/sw"
+              ]
+            }"
             "SUDO_ASKPASS=${thunderboltAskpass}"
           ];
           Restart = "on-failure";

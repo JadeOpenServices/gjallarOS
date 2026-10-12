@@ -71,10 +71,50 @@ func TestThunderboltNoticeStatesDMAProtection(t *testing.T) {
 	}
 }
 
-func TestThunderboltDMAProtectedByDomain(t *testing.T) {
+func TestThunderboltKernelDMAByDomain(t *testing.T) {
 	domains := []tbDomainInfo{{id: "a", iommu: true}, {id: "b", iommu: false}}
-	if !tbDMAProtected(domains, "a") || tbDMAProtected(domains, "b") || tbDMAProtected(domains, "missing") {
+	if !tbKernelDMA(domains, "a") || tbKernelDMA(domains, "b") || tbKernelDMA(domains, "missing") {
 		t.Fatal("DMA protection must follow the device's own domain; unknown is unprotected")
+	}
+}
+
+func TestThunderboltDMAWorstWins(t *testing.T) {
+	for _, c := range []struct {
+		kernel  bool
+		oddc    tbFlag
+		want    bool
+		warning bool
+	}{
+		{true, tbFlagYes, true, false},
+		{true, tbFlagNo, false, false},
+		{true, tbFlagUnknown, false, false},
+		{false, tbFlagYes, false, true},
+		{false, tbFlagNo, false, false},
+		{false, tbFlagUnknown, false, false},
+	} {
+		if got := tbDMAProtected(c.kernel, c.oddc); got != c.want {
+			t.Errorf("kernel %v, ODDC %v: protected = %v", c.kernel, c.oddc, got)
+		}
+		if warn := tbDMAContradiction(c.kernel, c.oddc, "d0"); (warn != "") != c.warning {
+			t.Errorf("kernel %v, ODDC %v: warning = %q", c.kernel, c.oddc, warn)
+		}
+	}
+}
+
+func TestParseODDCDMAFlag(t *testing.T) {
+	for in, want := range map[string]tbFlag{
+		`{"findings":[],"flags":{"thunderboltDmaProtected":true}}`:  tbFlagYes,
+		`{"findings":[],"flags":{"thunderboltDmaProtected":false}}`: tbFlagNo,
+		`{"findings":[],"flags":{}}`:                                tbFlagUnknown,
+		`{"findings":[]}`:                                           tbFlagUnknown,
+		`{"flags":{"thunderboltDmaProtected":"yes"}}`:               tbFlagUnknown,
+		`{"flags":{"thunderboltDmaProtected":null}}`:                tbFlagUnknown,
+		`not json`: tbFlagUnknown,
+		``:         tbFlagUnknown,
+	} {
+		if got := parseODDCDMAFlag([]byte(in)); got != want {
+			t.Errorf("%q = %v, want %v", in, got, want)
+		}
 	}
 }
 

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -133,8 +134,16 @@ func runThunderboltStatus(stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "FAIL: %v\n", err)
 		return 1
 	}
-	for _, d := range tbListDomains(ctx, conn) {
-		fmt.Fprintf(stdout, "domain %s: security %s, DMA protection %s\n", d.id, d.security, onOff(d.iommu))
+	domains := tbListDomains(ctx, conn)
+	if len(domains) > 0 {
+		dma := oddcDMAFlag(ctx)
+		for _, d := range domains {
+			fmt.Fprintf(stdout, "domain %s: security %s, DMA protection %s (kernel %s, ODDC %s)\n",
+				d.id, d.security, onOff(tbDMAProtected(d.iommu, dma)), onOff(d.iommu), dma)
+			if warn := tbDMAContradiction(d.iommu, dma, d.id); warn != "" {
+				fmt.Fprintln(stderr, warn)
+			}
+		}
 	}
 	if len(devices) == 0 {
 		fmt.Fprintln(stdout, "no devices")
@@ -219,15 +228,79 @@ func tbListDomains(ctx context.Context, conn *dbus.Conn) []tbDomainInfo {
 	return domains
 }
 
-// tbDMAProtected reports whether the domain a device hangs off has kernel DMA
-// protection. Unknown counts as unprotected.
-func tbDMAProtected(domains []tbDomainInfo, uid string) bool {
+// tbKernelDMA reports whether the kernel has DMA protection on the domain a
+// device hangs off. Unknown counts as unprotected.
+func tbKernelDMA(domains []tbDomainInfo, uid string) bool {
 	for _, d := range domains {
 		if d.id == uid {
 			return d.iommu
 		}
 	}
 	return false
+}
+
+// tbDMAProtected combines the kernel with ODDC's word on the model, and the
+// worse one wins: ODDC knows when firmware leaves a gap the kernel cannot
+// see. A model ODDC has not vouched for counts as unprotected.
+func tbDMAProtected(kernel bool, oddc tbFlag) bool {
+	return kernel && oddc == tbFlagYes
+}
+
+type tbFlag int
+
+const (
+	tbFlagUnknown tbFlag = iota
+	tbFlagYes
+	tbFlagNo
+)
+
+func (f tbFlag) String() string {
+	switch f {
+	case tbFlagYes:
+		return "on"
+	case tbFlagNo:
+		return "off"
+	}
+	return "unknown"
+}
+
+// oddcDMAFlag asks ODDC whether this model's Thunderbolt ports are DMA
+// protected. Any failure, and a flag ODDC does not set, is unknown.
+func oddcDMAFlag(ctx context.Context) tbFlag {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "oddc", "security", "--json").Output()
+	if err != nil {
+		return tbFlagUnknown
+	}
+	return parseODDCDMAFlag(out)
+}
+
+func parseODDCDMAFlag(out []byte) tbFlag {
+	var report struct {
+		Flags map[string]json.RawMessage `json:"flags"`
+	}
+	if json.Unmarshal(out, &report) != nil {
+		return tbFlagUnknown
+	}
+	var on *bool
+	if json.Unmarshal(report.Flags["thunderboltDmaProtected"], &on) != nil || on == nil {
+		return tbFlagUnknown
+	}
+	if *on {
+		return tbFlagYes
+	}
+	return tbFlagNo
+}
+
+// tbDMAContradiction is the journal line for ODDC vouching for a domain whose
+// kernel protection is off: the card says unprotected, and ODDC's data needs
+// a look.
+func tbDMAContradiction(kernel bool, oddc tbFlag, domain string) string {
+	if oddc != tbFlagYes || kernel {
+		return ""
+	}
+	return fmt.Sprintf("WARN: ODDC says Thunderbolt DMA is protected, but the kernel has it off on domain %s; treating it as unprotected. Please report this to ODDC.", domain)
 }
 
 // tbWaiting reports whether boltd holds the device back for a decision.
@@ -275,7 +348,7 @@ func tbDisplayName(d tbDevice) string {
 func tbReviewNotice(d tbDevice, protected bool) desktopNotice {
 	body := html.EscapeString(tbDisplayName(d)) + "\n"
 	if protected {
-		body += "Kernel DMA protection is on."
+		body += "DMA protection is on."
 	} else {
 		body += "No DMA protection: it can read memory once let in. Allow only your own devices."
 	}
@@ -360,6 +433,8 @@ func runThunderboltReview(stderr io.Writer) int {
 			return
 		}
 		domains := tbListDomains(callCtx, conn)
+		// ODDC is asked once per scan, and only when a card is due.
+		dma, asked := tbFlagUnknown, false
 		waiting := map[string]bool{}
 		for _, d := range devices {
 			uidAt[d.Path] = d.UID
@@ -367,10 +442,18 @@ func runThunderboltReview(stderr io.Writer) int {
 			if !tbWaiting(d) || answered[d.UID] || open[d.UID] != nil {
 				continue
 			}
+			if !asked {
+				dma, asked = oddcDMAFlag(callCtx), true
+			}
+			kernel := tbKernelDMA(domains, d.Domain)
+			if warn := tbDMAContradiction(kernel, dma, d.Domain); warn != "" {
+				fmt.Fprintln(stderr, warn)
+			}
+			protected := tbDMAProtected(kernel, dma)
 			promptCtx, cancel := context.WithCancel(ctx)
 			open[d.UID] = cancel
 			go func() {
-				outcomes <- tbOutcome{d.UID, tbReviewDevice(promptCtx, executable, d, tbDMAProtected(domains, d.Domain))}
+				outcomes <- tbOutcome{d.UID, tbReviewDevice(promptCtx, executable, d, protected)}
 			}()
 		}
 		// A card closes once its device is let in elsewhere or unplugged.
