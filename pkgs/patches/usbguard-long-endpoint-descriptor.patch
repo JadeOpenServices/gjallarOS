@@ -1,0 +1,48 @@
+--- a/src/Library/public/usbguard/USB.cpp
++++ b/src/Library/public/usbguard/USB.cpp
+@@ -394,6 +394,24 @@
+         return;
+ 
+       default:
++
++        /*
++         * Longer endpoint descriptors are parsed like the Linux kernel
++         * (usb_parse_endpoint) and libusb do: read the fields of the
++         * largest known layout that fits and ignore the trailing bytes.
++         * The device hash still covers every raw byte. MediaTek
++         * preloaders (0e8d:2000) send 8 byte endpoint descriptors.
++         */
++        if (size > sizeof(USBAudioEndpointDescriptor)) {
++          USBParseAudioEndpointDescriptor(parser, descriptor_raw, descriptor_out);
++          return;
++        }
++
++        if (size > sizeof(USBEndpointDescriptor)) {
++          USBParseEndpointDescriptor(parser, descriptor_raw, descriptor_out);
++          return;
++        }
++
+         throw Exception("USB descriptor parser", "endpoint descriptor", "unexpected descriptor size: " + std::to_string(size));
+       }
+ 
+--- a/src/CLI/usbguard-read-descriptor.cpp
++++ b/src/CLI/usbguard-read-descriptor.cpp
+@@ -87,7 +87,17 @@
+           break;
+ 
+         default:
+-          printUnknownDescriptor(descriptor);
++
++          /* Longer endpoint descriptors, parsed like the library does. */
++          if (descriptor->bHeader.bLength > sizeof(USBAudioEndpointDescriptor)) {
++            printAudioEndpointDescriptor(descriptor);
++          }
++          else if (descriptor->bHeader.bLength > sizeof(USBEndpointDescriptor)) {
++            printEndpointDescriptor(descriptor);
++          }
++          else {
++            printUnknownDescriptor(descriptor);
++          }
+         }
+ 
+         break;
