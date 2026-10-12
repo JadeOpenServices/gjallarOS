@@ -1766,7 +1766,7 @@ func printUsage(out io.Writer) {
 	fmt.Fprintln(out, "       gjallarctl tpm2 reenroll")
 	fmt.Fprintln(out, "       gjallarctl luks {status|recovery-key|setup}")
 	fmt.Fprintln(out, "       gjallarctl vpn status")
-	fmt.Fprintln(out, "       gjallarctl secure-boot {status|setup} [--repo PATH]")
+	fmt.Fprintln(out, "       gjallarctl secure-boot {status|setup|update-dbx} [--repo PATH]")
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "Safe GjallarOS maintenance commands. Rebuild invokes sudo explicitly.")
 }
@@ -2445,12 +2445,17 @@ func runTPM2Reenroll(args []string, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "Usage: gjallarctl tpm2 reenroll")
 		return 2
 	}
-	if _, err := exec.LookPath(tpm2ReenrollTool); err != nil {
-		fmt.Fprintf(stderr, "ERROR: %s not found; TPM2 unlock is not enabled on this system\n", tpm2ReenrollTool)
+	return execRootTool(tpm2ReenrollTool, "TPM2 unlock is not enabled on this system", stderr)
+}
+
+// execRootTool replaces gjallarctl with tool, run as root.
+func execRootTool(tool, missing string, stderr io.Writer) int {
+	if _, err := exec.LookPath(tool); err != nil {
+		fmt.Fprintf(stderr, "ERROR: %s not found; %s\n", tool, missing)
 		return 1
 	}
 
-	argv := tpm2ReenrollArgv(os.Geteuid())
+	argv := rootToolArgv(tool, os.Geteuid())
 	path, err := exec.LookPath(argv[0])
 	if err != nil {
 		fmt.Fprintf(stderr, "ERROR: %v\n", err)
@@ -2461,12 +2466,12 @@ func runTPM2Reenroll(args []string, stderr io.Writer) int {
 	return 1
 }
 
-func tpm2ReenrollArgv(euid int) []string {
+func rootToolArgv(tool string, euid int) []string {
 	if euid == 0 {
-		return []string{tpm2ReenrollTool}
+		return []string{tool}
 	}
 	// -k: ask now and leave no timestamp behind.
-	return []string{"sudo", "-k", tpm2ReenrollTool}
+	return []string{"sudo", "-k", tool}
 }
 
 func runHelpme(args []string, stdout, stderr io.Writer) int {

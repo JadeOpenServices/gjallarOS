@@ -20,7 +20,9 @@ import (
 	"github.com/JadeOpenServices/gjallarOS/internal/installercheck"
 )
 
-const secureBootUsage = "Usage: gjallarctl secure-boot {status|setup} [--repo PATH]"
+const secureBootUsage = "Usage: gjallarctl secure-boot {status|setup|update-dbx} [--repo PATH]"
+
+const dbxUpdateTool = "gjallar-secure-boot-dbx-update"
 
 // runSecureBoot sets up Secure Boot on an installed system the way the
 // installer does: same ownership checks, recovery gate, verification and
@@ -48,6 +50,12 @@ func runSecureBoot(args []string, stdout, stderr io.Writer) int {
 		return runSecureBootStatus(ctx, stdout, stderr)
 	case "setup":
 		return runSecureBootSetup(ctx, repo, stdout, stderr)
+	case "update-dbx":
+		if repo != "" {
+			fmt.Fprintln(stderr, secureBootUsage)
+			return 2
+		}
+		return execRootTool(dbxUpdateTool, "Secure Boot is not enabled on this system", stderr)
 	default:
 		fmt.Fprintln(stderr, secureBootUsage)
 		return 2
@@ -148,6 +156,9 @@ func runSecureBootSetup(ctx context.Context, repo string, stdout, stderr io.Writ
 	if err != nil {
 		return fail(err)
 	}
+	if next == secureboot.ContinuationNone {
+		return offerDBXUpdate(ctx, ui, stdout, stderr)
+	}
 	if !secureboot.NeedsFirmwareReboot(next) {
 		return 0
 	}
@@ -164,6 +175,32 @@ func runSecureBootSetup(ctx context.Context, repo string, stdout, stderr io.Writ
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, stdout, stderr
 	if err := cmd.Run(); err != nil {
 		return fail(fmt.Errorf("restart into firmware setup: %w", err))
+	}
+	return 0
+}
+
+// offerDBXUpdate runs once Secure Boot is active: the dbx the firmware
+// shipped with may be years old, and revoked boot loaders stay trusted until
+// a newer one is written.
+func offerDBXUpdate(ctx context.Context, ui prompt.UI, stdout, stderr io.Writer) int {
+	if _, err := exec.LookPath(dbxUpdateTool); err != nil {
+		return 0
+	}
+	yes, err := ui.Confirm(ctx, "Check LVFS for a newer dbx revocation list now?", true)
+	if err != nil {
+		fmt.Fprintf(stderr, "ERROR: %v\n", err)
+		return 1
+	}
+	if !yes {
+		fmt.Fprintln(stdout, "Check later with: gjallarctl secure-boot update-dbx")
+		return 0
+	}
+	argv := rootToolArgv(dbxUpdateTool, os.Geteuid())
+	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, stdout, stderr
+	if err := cmd.Run(); err != nil {
+		fmt.Fprintf(stderr, "ERROR: update dbx: %v\n", err)
+		return 1
 	}
 	return 0
 }

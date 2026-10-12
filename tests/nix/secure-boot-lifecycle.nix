@@ -3,6 +3,7 @@
   system,
   lifecycleModule,
   measuredBootModule,
+  dbxUpdateModule,
 }:
 let
   pkgs = nixpkgs.legacyPackages.${system};
@@ -12,6 +13,7 @@ let
     modules = [
       lifecycleModule
       measuredBootModule
+      dbxUpdateModule
       {
         options.boot.lanzaboote.measuredBoot.pcrs = nixpkgs.lib.mkOption {
           default = [
@@ -45,6 +47,7 @@ let
   post = evaluated.config.systemd.services.installer-post-secure-boot;
   enrollment = evaluated.config.systemd.services.secure-boot-enrollment;
   tpm2 = evaluated.config.systemd.services.measured-boot-tpm2-enrollment;
+  secureBootPolicy = evaluated.config.systemd.services.systemd-pcrlock-secureboot-policy;
 in
 # The TPM2 unlock self-test needs systemd's cryptsetup token plugin, which
 # NixOS cryptsetup only finds through the library path; it ignores
@@ -85,4 +88,12 @@ assert
 assert builtins.any (
   p: (p.name or "") == "gjallar-tpm2-reenroll"
 ) evaluated.config.environment.systemPackages;
+# A dbx update keeps the PCR 7 of the running boot valid until the restart;
+# the next boot must drop it before make-policy runs.
+assert builtins.any (
+  p: (p.name or "") == "gjallar-secure-boot-dbx-update"
+) evaluated.config.environment.systemPackages;
+assert builtins.any (
+  nixpkgs.lib.hasInfix "rm -f -- /var/lib/pcrlock.d/240-secureboot-policy.pcrlock.d/gjallar-before-dbx-update.pcrlock"
+) secureBootPolicy.serviceConfig.ExecStartPre;
 pkgs.runCommand "gjallar-secure-boot-lifecycle-check" { } "touch $out"

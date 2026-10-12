@@ -10,6 +10,7 @@ in
     ./verification.nix
     ./lifecycle.nix
     ./measured-boot.nix
+    ./dbx-update.nix
     ./tool.nix
   ];
 }

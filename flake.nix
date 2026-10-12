@@ -166,6 +166,7 @@
           inherit nixpkgs system;
           lifecycleModule = ./system/security/secure-boot/lifecycle.nix;
           measuredBootModule = ./system/security/secure-boot/measured-boot.nix;
+          dbxUpdateModule = ./system/security/secure-boot/dbx-update.nix;
         };
 
         installer-resume = import ./tests/nix/installer-resume.nix {
