@@ -372,6 +372,15 @@ func (s *luksSession) unlocked(before diskcrypto.Keyslots, env []string, args ..
 				return "", err
 			}
 			try = pin != ""
+			// Test the PIN alone first: given a wrong $PIN,
+			// systemd-cryptenroll asks again through the password agent,
+			// up to five times, and every try counts towards the lockout.
+			if try {
+				if err := diskcrypto.TestTPM2Token(s.ctx, s.device, before.TPM2Token[before.TPM2[0]], pin); err != nil {
+					fmt.Fprintln(s.tty, s.wrap("That PIN did not unlock the disk."))
+					try = false
+				}
+			}
 			chipEnv = append(chipEnv, "PIN="+pin)
 		}
 		if try {
