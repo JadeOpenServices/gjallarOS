@@ -54,6 +54,21 @@ const AnchorBluetoothAddress = "bluetooth-address"
 type ObservedDevice struct {
 	RuntimeID string   `json:"runtimeId"`
 	Identity  Identity `json:"identity"`
+
+	// Wiring is set when the device sits directly on a root port of a
+	// controller the kernel could name.
+	Wiring *ObservedPort `json:"wiring,omitempty"`
+}
+
+// ObservedPort is the kernel's view of a root port, in the same terms
+// as ExpectedPort.
+type ObservedPort struct {
+	Controller string `json:"controller"`
+	Hub        string `json:"hub"`
+	RootPort   int    `json:"rootPort"`
+	// Shared is set when another root hub has the same controller ID and
+	// hub, so an ODDC port entry cannot name just one of them.
+	Shared bool `json:"shared,omitempty"`
 }
 
 type AuditState string
