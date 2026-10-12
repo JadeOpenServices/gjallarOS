@@ -25,10 +25,12 @@ let
     builtins.filter lib.isDerivation config.wayland.windowManager.hyprland.plugins
   );
 
-  # Hyprland keeps the rules it started with until the next login. It records
-  # which ones at start, and activation compares that with the new set: a
-  # Noctalia or hyprlock update moves their store paths, and until a new login
-  # every screenshot of theirs would ask for permission.
+  # Hyprland keeps the rules it started with until the next login, but reads
+  # enforce_permissions again on every config reload. It records which rules
+  # it started with, and activation compares that with the new set: a Noctalia
+  # or hyprlock update moves their store paths, and until a new login every
+  # screenshot of theirs would ask for permission. A running session without a
+  # record started before these rules existed and now enforces with none.
   rulesId = builtins.hashString "sha256" (builtins.toJSON rules);
   startedRules = "gjallar/hyprland-permissions";
   recordRules = pkgs.writeShellScript "gjallar-record-permissions" ''
@@ -50,10 +52,16 @@ in
     exec-once = [ "${recordRules}" ];
   };
 
-  home.activation.gjallarPermissionsNotice = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+  # After reloadSystemd: a Noctalia update restarts Noctalia, which is also the
+  # notification server, and a notice sent before that vanishes with it.
+  home.activation.gjallarPermissionsNotice = lib.hm.dag.entryAfter [ "reloadSystemd" ] ''
     runtime=/run/user/$(${pkgs.coreutils}/bin/id -u)
-    if [ -r "$runtime/${startedRules}" ] &&
-       [ "$(${pkgs.coreutils}/bin/cat "$runtime/${startedRules}")" != ${rulesId} ]; then
+    gjallar_started_rules=$(${pkgs.coreutils}/bin/cat "$runtime/${startedRules}" 2>/dev/null || true)
+    gjallar_hyprland=$(XDG_RUNTIME_DIR=$runtime ${pkgs.hyprland}/bin/hyprctl instances -j 2>/dev/null || true)
+    if [ "$gjallar_started_rules" != ${rulesId} ] && [[ "$gjallar_hyprland" == *'"pid"'* ]]; then
+      DBUS_SESSION_BUS_ADDRESS=unix:path=$runtime/bus \
+        ${pkgs.glib.bin}/bin/gdbus wait --session --timeout 15 org.freedesktop.Notifications ||
+        true
       run ${pkgs.coreutils}/bin/env DBUS_SESSION_BUS_ADDRESS=unix:path=$runtime/bus \
         ${pkgs.libnotify}/bin/notify-send \
         --app-name=GjallarOS --icon=system-log-out \
