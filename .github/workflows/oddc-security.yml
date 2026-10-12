@@ -1,0 +1,37 @@
+# ODDC item 82.4: the security flags and finding fields gjallarctl reads must
+# still exist at the pinned ODDC revision. Runs on every change to the pin or
+# to gjallarctl. No secrets.
+name: oddc security flags
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - flake.lock
+      - cmd/gjallarctl/**
+      - tests/nix/oddc-security-flags.*
+      - .github/workflows/oddc-security.yml
+  pull_request:
+    paths:
+      - flake.lock
+      - cmd/gjallarctl/**
+      - tests/nix/oddc-security-flags.*
+      - .github/workflows/oddc-security.yml
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    if: github.repository == 'JadeOpenServices/gjallarOS'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31.11.1
+
+      - name: oddc-security-flags
+        run: nix build --print-build-logs --no-link '.#checks.x86_64-linux.oddc-security-flags'
