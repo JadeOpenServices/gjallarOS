@@ -9,6 +9,12 @@
 # got the same address kept the grant and could capture without asking.
 # Fixed on Hyprland main (PR #16353) after 0.56.2; drop this when nixpkgs
 # ships a release with it.
+#
+# Hyprland told every app that scrolling was never natural, even with
+# input:touchpad:natural_scroll on. Aquamarine already reads the setting
+# from libinput, but 0.55.4 (and main as of 2026-10-12) sends IDENTICAL
+# instead. Apps that follow the fingers (Qt's QWheelEvent::inverted, the
+# Dolphin swipe in dolphin.nix) then went the wrong way.
 final: prev:
 
 let
@@ -17,11 +23,12 @@ in
 {
   hyprland =
     assert lib.assertMsg (prev.hyprland.version == "0.55.4")
-      "GjallarOS hyprland overlay patches 0.55.4; drop pkgs/patches/hyprland-stale-cursor.patch if ${prev.hyprland.version} has Hyprland PR #15376, and pkgs/patches/hyprland-permission-client-destroy.patch if it has PR #16353.";
+      "GjallarOS hyprland overlay patches 0.55.4; drop pkgs/patches/hyprland-stale-cursor.patch if ${prev.hyprland.version} has Hyprland PR #15376, pkgs/patches/hyprland-permission-client-destroy.patch if it has PR #16353, and pkgs/patches/hyprland-axis-relative-direction.patch if onMouseWheel passes e.relativeDirection.";
     prev.hyprland.overrideAttrs (old: {
       patches = (old.patches or [ ]) ++ [
         ../patches/hyprland-stale-cursor.patch
         ../patches/hyprland-permission-client-destroy.patch
+        ../patches/hyprland-axis-relative-direction.patch
       ];
     });
 }
