@@ -13,7 +13,6 @@ import (
 
 	"github.com/JadeOpenServices/gjallarOS/internal/usbtrust"
 	"github.com/JadeOpenServices/gjallarOS/internal/usbtrust/broker"
-	"github.com/JadeOpenServices/gjallarOS/internal/usbtrust/oddcsource"
 	"github.com/JadeOpenServices/gjallarOS/internal/usbtrust/readmodel"
 )
 
@@ -327,11 +326,7 @@ func (c *Controller) snapshot(ctx context.Context) (input usbtrust.AuditInput, e
 	if c.Reader.Resolved == nil || c.Reader.Trust == nil || c.Reader.Observations == nil {
 		return input, fmt.Errorf("USB trust sources are incomplete")
 	}
-	resolved, err := c.Reader.Resolved.Resolved(ctx)
-	if err != nil {
-		return input, err
-	}
-	input.Expected, err = oddcsource.Expected(resolved)
+	input.Expected, err = c.Reader.Expected(ctx)
 	if err != nil {
 		return input, err
 	}
@@ -348,7 +343,7 @@ func (c *Controller) snapshot(ctx context.Context) (input usbtrust.AuditInput, e
 		}
 	}
 	c.armed.Store(input.Trusted != nil && input.Trusted.Enforcement != nil && input.Trusted.Enforcement.Armed)
-	input.Observed, err = c.Reader.Observations.Observed(ctx)
+	input.Observed, err = c.Reader.Observed(ctx)
 	if err != nil {
 		return input, err
 	}

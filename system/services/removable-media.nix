@@ -26,6 +26,7 @@ let
       --socket /run/gjallar-usbtrust/control.sock \
       --owner-uid "$ownerUID" \
       --oddc-resolved ${resolved} \
+      ${lib.optionalString (cfg.oddcDevices != null) "--oddc-devices ${cfg.oddcDevices}"} \
       --oddc-model ${
         lib.escapeShellArg (if config.oddc.device == null then "" else config.oddc.device)
       } \
@@ -51,6 +52,11 @@ in
       type = lib.types.bool;
       default = settings.usbTrustEnforce or false;
       description = "Arm USB blocking. The first arming enrolls ODDC internal devices; once armed, only the disk encryption passphrase (gjallarctl usb disarm) turns it off again.";
+    };
+    oddcDevices = lib.mkOption {
+      type = lib.types.nullOr lib.types.path;
+      default = null;
+      description = "Output of `oddc devices --json` for the selected model. Built-in parts it lists with a usbPort are then judged by their root port.";
     };
     tpmHandle = lib.mkOption {
       type = lib.types.nullOr lib.types.str;

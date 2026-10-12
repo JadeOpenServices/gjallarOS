@@ -22,11 +22,13 @@ import (
 	"github.com/JadeOpenServices/gjallarOS/internal/usbtrust/daemon"
 	"github.com/JadeOpenServices/gjallarOS/internal/usbtrust/mediagate"
 	"github.com/JadeOpenServices/gjallarOS/internal/usbtrust/readmodel"
+	"github.com/JadeOpenServices/gjallarOS/internal/usbtrust/sysfssource"
 	"github.com/JadeOpenServices/gjallarOS/internal/usbtrust/usbguardsource"
 )
 
 type config struct {
 	resolvedFile   string
+	devicesFile    string
 	enforce        bool
 	socketPath     string
 	ownerUID       uint32
@@ -229,6 +231,7 @@ func parseConfig(
 	)
 	flags.SetOutput(stderr)
 	flags.StringVar(&cfg.resolvedFile, "oddc-resolved", "", "absolute JSON path of the resolved NixOS ODDC view")
+	flags.StringVar(&cfg.devicesFile, "oddc-devices", "", "absolute JSON path of `oddc devices --json` for this model; parts with a usbPort are judged by their root port")
 	flags.BoolVar(&cfg.enforce, "enforce", false, "arm USB enforcement; the first arming enrolls internal devices")
 	flags.StringVar(&cfg.cryptsetup, "cryptsetup-binary", "cryptsetup", "cryptsetup CLI binary")
 	flags.Func("luks-device", "LUKS device whose passphrase may disarm enforcement (repeatable)", func(value string) error {
@@ -353,6 +356,9 @@ func parseConfig(
 	if cfg.resolvedFile != "" && !filepath.IsAbs(cfg.resolvedFile) {
 		return config{}, fmt.Errorf("--oddc-resolved must be absolute")
 	}
+	if cfg.devicesFile != "" && !filepath.IsAbs(cfg.devicesFile) {
+		return config{}, fmt.Errorf("--oddc-devices must be absolute")
+	}
 
 	if strings.TrimSpace(cfg.oddcModel) == "" {
 		return config{}, fmt.Errorf(
@@ -419,6 +425,10 @@ func buildReader(
 	}
 	if cfg.resolvedFile != "" {
 		reader.Resolved = readmodel.ResolvedFile(cfg.resolvedFile)
+	}
+	if cfg.devicesFile != "" {
+		reader.Devices = readmodel.DevicesFile{Path: cfg.devicesFile, Model: cfg.oddcModel}
+		reader.RootHubs = sysfssource.Sysfs("/sys")
 	}
 	return reader, nil
 }

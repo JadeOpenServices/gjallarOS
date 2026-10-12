@@ -1,6 +1,7 @@
 package sysfssource
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -172,4 +173,15 @@ func AttachWiring(devices []usbtrust.ObservedDevice, hubs []RootHub) {
 
 		devices[i].Wiring = Wiring(port, hubs)
 	}
+}
+
+// Sysfs reads root hubs from a sysfs mount, normally "/sys".
+type Sysfs string
+
+func (root Sysfs) RootHubs(ctx context.Context) ([]RootHub, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	return RootHubs(string(root))
 }

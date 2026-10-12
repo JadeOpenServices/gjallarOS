@@ -8,7 +8,9 @@ import (
 
 	"github.com/JadeOpenServices/gjallarOS/internal/usbtrust"
 	"github.com/JadeOpenServices/gjallarOS/internal/usbtrust/broker"
+	"github.com/JadeOpenServices/gjallarOS/internal/usbtrust/oddcsource"
 	"github.com/JadeOpenServices/gjallarOS/internal/usbtrust/readmodel"
+	"github.com/JadeOpenServices/gjallarOS/internal/usbtrust/sysfssource"
 )
 
 type sources struct {
@@ -274,5 +276,60 @@ func TestMutateRejectsActionsPolicyDidNotOffer(t *testing.T) {
 	}
 	if _, err := c.Mutate(ctx, broker.Request{Action: broker.ActionKeepBlocked, RuntimeID: "12", Connection: policy[0].Connection}); err != nil {
 		t.Fatalf("keep blocked must always work: %v", err)
+	}
+}
+
+type portDevices struct{ expected []usbtrust.ExpectedDevice }
+
+func (p portDevices) Devices(context.Context) (oddcsource.Devices, error) {
+	return oddcsource.Devices{Model: "model/test", Expected: p.expected}, nil
+}
+
+type oneHub struct{}
+
+func (oneHub) RootHubs(context.Context) ([]sysfssource.RootHub, error) {
+	// SYNTHETIC: one USB 2 root hub on bus 1.
+	return []sysfssource.RootHub{{Bus: "1", Controller: "8086:9d2f", Hub: "usb2"}}, nil
+}
+
+func TestReconcileStoresPortMatchOnceStoreIsReady(t *testing.T) {
+	c, s := fixture()
+	c.SetPersistenceReady(false)
+	ctx := context.Background()
+	c.Reader.Devices = portDevices{expected: []usbtrust.ExpectedDevice{{
+		Role:        "hardware.camera.front",
+		VIDPID:      "1234:5678",
+		ConnectType: "hardwired",
+		Required:    true,
+		Port:        &usbtrust.ExpectedPort{Controller: "8086:9d2f", Hub: "usb2", RootPort: 2, Attachment: "internal", Serial: usbtrust.SerialPlaceholder},
+	}}}
+	c.Reader.RootHubs = oneHub{}
+
+	if err := c.Reconcile(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if s.doc != nil {
+		t.Fatal("stored before the store was ready")
+	}
+	policy, _, err := c.Policy(ctx)
+	if err != nil || policy[0].Target != usbtrust.TargetAllow || policy[0].Reason != string(usbtrust.CodeInternalPortMatch) {
+		t.Fatalf("not allowed for this boot: %+v %v", policy, err)
+	}
+
+	c.SetPersistenceReady(true)
+	if err := c.Reconcile(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if s.doc == nil || len(s.doc.Devices) != 1 || s.doc.Devices[0].Role != "hardware.camera.front" || s.doc.Devices[0].Class != usbtrust.ClassInternal {
+		t.Fatalf("port match not stored: %+v", s.doc)
+	}
+	policy, _, err = c.Policy(ctx)
+	if err != nil || policy[0].Reason != string(usbtrust.CodeInternalMatch) {
+		t.Fatalf("stored part not matched: %+v %v", policy, err)
+	}
+
+	revision := s.doc.Revision
+	if err := c.Reconcile(ctx); err != nil || s.doc.Revision != revision {
+		t.Fatalf("second reconcile wrote again: %v", err)
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"github.com/JadeOpenServices/gjallarOS/internal/usbtrust"
 	"github.com/JadeOpenServices/gjallarOS/internal/usbtrust/broker"
 	"github.com/JadeOpenServices/gjallarOS/internal/usbtrust/oddcsource"
+	"github.com/JadeOpenServices/gjallarOS/internal/usbtrust/sysfssource"
 )
 
 // ResolvedSource returns the already-resolved ODDC machine view.
@@ -33,10 +34,73 @@ type TrustSource interface {
 	Trusted(context.Context) (*usbtrust.Document, error)
 }
 
+// RootHubSource names the USB root hubs, so observations can carry the
+// root port they sit on.
+type RootHubSource interface {
+	RootHubs(context.Context) ([]sysfssource.RootHub, error)
+}
+
 type Reader struct {
 	Resolved     ResolvedSource
 	Observations ObservationSource
 	Trust        TrustSource
+	// Devices and RootHubs are optional. With both, parts ODDC lists with a
+	// usbPort are judged by their root port.
+	Devices  DevicesSource
+	RootHubs RootHubSource
+}
+
+// Expected returns the USB expectations for this machine. Parts with a
+// usbPort replace the resolved view's list; a model without any keeps it.
+func (r Reader) Expected(ctx context.Context) ([]usbtrust.ExpectedDevice, error) {
+	if r.Devices != nil {
+		devices, err := r.Devices.Devices(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("read ODDC devices: %w", err)
+		}
+		if len(devices.Expected) > 0 {
+			return devices.Expected, nil
+		}
+	}
+
+	resolved, err := r.Resolved.Resolved(ctx)
+	if err != nil {
+		return nil, fmt.Errorf(
+			"read resolved ODDC state: %w",
+			err,
+		)
+	}
+
+	expected, err := oddcsource.Expected(resolved)
+	if err != nil {
+		return nil, fmt.Errorf(
+			"derive USB expectations from ODDC: %w",
+			err,
+		)
+	}
+
+	return expected, nil
+}
+
+// Observed returns the live USB devices with their root port attached.
+func (r Reader) Observed(ctx context.Context) ([]usbtrust.ObservedDevice, error) {
+	observed, err := r.Observations.Observed(ctx)
+	if err != nil {
+		return nil, fmt.Errorf(
+			"observe live USB state: %w",
+			err,
+		)
+	}
+
+	if r.RootHubs != nil {
+		hubs, err := r.RootHubs.RootHubs(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("read USB root hubs: %w", err)
+		}
+		sysfssource.AttachWiring(observed, hubs)
+	}
+
+	return observed, nil
 }
 
 type snapshot struct {
@@ -117,28 +181,14 @@ func (r Reader) snapshot(
 		)
 	}
 
-	resolved, err := r.Resolved.Resolved(ctx)
+	expected, err := r.Expected(ctx)
 	if err != nil {
-		return snapshot{}, fmt.Errorf(
-			"read resolved ODDC state: %w",
-			err,
-		)
+		return snapshot{}, err
 	}
 
-	expected, err := oddcsource.Expected(resolved)
+	observed, err := r.Observed(ctx)
 	if err != nil {
-		return snapshot{}, fmt.Errorf(
-			"derive USB expectations from ODDC: %w",
-			err,
-		)
-	}
-
-	observed, err := r.Observations.Observed(ctx)
-	if err != nil {
-		return snapshot{}, fmt.Errorf(
-			"observe live USB state: %w",
-			err,
-		)
+		return snapshot{}, err
 	}
 
 	trusted, err := r.Trust.Trusted(ctx)
