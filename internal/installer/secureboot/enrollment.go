@@ -26,6 +26,7 @@ type enrollmentOps struct {
 	recordOwnership func(context.Context, string) error
 	glob            func(string) ([]string, error)
 	armed           func() (bool, error)
+	writeDBX        func(context.Context, []byte) error
 }
 
 func EnrollFirmware(ctx context.Context) (EnrollmentResult, error) {
@@ -56,6 +57,7 @@ func EnrollFirmware(ctx context.Context) (EnrollmentResult, error) {
 			}
 			return err == nil, err
 		},
+		writeDBX: writeSignedDBX,
 	}
 
 	return enrollFirmware(ctx, snapshot, ops)
@@ -98,6 +100,10 @@ func enrollFirmware(
 			inspection.State,
 			inspection.Description,
 		)
+	}
+
+	if err := restoreDefaultDBX(ctx, snapshot, ops); err != nil {
+		return "", err
 	}
 
 	for _, name := range snapshot.RequiredPresent {
@@ -195,6 +201,85 @@ func enrollFirmware(
 	}
 
 	return finishEnrollment(ctx, ops)
+}
+
+// restoreDefaultDBX puts the firmware's default revocation list back when
+// the policy wants dbx present but it is empty. Some firmware clears dbx
+// together with the Platform Key (Setup Mode by "erase all keys"), and an
+// empty dbx trusts every revoked boot loader again. The default comes from
+// the firmware itself (dbxDefault), is written signed with the GjallarOS
+// KEK and must read back byte for byte, or enrollment stops before the PK is
+// written.
+func restoreDefaultDBX(
+	ctx context.Context,
+	snapshot FirmwarePolicySnapshot,
+	ops enrollmentOps,
+) error {
+	if !slices.Contains(snapshot.RequiredPresent, "dbx") {
+		return nil
+	}
+	current, present, err := ops.payload("dbx")
+	if err != nil {
+		return fmt.Errorf("read EFI variable dbx: %w", err)
+	}
+	if present && len(current) != 0 {
+		return nil
+	}
+
+	defaults, present, err := ops.payload("dbxDefault")
+	if err != nil {
+		return fmt.Errorf("read EFI variable dbxDefault: %w", err)
+	}
+	if !present || len(defaults) == 0 {
+		return fmt.Errorf(
+			"dbx is empty and the firmware has no default dbx to restore; refusing Secure Boot enrollment",
+		)
+	}
+
+	if err := ops.writeDBX(ctx, defaults); err != nil {
+		return fmt.Errorf("restore default dbx: %w", err)
+	}
+
+	written, present, err := ops.payload("dbx")
+	if err != nil {
+		return fmt.Errorf("read restored dbx: %w", err)
+	}
+	if !present || !bytes.Equal(written, defaults) {
+		return fmt.Errorf(
+			"restored dbx does not match the firmware default dbx; refusing Secure Boot enrollment",
+		)
+	}
+	return nil
+}
+
+// writeSignedDBX writes esl, an EFI signature list, to dbx as an
+// authenticated update signed with the GjallarOS KEK (efitools, as in
+// https://wiki.archlinux.org/title/Unified_Extensible_Firmware_Interface/Secure_Boot).
+func writeSignedDBX(ctx context.Context, esl []byte) error {
+	dir, err := os.MkdirTemp("/run", "gjallar-dbx-")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(dir)
+
+	eslPath := filepath.Join(dir, "dbx.esl")
+	authPath := filepath.Join(dir, "dbx.auth")
+	if err := os.WriteFile(eslPath, esl, 0o600); err != nil {
+		return err
+	}
+	if err := run(
+		ctx,
+		"sign-efi-sig-list",
+		"-k", "/var/lib/sbctl/keys/KEK/KEK.key",
+		"-c", "/var/lib/sbctl/keys/KEK/KEK.pem",
+		"dbx", eslPath, authPath,
+	); err != nil {
+		return fmt.Errorf("sign dbx update: %w", err)
+	}
+	if err := run(ctx, "efi-updatevar", "-f", authPath, "dbx"); err != nil {
+		return fmt.Errorf("write dbx: %w", err)
+	}
+	return nil
 }
 
 // finishEnrollment verifies and records GjallarOS ownership once its keys are

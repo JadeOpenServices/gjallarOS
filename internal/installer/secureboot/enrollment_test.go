@@ -96,7 +96,10 @@ func TestEnrollFirmwareFailsClosedWhenRequiredVariableMissing(t *testing.T) {
 			}, nil
 		},
 		present: func(name string) (bool, error) {
-			return name != "dbx", nil
+			return name != "db", nil
+		},
+		payload: func(name string) ([]byte, bool, error) {
+			return []byte("stable-" + name), true, nil
 		},
 	}
 
@@ -229,7 +232,7 @@ func TestEnrollFirmwareNeverMutatesUntouchedDBX(t *testing.T) {
 func TestEnrollFirmwareRejectsModifiedUntouchedVariable(t *testing.T) {
 	snapshot := frameworkPolicySnapshotForEnrollmentTest()
 
-	payloadReads := 0
+	enrolled := false
 
 	ops := enrollmentOps{
 		present: func(name string) (bool, error) {
@@ -240,15 +243,14 @@ func TestEnrollFirmwareRejectsModifiedUntouchedVariable(t *testing.T) {
 				return []byte("stable"), true, nil
 			}
 
-			payloadReads++
-			if payloadReads == 1 {
+			if !enrolled {
 				return []byte("factory-dbx"), true, nil
 			}
 
 			return []byte("modified-dbx"), true, nil
 		},
 		inspect: func(context.Context) (Inspection, error) {
-			if payloadReads == 0 {
+			if !enrolled {
 				return Inspection{
 					State:     StatePendingEnrollment,
 					SetupMode: true,
@@ -260,7 +262,8 @@ func TestEnrollFirmwareRejectsModifiedUntouchedVariable(t *testing.T) {
 				SetupMode: false,
 			}, nil
 		},
-		command: func(context.Context, string, ...string) error {
+		command: func(_ context.Context, name string, _ ...string) error {
+			enrolled = enrolled || name == "sbctl"
 			return nil
 		},
 		verifyArtifacts: func(context.Context) error {
@@ -342,5 +345,106 @@ func TestEnrollFirmwareLeavesCompletedOwnershipAlone(t *testing.T) {
 	result, err := enrollFirmware(context.Background(), enrollmentTestSnapshot(), ops)
 	if err != nil || result != EnrollmentWaitingForSetupMode {
 		t.Fatalf("result = %q, err = %v", result, err)
+	}
+}
+
+func dbxRestoreOps(dbx []byte, dbxDefault []byte, readBack func([]byte) []byte, commands *[]string) enrollmentOps {
+	inspection := 0
+	return enrollmentOps{
+		inspect: func(context.Context) (Inspection, error) {
+			inspection++
+			if inspection == 1 {
+				return Inspection{State: StatePendingEnrollment, SetupMode: true}, nil
+			}
+			return Inspection{State: StateGjallarManaged}, nil
+		},
+		present: func(name string) (bool, error) {
+			if name == "dbx" {
+				return dbx != nil, nil
+			}
+			return name != "PK", nil
+		},
+		payload: func(name string) ([]byte, bool, error) {
+			switch name {
+			case "dbx":
+				return dbx, dbx != nil, nil
+			case "dbxDefault":
+				return dbxDefault, dbxDefault != nil, nil
+			}
+			return []byte("stable-" + name), true, nil
+		},
+		writeDBX: func(_ context.Context, esl []byte) error {
+			*commands = append(*commands, "write-dbx")
+			dbx = readBack(esl)
+			return nil
+		},
+		glob: func(pattern string) ([]string, error) {
+			return []string{"/efi/" + pattern}, nil
+		},
+		command: func(_ context.Context, name string, _ ...string) error {
+			*commands = append(*commands, name)
+			return nil
+		},
+		verifyArtifacts: func(context.Context) error { return nil },
+		recordOwnership: func(context.Context, string) error { return nil },
+	}
+}
+
+func TestEnrollFirmwareRestoresEmptyDBXBeforeEnrolling(t *testing.T) {
+	var commands []string
+	same := func(esl []byte) []byte { return append([]byte(nil), esl...) }
+	ops := dbxRestoreOps(nil, []byte("default-dbx"), same, &commands)
+
+	if _, err := enrollFirmware(context.Background(), enrollmentTestSnapshot(), ops); err != nil {
+		t.Fatal(err)
+	}
+	if len(commands) == 0 || commands[0] != "write-dbx" {
+		t.Fatalf("dbx was not restored first: %v", commands)
+	}
+	if !reflect.DeepEqual(commands[len(commands)-4:len(commands)-2], []string{"chattr", "sbctl"}) {
+		t.Fatalf("enrollment did not follow the restore: %v", commands)
+	}
+}
+
+func TestEnrollFirmwareStopsWhenRestoredDBXDiffers(t *testing.T) {
+	var commands []string
+	changed := func([]byte) []byte { return []byte("something-else") }
+	ops := dbxRestoreOps([]byte{}, []byte("default-dbx"), changed, &commands)
+
+	_, err := enrollFirmware(context.Background(), enrollmentTestSnapshot(), ops)
+	if err == nil || !strings.Contains(err.Error(), "does not match") {
+		t.Fatalf("got %v, want a read-back mismatch", err)
+	}
+	if !reflect.DeepEqual(commands, []string{"write-dbx"}) {
+		t.Fatalf("enrollment continued after a bad restore: %v", commands)
+	}
+}
+
+func TestEnrollFirmwareRefusesEmptyDBXWithoutDefault(t *testing.T) {
+	var commands []string
+	same := func(esl []byte) []byte { return esl }
+	ops := dbxRestoreOps(nil, nil, same, &commands)
+
+	_, err := enrollFirmware(context.Background(), enrollmentTestSnapshot(), ops)
+	if err == nil || !strings.Contains(err.Error(), "no default dbx") {
+		t.Fatalf("got %v, want a refusal", err)
+	}
+	if len(commands) != 0 {
+		t.Fatalf("firmware was changed: %v", commands)
+	}
+}
+
+func TestEnrollFirmwareKeepsPopulatedDBX(t *testing.T) {
+	var commands []string
+	same := func(esl []byte) []byte { return esl }
+	ops := dbxRestoreOps([]byte("current-dbx"), []byte("default-dbx"), same, &commands)
+
+	if _, err := enrollFirmware(context.Background(), enrollmentTestSnapshot(), ops); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range commands {
+		if name == "write-dbx" {
+			t.Fatal("a populated dbx was replaced")
+		}
 	}
 }

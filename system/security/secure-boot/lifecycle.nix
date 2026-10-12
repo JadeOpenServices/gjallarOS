@@ -22,6 +22,9 @@
     path = [
       gjallarctlPackage
       pkgs.sbctl
+      # sign-efi-sig-list and efi-updatevar put an emptied dbx back from
+      # dbxDefault; sbctl cannot write dbx.
+      pkgs.efitools
       # sbctl verify locates the ESP with lsblk (e2e-target, 2026-09-29).
       pkgs.util-linux
       pkgs.coreutils
