@@ -107,13 +107,23 @@ func runUSBReview(args []string, stderr io.Writer) int {
 	// Media notices close their cards when ctx ends; wait for that on exit.
 	var media sync.WaitGroup
 	defer media.Wait()
+	// The same failure every 2 s says nothing new: report it once, and once
+	// more when the broker answers again.
+	lastErr := ""
 	for ctx.Err() == nil {
 		requestCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		response, err := broker.Call(requestCtx, broker.DefaultSocket, broker.Request{Action: broker.ActionPolicy})
 		cancel()
 		if err != nil {
-			fmt.Fprintf(stderr, "WARN: USB review: %v\n", err)
+			if err.Error() != lastErr {
+				fmt.Fprintf(stderr, "WARN: USB review: %v\n", err)
+				lastErr = err.Error()
+			}
 		} else {
+			if lastErr != "" {
+				fmt.Fprintln(stderr, "USB review: broker answers again")
+				lastErr = ""
+			}
 			active := map[string]bool{}
 			present := map[string]bool{}
 			for _, d := range response.Policy {
