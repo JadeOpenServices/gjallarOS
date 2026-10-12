@@ -299,7 +299,7 @@ whole directory into the Nix store, untracked files and VM disks included.
 ### Release cache
 
 GjallarOS patches a few packages (Noctalia, its greeter, the Nextcloud client
-with OpenVFS, OpenCode, qt6ct and others), so cache.nixos.org does not have
+with OpenVFS, OpenCode, Hyprland, Ghostty, Dolphin and others), so cache.nixos.org does not have
 them and every machine compiled them itself. For each `v*` release tag,
 `.github/workflows/cache.yml` builds them (flake package `prebuilt`), signs
 them and uploads them as files of the `nix-cache` release. Those files are a

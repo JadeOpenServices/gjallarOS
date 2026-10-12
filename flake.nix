@@ -129,7 +129,15 @@
         openvfs = (import ./apps/nextcloud/package.nix { inherit pkgs; }).openvfs;
         "gjallar-opencode" = import ./apps/ai/opencode.nix { inherit pkgs; };
         inherit (pkgs.qt6Packages) qt6ct;
-        inherit (pkgs) _nemu;
+        inherit (pkgs.kdePackages) dolphin;
+        inherit (pkgs)
+          _nemu
+          ghostty
+          hyprland
+          usbguard
+          wvkbd
+          xdg-desktop-portal-hyprland
+          ;
 
         prebuilt = pkgs.linkFarmFromDrvs "gjallar-prebuilt" [
           gjallarctl
@@ -142,6 +150,13 @@
           gjallar-opencode
           qt6ct
           _nemu
+          # pkgs/overlays patches these, so cache.nixos.org has other builds.
+          dolphin
+          ghostty
+          hyprland
+          usbguard
+          wvkbd
+          xdg-desktop-portal-hyprland
         ];
       };
 
