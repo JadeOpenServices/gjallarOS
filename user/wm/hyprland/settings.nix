@@ -58,6 +58,17 @@ let
           exit
         }
       ' "$noctalia_state")"
+      # The bundled wallpaper is saved by its store path, which is gone after
+      # an update and garbage collection. Use the same file from the running
+      # Noctalia, as pkgs/noctalia/wallpaper-store-path.patch does in the shell.
+      case $noctalia_wallpaper in
+        *..*) ;;
+        */share/noctalia/assets/?*)
+          if [ ! -e "$noctalia_wallpaper" ]; then
+            noctalia_wallpaper="${config.programs.noctalia.package}/share/noctalia/assets/''${noctalia_wallpaper#*/share/noctalia/assets/}"
+          fi
+          ;;
+      esac
       if [ -n "$noctalia_wallpaper" ] && [ -r "$noctalia_wallpaper" ]; then
         selected_wallpaper="$noctalia_wallpaper"
       fi
