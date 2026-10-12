@@ -288,8 +288,8 @@ lib.mkIf (settings.touchscreenEnable or false) {
         # Not plain Super+K: that already moves focus up, and Hyprland would
         # run both.
         "SUPER CTRL, K, Show or hide on-screen keyboard, exec, ${lib.getExe virtualKeyboard}"
-        # KEY_KEYBOARD (374, xkb 382): the keyboard key some convertibles and
-        # the ZBook Quick Keys send.
+        # KEY_KEYBOARD (374, xkb 382): the keyboard key some convertibles
+        # send.
         ", code:382, Show or hide on-screen keyboard, exec, ${lib.getExe virtualKeyboard}"
       ];
 

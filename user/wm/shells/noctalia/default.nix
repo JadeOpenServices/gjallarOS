@@ -12,8 +12,8 @@ let
   semanticTheme = import ../../../../themes/lib/semantic.nix { inherit config; };
   contrastGuard = import ../../../../themes/lib/contrast.nix { inherit pkgs; };
 
-  # Bezel Quick Keys (system/hardware/quick-keys.nix). Only models that have
-  # them get the preset indicator in the bar.
+  # Bezel Quick Keys (ODDC's oddc-quick-keys). Only models that have them get
+  # the preset indicator in the bar.
   hasQuickKeys =
     lib.attrByPath [ "oddc" "resolved" "hardware" "input" "quickKeys" ] { } osConfig ? primary;
   # On-screen keyboard button, same switch as user/wm/hyprland/touch.nix.

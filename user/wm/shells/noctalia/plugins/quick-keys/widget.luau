@@ -1,13 +1,13 @@
 -- oddc-quick-keys writes preset1, preset2 or preset3 here when the device
 -- reports a change. The file is missing until the first key press after boot,
--- and the widget stays hidden until then. Names follow
--- system/hardware/quick-keys.nix.
+-- and the widget stays hidden until then. GjallarOS maps none of the keys:
+-- each preset sends ODDC's own macro keys, free for the user's binds.
 local presetFile = "/run/oddc/quick-keys/preset"
 
 local presets = {
-  preset1 = { label = "1", name = "Desktop: keyboard, screenshot, lock, brightness" },
-  preset2 = { label = "2", name = "Media" },
-  preset3 = { label = "3", name = "Custom (KEY_MACRO11-15)" },
+  preset1 = { label = "1" },
+  preset2 = { label = "2" },
+  preset3 = { label = "3" },
 }
 
 local shown = false
@@ -28,6 +28,6 @@ function update()
   end
   barWidget.setGlyph("keyboard")
   barWidget.setText(preset.label)
-  barWidget.setTooltip("Quick Keys preset " .. preset.label .. ": " .. preset.name)
+  barWidget.setTooltip("Quick Keys preset " .. preset.label .. ": keys free for your own shortcuts")
   barWidget.setVisible(true)
 end
