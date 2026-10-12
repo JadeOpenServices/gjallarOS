@@ -1,8 +1,13 @@
 # The Hyprland portal crashed at every logout: after its event loop ended it
 # disconnected from Wayland, then the outputs, registry and other proxies were
 # destroyed at exit() and wrote to the freed connection. Drop them before the
-# disconnect (upstream PR #443, still open; 1.4.1 has the same bug). Drop this
-# when nixpkgs ships a release with the fix.
+# disconnect (upstream PR #443, still open; 1.4.1 has the same bug). Drop the
+# patch when nixpkgs ships a release with the fix.
+#
+# The portal takes screenshots and picks colours by running grim, slurp and
+# hyprpicker, and offers neither without grim on its PATH. They go on the
+# portal's own PATH, not the user's, and get no permission rule: Hyprland
+# asks before each capture, because a grant ends when grim exits.
 final: prev:
 
 let
@@ -14,5 +19,15 @@ in
       "GjallarOS xdg-desktop-portal-hyprland overlay patches 1.3.12; drop pkgs/patches/xdph-release-wayland.patch if ${prev.xdg-desktop-portal-hyprland.version} has xdph PR #443.";
     prev.xdg-desktop-portal-hyprland.overrideAttrs (old: {
       patches = (old.patches or [ ]) ++ [ ../patches/xdph-release-wayland.patch ];
+      postInstall = (old.postInstall or "") + ''
+        wrapProgramShell $out/libexec/xdg-desktop-portal-hyprland \
+          --prefix PATH ":" ${
+            lib.makeBinPath [
+              final.grim
+              final.slurp
+              final.hyprpicker
+            ]
+          }
+      '';
     });
 }
