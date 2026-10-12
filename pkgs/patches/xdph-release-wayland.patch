@@ -1,0 +1,54 @@
+xdg-desktop-portal-hyprland PR #443 (open), moved to the 1.3.12 file layout:
+drop the Wayland proxies before disconnecting the display, so their
+destructors at exit() don't write to a freed wl_display (SEGV at logout).
+1.3.12 has no xdgOutputManager or inputCapture, so those lines are left out.
+https://github.com/hyprwm/xdg-desktop-portal-hyprland/pull/443
+
+--- a/src/core/PortalManager.cpp
++++ b/src/core/PortalManager.cpp
+@@ -442,10 +442,11 @@
+     m_sPortals.screencopy.reset();
+     m_sPortals.screenshot.reset();
+     m_sHelpers.toplevel.reset();
++    m_sHelpers.toplevelMapping.reset();
+ 
+     m_pConnection.reset();
+     pw_loop_destroy(m_sPipewire.loop);
+-    wl_display_disconnect(m_sWaylandConnection.display);
++    releaseWayland();
+ 
+     m_sTimersThread.thread.release();
+     pollThr.join(); // wait for poll to exit
+@@ -512,6 +513,21 @@
+     m_sTimersThread.loopSignal.notify_all();
+ }
+ 
++void CPortalManager::releaseWayland() {
++    m_vOutputs.clear();
++    m_sWaylandConnection.linuxDmabufFeedback.reset();
++    m_sWaylandConnection.linuxDmabuf.reset();
++    m_sWaylandConnection.hyprlandToplevelMgr.reset();
++    m_sWaylandConnection.shm.reset();
++    m_sWaylandConnection.registry.reset();
++
++    if (!m_sWaylandConnection.display)
++        return;
++
++    wl_display_disconnect(m_sWaylandConnection.display);
++    m_sWaylandConnection.display = nullptr;
++}
++
+ void CPortalManager::terminate() {
+     m_bTerminate = true;
+ 
+--- a/src/core/PortalManager.hpp
++++ b/src/core/PortalManager.hpp
+@@ -98,6 +98,8 @@
+     // terminate after the event loop has been created. Before we can exit()
+     void terminate();
+ 
++    void releaseWayland();
++
+   private:
+     void  startEventLoop();
+ 
