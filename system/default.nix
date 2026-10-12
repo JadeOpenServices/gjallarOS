@@ -29,6 +29,7 @@
     ./security/disk-unlock.nix
     ./security/touch-unlock.nix
     ./security/keyring.nix
+    ./security/security-notice.nix
     ./maintenance/storage.nix
     ./maintenance/installer-resume.nix
     ./maintenance/binary-cache.nix

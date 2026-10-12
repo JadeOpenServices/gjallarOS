@@ -126,6 +126,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runVPN(args[1:], stdout, stderr)
 	case "secure-boot":
 		return runSecureBoot(args[1:], stdout, stderr)
+	case "security":
+		return runSecurity(args[1:], stderr)
 	default:
 		fmt.Fprintf(stderr, "ERROR: unknown command %q\n", args[0])
 		printUsage(stderr)
@@ -1794,9 +1796,10 @@ func printUsage(out io.Writer) {
 	fmt.Fprintln(out, "       gjallarctl normalize keyboard --layout VALUE")
 	fmt.Fprintln(out, "       gjallarctl preset {validate|get|list|bool} --config PATH [--key NAME]")
 	fmt.Fprintln(out, "       gjallarctl tpm2 reenroll")
-	fmt.Fprintln(out, "       gjallarctl luks {status|recovery-key|setup|remind [--open|--refresh]}")
+	fmt.Fprintln(out, "       gjallarctl luks {status|recovery-key|pin [--remove]|setup|remind [--open|--refresh]}")
 	fmt.Fprintln(out, "       gjallarctl vpn status")
 	fmt.Fprintln(out, "       gjallarctl secure-boot {status|setup|update-dbx} [--repo PATH]")
+	fmt.Fprintln(out, "       gjallarctl security notice")
 	fmt.Fprintln(out, "       gjallarctl hyprland-render-gpu")
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "Safe GjallarOS maintenance commands. Rebuild invokes sudo explicitly.")

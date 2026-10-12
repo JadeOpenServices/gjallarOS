@@ -157,6 +157,7 @@ _gjallarctl() {
     'tpm2:TPM2 disk unlock'
     'luks:system disk unlock methods and recovery key'
     'secure-boot:Secure Boot with GjallarOS keys'
+    'security:security notes for this device from ODDC'
     'oddc:ODDC hardware catalogue'
     'fan:fan control'
     'thermal-status:show temperatures and fan state'
@@ -184,6 +185,7 @@ _gjallarctl() {
         helpme) _arguments '--text[print instead of opening a window]' ;;
         tpm2) _arguments '1:tpm2 command:((reenroll\:"enroll the TPM2 key again"))' ;;
         luks) _gjallarctl_luks ;;
+        security) _arguments '1:security command:((notice\:"show new security notes once, as at login"))' ;;
         secure-boot)
           _arguments '1:secure-boot command:((status\:"show Secure Boot ownership" setup\:"set up Secure Boot on this installed system" update-dbx\:"install the newest dbx revocation list from LVFS"))' \
             '--repo[GjallarOS checkout]:checkout:_files -/' ;;
