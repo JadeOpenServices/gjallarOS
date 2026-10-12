@@ -97,11 +97,10 @@ lib.mkIf settings.secureBootEnable {
 
   environment.systemPackages = [ dbxUpdate ];
 
-  # Runs before make-policy at boot: the firmware now measures the new dbx,
-  # so the state from before the update no longer unlocks the disk.
-  systemd.services.systemd-pcrlock-secureboot-policy = lib.mkIf tpm2Enabled {
-    serviceConfig.ExecStartPre = [
-      "${pkgs.coreutils}/bin/rm -f -- ${lib.escapeShellArg previousPolicy}"
-    ];
-  };
+  # At the next boot the firmware measures the new dbx, so the state from
+  # before the update no longer unlocks the disk. "!": only
+  # systemd-tmpfiles-setup at boot removes it, before make-policy (see
+  # lanzaboote.nix). A rebuild restarts changed units, so an ExecStartPre
+  # here would have dropped it before the restart.
+  systemd.tmpfiles.rules = lib.mkIf tpm2Enabled [ "r! ${previousPolicy}" ];
 }
