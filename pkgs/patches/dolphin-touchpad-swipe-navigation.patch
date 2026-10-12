@@ -1,0 +1,77 @@
+diff --git a/src/kitemviews/kitemlistcontainer.cpp b/src/kitemviews/kitemlistcontainer.cpp
+index 3ec56e5..0e7ff07 100644
+--- a/src/kitemviews/kitemlistcontainer.cpp
++++ b/src/kitemviews/kitemlistcontainer.cpp
+@@ -187,12 +187,46 @@ void KItemListContainer::wheelEvent(QWheelEvent *event)
+         return;
+     }
+ 
++    trackSwipe(event);
++
+     const bool scrollHorizontally = (qAbs(event->angleDelta().y()) < qAbs(event->angleDelta().x())) || (!verticalScrollBar()->isVisible());
+     KItemListSmoothScroller *smoothScroller = scrollHorizontally ? m_horizontalSmoothScroller : m_verticalSmoothScroller;
+ 
+     smoothScroller->handleWheelEvent(event);
+ }
+ 
++void KItemListContainer::trackSwipe(const QWheelEvent *event)
++{
++    // Only touchpads (and other finger scrolling) send scroll phases; a mouse
++    // wheel never starts a swipe.
++    switch (event->phase()) {
++    case Qt::ScrollBegin:
++        // Compact view, or Details view with wide columns, scrolls sideways.
++        m_swipeTracking = horizontalScrollBar()->minimum() == horizontalScrollBar()->maximum();
++        m_swipeDistance = QPointF();
++        break;
++    case Qt::ScrollUpdate:
++        // pixelDelta() follows the scroll direction; with natural scrolling
++        // inverted() is set and it follows the fingers.
++        if (m_swipeTracking) {
++            m_swipeDistance += event->inverted() ? QPointF(event->pixelDelta()) : -QPointF(event->pixelDelta());
++        }
++        break;
++    case Qt::ScrollEnd: {
++        // Fingers moved right: back, as on a touchscreen (KItemListController::swipeTriggered).
++        const qreal minimumDistance = 120;
++        const qreal x = m_swipeDistance.x();
++        if (m_swipeTracking && qAbs(x) >= minimumDistance && qAbs(x) > 2 * qAbs(m_swipeDistance.y())) {
++            Q_EMIT m_controller->mouseButtonPressed(-1, x > 0 ? Qt::BackButton : Qt::ForwardButton);
++        }
++        m_swipeTracking = false;
++        break;
++    }
++    default:
++        break;
++    }
++}
++
+ void KItemListContainer::focusInEvent(QFocusEvent *event)
+ {
+     KItemListView *view = m_controller->view();
+diff --git a/src/kitemviews/kitemlistcontainer.h b/src/kitemviews/kitemlistcontainer.h
+index 93016ab..bf79249 100644
+--- a/src/kitemviews/kitemlistcontainer.h
++++ b/src/kitemviews/kitemlistcontainer.h
+@@ -74,12 +74,21 @@ private:
+      */
+     void updateScrollOffsetScrollBarPolicy();
+ 
++    /**
++     * Two fingers swiped sideways on a touchpad go back or forward, as in web
++     * browsers, when the view cannot scroll sideways itself.
++     */
++    void trackSwipe(const QWheelEvent *event);
++
+ private:
+     KItemListController *m_controller;
+ 
+     KItemListSmoothScroller *m_horizontalSmoothScroller;
+     KItemListSmoothScroller *m_verticalSmoothScroller;
+     QScroller *m_scroller;
++
++    bool m_swipeTracking = false;
++    QPointF m_swipeDistance;
+ };
+ 
+ #endif
