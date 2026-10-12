@@ -144,10 +144,12 @@ in
     };
   };
 
+  # programs.hyprland already adds the hyprland and gtk portals. Listing gtk here
+  # again put its D-Bus services on the session bus twice, and dbus-broker
+  # logged "Ignoring duplicate name" for each of them on every reload.
   xdg.portal = {
     enable = true;
     xdgOpenUsePortal = true;
-    extraPortals = [ pkgs.xdg-desktop-portal-gtk ];
     config.hyprland = {
       default = [
         "hyprland"
