@@ -9,36 +9,43 @@ let
   printing = settings.printingEnable or false;
   networkPrinting = printing && (settings.networkPrintingEnable or false);
 in
-lib.mkIf printing {
+{
+  # Printing turns avahi on (ipp-usb below enables it). avahi from nixpkgs
+  # dies at boot and then never starts again (Plane 181).
+  # What the fix does and when to drop it: system/fixes/avahi-daemon.
+  imports = [ ../fixes/avahi-daemon ];
 
-  services.printing = {
-    enable = true;
+  config = lib.mkIf printing {
 
-    startWhenNeeded = true;
+    services.printing = {
+      enable = true;
 
-    listenAddresses = [ "localhost:631" ];
-    allowFrom = [ "localhost" ];
-    openFirewall = false;
+      startWhenNeeded = true;
 
-    defaultShared = false;
-    browsing = false;
-    webInterface = false;
+      listenAddresses = [ "localhost:631" ];
+      allowFrom = [ "localhost" ];
+      openFirewall = false;
 
-    browsed.enable = false;
+      defaultShared = false;
+      browsing = false;
+      webInterface = false;
 
-    drivers = with pkgs; [
-      gutenprint
-    ];
-  };
+      browsed.enable = false;
 
-  services.ipp-usb.enable = true;
+      drivers = with pkgs; [
+        gutenprint
+      ];
+    };
 
-  hardware.sane.enable = true;
+    services.ipp-usb.enable = true;
 
-  services.avahi = lib.mkIf networkPrinting {
-    enable = true;
-    nssmdns4 = true;
+    hardware.sane.enable = true;
 
-    openFirewall = true;
+    services.avahi = lib.mkIf networkPrinting {
+      enable = true;
+      nssmdns4 = true;
+
+      openFirewall = true;
+    };
   };
 }

@@ -1,0 +1,15 @@
+--- a/avahi-daemon/main.c
++++ b/avahi-daemon/main.c
+@@ -1638,6 +1638,12 @@
+         daemon_reset_sigs(-1);
+         daemon_unblock_sigs(-1);
+ 
++        /* GjallarOS: resolvconf's libc.d hook sends SIGHUP to the pid in the
++         * pid file. That file exists before run_server() installs the
++         * handler, and the default action ends the daemon. Ignore SIGHUP
++         * until daemon_signal_init() replaces this. */
++        ignore_signal(SIGHUP);
++
+         if (make_runtime_dir() < 0)
+             goto finish;
+ 

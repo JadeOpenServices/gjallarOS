@@ -191,6 +191,11 @@
           wrapperModule = ./tests/nix/installer-resume-wrapper.nix;
         };
 
+        avahi-daemon-fix = import ./tests/nix/avahi-daemon-fix.nix {
+          inherit pkgs;
+          fixModule = ./system/fixes/avahi-daemon;
+        };
+
         tailscale-trust = import ./tests/nix/tailscale-trust.nix {
           inherit nixpkgs system;
           tailscaleModules = [
