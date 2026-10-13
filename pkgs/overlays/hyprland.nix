@@ -15,6 +15,13 @@
 # from libinput, but 0.55.4 (and main as of 2026-10-12) sends IDENTICAL
 # instead. Apps that follow the fingers (Qt's QWheelEvent::inverted, the
 # Dolphin swipe in dolphin.nix) then went the wrong way.
+#
+# sendshortcut looked the key up in the keyboard's live xkb state, which
+# holds the pressed modifiers. The paste-once bind for Ctrl+Shift+V runs
+# while Shift is still down, so v read as V, the lookup failed and nothing
+# was pasted until a plain Ctrl+V had put v in Hyprland's keycode cache.
+# The patch looks keys up in the state that only tracks the layout. Open
+# upstream as of 2026-10-13.
 final: prev:
 
 let
@@ -23,12 +30,13 @@ in
 {
   hyprland =
     assert lib.assertMsg (prev.hyprland.version == "0.55.4")
-      "GjallarOS hyprland overlay patches 0.55.4; drop pkgs/patches/hyprland-stale-cursor.patch if ${prev.hyprland.version} has Hyprland PR #15376, pkgs/patches/hyprland-permission-client-destroy.patch if it has PR #16353, and pkgs/patches/hyprland-axis-relative-direction.patch if onMouseWheel passes e.relativeDirection.";
+      "GjallarOS hyprland overlay patches 0.55.4; drop pkgs/patches/hyprland-stale-cursor.patch if ${prev.hyprland.version} has Hyprland PR #15376, pkgs/patches/hyprland-permission-client-destroy.patch if it has PR #16353, pkgs/patches/hyprland-axis-relative-direction.patch if onMouseWheel passes e.relativeDirection, and pkgs/patches/hyprland-sendshortcut-unshifted.patch if sendshortcut no longer reads KB->m_xkbState.";
     prev.hyprland.overrideAttrs (old: {
       patches = (old.patches or [ ]) ++ [
         ../patches/hyprland-stale-cursor.patch
         ../patches/hyprland-permission-client-destroy.patch
         ../patches/hyprland-axis-relative-direction.patch
+        ../patches/hyprland-sendshortcut-unshifted.patch
       ];
     });
 }

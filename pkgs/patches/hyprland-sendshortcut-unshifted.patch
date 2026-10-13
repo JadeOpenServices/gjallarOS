@@ -1,0 +1,28 @@
+--- a/src/config/legacy/DispatcherTranslator.cpp
++++ b/src/config/legacy/DispatcherTranslator.cpp
+@@ -554,7 +554,10 @@
+ 
+         if (!g_pKeybindManager->m_keyToCodeCache.contains(KEYPAIRSTRING)) {
+             xkb_keymap*   km          = KB->m_xkbKeymap;
+-            xkb_state*    ks          = KB->m_xkbState;
++            // m_xkbState carries the held modifiers, so with Shift down from the
++            // bind itself v reads as V and the lookup fails. m_xkbSymState has
++            // the layout group only.
++            xkb_state*    ks          = KB->m_xkbSymState ? KB->m_xkbSymState : KB->m_xkbState;
+             xkb_keycode_t keycode_min = xkb_keymap_min_keycode(km);
+             xkb_keycode_t keycode_max = xkb_keymap_max_keycode(km);
+ 
+--- a/src/config/lua/bindings/LuaBindingsDispatchers.cpp
++++ b/src/config/lua/bindings/LuaBindingsDispatchers.cpp
+@@ -362,7 +362,10 @@
+         return g_pKeybindManager->m_keyToCodeCache[KEYPAIRSTRING];
+ 
+     xkb_keymap*   km          = KB->m_xkbKeymap;
+-    xkb_state*    ks          = KB->m_xkbState;
++    // m_xkbState carries the held modifiers, so with Shift down from the
++    // bind itself v reads as V and the lookup fails. m_xkbSymState has
++    // the layout group only.
++    xkb_state*    ks          = KB->m_xkbSymState ? KB->m_xkbSymState : KB->m_xkbState;
+     xkb_keycode_t keycode_min = xkb_keymap_min_keycode(km);
+     xkb_keycode_t keycode_max = xkb_keymap_max_keycode(km);
+     uint32_t      keycode     = 0;
