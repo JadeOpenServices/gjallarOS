@@ -427,8 +427,9 @@ setup existed) can only get it by running the whole installer again.
       custom KEK folder (`-c`). The certificate is pinned by hash. db stays
       as the firmware had it (no `-m`), so nothing new is trusted to boot.
       Open: ask ODDC whether the ZBook's KEKDefault already has it.
-- [x] **dbx updates after enrollment.** The fwupd refresh timer is off, so
-      no dbx update arrives on its own. After Secure Boot is verified, setup
+- [x] **dbx updates after enrollment.** The fwupd refresh timer keeps the
+      LVFS data current, but a dbx update changes PCR 7, so it never installs
+      on its own. After Secure Boot is verified, setup
       offers `gjallarctl secure-boot update-dbx`, a dbx update through fwupd (2.0.8 or newer handles
       the 2023 KEK). dbx is measured into PCR 7, which TPM disk unlock is
       bound to, so before the reboot the Secure Boot policy is locked again
