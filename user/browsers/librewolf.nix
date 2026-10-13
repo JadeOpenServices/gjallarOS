@@ -20,7 +20,8 @@ in
       #compdef gjallar-librewolf-import
       _arguments \
         '--dry-run[list the files without copying]' \
-        '--once[import only into a Firefox profile that was never opened]' \
+        '--once[import into a new Firefox profile, or add hand-installed add-ons once to an imported one]' \
+        '--extensions[copy only the add-ons installed by hand, with their data]' \
         '--src[LibreWolf profile]:directory:_files -/' \
         '--dst[Firefox profile]:directory:_files -/'
     '')

@@ -25,3 +25,6 @@ generated/
 /result
 /result-*
 .claude/
+
+# Python bytecode.
+__pycache__/

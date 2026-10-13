@@ -5,14 +5,25 @@ SQLite databases go through the backup API from a private copy so a stale
 -wal file can never be replayed onto the copied database. Files that Home
 Manager owns (user.js, search, extensions, chrome) are left alone.
 
-With --once (used by Home Manager activation) it only runs while Firefox has
-never been opened, and leaves a marker so it never runs again.
+Add-ons that Home Manager installs are links into the Nix store and are left
+to Home Manager. Add-ons the user installed by hand in LibreWolf are plain
+.xpi files; they are copied with their data, so they keep their settings.
 
-Usage: gjallar-librewolf-import [--dry-run] [--once] [--src DIR] [--dst DIR]
+With --once (used by Home Manager activation) the full import only runs while
+Firefox has never been opened, and leaves a marker so it never runs again.
+Profiles imported before hand-installed add-ons were copied get only that
+step, once, with a second marker.
+
+--extensions copies only the hand-installed add-ons, for a Firefox profile
+that is already in use.
+
+Usage: gjallar-librewolf-import [--dry-run] [--once] [--extensions] [--src DIR] [--dst DIR]
 """
 import argparse
 import configparser
+import json
 import os
+import re
 import shutil
 import sqlite3
 import sys
@@ -31,6 +42,7 @@ SKIP = {
     "saved-telemetry-pings", "times.json",
 }
 SQLITE_SIDE = ("-wal", "-shm", "-journal")
+EXT_MARKER = ".gjallar-librewolf-extensions-imported"
 
 
 def default_profile(ini_dirs):
@@ -97,6 +109,73 @@ def copy_sqlite(src, dst, tmp):
     return ok
 
 
+def ext_uuids(profile):
+    try:
+        prefs = (profile / "prefs.js").read_text(errors="replace")
+    except OSError:
+        return {}
+    m = re.search(r'user_pref\("extensions\.webextensions\.uuids", "(.*)"\);', prefs)
+    if not m:
+        return {}
+    try:
+        return json.loads(json.loads(f'"{m.group(1)}"'))
+    except ValueError:
+        return {}
+
+
+def copy_tree(s, d, tmp, bad):
+    """Copy a file or folder, SQLite files through copy_sqlite."""
+    files = [s] if s.is_file() else [p for p in s.rglob("*") if p.is_file()]
+    for f in files:
+        if f.is_symlink() or f.name.endswith(SQLITE_SIDE):
+            continue
+        t = d / f.relative_to(s) if s.is_dir() else d
+        t.parent.mkdir(parents=True, exist_ok=True)
+        if is_sqlite(f):
+            ok = copy_sqlite(f, t, tmp)
+            if ok != "ok":
+                bad.append(f"{f}: {ok}")
+        else:
+            shutil.copy2(f, t)
+
+
+def copy_extensions(src, dst, tmp, bad):
+    """Copy hand-installed add-ons (plain .xpi files) and their data.
+
+    Firefox finds them in the profile on the next start and keeps them
+    enabled (autoDisableScopes leaves the profile scope alone). Data is keyed
+    by the add-on's internal UUID, so it is only copied when Firefox uses the
+    same UUID as LibreWolf; otherwise the add-on starts empty.
+    """
+    sx, dx = src / "extensions", dst / "extensions"
+    if not sx.is_dir():
+        return []
+    src_ids, dst_ids = ext_uuids(src), ext_uuids(dst)
+    done = []
+    for x in sorted(sx.glob("*.xpi")):
+        if x.is_symlink():
+            continue
+        t = dx / x.name
+        if t.exists() or t.is_symlink():
+            continue
+        dx.mkdir(exist_ok=True)
+        shutil.copy2(x, t)
+        ext_id = x.name[:-4]
+        uuid = src_ids.get(ext_id)
+        if uuid and dst_ids.get(ext_id) == uuid:
+            for d in (src / "storage/default").glob(f"moz-extension+++{uuid}*"):
+                if (dst / "storage/default" / d.name).exists():
+                    shutil.rmtree(dst / "storage/default" / d.name)
+                copy_tree(d, dst / "storage/default" / d.name, tmp, bad)
+            data = src / "browser-extension-data" / ext_id
+            if data.is_dir():
+                copy_tree(data, dst / "browser-extension-data" / ext_id, tmp, bad)
+            done.append(ext_id)
+        else:
+            done.append(f"{ext_id} (without its data)")
+    return done
+
+
 def main():
     ap = argparse.ArgumentParser(prog="gjallar-librewolf-import")
     ap.add_argument("--src", type=Path)
@@ -104,6 +183,8 @@ def main():
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--once", action="store_true",
                     help="import only into a Firefox profile that was never opened")
+    ap.add_argument("--extensions", action="store_true",
+                    help="copy only the add-ons installed by hand, with their data")
     a = ap.parse_args()
 
     src = a.src or default_profile([HOME / ".librewolf", HOME / ".config/librewolf/librewolf"])
@@ -116,8 +197,13 @@ def main():
         sys.exit(f"profile not found: src={src} dst={dst}")
     src, dst = src.resolve(), dst.resolve()
     marker = dst / ".gjallar-librewolf-imported"
+    ext_marker = dst / EXT_MARKER
+    only_ext = a.extensions
     if a.once and (marker.exists() or (dst / "places.sqlite").exists()):
-        return
+        # Imported before add-ons were copied: do that step once.
+        if not marker.exists() or ext_marker.exists():
+            return
+        only_ext = True
     print(f"from {src}\n  to {dst}")
     if src == dst:
         sys.exit("source and target are the same")
@@ -127,6 +213,21 @@ def main():
                 print(f"{name} is running; LibreWolf import waits for the next switch")
                 return
             sys.exit(f"{name} is running ({p}/lock); close it first")
+    if only_ext:
+        if a.dry_run:
+            for x in sorted((src / "extensions").glob("*.xpi")):
+                if not x.is_symlink() and not (dst / "extensions" / x.name).exists():
+                    print("  add-on", x.name[:-4])
+            return
+        bad = []
+        with tempfile.TemporaryDirectory() as tmp:
+            done = copy_extensions(src, dst, tmp, bad)
+        for e in done:
+            print(f"  add-on {e}")
+        if bad:
+            sys.exit("integrity check failed: " + "; ".join(bad))
+        ext_marker.write_text(time.strftime("%Y-%m-%d %H:%M:%S\n"))
+        return
 
     plan = []
     for root, dirs, files in os.walk(src):
@@ -170,8 +271,11 @@ def main():
                     bad.append(f"{p}: {ok}")
             else:
                 shutil.copy2(s, d)
+        added = copy_extensions(src, dst, tmp, bad)
     os.utime(dst)
     print(f"copied {len(plan)} files ({dbs} databases)")
+    for e in added:
+        print(f"  add-on {e}")
 
     def count(db, sql):
         try:
@@ -196,6 +300,7 @@ def main():
     if bad:
         sys.exit("integrity check failed: " + "; ".join(bad))
     marker.write_text(time.strftime("%Y-%m-%d %H:%M:%S\n"))
+    ext_marker.write_text(time.strftime("%Y-%m-%d %H:%M:%S\n"))
     print("done; LibreWolf profile untouched")
 
 
