@@ -484,3 +484,103 @@ Sources:
   https://discourse.nixos.org/t/how-to-enable-secureboot/28820/10
 - Lockdown and hibernation:
   https://lkml.iu.edu/hypermail/linux/kernel/1908.2/02835.html
+
+## 13. JODS: own pins and build agents
+
+Plane GJALLAROS-183, weight 44. Nothing in this section is built yet.
+
+Jade's idea (2026-10-13): GjallarOS pins its packages in Nix. JODS should
+also be able to pin its own things, such as Noctalia plugins or a company's
+own Firefox add-ons. An organisation runs its own build agents, which build
+these for the GjallarOS channel the devices are on. Devices then only
+download them.
+
+### Is it sane?
+
+Mostly yes, because Nix already has the parts:
+
+- A pin is a flake input or a fetcher with a hash, in a repository JODS
+  owns. Devices evaluate it like the GjallarOS repo itself.
+- A build agent builds the pinned sources and puts the outputs in a binary
+  cache. Devices list that cache as a substituter and get the outputs
+  instead of compiling them, like the release cache in section 11.
+- The pins are hashes, so devices need no credentials for a private
+  repository. Only the agent fetches sources.
+
+Three parts need more than that:
+
+- **Build per channel.** Noctalia plugins follow the Noctalia plugin API of
+  the release. The agent builds every pin once per GjallarOS channel
+  (`dev`, `staging`, `stable`) against that channel's `flake.lock`. A pin
+  that does not build on a channel is not offered there.
+- **Firefox add-ons stay signed by Mozilla.** Release Firefox only installs
+  add-ons Mozilla has signed. A company's own add-on gets signed as an
+  unlisted add-on on addons.mozilla.org
+  ([Extension Workshop](https://extensionworkshop.com/documentation/publish/signing-and-distribution-overview/)),
+  and the pin is that signed file with its hash. Turning signature checks
+  off is not an option: it would let every unsigned add-on in.
+- **Noctalia plugins are plain code in the session.** They run with the
+  user's rights and nobody signs them. A plugin pin is trusted like a
+  package in the system: someone reviews the source at the pinned commit.
+
+Standalone installs do not need any of this. They keep the GjallarOS pins
+and can add their own overlay in their own checkout.
+
+### Security pass
+
+- **What the cache key can do.** A device checks a downloaded path against
+  the keys in `trusted-public-keys`
+  ([Nix manual](https://nix.dev/manual/nix/latest/command-ref/conf-file.html#conf-trusted-public-keys)).
+  A trusted key is valid for every store path, not only for the
+  organisation's plugins. Whoever holds it can serve their own content for
+  any path a device asks that cache for, system packages included.
+- **Build servers get attacked directly.** In the SolarWinds case an
+  implant on the build server swapped a source file during the build, so
+  the shipped and signed product carried the backdoor
+  ([CrowdStrike, SUNSPOT](https://www.crowdstrike.com/blog/sunspot-malware-technical-analysis/)).
+  A signature only proves where the output came from. It does not prove
+  that the build was clean.
+- **Shared build state gets poisoned.** GitHub Actions cache poisoning
+  lets a low-trust job leave entries that a release job later uses
+  ([Adnan Khan, 2024](https://adnanthekhan.com/2024/05/06/the-monsters-in-your-build-cache-github-actions-cache-poisoning/)).
+  Nix itself had a sandbox hole where a fixed-output build could change a
+  store path after Nix had marked it valid
+  ([CVE-2024-27297](https://nvd.nist.gov/vuln/detail/cve-2024-27297)).
+- **Pins delay updates, they do not review them.** In December 2024 a
+  phished developer account pushed a malicious update of the Cyberhaven
+  browser extension, and auto-update delivered it to about 400,000 browsers
+  within hours ([Island](https://www.island.io/info/cyberhaven-and-extension-takeover-incident),
+  [DomainTools](https://dti.domaintools.com/cyberhaven-breach-likely-part-of-a-long-term-criminal-campaign/)).
+  Firefox also grants a policy-installed add-on the new permissions of an
+  update without asking (`isAddonRequiredByPolicy` in Firefox 154). A bot
+  that bumps pins to the newest version gives the same result as
+  auto-update.
+
+Threat model: an agent is a server on the organisation's network and can
+be taken over. Its disk and its secrets count as readable. A device in a
+user's hands must not trust more than the organisation decided to ship.
+
+### Decision
+
+- [ ] **The signing key never sits on a build agent.** The agent builds and
+      uploads unsigned. A separate JODS signer signs only store paths whose
+      output hash two agents on different machines both got (Nix
+      `--rebuild` checks). The release key is never the cache key, so one
+      stolen key is never enough (as in section 11).
+- [ ] **Devices accept only what a signed manifest lists.** JODS publishes a
+      manifest per channel: pin, version, store path, output hash, and for
+      add-ons the permissions. Devices verify it with the JODS key from
+      enrolment and only fetch those paths from the organisation's cache.
+- [ ] **Agents keep no state between jobs.** No shared cache between
+      review builds and release builds; Nix kept at a patched version; one
+      agent pool per organisation.
+- [ ] **Pin bumps are reviewed.** A bump shows the source diff (plugins) or
+      the permission diff (add-ons), and a person approves it in JODS. A
+      bump that adds permissions always needs that approval, never a bot.
+- [ ] **Ties to managed items.** The pins become items in the same
+      `app, id, source, pin, mode` model as the Firefox add-ons (Plane
+      GJALLAROS-180) and the other app backends (GJALLAROS-182), so the app
+      portal shows them like any other item.
+
+The idea holds. What does not hold is any version where the build agent
+signs on its own, or where pins follow upstream automatically.
