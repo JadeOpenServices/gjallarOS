@@ -660,6 +660,91 @@ func (u UI) Multi(ctx context.Context, label string, defaults, options []string)
 	return values, nil
 }
 
+// Item is one row of a Checklist.
+type Item struct {
+	Value, Name, Description string
+	On                       bool
+}
+
+// Checklist lets the user tick any number of items, none included, and
+// returns the ticked values in list order. Rows show name and description;
+// the value stays hidden.
+func (u UI) Checklist(ctx context.Context, label string, items []Item) ([]string, error) {
+	known := map[string]bool{}
+	for _, item := range items {
+		known[item.Value] = true
+	}
+	inOrder := func(chosen map[string]bool) []string {
+		values := []string{}
+		for _, item := range items {
+			if chosen[item.Value] {
+				values = append(values, item.Value)
+			}
+		}
+		return values
+	}
+	if u.GTK {
+		args := []string{"--list", "--checklist", "--title=GjallarOS installer", "--text=" + label, "--width=720", "--height=420", "--separator=\n",
+			"--column=Use", "--column=Value", "--column=Name", "--column=Description", "--hide-column=2", "--print-column=2"}
+		for _, item := range items {
+			args = append(args, strconv.FormatBool(item.On), item.Value, item.Name, item.Description)
+		}
+		out, err := zenityCommand(ctx, args...).Output()
+		if err != nil {
+			return nil, ErrCancelled
+		}
+		chosen := map[string]bool{}
+		for _, value := range strings.Fields(string(out)) {
+			if !known[value] {
+				return nil, fmt.Errorf("unsupported selection %q", value)
+			}
+			chosen[value] = true
+		}
+		return inOrder(chosen), nil
+	}
+	fmt.Fprintln(u.Out, label)
+	defaults := []string{}
+	for i, item := range items {
+		mark := " "
+		if item.On {
+			mark = "x"
+			defaults = append(defaults, strconv.Itoa(i+1))
+		}
+		fmt.Fprintf(u.Out, "  %d) [%s] %s: %s\n", i+1, mark, item.Name, item.Description)
+	}
+	for {
+		fmt.Fprintf(u.Out, "Numbers to tick, comma-separated, or none [%s]: ", strings.Join(defaults, ","))
+		line, err := u.readLine(ctx)
+		if err != nil {
+			return nil, err
+		}
+		line = strings.TrimSpace(line)
+		chosen := map[string]bool{}
+		if line == "" {
+			for _, item := range items {
+				chosen[item.Value] = item.On
+			}
+			return inOrder(chosen), nil
+		}
+		if strings.EqualFold(line, "none") {
+			return []string{}, nil
+		}
+		valid := true
+		for _, field := range strings.Split(line, ",") {
+			n, err := strconv.Atoi(strings.TrimSpace(field))
+			if err != nil || n < 1 || n > len(items) {
+				valid = false
+				break
+			}
+			chosen[items[n-1].Value] = true
+		}
+		if valid {
+			return inOrder(chosen), nil
+		}
+		fmt.Fprintf(u.Out, "Use numbers from 1 to %d, or none.\n", len(items))
+	}
+}
+
 // finalFirmwareSteps is the firmware visit that turns Secure Boot on; the
 // optional supervisor-password steps belong to it because every later
 // firmware change then needs that password.

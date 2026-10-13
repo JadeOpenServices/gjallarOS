@@ -49,6 +49,11 @@ type User struct {
 	Tailscale              *TailscaleIntent       `json:"tailscale,omitempty"`
 	// Apps are the selected catalogue app IDs (apps/<id>/meta.json).
 	Apps []string `json:"apps"`
+	// FirefoxAddons turns add-on collections (apps/firefox-addons.json) and
+	// their add-ons on; an add-on only counts while its collection is on.
+	FirefoxAddons map[string]map[string]bool `json:"firefoxAddons"`
+	// FirefoxStoreAddons are extra add-on IDs from addons.mozilla.org.
+	FirefoxStoreAddons []string `json:"firefoxStoreAddons"`
 
 	// Compatibility fields retained while the installer prompt and generated
 	// Nix settings migrate to the generic webApplications contract.
@@ -121,6 +126,8 @@ func Defaults() (User, error) {
 		PreferredBrowser:        "firefox",
 		WebApplications:         []WebApplicationIntent{},
 		Apps:                    ids,
+		FirefoxAddons:           apps.FirefoxAddonDefaults(),
+		FirefoxStoreAddons:      []string{},
 		Theme:                   "noctalia",
 		AIAgentMode:             "workspace",
 		RecoveryPartitionEnable: true,
@@ -222,6 +229,11 @@ func Load(path string) (User, error) {
 			return User{}, err
 		}
 	}
+	// Missing add-on switches are off.
+	user.FirefoxAddons = apps.CompleteFirefoxAddons(user.FirefoxAddons)
+	if user.FirefoxStoreAddons == nil {
+		user.FirefoxStoreAddons = []string{}
+	}
 	if err := NormalizeProjectTools(&user); err != nil {
 		return User{}, err
 	}
@@ -253,6 +265,9 @@ func Validate(user User) error {
 		}
 	}
 	if err := apps.Validate(user.Apps); err != nil {
+		return err
+	}
+	if err := apps.ValidateFirefoxAddons(user.FirefoxAddons, user.FirefoxStoreAddons); err != nil {
 		return err
 	}
 	if user.HasApp("ai") {

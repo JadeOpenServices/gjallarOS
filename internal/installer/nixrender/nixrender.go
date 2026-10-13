@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/JadeOpenServices/gjallarOS/apps"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/config"
 )
 
@@ -98,6 +99,7 @@ type Settings struct {
 	WebApplications                                                                         []config.WebApplicationIntent
 	Tailscale                                                                               *config.TailscaleIntent
 	Apps                                                                                    []string
+	FirefoxAddons, FirefoxStoreAddons                                                       []string
 	NextcloudHost                                                                           string
 	NextcloudEnable                                                                         bool
 	ODDCModel                                                                               string
@@ -159,6 +161,8 @@ func FromUser(user config.User) Settings {
 		WebApplications:                     user.WebApplications,
 		Tailscale:                           user.Tailscale,
 		Apps:                                user.Apps,
+		FirefoxAddons:                       apps.SelectedFirefoxAddons(user.FirefoxAddons),
+		FirefoxStoreAddons:                  user.FirefoxStoreAddons,
 		NextcloudEnable:                     user.NextcloudEnable,
 		NextcloudHost:                       user.NextcloudHost,
 		AIAgentMode:                         user.AIAgentMode,
@@ -269,6 +273,8 @@ var userIntentKeys = []string{
 	"jodsFingerprintEnrollmentAllowed",
 	"theme",
 	"apps",
+	"firefoxAddons",
+	"firefoxStoreAddons",
 }
 
 // SyncUserIntent updates only direct user-owned assignments in an existing
@@ -425,6 +431,8 @@ func Render(s Settings) []byte {
 	fmt.Fprintf(&b, "    webApplications = %s;\n", WebApplications(s.WebApplications))
 	fmt.Fprintf(&b, "    tailscale = %s;\n", Tailscale(s.Tailscale))
 	list("apps", s.Apps)
+	list("firefoxAddons", s.FirefoxAddons)
+	list("firefoxStoreAddons", s.FirefoxStoreAddons)
 	boolean("nextcloudEnable", s.NextcloudEnable)
 	str("nextcloudHost", s.NextcloudHost)
 	str("oddcModel", s.ODDCModel)

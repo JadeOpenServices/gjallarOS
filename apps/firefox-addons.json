@@ -1,0 +1,114 @@
+[
+  {
+    "id": "privacy",
+    "name": "Privacy",
+    "description": "Stop sites from following you around.",
+    "addons": [
+      {
+        "id": "multi-account-containers",
+        "addonId": "@testpilot-containers",
+        "name": "Multi-Account Containers",
+        "description": "Keeps sites in separate containers, each with its own cookies and logins."
+      },
+      {
+        "id": "facebook-container",
+        "addonId": "@contain-facebook",
+        "name": "Facebook Container",
+        "description": "Keeps Facebook in its own container so it cannot follow you to other sites."
+      },
+      {
+        "id": "privacy-badger",
+        "addonId": "jid1-MnnxcxisBPnSXQ@jetpack",
+        "name": "Privacy Badger",
+        "description": "Learns which trackers follow you across sites and blocks them."
+      },
+      {
+        "id": "clearurls",
+        "addonId": "{74145f27-f039-47ce-a470-a662b129930a}",
+        "name": "ClearURLs",
+        "description": "Removes tracking parts from links."
+      },
+      {
+        "id": "localcdn",
+        "addonId": "{b86e4813-687a-43e6-ab65-0bde4ab75758}",
+        "name": "LocalCDN",
+        "description": "Serves common web libraries from your machine instead of third-party servers."
+      }
+    ]
+  },
+  {
+    "id": "passwords",
+    "name": "Password managers",
+    "description": "Fill logins from the password manager you use.",
+    "addons": [
+      {
+        "id": "passbolt",
+        "addonId": "passbolt@passbolt.com",
+        "name": "Passbolt",
+        "description": "Fills logins from a Passbolt server."
+      },
+      {
+        "id": "bitwarden",
+        "addonId": "{446900e4-71c2-419f-a6a7-df9c091e268b}",
+        "name": "Bitwarden",
+        "description": "Fills logins from Bitwarden or Vaultwarden."
+      },
+      {
+        "id": "keepassxc-browser",
+        "addonId": "keepassxc-browser@keepassxc.org",
+        "name": "KeePassXC-Browser",
+        "description": "Fills logins from the KeePassXC app on this machine."
+      },
+      {
+        "id": "nextcloud-passwords",
+        "addonId": "ncpasswords@mdns.eu",
+        "name": "Nextcloud Passwords",
+        "description": "Fills logins from the Passwords app on your Nextcloud."
+      }
+    ]
+  },
+  {
+    "id": "comfort",
+    "name": "Comfort",
+    "description": "Make the web easier on the eyes and hands.",
+    "addons": [
+      {
+        "id": "darkreader",
+        "addonId": "addon@darkreader.org",
+        "name": "Dark Reader",
+        "description": "Dark mode for every site."
+      },
+      {
+        "id": "vimium",
+        "addonId": "{d7742d87-e61d-4b78-b8a1-b469842139fa}",
+        "name": "Vimium",
+        "description": "Browse with the keyboard, using vim keys."
+      },
+      {
+        "id": "stylus",
+        "addonId": "{7a7a4a92-a2a0-41d1-9fd7-1e92480d612d}",
+        "name": "Stylus",
+        "description": "Your own styles for websites."
+      },
+      {
+        "id": "sponsorblock",
+        "addonId": "sponsorBlocker@ajay.app",
+        "name": "SponsorBlock",
+        "description": "Skips sponsor segments in YouTube videos."
+      }
+    ]
+  },
+  {
+    "id": "cookies",
+    "name": "Cookie banners",
+    "description": "Answer cookie pop-ups for you.",
+    "addons": [
+      {
+        "id": "consent-o-matic",
+        "addonId": "gdpr@cavi.au.dk",
+        "name": "Consent-O-Matic",
+        "description": "Answers cookie pop-ups with the fewest permissions."
+      }
+    ]
+  }
+]

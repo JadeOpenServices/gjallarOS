@@ -114,6 +114,11 @@ probe_tools=(
     nixpkgs#age
     nixpkgs#sops
 )
+# Questions open as GTK dialogs when a desktop session is running. Before the
+# first rebuild the system has no zenity, so bring it along.
+if [[ -n "${WAYLAND_DISPLAY:-}${DISPLAY:-}" && -z "${SSH_CONNECTION:-}" ]]; then
+    probe_tools+=(nixpkgs#zenity)
+fi
 
 printf 'Preparing GjallarOS hardware probe environment...\n'
 

@@ -206,6 +206,36 @@ and the Home Manager side (`user/apps/default.nix`). The old `aiEnable`,
 `containersEnable` and `nemuEnable` keys are rejected; list `ai`,
 `containers` or `nemu` in `apps` instead.
 
+### Firefox add-ons
+
+Firefox always gets uBlock Origin. Other add-ons come in collections, listed
+in `apps/firefox-addons.json`: Privacy, Password managers, Comfort and Cookie
+banners. The installer first asks which collections you want, then which
+add-ons of each ticked collection. In `user.config.json` every collection has
+an `enable` switch and one switch per add-on:
+
+```json
+"firefoxAddons": {
+  "passwords": { "enable": true, "passbolt": true, "bitwarden": false, "keepassxc-browser": false, "nextcloud-passwords": false }
+}
+```
+
+An add-on can only be `true` while its collection's `enable` is `true`; the
+installer refuses anything else. Missing switches count as `false`.
+
+Other add-ons from addons.mozilla.org go in `firefoxStoreAddons`, by add-on
+ID (about:support lists the ID of each installed add-on):
+
+```json
+"firefoxStoreAddons": ["addon@example.org", "{11111111-2222-3333-4444-555555555555}"]
+```
+
+Firefox downloads them from addons.mozilla.org on start and cancels the
+install when the downloaded add-on has another ID, so an ID can only bring
+that one add-on. Users can turn these add-ons off, but not remove them. When
+an ID leaves the list, Firefox keeps the add-on until it is removed in
+about:addons. JODS and unattended installs set both keys in the same way.
+
 <div align="right"><a href="#gjallaros">↑ back to top</a></div>
 
 ## 🧬 Hardware catalog (ODDC)

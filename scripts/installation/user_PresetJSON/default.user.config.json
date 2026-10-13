@@ -36,6 +36,35 @@
   ],
   "email": "you@example.com",
   "endpointManagedDevice": false,
+  "firefoxAddons": {
+    "privacy": {
+      "enable": false,
+      "multi-account-containers": false,
+      "facebook-container": false,
+      "privacy-badger": false,
+      "clearurls": false,
+      "localcdn": false
+    },
+    "passwords": {
+      "enable": false,
+      "passbolt": false,
+      "bitwarden": false,
+      "keepassxc-browser": false,
+      "nextcloud-passwords": false
+    },
+    "comfort": {
+      "enable": false,
+      "darkreader": false,
+      "vimium": false,
+      "stylus": false,
+      "sponsorblock": false
+    },
+    "cookies": {
+      "enable": false,
+      "consent-o-matic": false
+    }
+  },
+  "firefoxStoreAddons": [],
   "firmwarePasswordLock": true,
   "forceRedeploy": false,
   "githubUsername": "UsernameHere",

@@ -333,3 +333,23 @@ func TestExampleStopsAtEndOfInput(t *testing.T) {
 		t.Fatal("Example kept asking after the input ended")
 	}
 }
+
+func TestTerminalChecklist(t *testing.T) {
+	items := []Item{{Value: "a", Name: "A", Description: "first", On: true}, {Value: "b", Name: "B", Description: "second"}, {Value: "c", Name: "C", Description: "third"}}
+	for input, want := range map[string]string{
+		"\n":           "a",
+		"none\n":       "",
+		"3, 2\n":       "b,c",
+		"1,1,3\n":      "a,c",
+		"4\n0\nx\n2\n": "b",
+		"1,,2\n3\n":    "c",
+		"none,1\n1\n":  "a",
+	} {
+		var out strings.Builder
+		u := UI{Reader: bufio.NewReader(strings.NewReader(input)), Out: &out}
+		got, err := u.Checklist(context.Background(), "Pick", items)
+		if err != nil || strings.Join(got, ",") != want {
+			t.Errorf("%q: got %v, %v; want %q", input, got, err, want)
+		}
+	}
+}

@@ -1,6 +1,31 @@
-{ pkgs, ... }:
+{
+  lib,
+  pkgs,
+  settings,
+  ...
+}:
 let
   profileName = "Default";
+
+  # uBlock Origin is always on; the rest come from the add-on collections in
+  # apps/firefox-addons.json that the installer asks about.
+  addons = pkgs.nur.repos.rycee.firefox-addons;
+  chosenAddons = map (name: addons.${name}) (settings.firefoxAddons or [ ]);
+
+  # Add-ons from addons.mozilla.org by ID. Firefox cancels the install when
+  # the downloaded add-on has another ID, so an ID can only bring that one
+  # add-on. The installer checks the format; this check guards hand edits.
+  storeAddonIdPattern = "[{][0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}[}]|[a-zA-Z0-9._-]*@[a-zA-Z0-9._-]+";
+  storeAddonId =
+    id:
+    if builtins.match storeAddonIdPattern id != null then
+      id
+    else
+      throw "firefoxStoreAddons: ${builtins.toJSON id} is not an add-on ID from addons.mozilla.org";
+  storeAddons = lib.genAttrs (map storeAddonId (settings.firefoxStoreAddons or [ ])) (id: {
+    installation_mode = "normal_installed";
+    install_url = "https://addons.mozilla.org/firefox/downloads/latest/${id}/latest.xpi";
+  });
 
   # Hardening that follows LibreWolf's defaults (codeberg.org/librewolf/settings,
   # librewolf.cfg). defaultPref stays changeable in about:config and Settings;
@@ -183,6 +208,7 @@ let
   package = pkgs.firefox.override {
     extraPrefs = hardening;
     extraPolicies = {
+      ExtensionSettings = storeAddons;
       DisableTelemetry = true;
       DisableFirefoxStudies = true;
       DisablePocket = true;
@@ -239,12 +265,7 @@ in
       settings."extensions.autoDisableScopes" = 14;
       extensions = {
         force = true;
-        packages = with pkgs.nur.repos.rycee.firefox-addons; [
-          nextcloud-passwords
-          ublock-origin
-          vimium
-          stylus
-        ];
+        packages = [ addons.ublock-origin ] ++ chosenAddons;
       };
     };
   };

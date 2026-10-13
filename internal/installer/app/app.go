@@ -1847,6 +1847,9 @@ func collectInteractive(ctx context.Context, ui prompt.UI, root string, partitio
 	if err := collectApps(ctx, ui, u); err != nil {
 		return err
 	}
+	if err := collectFirefoxAddons(ctx, ui, u); err != nil {
+		return err
+	}
 	if err := collectRecovery(ctx, ui, partitionable, u); err != nil {
 		return err
 	}
@@ -1973,6 +1976,68 @@ func collectApps(ctx context.Context, ui prompt.UI, u *config.User) error {
 		}
 	}
 	return nil
+}
+
+// collectFirefoxAddons asks which add-on collections Firefox gets, then
+// one question per ticked collection for its add-ons, so an add-on is only
+// offered while its collection is on. Earlier answers are the defaults.
+func collectFirefoxAddons(ctx context.Context, ui prompt.UI, u *config.User) error {
+	previous := apps.CompleteFirefoxAddons(u.FirefoxAddons)
+	previousStore := u.FirefoxStoreAddons
+	u.FirefoxAddons, u.FirefoxStoreAddons = apps.FirefoxAddonDefaults(), []string{}
+	if !slices.Contains(u.Browsers, "firefox") {
+		return nil
+	}
+	collections := apps.FirefoxCollections()
+	items := []prompt.Item{}
+	for _, c := range collections {
+		items = append(items, prompt.Item{Value: c.ID, Name: c.Name, Description: c.Description, On: previous[c.ID][apps.CollectionSwitch]})
+	}
+	chosen, err := ui.Checklist(ctx, "Firefox add-ons. uBlock Origin is always on. Tick the collections you want to pick more from.", items)
+	if err != nil {
+		return err
+	}
+	for _, c := range collections {
+		if !slices.Contains(chosen, c.ID) {
+			continue
+		}
+		items = []prompt.Item{}
+		for _, a := range c.Addons {
+			items = append(items, prompt.Item{Value: a.ID, Name: a.Name, Description: a.Description, On: previous[c.ID][a.ID]})
+		}
+		picked, err := ui.Checklist(ctx, c.Name+": tick the add-ons you want.", items)
+		if err != nil {
+			return err
+		}
+		// A collection with nothing ticked stays off.
+		if len(picked) == 0 {
+			continue
+		}
+		u.FirefoxAddons[c.ID][apps.CollectionSwitch] = true
+		for _, id := range picked {
+			u.FirefoxAddons[c.ID][id] = true
+		}
+	}
+	const storeLabel = "More add-ons from addons.mozilla.org by add-on ID, comma-separated (optional). about:support lists the ID of each installed add-on."
+	label, answer := storeLabel, strings.Join(previousStore, ", ")
+	for {
+		answer, err = ui.Value(ctx, label, answer)
+		if err != nil {
+			return err
+		}
+		store := []string{}
+		for _, id := range strings.Split(answer, ",") {
+			if id = strings.TrimSpace(id); id != "" {
+				store = append(store, id)
+			}
+		}
+		err = apps.ValidateFirefoxAddons(u.FirefoxAddons, store)
+		if err == nil {
+			u.FirefoxStoreAddons = store
+			return nil
+		}
+		label = err.Error() + "\n\n" + storeLabel
+	}
 }
 
 // aiMemoryGB is swapped in tests; the installer runs on the target machine.
