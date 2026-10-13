@@ -133,6 +133,12 @@ in
           corner_radius_scale = 2.0;
           font_family = themeDetails.font;
           polkit_agent = true;
+          # No "Welcome to Noctalia" wizard: its choices are saved as overrides
+          # that beat the theme above and the colors it feeds to Hyprland,
+          # Ghostty and Plymouth. Theme and wallpaper can still be changed in
+          # Noctalia's settings.
+          setup_wizard_enabled = false;
+          telemetry_enabled = false;
           # Apps get their own unit, so a shell restart after a rebuild does
           # not take them down with it.
           launch_apps_as_systemd_services = true;
