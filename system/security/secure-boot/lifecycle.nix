@@ -73,21 +73,10 @@
 
               marker=/var/lib/gjallarOS/secure-boot-enable-required
 
-              status=""
-      for attempt in 1 2 3 4 5; do
-        if status="$(sbctl status 2>&1)"; then
-          break
-        fi
-
-        if [ "$attempt" -eq 5 ]; then
-          printf '%s\n' \
-            'ERROR: sbctl status was not ready after 5 attempts during boot.' \
-            "$status" >&2
-          exit 1
-        fi
-
-        sleep 1
-      done
+              if ! status="$(sbctl status 2>&1)"; then
+                printf '%s\n' 'ERROR: sbctl status failed during boot.' "$status" >&2
+                exit 1
+              fi
 
               if ! printf '%s\n' "$status" | grep -Eq 'Secure Boot:.*Enabled'; then
                 printf '%s\n' \
