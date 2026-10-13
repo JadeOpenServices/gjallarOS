@@ -215,16 +215,6 @@ in
       powerManagement.enable = true;
       services.upower.enable = true;
 
-      services.logind.settings.Login = {
-        HandlePowerKey = "suspend";
-        HandlePowerKeyLongPress = "poweroff";
-      }
-      // lib.optionalAttrs settings.clamshellEnable {
-        HandleLidSwitch = "suspend";
-        HandleLidSwitchExternalPower = "ignore";
-        HandleLidSwitchDocked = "ignore";
-      };
-
       systemd.services.battery-guard = {
         description = "Low-battery warnings and emergency shutdown";
         wantedBy = [ "multi-user.target" ];

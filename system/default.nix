@@ -20,6 +20,7 @@
     ./hardware/fingerprint.nix
     ./hardware/thunderbolt.nix
     ./hardware/input.nix
+    ./hardware/power-keys.nix
     ./hardware/fan-control.nix
     ./hardware/memory.nix
 
