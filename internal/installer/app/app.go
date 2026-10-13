@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/control"
 	"io"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -32,6 +33,7 @@ import (
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/deviceprofilecache"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/discovery"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/diskcrypto"
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/firefoxstore"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/firmware"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/flakesource"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/geolocation"
@@ -1980,64 +1982,130 @@ func collectApps(ctx context.Context, ui prompt.UI, u *config.User) error {
 
 // collectFirefoxAddons asks which add-on collections Firefox gets, then
 // one question per ticked collection for its add-ons, so an add-on is only
-// offered while its collection is on. Earlier answers are the defaults.
+// offered while its collection is on. Earlier answers are the defaults; an
+// add-on that was locked stays locked while it is still ticked.
 func collectFirefoxAddons(ctx context.Context, ui prompt.UI, u *config.User) error {
 	previous := apps.CompleteFirefoxAddons(u.FirefoxAddons)
 	previousStore := u.FirefoxStoreAddons
-	u.FirefoxAddons, u.FirefoxStoreAddons = apps.FirefoxAddonDefaults(), []string{}
+	u.FirefoxAddons, u.FirefoxStoreAddons = previous, []apps.FirefoxStoreAddon{}
 	if !slices.Contains(u.Browsers, "firefox") {
 		return nil
 	}
 	collections := apps.FirefoxCollections()
 	items := []prompt.Item{}
 	for _, c := range collections {
-		items = append(items, prompt.Item{Value: c.ID, Name: c.Name, Description: c.Description, On: previous[c.ID][apps.CollectionSwitch]})
+		items = append(items, prompt.Item{Value: c.ID, Name: c.Name, Description: c.Description, On: previous[c.ID].Enable})
 	}
-	chosen, err := ui.Checklist(ctx, "Firefox add-ons. uBlock Origin is always on. Tick the collections you want to pick more from.", items)
+	chosen, err := ui.Checklist(ctx, "Firefox add-ons. Tick the collections you want to pick from.", items)
 	if err != nil {
 		return err
 	}
 	for _, c := range collections {
+		choice := apps.FirefoxCollectionChoice{Addons: maps.Clone(previous[c.ID].Addons)}
+		u.FirefoxAddons[c.ID] = choice
 		if !slices.Contains(chosen, c.ID) {
+			// Off, but the add-on choices stay for when it is turned on again.
 			continue
 		}
 		items = []prompt.Item{}
 		for _, a := range c.Addons {
-			items = append(items, prompt.Item{Value: a.ID, Name: a.Name, Description: a.Description, On: previous[c.ID][a.ID]})
+			items = append(items, prompt.Item{Value: a.ID, Name: a.Name, Description: a.Description, On: choice.Addons[a.ID] != apps.AddonOff})
 		}
 		picked, err := ui.Checklist(ctx, c.Name+": tick the add-ons you want.", items)
 		if err != nil {
 			return err
 		}
+		for _, a := range c.Addons {
+			switch {
+			case !slices.Contains(picked, a.ID):
+				choice.Addons[a.ID] = apps.AddonOff
+			case choice.Addons[a.ID] != apps.AddonLocked:
+				choice.Addons[a.ID] = apps.AddonOn
+			}
+		}
 		// A collection with nothing ticked stays off.
-		if len(picked) == 0 {
-			continue
-		}
-		u.FirefoxAddons[c.ID][apps.CollectionSwitch] = true
-		for _, id := range picked {
-			u.FirefoxAddons[c.ID][id] = true
-		}
+		choice.Enable = len(picked) > 0
+		u.FirefoxAddons[c.ID] = choice
 	}
+	return collectStoreAddons(ctx, ui, u, previousStore)
+}
+
+// pinStoreAddon is swapped in tests; the installer asks addons.mozilla.org.
+var pinStoreAddon = firefoxstore.Pin
+
+// collectStoreAddons asks for more add-ons by ID. A listed add-on that was
+// pinned before keeps its pin; a new one is pinned to its current version
+// after the user has seen what it may do.
+func collectStoreAddons(ctx context.Context, ui prompt.UI, u *config.User, previous []apps.FirefoxStoreAddon) error {
 	const storeLabel = "More add-ons from addons.mozilla.org by add-on ID, comma-separated (optional). about:support lists the ID of each installed add-on."
-	label, answer := storeLabel, strings.Join(previousStore, ", ")
+	ids := []string{}
+	for _, a := range previous {
+		ids = append(ids, a.ID)
+	}
+	label, answer := storeLabel, strings.Join(ids, ", ")
 	for {
+		var err error
 		answer, err = ui.Value(ctx, label, answer)
 		if err != nil {
 			return err
 		}
-		store := []string{}
-		for _, id := range strings.Split(answer, ",") {
-			if id = strings.TrimSpace(id); id != "" {
-				store = append(store, id)
-			}
-		}
-		err = apps.ValidateFirefoxAddons(u.FirefoxAddons, store)
+		store, err := storeAddonsFor(ctx, ui, u, previous, answer)
 		if err == nil {
 			u.FirefoxStoreAddons = store
 			return nil
 		}
+		if errors.Is(err, prompt.ErrCancelled) || ctx.Err() != nil {
+			return err
+		}
 		label = err.Error() + "\n\n" + storeLabel
 	}
+}
+
+func storeAddonsFor(ctx context.Context, ui prompt.UI, u *config.User, previous []apps.FirefoxStoreAddon, answer string) ([]apps.FirefoxStoreAddon, error) {
+	store := []apps.FirefoxStoreAddon{}
+	for _, id := range strings.Split(answer, ",") {
+		if id = strings.TrimSpace(id); id == "" {
+			continue
+		}
+		if i := slices.IndexFunc(previous, func(a apps.FirefoxStoreAddon) bool { return a.ID == id }); i >= 0 {
+			a := previous[i]
+			if a.Mode == apps.AddonOff {
+				a.Mode = apps.AddonOn
+			}
+			store = append(store, a)
+			continue
+		}
+		// Check the ID before asking the network about it.
+		if err := apps.CheckStoreAddonID(id); err != nil {
+			return nil, fmt.Errorf("firefoxStoreAddons: %w", err)
+		}
+		if slices.ContainsFunc(store, func(a apps.FirefoxStoreAddon) bool { return a.ID == id }) {
+			return nil, fmt.Errorf("firefoxStoreAddons: %q listed twice", id)
+		}
+		a, err := pinStoreAddon(ctx, id, apps.AddonOn)
+		if err != nil {
+			return nil, err
+		}
+		ok, err := ui.Confirm(ctx, fmt.Sprintf("Install %s %s (%s)? It may use: %s", a.Name, a.Version, a.ID, permissionList(a.Permissions)), true)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			return nil, fmt.Errorf("%s left out; remove it from the list or confirm it", id)
+		}
+		store = append(store, a)
+	}
+	if err := apps.ValidateFirefoxAddons(u.FirefoxAddons, store); err != nil {
+		return nil, err
+	}
+	return store, nil
+}
+
+func permissionList(permissions []string) string {
+	if len(permissions) == 0 {
+		return "nothing special"
+	}
+	return strings.Join(permissions, ", ")
 }
 
 // aiMemoryGB is swapped in tests; the installer runs on the target machine.

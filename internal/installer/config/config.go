@@ -49,11 +49,12 @@ type User struct {
 	Tailscale              *TailscaleIntent       `json:"tailscale,omitempty"`
 	// Apps are the selected catalogue app IDs (apps/<id>/meta.json).
 	Apps []string `json:"apps"`
-	// FirefoxAddons turns add-on collections (apps/firefox-addons.json) and
-	// their add-ons on; an add-on only counts while its collection is on.
-	FirefoxAddons map[string]map[string]bool `json:"firefoxAddons"`
-	// FirefoxStoreAddons are extra add-on IDs from addons.mozilla.org.
-	FirefoxStoreAddons []string `json:"firefoxStoreAddons"`
+	// FirefoxAddons holds the add-on collections (apps/firefox-addons.json)
+	// and each add-on's mode; an add-on only counts while its collection is on.
+	FirefoxAddons map[string]apps.FirefoxCollectionChoice `json:"firefoxAddons"`
+	// FirefoxStoreAddons are extra add-ons from addons.mozilla.org, each
+	// pinned to one file.
+	FirefoxStoreAddons []apps.FirefoxStoreAddon `json:"firefoxStoreAddons"`
 
 	// Compatibility fields retained while the installer prompt and generated
 	// Nix settings migrate to the generic webApplications contract.
@@ -127,7 +128,7 @@ func Defaults() (User, error) {
 		WebApplications:         []WebApplicationIntent{},
 		Apps:                    ids,
 		FirefoxAddons:           apps.FirefoxAddonDefaults(),
-		FirefoxStoreAddons:      []string{},
+		FirefoxStoreAddons:      []apps.FirefoxStoreAddon{},
 		Theme:                   "noctalia",
 		AIAgentMode:             "workspace",
 		RecoveryPartitionEnable: true,
@@ -229,10 +230,10 @@ func Load(path string) (User, error) {
 			return User{}, err
 		}
 	}
-	// Missing add-on switches are off.
+	// Missing collections get their defaults, missing add-ons are off.
 	user.FirefoxAddons = apps.CompleteFirefoxAddons(user.FirefoxAddons)
 	if user.FirefoxStoreAddons == nil {
-		user.FirefoxStoreAddons = []string{}
+		user.FirefoxStoreAddons = []apps.FirefoxStoreAddon{}
 	}
 	if err := NormalizeProjectTools(&user); err != nil {
 		return User{}, err

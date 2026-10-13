@@ -5,6 +5,13 @@
     "description": "Stop sites from following you around.",
     "addons": [
       {
+        "id": "ublock-origin",
+        "addonId": "uBlock0@raymondhill.net",
+        "name": "uBlock Origin",
+        "description": "Blocks ads, trackers and known bad sites.",
+        "defaultMode": "on"
+      },
+      {
         "id": "multi-account-containers",
         "addonId": "@testpilot-containers",
         "name": "Multi-Account Containers",

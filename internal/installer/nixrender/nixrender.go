@@ -50,6 +50,25 @@ func WebApplications(values []config.WebApplicationIntent) string {
 	return "[ " + strings.Join(rendered, " ") + " ]"
 }
 
+// FirefoxStoreAddons renders the pinned store add-ons the build installs;
+// name, version and permissions stay in user.config.json.
+func FirefoxStoreAddons(values []apps.FirefoxStoreAddon) string {
+	rendered := make([]string, 0, len(values))
+	for _, a := range values {
+		rendered = append(
+			rendered,
+			fmt.Sprintf(
+				"{ id = %s; url = %s; sha256 = %s; mode = %s; }",
+				String(a.ID),
+				String(a.URL),
+				String(a.SHA256),
+				String(a.Mode),
+			),
+		)
+	}
+	return "[ " + strings.Join(rendered, " ") + " ]"
+}
+
 // StringAttrs renders an attribute set of strings, sorted by name.
 func StringAttrs(attrs map[string]string) string {
 	var b strings.Builder
@@ -99,7 +118,8 @@ type Settings struct {
 	WebApplications                                                                         []config.WebApplicationIntent
 	Tailscale                                                                               *config.TailscaleIntent
 	Apps                                                                                    []string
-	FirefoxAddons, FirefoxStoreAddons                                                       []string
+	FirefoxAddons                                                                           map[string]string
+	FirefoxStoreAddons                                                                      []apps.FirefoxStoreAddon
 	NextcloudHost                                                                           string
 	NextcloudEnable                                                                         bool
 	ODDCModel                                                                               string
@@ -161,8 +181,8 @@ func FromUser(user config.User) Settings {
 		WebApplications:                     user.WebApplications,
 		Tailscale:                           user.Tailscale,
 		Apps:                                user.Apps,
-		FirefoxAddons:                       apps.SelectedFirefoxAddons(user.FirefoxAddons),
-		FirefoxStoreAddons:                  user.FirefoxStoreAddons,
+		FirefoxAddons:                       apps.ActiveFirefoxAddons(user.FirefoxAddons),
+		FirefoxStoreAddons:                  apps.ActiveStoreAddons(user.FirefoxStoreAddons),
 		NextcloudEnable:                     user.NextcloudEnable,
 		NextcloudHost:                       user.NextcloudHost,
 		AIAgentMode:                         user.AIAgentMode,
@@ -431,8 +451,8 @@ func Render(s Settings) []byte {
 	fmt.Fprintf(&b, "    webApplications = %s;\n", WebApplications(s.WebApplications))
 	fmt.Fprintf(&b, "    tailscale = %s;\n", Tailscale(s.Tailscale))
 	list("apps", s.Apps)
-	list("firefoxAddons", s.FirefoxAddons)
-	list("firefoxStoreAddons", s.FirefoxStoreAddons)
+	fmt.Fprintf(&b, "    firefoxAddons = %s;\n", StringAttrs(s.FirefoxAddons))
+	fmt.Fprintf(&b, "    firefoxStoreAddons = %s;\n", FirefoxStoreAddons(s.FirefoxStoreAddons))
 	boolean("nextcloudEnable", s.NextcloudEnable)
 	str("nextcloudHost", s.NextcloudHost)
 	str("oddcModel", s.ODDCModel)

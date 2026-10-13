@@ -38,30 +38,39 @@
   "endpointManagedDevice": false,
   "firefoxAddons": {
     "privacy": {
-      "enable": false,
-      "multi-account-containers": false,
-      "facebook-container": false,
-      "privacy-badger": false,
-      "clearurls": false,
-      "localcdn": false
+      "enable": true,
+      "addons": {
+        "ublock-origin": "on",
+        "multi-account-containers": "off",
+        "facebook-container": "off",
+        "privacy-badger": "off",
+        "clearurls": "off",
+        "localcdn": "off"
+      }
     },
     "passwords": {
       "enable": false,
-      "passbolt": false,
-      "bitwarden": false,
-      "keepassxc-browser": false,
-      "nextcloud-passwords": false
+      "addons": {
+        "passbolt": "off",
+        "bitwarden": "off",
+        "keepassxc-browser": "off",
+        "nextcloud-passwords": "off"
+      }
     },
     "comfort": {
       "enable": false,
-      "darkreader": false,
-      "vimium": false,
-      "stylus": false,
-      "sponsorblock": false
+      "addons": {
+        "darkreader": "off",
+        "vimium": "off",
+        "stylus": "off",
+        "sponsorblock": "off"
+      }
     },
     "cookies": {
       "enable": false,
-      "consent-o-matic": false
+      "addons": {
+        "consent-o-matic": "off"
+      }
     }
   },
   "firefoxStoreAddons": [],
