@@ -196,7 +196,11 @@ let
   };
 in
 {
-  config = lib.mkIf batteryAvailable (lib.mkMerge [
+  # UPower also reports mouse and headset batteries, so it runs on every
+  # machine; the battery protection below stays with the ODDC capability.
+  config = lib.mkMerge [
+    { services.upower.enable = true; }
+    (lib.mkIf batteryAvailable (lib.mkMerge [
     {
       assertions = [
         {
@@ -213,7 +217,6 @@ in
       ];
 
       powerManagement.enable = true;
-      services.upower.enable = true;
 
       systemd.services.battery-guard = {
         description = "Low-battery warnings and emergency shutdown";
@@ -280,5 +283,6 @@ in
         '';
       };
     })
-  ]);
+    ]))
+  ];
 }
