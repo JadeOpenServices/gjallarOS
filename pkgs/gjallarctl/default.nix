@@ -29,6 +29,7 @@ buildGoModule {
       ../../internal/input
       ../../internal/installercheck
       ../../internal/installer
+      ../../internal/managedapps
       ../../internal/nettrust
       ../../internal/oddccli
       ../../internal/preset

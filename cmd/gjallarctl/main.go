@@ -124,6 +124,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runLUKSLifecycle(args[1:], stdout, stderr)
 	case "vpn":
 		return runVPN(args[1:], stdout, stderr)
+	case "addons":
+		return runAddons(args[1:], stdout, stderr)
 	case "secure-boot":
 		return runSecureBoot(args[1:], stdout, stderr)
 	case "security":
@@ -1798,6 +1800,7 @@ func printUsage(out io.Writer) {
 	fmt.Fprintln(out, "       gjallarctl tpm2 reenroll")
 	fmt.Fprintln(out, "       gjallarctl luks {status|recovery-key|pin [--remove]|setup|remind [--open|--refresh]}")
 	fmt.Fprintln(out, "       gjallarctl vpn status")
+	fmt.Fprintln(out, "       gjallarctl addons {list|set|pin|update} [--repo PATH]")
 	fmt.Fprintln(out, "       gjallarctl secure-boot {status|setup|update-dbx} [--repo PATH]")
 	fmt.Fprintln(out, "       gjallarctl security notice")
 	fmt.Fprintln(out, "       gjallarctl hyprland-render-gpu")
