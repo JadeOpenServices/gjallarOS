@@ -24,6 +24,8 @@ lib.mkIf usbguard {
     pkgs.zenity
   ];
 
+  # pkgs/overlays/udiskie.nix: only mounts what is there at plug-in, not
+  # what dd, mkfs or a stick writer creates later.
   services.udiskie = {
     enable = true;
     automount = true;

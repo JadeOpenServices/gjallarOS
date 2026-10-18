@@ -134,6 +134,7 @@
           _nemu
           ghostty
           hyprland
+          udiskie
           usbguard
           wvkbd
           xdg-desktop-portal-hyprland
@@ -154,6 +155,7 @@
           dolphin
           ghostty
           hyprland
+          udiskie
           usbguard
           wvkbd
           xdg-desktop-portal-hyprland
@@ -199,6 +201,11 @@
         systemd-partition-reread-fix = import ./tests/nix/systemd-partition-reread-fix.nix {
           inherit pkgs;
           fixModule = ./system/fixes/systemd-partition-reread;
+        };
+
+        udiskie-new-media-only = import ./tests/nix/udiskie-new-media-only.nix {
+          inherit pkgs;
+          stockUdiskie = nixpkgs.legacyPackages.${system}.udiskie;
         };
 
         tailscale-trust = import ./tests/nix/tailscale-trust.nix {
