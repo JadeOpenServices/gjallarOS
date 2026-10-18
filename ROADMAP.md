@@ -584,3 +584,302 @@ user's hands must not trust more than the organisation decided to ship.
 
 The idea holds. What does not hold is any version where the build agent
 signs on its own, or where pins follow upstream automatically.
+
+## 14. System checkout owned by root
+
+Plan written 2026-10-18 for Plane GJALLAROS-168 (loophole 20, also the root
+of loophole 22). Today root builds the system from `~/Documents/gjallarOS`.
+The desktop user owns that checkout, including `generated/`,
+`user.config.json` and `user/`, which home-manager evaluates as part of the
+system. `DiscoverRepository` also asks `GJALLAROS_REPO` and a state file in
+the user's home before `/etc/gjallar/repository`. So anything running as
+the user decides what root builds the next time someone types the password
+for `rebuild`. On a managed device, where the user has no root, that is a
+way to root.
+
+### How others handle it
+
+- NixOS users raised the same question in
+  [Security: auto-upgrades and config ownership](https://discourse.nixos.org/t/security-auto-upgrades-and-config-ownership/30970).
+  Most answers keep the configuration that root builds under root: a
+  root-owned worktree reset to a branch by a root alias, a copy inside the
+  system closure (`/run/current-system/configuration`), or a flake on a
+  locked-down remote. Two replies argue that on a single-user desktop the
+  user account is worth as much as root anyway.
+- Fedora's image-based desktops (Silverblue, Kinoite) keep the system tree
+  read-only and change it only through `rpm-ostreed` behind polkit. The
+  [OSTree SIG proposal](https://gitlab.com/fedora/ostree/sig/-/issues/7)
+  lets unprivileged users update but asks for a password for any change to
+  the system, and notes that files like `~/.bashrc` and `$PATH` stay a
+  separate trust problem.
+- `/etc/nixos` is root-owned by default on NixOS; `nixos-rebuild` with a
+  user-owned flake is a choice the user makes.
+- sudo resets the environment by default because
+  [a blocklist of dangerous variables cannot be complete](https://www.sudo.ws/security/advisories/env_add/).
+  `GJALLAROS_REPO` deciding what root builds is the same kind of input.
+
+### Security pass
+
+- **What the current design allows.** The user side picks the checkout
+  (environment variable, state file, working directory), pulls, rewrites
+  `user.config.json` and evaluates. The root side activates what that
+  produced. Root never checks where the source came from.
+- **How this broke elsewhere.** git's
+  [CVE-2022-24765](https://github.blog/2022-04-12-git-security-vulnerability-announced/)
+  ran another user's commands because git read configuration from a
+  repository someone else controlled; the fix was the `safe.directory`
+  ownership check. [CVE-2024-32004](https://access.redhat.com/security/cve/CVE-2024-32004)
+  did the same through a crafted local repository at clone time. So root
+  must never run git inside, or clone from, the user's checkout.
+  [CVE-2023-22809](https://security-tracker.debian.org/tracker/CVE-2023-22809)
+  (sudoedit) shows the wider pattern: a privileged tool trusted a value the
+  user set and touched files nobody approved.
+- **Threat model.** Two cases. Managed device: the user is not in wheel
+  and root belongs to the organisation; today the user (or malware in the
+  session) can make the next admin rebuild run their code. That is a real
+  boundary and this plan closes it. Unmanaged device: the user is in wheel.
+  Malware in the session can also wrap `sudo` through the shell startup
+  files or `$PATH` and catch the password; this plan does not fix that
+  (residual, logged on the security review page). What it does give there:
+  the system builds only what was shown and approved, the built revision is
+  recorded, and a checkout that is empty or not a git checkout (ODDC b12
+  items 2 and 17) is reported instead of failing silently.
+- **What changes in the design.** Root never reads the user's checkout
+  with git and never follows a path the user chose. Settings arrive as
+  typed values through a root service; local code arrives as a copied
+  folder (data only) in developer mode. Discovery for privileged commands
+  is fixed at `/etc/gjallar/system`.
+
+### Plan
+
+- [ ] **Checkpoint 1: root-owned checkout.** `/etc/gjallar/system`,
+      owned by root, not writable by group or others, a git checkout of the
+      official origin. `generated/` and `user.config.json` live there too
+      (`user.config.json` mode 600, it can hold a Tailscale key).
+      `/etc/gjallar/repository` names it. `programs.nh.flake` points there.
+- [ ] **Checkpoint 2: privileged rebuild ignores user input.** The user
+      command only authenticates and starts `gjallarctl system rebuild` as
+      root with a fixed argument list. The root side ignores
+      `GJALLAROS_REPO`, the remembered state file, the working directory and
+      `--repo`. It pulls, refreshes `generated/oddc`, runs the preflight and
+      evaluates as root. Before building it checks: HEAD is on the official
+      origin, or is an applied local change (below); no tracked file differs
+      from HEAD; the oddc input is the lock pin or a checked override (Plane
+      169). It prints what it builds: revision, local changes, oddc pin.
+      The built revision goes into `system.configurationRevision`.
+- [ ] **Checkpoint 3: settings service.** Root service with a typed
+      D-Bus API over the `user.config.json` schema, tiers, reading and
+      security delay, signed export and import, per-user device keys, key
+      wipe on user removal and factory reset. The settings editor and
+      `gjallarctl` use it. A Noctalia palette (loophole 21) becomes checked
+      colour values instead of a file path root reads.
+- [ ] **Checkpoint 3b: developer mode.** `~/GjallarOS-local/`, the copy
+      into `/etc/gjallar/local`, the `local` flake input, notice, boot
+      entry name and the recovery exit.
+- [ ] **Checkpoint 4: installer, README, migration.** New installs clone
+      into `/etc/gjallar/system`. Existing installs: one privileged step
+      re-clones the official origin at the revision the system runs,
+      carries `generated/` and `user.config.json` over after a check, and
+      lists local commits in the old checkout so they can move into
+      `~/GjallarOS-local/`. When
+      `/etc/gjallar/repository` names an empty or missing path, say "The
+      checkout at <path> is empty or missing" and how to fix it. Tested on
+      the fw13 VM first.
+
+### Editing on standalone devices
+
+Jade's direction (2026-10-18): only standalone (not JODS-managed) devices
+may change the system; ideally through an editor where people tick options
+and add entries, with an import/export file. The worry: a file anyone can
+load and activate is the most attractive target on the device.
+
+How others handle the same split:
+
+- **Typed settings services.** GNOME does not edit system files for the
+  hostname, clock or locale. It calls small root daemons
+  ([timedated](https://www.man7.org/linux/man-pages/man5/org.freedesktop.timedate1.5.html),
+  hostnamed, localed) that take one typed value per call, each call its own
+  polkit action. The
+  [GNOME 3.4 announcement](https://gitweb.mageia.org/web/archives/plain/zarb-ml/mageia-dev/attachments/20120127/027d9fd7/attachment.mht)
+  moved GNOME to these APIs. The caller never hands root a file.
+- **A GUI over the NixOS configuration.** SnowflakeOS ships
+  [NixOS Configuration Editor](https://discourse.nixos.org/t/nixos-conf-editor-a-gtk4-libadwaita-configuration-editor/19426),
+  which edits option values in `configuration.nix` and then rebuilds behind
+  an admin prompt. It writes Nix source, so anything that can feed it a
+  value is writing code root evaluates.
+- **Approval for system changes even for admins.** A
+  [Silverblue proof of concept](https://github.com/rohanssrao/silverblue-privesc)
+  showed that `rpm-ostree install` of a local package needed no password
+  for wheel users, so any program in their session reached root. Fedora's
+  answer, the
+  [unprivileged updates change](https://fedoraproject.org/wiki/Changes/UnprivilegedUpdatesAtomicDesktops),
+  lets everyone update from the official source without a password and
+  asks for one for every other change, admins included.
+- **Imported settings files.** Apple configuration profiles are exactly
+  the "load a file, activate it" feature, and they are a known phishing
+  vehicle: a profile sent as a "compliance requirement" sets a proxy, a
+  root certificate or a management server
+  ([NetSPI](https://www.netspi.com/blog/technical-blog/mobile-application-pentesting/malicious-mobile-configs/),
+  [Jamf](https://www.jamf.com/blog/malicious-profiles-come/)). Apple's
+  response is friction: opening a profile does not install it; the user
+  has to find it in System Settings, sees an "unsigned" warning, and
+  security-sensitive payloads only work from user-approved management
+  ([Apple](https://support.apple.com/en-us/guide/mac-help/mchl42f58b2c/10.14/mac/10.14)).
+- **Code changes as a visible mode.** ChromeOS lets people change the
+  system only in
+  [developer mode](https://chromium.org/chromium-os/developer-library/guides/device/developer-mode),
+  which wipes user data on the way in and out and which an organisation
+  can block for its devices.
+- **The file format itself.** YAML loaders ran code or exhausted memory
+  from a crafted file: PyYAML
+  [CVE-2017-18342](https://nvd.nist.gov/vuln/detail/CVE-2017-18342),
+  SnakeYAML [CVE-2022-1471](https://nvd.nist.gov/vuln/detail/CVE-2022-1471),
+  alias expansion in Kubernetes
+  [CVE-2019-11253](https://nvd.nist.gov/vuln/detail/CVE-2019-11253).
+
+What follows for GjallarOS:
+
+1. **Settings are data, never Nix.** The editor and any import file only
+   set known keys with typed values from the `user.config.json` schema
+   (catalogue app IDs, booleans, enums, checked strings). Nothing a user or
+   a file supplies becomes Nix source. A root service checks each value
+   against the schema, the way timedated checks a timezone, and writes
+   `user.config.json` in the system checkout. Unknown keys are refused.
+2. **Three tiers of settings** with their own password and delay rules
+   (below).
+3. **Import only signed files.** An exported file is signed by a device
+   key GjallarOS manages for the user; unsigned or unknown files are
+   refused, and even a valid one only loads as a draft (below).
+4. **Code changes are developer mode** with a local folder outside the
+   official checkout (below). JODS-managed devices cannot turn it on.
+5. **Managed devices.** JODS policy decides which everyday keys the user
+   may change; security keys and developer mode are never user-editable.
+
+Residual, unchanged by this: on a wheel desktop, code in the user's
+session can fake the editor's diff or catch the password through the
+shell or `$PATH`. Fedora and Apple carry the same residual. Logged on the
+security review page.
+
+### Tiers, password and delay
+
+Decided with Jade 2026-10-18: security changes show old and new value,
+ask the password every time, and wait. Every setting in the schema gets a
+tier; a new setting without one fails the schema check.
+
+| Tier | Examples | Rule |
+| --- | --- | --- |
+| Everyday | apps from the catalogue, extra nixpkgs packages, theme, layout, displays, Wi-Fi choices | one password per apply |
+| Security | AI endpoint, VPN and Tailscale, SSH keys and sshd, firewall, USB and Bluetooth policy, browser policies, DNS and NTP servers, extra root certificates, user accounts and admin rights | old -> new with a one-line effect; password every apply, never cached; Apply enabled after a 10 s reading delay at home, after a 1 h security delay elsewhere |
+| Critical | update origin and channel, developer mode on, Secure Boot, LUKS and TPM PIN options, recovery off, leaving JODS | always the 1 h security delay, at home too; password when asking and again when applying |
+
+- **Reading delay.** Firefox keeps the Install button of add-on prompts
+  disabled for a moment so a click meant for the page cannot land on it
+  ([bug 162020](https://www.bugzilla.mozilla.org/show_bug.cgi?id=162020));
+  the delay restarts whenever the window loses focus, which closed later
+  bypasses ([MFSA 2016-08](https://www.mozilla.org/en-CA/security/advisories/mfsa2016-08/)).
+  GjallarOS uses 10 s because the point is reading the change, not only
+  avoiding a stray click.
+- **Security delay.** Apple's Stolen Device Protection makes some changes
+  wait an hour and ask Face ID again when the phone is away from familiar
+  places ([HN discussion](https://news.ycombinator.com/item?id=39093978)).
+  The weak spot people found: "familiar" was learned from location history,
+  so a bar someone visits often counted as home
+  ([9to5Mac](https://9to5mac.com/2024/01/28/security-bite-iphones-stolen-device-protection-has-a-fatal-flaw-but-you-can-fix-it/)).
+  GjallarOS uses the proven home network instead (a router of the user's
+  own tailnet, see `routerHome`), and critical changes ignore location.
+- **While a change waits.** A notification names the change and offers
+  Cancel. Locking the screen does not cancel it; logging out or rebooting
+  does. When the hour is over, the password is asked again and the change
+  applies. The wait and the result go to the journal, and to JODS on
+  managed devices.
+- **Recovery is the trusted path.** The recovery system runs outside the
+  user's session, so it may apply security and critical changes without
+  the delay, after the admin password. That is also how a person who is
+  locked out fixes things.
+- **Managed devices.** Security and critical keys come only from JODS;
+  the local editor shows them read-only.
+
+### Signed settings files
+
+Decided with Jade 2026-10-18: imports must be signed, and GjallarOS does
+the key handling unless the installer is told otherwise.
+
+Inspiration: systemd-homed signs every user record and only accepts records
+whose signature matches a public key installed on the machine; moving a
+user to another machine means copying that public key
+([systemd-homed.service(8)](https://man7.org/linux/man-pages/man8/systemd-homed.service.8.html)).
+A point from the
+[HN discussion of homed](https://news.ycombinator.com/item?id=22194910):
+check the signature over the raw bytes before parsing anything. Apple
+profiles show "not signed" but still install, which is what phishing uses.
+
+- **Device key per user.** The settings service creates an Ed25519 key
+  pair when a user account is created (installer or new user). The private
+  key stays with the service, root-only and sealed with `systemd-creds`
+  (TPM where there is one). The user never sees or handles it.
+- **Export.** The user picks Export; the service asks for the user's own
+  password, signs the exact file bytes (with schema version, device,
+  user and time inside) and hands back the file.
+- **Import.** The service checks the signature over the raw bytes first,
+  then parses with the strict parser. Accepted signers: the users of this
+  device, devices the user paired, and on managed devices the JODS
+  organisation key. Anything else is refused with "This file was not made
+  on this device or a device you paired". A valid file still only loads
+  as a draft, with the usual tier rules: a signature says where the file
+  came from, not that the change is wanted now.
+- **Pairing own devices.** Both devices show the same short code; the
+  user confirms on both with their password. Each then trusts the other's
+  public key for that user. Unpairing removes it.
+- **Opting out in the installer.** "Let GjallarOS manage signing keys
+  (recommended)". Saying no lets the person add their own public key (for
+  example an SSH or hardware key) as the only signer instead.
+- **Nothing is locked behind the key.** Login, disk unlock, applying
+  settings in the editor and recovery never need it. Losing it only makes
+  old exports unimportable.
+- **Reset and recovery.** Removing a user (editor or recovery) deletes
+  that user's key and the pairings made for them. A factory reset from
+  recovery deletes all keys, pairings and the `systemd-creds` host secret,
+  so a copied key file cannot be unsealed later. A new user always starts
+  with a fresh key. Leaving JODS removes the organisation key.
+
+### Developer mode and the local folder
+
+Decided with Jade 2026-10-18: Nix code changes only in developer mode, so
+nobody breaks their system by accident and it is always clear what caused
+a problem.
+
+- **Turning it on** is a critical change: an explanation screen, the
+  password, the 1 h delay, the password again. A notice stays in the bar
+  while it is on. JODS devices cannot turn it on.
+- **The folder.** Turning it on creates `~/GjallarOS-local/` from a
+  template: `system/` for NixOS modules, `home/` for home-manager modules,
+  a README. Every `.nix` file there is imported; a name starting with `_`
+  is skipped. No git needed, and the official checkout is never touched,
+  so pulls never conflict.
+- **Apply.** `gjallarctl system apply` (or the editor button) copies the
+  folder as data into root-owned `/etc/gjallar/local`: `.nix` files and a
+  short list of asset types only, no links, no hidden files, a size cap.
+  It shows the file diff with the security-tier rules, then builds with
+  the flake's `local` input pointed there. With developer mode off, that
+  input is an empty stub in the repository.
+- **Visible everywhere.** Each generation records the folder's hash; the
+  boot entry says "local changes"; `gjallarctl system status` lists the
+  files. Later: compare the security-relevant options of the official and
+  the local build and list what local code changed (firewall, sshd, ...).
+- **Getting out.** If a local module breaks the system, the previous
+  generation boots; recovery offers "Turn off developer mode and rebuild
+  the official system". Turning it off keeps `~/GjallarOS-local/`.
+- **Adding an app does not need it.** Extra nixpkgs packages are an
+  everyday setting (attribute names checked against the pinned nixpkgs).
+
+Honest limit: in developer mode the local folder is root code. The delay,
+diff and notice make that a visible choice; they do not make local code
+safe.
+
+### Decision
+
+2026-10-18, Jade: typed settings service; security changes show old and
+new value, ask the password every time and wait; imports only signed, with
+GjallarOS managing the keys by default; Nix code only in developer mode
+with a local folder. Migration on the one existing install: whatever does
+not break the running system. New installs get no `~/Documents` clone.
