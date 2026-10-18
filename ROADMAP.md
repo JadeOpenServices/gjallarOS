@@ -665,7 +665,7 @@ way to root.
       without following links: every entry and every directory above it is
       owned by root and not writable by group or others, no link leaves the
       checkout, and an empty or missing checkout is named as such.
-- [ ] **Checkpoint 2: privileged rebuild ignores user input.** On a system
+- [x] **Checkpoint 2: privileged rebuild ignores user input.** On a system
       checkout the user's `rebuild` only checks its options, authenticates
       and starts `/run/current-system/sw/bin/gjallar-system-rebuild` with a
       fixed argument list (`sudo -n`, or `su -l` on managed devices). That
@@ -689,6 +689,7 @@ way to root.
       not the pinned one, and the user-side writers of `user.config.json`
       (add-ons, USB, Secure Boot), which fail on a system checkout until
       checkpoint 3. Creating the checkout is checkpoint 4.
+      Done in 0bf0c1be and 76b1646b, tested on the fw13 VM.
 - [ ] **Checkpoint 3: settings service.** Root service with a typed
       D-Bus API over the `user.config.json` schema, tiers, reading and
       security delay, signed export and import, per-user device keys, key
