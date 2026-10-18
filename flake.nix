@@ -196,6 +196,11 @@
           fixModule = ./system/fixes/avahi-daemon;
         };
 
+        systemd-partition-reread-fix = import ./tests/nix/systemd-partition-reread-fix.nix {
+          inherit pkgs;
+          fixModule = ./system/fixes/systemd-partition-reread;
+        };
+
         tailscale-trust = import ./tests/nix/tailscale-trust.nix {
           inherit nixpkgs system;
           tailscaleModules = [

@@ -1,0 +1,496 @@
+diff --git a/src/shared/reread-partition-table.c b/src/shared/reread-partition-table.c
+index ce26906..68182ed 100644
+--- a/src/shared/reread-partition-table.c
++++ b/src/shared/reread-partition-table.c
+@@ -15,7 +15,6 @@
+ #include "fd-util.h"
+ #include "log.h"
+ #include "reread-partition-table.h"
+-#include "set.h"
+ #include "string-util.h"
+ 
+ static int trigger_partitions(sd_device *dev, bool blkrrpart_success) {
+@@ -68,36 +67,30 @@ static int fallback_ioctl(sd_device *d, int fd, RereadPartitionTableFlags flags)
+ }
+ 
+ #if HAVE_BLKID
+-static int process_partition(
+-                sd_device *d,
+-                int fd,
+-                blkid_partition pp,
+-                sd_device_enumerator *e,
+-                Set **partnos,
+-                RereadPartitionTableFlags flags,
+-                bool *changed) {
+-
+-        int r;
++typedef struct PartitionEntry {
++        unsigned nr;
++        uint64_t start; /* in 512 byte sectors */
++        uint64_t size;  /* in 512 byte sectors */
++        bool unchanged;
++} PartitionEntry;
++
++static const PartitionEntry* partition_entry_find(const PartitionEntry *entries, size_t n_entries, unsigned nr) {
++        FOREACH_ARRAY(i, entries, n_entries)
++                if (i->nr == nr)
++                        return i;
++
++        return NULL;
++}
+ 
+-        assert(d);
+-        assert(fd >= 0);
++static int read_partition_entry(blkid_partition pp, PartitionEntry *ret) {
+         assert(pp);
+-        assert(e);
+-        assert(partnos);
+-        assert(changed);
+-
+-        const char *node;
+-        r = sd_device_get_devname(d, &node);
+-        if (r < 0)
+-                return log_device_debug_errno(d, r, "Failed to acquire device node path: %m");
++        assert(ret);
+ 
+         errno = 0;
+         int nr = sym_blkid_partition_get_partno(pp);
+         if (nr < 0)
+                 return log_debug_errno(errno_or_else(EIO), "Failed to read partition number of partition: %m");
+ 
+-        log_device_debug(d, "Processing partition %i...", nr);
+-
+         errno = 0;
+         blkid_loff_t start = sym_blkid_partition_get_start(pp);
+         if (start < 0)
+@@ -110,131 +103,220 @@ static int process_partition(
+                 return log_debug_errno(errno_or_else(EIO), "Failed to read partition size of partition %i: %m", nr);
+         assert((uint64_t) size < UINT64_MAX / 512U);
+ 
+-        if (set_ensure_put(partnos, /* hash_ops= */ NULL, UINT_TO_PTR(nr)) < 0)
+-                return log_oom_debug();
++        *ret = (PartitionEntry) {
++                .nr = nr,
++                .start = start,
++                .size = size,
++        };
++
++        return 0;
++}
++
++static int kernel_partition(sd_device *d, unsigned nr, char **ret_subnode, sd_device **ret_partition) {
++        int r;
++
++        assert(d);
++        assert(ret_subnode);
++        assert(ret_partition);
++
++        /* Returns the kernel partition device for partition nr, or NULL if the kernel doesn't know it */
++
++        const char *node;
++        r = sd_device_get_devname(d, &node);
++        if (r < 0)
++                return log_device_debug_errno(d, r, "Failed to acquire device node path: %m");
+ 
+         _cleanup_free_ char *subnode = NULL;
+         r = partition_node_of(node, nr, &subnode);
+         if (r < 0)
+-                return log_device_debug_errno(d, r, "Failed to determine partition node %i for '%s': %m", nr, node);
++                return log_device_debug_errno(d, r, "Failed to determine partition node %u for '%s': %m", nr, node);
+ 
+         _cleanup_(sd_device_unrefp) sd_device *partition = NULL;
+         r = sd_device_new_from_devname(&partition, subnode);
+-        if (r < 0) {
+-                if (r != -ENODEV)
+-                        return log_device_debug_errno(d, r, "Failed to acquire device '%s': %m", subnode);
+-        } else {
+-                uint64_t start_kernel;
+-                r = device_get_sysattr_u64(partition, "start", &start_kernel);
+-                if (r < 0)
+-                        return log_device_debug_errno(partition, r, "Failed to get start of kernel partition device '%s': %m", subnode);
++        if (r < 0 && r != -ENODEV)
++                return log_device_debug_errno(d, r, "Failed to acquire device '%s': %m", subnode);
+ 
+-                uint64_t size_kernel;
+-                r = device_get_sysattr_u64(partition, "size", &size_kernel);
+-                if (r < 0)
+-                        return log_device_debug_errno(partition, r, "Failed to get size of kernel partition device '%s': %m", subnode);
++        *ret_subnode = TAKE_PTR(subnode);
++        *ret_partition = TAKE_PTR(partition);
++        return 0;
++}
+ 
+-                if (start_kernel == (uint64_t) start && size_kernel == (uint64_t) size) {
+-                        log_device_debug(partition, "Kernel partition device '%s' already matches partition table, not modifying.", subnode);
++static int remove_partitions(
++                sd_device *d,
++                int fd,
++                sd_device_enumerator *e,
++                const PartitionEntry *entries,
++                size_t n_entries,
++                bool *changed) {
+ 
+-                        if (FLAGS_SET(flags, REREADPT_FORCE_UEVENT)) {
+-                                if (!*changed) {
+-                                        /* Make sure to synthesize a change event on the main device, before we issue the first one on a partition device */
+-                                        r = sd_device_trigger(d, SD_DEVICE_CHANGE);
+-                                        if (r < 0)
+-                                                return log_device_debug_errno(d, r, "Failed to issue 'change' uevent on device '%s': %m", node);
++        int r;
+ 
+-                                        log_device_debug(d, "Successfully issued 'change' uevent on device '%s'.", node);
+-                                        *changed = true;
+-                                }
++        assert(d);
++        assert(fd >= 0);
++        assert(e);
++        assert(entries || n_entries == 0);
++        assert(changed);
+ 
+-                                r = sd_device_trigger(partition, SD_DEVICE_CHANGE);
+-                                if (r < 0)
+-                                        return log_device_debug_errno(partition, r, "Failed to issue 'change' uevent on partition '%s': %m", subnode);
++        /* Removes all partitions of the specified device that we didn't find in the partition table, or that
++         * start at a different offset there. This runs before anything is resized or added, because the
++         * kernel refuses to add or grow a partition that overlaps one it still knows, and the old partition
++         * in the way may well have a different number than the new one. */
+ 
+-                                log_device_debug(partition, "Successfully issued 'change' uevent on partition '%s'.", subnode);
+-                        }
++        int ret = 0;
++        FOREACH_DEVICE(e, partition) {
++                const char *devname;
+ 
+-                        return 0;
+-                }
++                r = sd_device_get_devname(partition, &devname);
++                if (r < 0)
++                        return log_device_debug_errno(partition, r, "Failed to get name of partition: %m");
+ 
+-                if (start_kernel == (uint64_t) start) {
+-                        /* If the start offsize doesn't change we can just resize the partition */
+-                        log_device_debug(partition, "Resizing partition %i...", nr);
++                unsigned nr;
++                r = device_get_property_uint(partition, "PARTN", &nr);
++                if (r < 0)
++                        return log_device_debug_errno(partition, r, "Failed to read partition number property: %m");
+ 
+-                        r = block_device_resize_partition(fd, nr, (uint64_t) start * 512U, (uint64_t) size * 512U);
++                const PartitionEntry *entry = partition_entry_find(entries, n_entries, nr);
++                if (entry) {
++                        uint64_t start_kernel;
++                        r = device_get_sysattr_u64(partition, "start", &start_kernel);
+                         if (r < 0)
+-                                return log_device_debug_errno(partition, r, "Failed to resize kernel partition device '%s' to partition table values: %m", subnode);
++                                return log_device_debug_errno(partition, r, "Failed to get start of kernel partition device '%s': %m", devname);
++
++                        if (start_kernel == entry->start) {
++                                log_device_debug(partition, "Found kernel partition device %u in partition table, leaving around.", nr);
++                                continue;
++                        }
+ 
+-                        log_device_debug(partition, "Successfully resized kernel partition device '%s' to match partition table.", subnode);
++                        log_device_debug(partition, "Kernel partition device %u starts at a different offset in partition table, removing it in order to recreate it.", nr);
++                } else
++                        log_device_debug(partition, "Kernel knows partition %u which we didn't find, removing.", nr);
++
++                r = block_device_remove_partition(fd, (int) nr);
++                if (r < 0) /* NB: when logging we use the parent device below, after all the partition device ceased existing by now, most likely */
++                        RET_GATHER(ret, log_device_debug_errno(d, r, "Failed to remove kernel partition device '%s': %m", devname));
++                else  {
++                        log_device_debug(d, "Removed partition %u from kernel.", nr);
+                         *changed = true;
+-                        return 1;
+                 }
++        }
+ 
+-                /* If the start offset changed we need to remove and recreate the partition */
+-                log_device_debug(partition, "Removing and recreating partition %i...", nr);
++        return ret;
++}
+ 
+-                /* NB: when logging below we use the parent device now, after all the partition device ceased
+-                 * existing by now, most likely. Let's explicitly get rid of the obsolete device object now,
+-                 * just to make a point. */
+-                partition = sd_device_unref(partition);
++static int resize_partition(sd_device *d, int fd, PartitionEntry *entry, bool *changed) {
++        int r;
+ 
+-                r = block_device_remove_partition(fd, nr);
+-                if (r < 0)
+-                        return log_device_debug_errno(d, r, "Failed to remove kernel partition device '%s' in order to recreate it: %m", subnode);
++        assert(d);
++        assert(fd >= 0);
++        assert(entry);
++        assert(changed);
+ 
+-                /* And now add it the partition anew */
+-                log_device_debug(d, "Successfully removed kernel partition device '%s' in order to recreate it.", subnode);
++        _cleanup_free_ char *subnode = NULL;
++        _cleanup_(sd_device_unrefp) sd_device *partition = NULL;
++        r = kernel_partition(d, entry->nr, &subnode, &partition);
++        if (r < 0)
++                return r;
++        if (!partition) /* Added later */
++                return 0;
++
++        uint64_t start_kernel;
++        r = device_get_sysattr_u64(partition, "start", &start_kernel);
++        if (r < 0)
++                return log_device_debug_errno(partition, r, "Failed to get start of kernel partition device '%s': %m", subnode);
++
++        uint64_t size_kernel;
++        r = device_get_sysattr_u64(partition, "size", &size_kernel);
++        if (r < 0)
++                return log_device_debug_errno(partition, r, "Failed to get size of kernel partition device '%s': %m", subnode);
++
++        if (start_kernel != entry->start) {
++                /* remove_partitions() could not remove it and already said why */
++                log_device_debug(partition, "Kernel partition device '%s' is still at its old offset, not touching it.", subnode);
++                return 0;
+         }
+ 
+-        log_device_debug(d, "Adding partition %i...", nr);
++        if (size_kernel == entry->size) {
++                log_device_debug(partition, "Kernel partition device '%s' already matches partition table, not modifying.", subnode);
++                entry->unchanged = true;
++                return 0;
++        }
++
++        log_device_debug(partition, "Resizing partition %u...", entry->nr);
+ 
+-        r = block_device_add_partition(fd, nr, (uint64_t) start * 512U, (uint64_t) size * 512U);
++        r = block_device_resize_partition(fd, (int) entry->nr, entry->start * 512U, entry->size * 512U);
+         if (r < 0)
+-                return log_device_debug_errno(d, r, "Failed to add kernel partition device %i to partition table values: %m", nr);
++                return log_device_debug_errno(partition, r, "Failed to resize kernel partition device '%s' to partition table values: %m", subnode);
+ 
+-        log_device_debug(d, "Successfully added kernel partition device %i to match partition table.", nr);
++        log_device_debug(partition, "Successfully resized kernel partition device '%s' to match partition table.", subnode);
+         *changed = true;
+         return 1;
+ }
+ 
+-static int remove_partitions(sd_device *d, int fd, sd_device_enumerator *e, Set *partnos, bool *changed) {
++static int add_partition(sd_device *d, int fd, const PartitionEntry *entry, bool *changed) {
+         int r;
+ 
+         assert(d);
+         assert(fd >= 0);
+-        assert(e);
++        assert(entry);
+         assert(changed);
+ 
+-        /* Removes all partitions of the specified device that we didn't find in the partition table (as
+-         * listed in the specified Set object) */
++        _cleanup_free_ char *subnode = NULL;
++        _cleanup_(sd_device_unrefp) sd_device *partition = NULL;
++        r = kernel_partition(d, entry->nr, &subnode, &partition);
++        if (r < 0)
++                return r;
++        if (partition) /* Kept or resized above, or it could not be removed */
++                return 0;
+ 
+-        int ret = 0;
+-        FOREACH_DEVICE(e, partition) {
+-                const char *devname;
++        log_device_debug(d, "Adding partition %u...", entry->nr);
+ 
+-                r = sd_device_get_devname(partition, &devname);
+-                if (r < 0)
+-                        return log_device_debug_errno(partition, r, "Failed to get name of partition: %m");
++        r = block_device_add_partition(fd, (int) entry->nr, entry->start * 512U, entry->size * 512U);
++        if (r < 0)
++                return log_device_debug_errno(d, r, "Failed to add kernel partition device %u to partition table values: %m", entry->nr);
+ 
+-                unsigned nr;
+-                r = device_get_property_uint(partition, "PARTN", &nr);
+-                if (r < 0)
+-                        return log_device_debug_errno(partition, r, "Failed to read partition number property: %m");
+-                if (set_contains(partnos, UINT_TO_PTR(nr))) {
+-                        log_device_debug(partition, "Found kernel partition device %u in partition table, leaving around.", nr);
++        log_device_debug(d, "Successfully added kernel partition device %u to match partition table.", entry->nr);
++        *changed = true;
++        return 1;
++}
++
++static int trigger_disk_and_unchanged(sd_device *d, const PartitionEntry *entries, size_t n_entries) {
++        int r;
++
++        assert(d);
++        assert(entries || n_entries == 0);
++
++        /* The kernel sent "remove" and "add" for the partitions we removed and added, but nothing for the
++         * disk itself, whose contents changed all the same. Synthesize "change" for the disk first, then
++         * for the partitions we left alone. */
++
++        r = sd_device_trigger(d, SD_DEVICE_CHANGE);
++        if (r < 0)
++                return log_device_debug_errno(d, r, "Failed to issue 'change' uevent on disk: %m");
++
++        log_device_debug(d, "Successfully issued 'change' uevent on disk.");
++
++        int ret = 0;
++        FOREACH_ARRAY(i, entries, n_entries) {
++                if (!i->unchanged)
+                         continue;
+-                }
+ 
+-                log_device_debug(partition, "Kernel knows partition %u which we didn't find, removing.", nr);
++                _cleanup_free_ char *subnode = NULL;
++                _cleanup_(sd_device_unrefp) sd_device *partition = NULL;
++                r = kernel_partition(d, i->nr, &subnode, &partition);
++                if (r < 0) {
++                        RET_GATHER(ret, r);
++                        continue;
++                }
++                if (!partition)
++                        continue;
+ 
+-                r = block_device_remove_partition(fd, (int) nr);
+-                if (r < 0) /* NB: when logging we use the parent device below, after all the partition device ceased existing by now, most likely */
+-                        RET_GATHER(ret, log_device_debug_errno(d, r, "Failed to remove kernel partition device '%s' that vanished from partition table: %m", devname));
+-                else  {
+-                        log_device_debug(d, "Removed partition %u from kernel.", nr);
+-                        *changed = true;
++                r = sd_device_trigger(partition, SD_DEVICE_CHANGE);
++                if (r < 0) {
++                        RET_GATHER(ret, log_device_debug_errno(partition, r, "Failed to issue 'change' uevent on partition '%s': %m", subnode));
++                        continue;
+                 }
++
++                log_device_debug(partition, "Successfully issued 'change' uevent on partition '%s'.", subnode);
+         }
+ 
+         return ret;
+@@ -340,41 +422,43 @@ static int reread_partition_table_full(sd_device *dev, int fd, RereadPartitionTa
+         if (r < 0)
+                 return log_device_debug_errno(dev, r, "Failed to enumerate kernel partition devices: %m");
+ 
+-        log_device_debug(dev, "Updating/adding kernel partition devices...");
++        _cleanup_free_ PartitionEntry *entries = new(PartitionEntry, n_partitions);
++        if (!entries)
++                return log_oom_debug();
+ 
+-        _cleanup_(set_freep) Set *found_partnos = NULL;
+-        bool changed = false;
+-        int ret = 0;
+         for (int i = 0; i < n_partitions; i++) {
+                 errno = 0;
+                 blkid_partition pp = sym_blkid_partlist_get_partition(pl, i);
+                 if (!pp)
+                         return log_device_debug_errno(dev, errno_or_else(EIO), "Unable to get partition data of partition %i of partition table of '%s': %m", i, p);
+ 
+-                RET_GATHER(ret, process_partition(dev, fd, pp, e, &found_partnos, flags, &changed));
++                r = read_partition_entry(pp, entries + i);
++                if (r < 0)
++                        return r;
+         }
+ 
+-        /* Only delete unrecognized partitions if everything else worked */
+-        if (ret < 0)
+-                return ret;
++        log_device_debug(dev, "Updating/adding kernel partition devices...");
++
++        /* Remove first, then resize, then add: a partition that is still in the way makes the kernel refuse
++         * to add or grow another one, and nothing would retry it. */
++        bool changed = false;
++        int ret = 0;
++        RET_GATHER(ret, remove_partitions(dev, fd, e, entries, n_partitions, &changed));
+ 
+-        log_device_debug(dev, "Removing old kernel partition devices...");
++        FOREACH_ARRAY(i, entries, n_partitions)
++                RET_GATHER(ret, resize_partition(dev, fd, i, &changed));
+ 
+-        r = remove_partitions(dev, fd, e, found_partnos, &changed);
+-        if (r < 0)
+-                return r;
++        FOREACH_ARRAY(i, entries, n_partitions)
++                RET_GATHER(ret, add_partition(dev, fd, i, &changed));
+ 
+-        if (changed)
+-                return 1;
++        /* Also on errors: the disk contents changed either way, and whoever is listening should look again */
++        if (FLAGS_SET(flags, REREADPT_FORCE_UEVENT))
++                RET_GATHER(ret, trigger_disk_and_unchanged(dev, entries, n_partitions));
+ 
+-        if (FLAGS_SET(flags, REREADPT_FORCE_UEVENT)) {
+-                /* No change? Then trigger an event manually if we were told to */
+-                r = sd_device_trigger(dev, SD_DEVICE_CHANGE);
+-                if (r < 0)
+-                        return log_device_debug_errno(dev, r, "Failed to issue 'change' uevent on device '%s': %m", p);
+-        }
++        if (ret < 0)
++                return ret;
+ 
+-        return 0;
++        return changed;
+ #else
+         log_device_debug(dev, "We don't have libblkid, falling back to BLKRRPART on '%s'.", p);
+         return fallback_ioctl(dev, fd, flags);
+diff --git a/src/test/test-reread-partition-table.c b/src/test/test-reread-partition-table.c
+index 61487cb..a562db0 100644
+--- a/src/test/test-reread-partition-table.c
++++ b/src/test/test-reread-partition-table.c
+@@ -168,6 +168,61 @@ TEST(rereadpt) {
+         ASSERT_OK_ZERO_ERRNO(access(p, F_OK));
+         ASSERT_OK(reread_partition_table_fd(loop->fd, /* flags= */ 0));
+         ASSERT_ERROR_ERRNO(access(p, F_OK), ENOENT);
++
++        _cleanup_free_ char *p2 = NULL;
++        ASSERT_OK(partition_node_of(loop->node, 2, &p2));
++
++        /* Two partitions in reverse order on disk, like an image whose first partition sits behind its
++         * second one */
++        log_notice("CREATING TWO IN REVERSE ORDER");
++        sfdisk(sfdisk_path,
++               loop,
++               "label: gpt\n"
++               "start=30M, size=20M, type=EBD0A0A2-B9E5-4433-87C0-68B6B72699C7\n"
++               "start=2M, size=5M, type=EBD0A0A2-B9E5-4433-87C0-68B6B72699C7\n");
++
++        ASSERT_OK(reread_partition_table_fd(loop->fd, /* flags= */ 0));
++        ASSERT_OK_ZERO_ERRNO(access(p, F_OK));
++        ASSERT_OK_ZERO_ERRNO(access(p2, F_OK));
++
++        /* Both move, and the new partition 1 overlaps the old partition 2. The old partition 2 has to go
++         * before the new partition 1 can be added. */
++        log_notice("MOVING ONTO EACH OTHER");
++        sfdisk(sfdisk_path,
++               loop,
++               "label: gpt\n"
++               "start=1M, size=16M, type=EBD0A0A2-B9E5-4433-87C0-68B6B72699C7\n"
++               "start=20M, size=10M, type=EBD0A0A2-B9E5-4433-87C0-68B6B72699C7\n");
++
++        ASSERT_OK(reread_partition_table_fd(loop->fd, /* flags= */ REREADPT_FORCE_UEVENT));
++
++        pfd = ASSERT_OK_ERRNO(open(p, O_RDONLY|O_CLOEXEC|O_NONBLOCK|O_NOCTTY));
++        ASSERT_OK(blockdev_get_device_size(pfd, &size));
++        ASSERT_EQ(size, 16U*1024U*1024U);
++        pfd = safe_close(pfd);
++
++        pfd = ASSERT_OK_ERRNO(open(p2, O_RDONLY|O_CLOEXEC|O_NONBLOCK|O_NOCTTY));
++        ASSERT_OK(blockdev_get_device_size(pfd, &size));
++        ASSERT_EQ(size, 10U*1024U*1024U);
++        pfd = safe_close(pfd);
++
++        /* Partition 1 grows into the space of partition 2, which goes away */
++        log_notice("GROWING INTO REMOVED PARTITION");
++        sfdisk(sfdisk_path,
++               loop,
++               "label: gpt\n"
++               "start=1M, size=25M, type=EBD0A0A2-B9E5-4433-87C0-68B6B72699C7\n");
++
++        ASSERT_OK(reread_partition_table_fd(loop->fd, /* flags= */ 0));
++        ASSERT_ERROR_ERRNO(access(p2, F_OK), ENOENT);
++
++        pfd = ASSERT_OK_ERRNO(open(p, O_RDONLY|O_CLOEXEC|O_NONBLOCK|O_NOCTTY));
++        ASSERT_OK(blockdev_get_device_size(pfd, &size));
++        ASSERT_EQ(size, 25U*1024U*1024U);
++        pfd = safe_close(pfd);
++
++        /* No change */
++        ASSERT_OK(reread_partition_table_fd(loop->fd, /* flags= */ 0));
+ }
+ 
+ DEFINE_TEST_MAIN(LOG_DEBUG);

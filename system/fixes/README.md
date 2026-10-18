@@ -30,3 +30,4 @@ drop when upstream fixes the bug.
 | Fix | Linked from | Plane | Remove when |
 | --- | --- | --- | --- |
 | `avahi-daemon/` | `system/services/printing.nix` (ipp-usb turns avahi on) | 181 | the test's stock machine survives a stale pid file; avahi is newer than 0.8 and handles SIGHUP before writing its pid file |
+| `systemd-partition-reread/` | `system/services/removable-media.nix` (sticks written with dd) | 185 | the test's stock machine shows every new partition and the new disk label after a dd; systemd is newer than 260.2 and removes partitions in the way before adding |

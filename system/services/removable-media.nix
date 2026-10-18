@@ -42,6 +42,11 @@ let
   '';
 in
 {
+  # A stick written with dd loses partitions and keeps its old label in
+  # udev (Plane 185). What the fix does and when to drop it:
+  # system/fixes/systemd-partition-reread.
+  imports = [ ../fixes/systemd-partition-reread ];
+
   options.services.gjallar-usbtrust = {
     enable = lib.mkOption {
       type = lib.types.bool;
