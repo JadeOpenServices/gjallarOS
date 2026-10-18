@@ -36,6 +36,15 @@
 # temperature flickered (47 -> 63 -> 56 -> 47 within seconds on the ZBook x2).
 # cpu-temp-smoothing.patch shows an 8 s moving average of it instead.
 #
+# Wi-Fi password prompts died after the first rebuild switch: NM restarts and
+# forgets its agents, and the shell registered only once, so NM answered "No
+# agents were available". network-secret-agent.patch backports upstream
+# 22ab9a4d (#4402, in 5.2.1) to register again whenever NM comes back, only
+# takes GetSecrets and CancelGetSecrets from the current NM owner, keeps the
+# request when the control center closes, and posts a notification while the
+# Network tab is not open. Drop it once the pin is 5.2.1 or newer, except for
+# the sender check and the notification.
+#
 # libqalculate 5.10 frees its random state on exit even when nothing ever
 # created it, so the shell crashes every time it stops. Upstream fixed that in
 # 931c2aa9 (5.11); drop the patch once nixpkgs ships libqalculate 5.11 or newer.
@@ -60,5 +69,6 @@
       ./wallpaper-store-path.patch
       ./bluetooth-pairing.patch
       ./cpu-temp-smoothing.patch
+      ./network-secret-agent.patch
     ];
   })
