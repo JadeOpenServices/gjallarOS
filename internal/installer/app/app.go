@@ -3183,8 +3183,10 @@ func validateSelections(u config.User, o discovery.Options) error {
 			return fmt.Errorf("unsupported editor: %q", value)
 		}
 	}
+	// A retired browser stays valid in a config that already lists it (an
+	// update in place or an old preset); the flake adds Firefox next to it.
 	for _, value := range u.Browsers {
-		if !contains(o.Browsers, value) {
+		if !contains(o.Browsers, value) && !contains(o.RetiredBrowsers, value) {
 			return fmt.Errorf("unsupported browser: %q", value)
 		}
 	}

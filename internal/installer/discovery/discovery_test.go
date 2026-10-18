@@ -177,4 +177,7 @@ func TestDiscoverSkipsRetiredBrowsers(t *testing.T) {
 	if len(o.Browsers) != 1 || o.Browsers[0] != "firefox" {
 		t.Fatalf("Browsers = %v, want [firefox]", o.Browsers)
 	}
+	if len(o.RetiredBrowsers) != 1 || o.RetiredBrowsers[0] != "librewolf" {
+		t.Fatalf("RetiredBrowsers = %v, want [librewolf]", o.RetiredBrowsers)
+	}
 }

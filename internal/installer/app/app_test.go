@@ -140,6 +140,16 @@ func TestValidateSelections(t *testing.T) {
 	if err := validateSelections(u, o); err == nil {
 		t.Fatal("accepted invalid shell")
 	}
+	u.Shell = "zsh"
+
+	u.Browsers = []string{"librewolf"}
+	if err := validateSelections(u, o); err == nil {
+		t.Fatal("accepted a browser without a module")
+	}
+	o.RetiredBrowsers = []string{"librewolf"}
+	if err := validateSelections(u, o); err != nil {
+		t.Fatalf("rejected a retired browser an existing config lists: %v", err)
+	}
 }
 
 func TestManagedPresetForcesBootRecoveryContract(t *testing.T) {

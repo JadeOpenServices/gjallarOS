@@ -30,7 +30,10 @@ type Hardware struct {
 
 	DeviceInventory deviceprobe.Snapshot
 }
-type Options struct{ Shells, Editors, Browsers, Themes []string }
+
+// RetiredBrowsers still have a module, so a config that lists one keeps
+// working, but they are not offered for new choices.
+type Options struct{ Shells, Editors, Browsers, RetiredBrowsers, Themes []string }
 
 func DetectHardware(sysRoot string) Hardware {
 	h := Hardware{
@@ -145,16 +148,18 @@ func Discover(repo string) (Options, error) {
 	if err != nil {
 		return Options{}, err
 	}
+	kept := onlyRetired(browsers, retiredBrowsers)
 	browsers = withoutRetired(browsers, retiredBrowsers)
 	themes, err := nixFiles(filepath.Join(repo, "themes"))
 	if err != nil {
 		return Options{}, err
 	}
 	return Options{
-		Shells:   shells,
-		Editors:  editors,
-		Browsers: browsers,
-		Themes:   themes,
+		Shells:          shells,
+		Editors:         editors,
+		Browsers:        browsers,
+		RetiredBrowsers: kept,
+		Themes:          themes,
 	}, nil
 }
 
@@ -181,6 +186,16 @@ func withoutRetired(names, retired []string) []string {
 	out := []string{}
 	for _, name := range names {
 		if !slices.Contains(retired, name) {
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
+func onlyRetired(names, retired []string) []string {
+	out := []string{}
+	for _, name := range names {
+		if slices.Contains(retired, name) {
 			out = append(out, name)
 		}
 	}
