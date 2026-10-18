@@ -26,6 +26,38 @@ let
     fi
     exec ${gjallarctl}/bin/gjallarctl rebuild "$@"
   '';
+  # The root side of `rebuild` for the system checkout (ROADMAP section 14).
+  # The user's environment stays outside: the inner script starts from
+  # env -i with fixed values. The installed gjallarctl checks the checkout's
+  # ownership before anything in it is evaluated.
+  systemRebuildInner = pkgs.writeShellScript "gjallar-system-rebuild-inner" ''
+    set -eu
+    if [ "$(${pkgs.coreutils}/bin/id -u)" != 0 ]; then
+      echo "[GjallarOS] Error: gjallar-system-rebuild runs as root; use rebuild" >&2
+      exit 2
+    fi
+    ${gjallarctl}/bin/gjallarctl system check
+    ctl=${gjallarctl}/bin/gjallarctl
+    errors="$(${pkgs.coreutils}/bin/mktemp)"
+    if current="$(${pkgs.nix}/bin/nix-build --no-out-link -E \
+      '(import ${pkgs.path} { }).callPackage /etc/gjallar/system/pkgs/gjallarctl { }' 2>"$errors")"; then
+      ctl="$current/bin/gjallarctl"
+    else
+      echo "[GjallarOS] Building gjallarctl from the checkout failed; using the installed one:" >&2
+      ${pkgs.coreutils}/bin/tail -n 3 "$errors" >&2
+    fi
+    ${pkgs.coreutils}/bin/rm -f "$errors"
+    exec "$ctl" system rebuild "$@"
+  '';
+  systemRebuild = pkgs.writeShellScriptBin "gjallar-system-rebuild" ''
+    exec ${pkgs.coreutils}/bin/env -i \
+      PATH=/run/wrappers/bin:/run/current-system/sw/bin \
+      HOME=/root \
+      TERM="''${TERM:-dumb}" \
+      LANG="''${LANG:-C.UTF-8}" \
+      GJALLAR_REBUILD_CALLER_HOME="''${GJALLAR_REBUILD_CALLER_HOME:-}" \
+      ${systemRebuildInner} "$@"
+  '';
   goCommand = name: command: pkgs.writeShellScriptBin name ''
     exec ${gjallarctl}/bin/gjallarctl ${command} "$@"
   '';
@@ -41,6 +73,7 @@ in
   environment.systemPackages = [
     (goCommand "helpme" "helpme")
     rebuild
+    systemRebuild
     (goCommand "cleanup" "cleanup")
     (goCommand "cleanup-old-generations" "cleanup-old-generations")
     (goCommand "thermal-status" "thermal-status")

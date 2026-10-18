@@ -59,3 +59,25 @@ func TestWriteAtomicPersistsUserConfigMode0600(t *testing.T) {
 		t.Fatalf("persisted configuration mismatch: %+v", got)
 	}
 }
+
+func TestWriteAtomicKeepsExistingModeWithoutWriteBits(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "user.config.json")
+	for _, tc := range []struct{ before, want os.FileMode }{{0o644, 0o644}, {0o666, 0o644}, {0o600, 0o600}} {
+		if err := os.WriteFile(path, []byte("{}\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod(path, tc.before); err != nil {
+			t.Fatal(err)
+		}
+		if err := WriteAtomic(path, User{Hostname: "box"}); err != nil {
+			t.Fatal(err)
+		}
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := info.Mode().Perm(); got != tc.want {
+			t.Fatalf("mode %o became %o, want %o", tc.before, got, tc.want)
+		}
+	}
+}

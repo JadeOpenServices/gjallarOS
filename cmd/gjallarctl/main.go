@@ -12,6 +12,7 @@ import (
 	"github.com/JadeOpenServices/gjallarOS/internal/binarycache"
 	"github.com/JadeOpenServices/gjallarOS/internal/hardware/deviceprobe"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/repojson"
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/systemcheckout"
 	"io"
 	"math"
 	"math/rand/v2"
@@ -108,6 +109,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runAuth(args[1:], stderr)
 	case "rebuild":
 		return runRebuild(args[1:], stdout, stderr)
+	case "system":
+		return runSystem(args[1:], stdout, stderr)
 	case "cleanup":
 		return runCleanup(args[1:], stdout, stderr)
 	case "cleanup-old-generations":
@@ -1792,6 +1795,7 @@ func printUsage(out io.Writer) {
 	oddccli.Usage(out)
 	fmt.Fprintln(out, "       gjallarctl auth")
 	fmt.Fprintln(out, "       gjallarctl rebuild [--repo PATH] [--host HOST] [-d|--debug] [-n|--no-cleanup] [--update] [--update-inputs] [--hardware-update [--channel stable|staging] [--switch 0|1]] [NIXOS-REBUILD-ARGS...]")
+	fmt.Fprintln(out, "       gjallarctl system {check|rebuild}   (root; rebuild starts it for the system checkout)")
 	fmt.Fprintln(out, "       gjallarctl device-probe refresh [--output PATH]")
 	fmt.Fprintln(out, "       gjallarctl fan {status|list|reconcile}")
 	fmt.Fprintln(out, "       gjallarctl ai profile [--config PATH]")
@@ -1882,6 +1886,15 @@ func runRebuild(args []string, stdout, stderr io.Writer) int {
 			rebuildArgs = append(rebuildArgs, args[i])
 		}
 	}
+	opts := rebuildOptions{
+		repo: repo, host: host, debug: debug, cleanup: cleanup,
+		hardwareUpdate: hardwareUpdate, channel: channel, switchNow: switchNow,
+		update: update, updateInputs: updateInputs, rebuildArgs: rebuildArgs,
+	}
+	if systemcheckout.Active(installercheck.SystemRepositoryFile) {
+		return startSystemRebuild(opts, stdout, stderr)
+	}
+
 	resolvedRepo, err := installercheck.DiscoverRepository(repo)
 	if err != nil {
 		fmt.Fprintf(stderr, "ERROR: resolve GjallarOS repository: %v\n", err)
@@ -1905,6 +1918,17 @@ func runRebuild(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintf(stderr, "[GjallarOS] Warning: %v\n", err)
 		}
 	}()
+	return rebuildCheckout(repo, opts, false, stdout, stderr)
+}
+
+// rebuildCheckout pulls, refreshes and builds repo. system is set for the
+// root side of a system checkout rebuild: the checkout is then checked
+// before anything in it is evaluated, and nothing is written back for the
+// user.
+func rebuildCheckout(repo string, opts rebuildOptions, system bool, stdout, stderr io.Writer) int {
+	host, debug, cleanup := opts.host, opts.debug, opts.cleanup
+	hardwareUpdate, channel, switchNow := opts.hardwareUpdate, opts.channel, opts.switchNow
+	update, updateInputs, rebuildArgs := opts.update, opts.updateInputs, opts.rebuildArgs
 
 	if update {
 		if code := pullCheckout(repo, stdout, stderr); code != 0 {
@@ -1937,11 +1961,16 @@ func runRebuild(args []string, stdout, stderr io.Writer) int {
 		}
 	}
 
-	_, err = repojson.CanonicalizeChangedTracked(
+	// The system checkout must match a reviewed commit, so it is checked,
+	// not rewritten.
+	if system {
+		if status := checkSystemSource(repo, stdout, stderr); status != 0 {
+			return status
+		}
+	} else if _, err := repojson.CanonicalizeChangedTracked(
 		context.Background(),
 		repo,
-	)
-	if err != nil {
+	); err != nil {
 		fmt.Fprintf(stderr, "ERROR: canonicalize changed JSON: %v\n", err)
 		return 1
 	}
@@ -2004,6 +2033,13 @@ func runRebuild(args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		fmt.Fprintf(stderr, "[GjallarOS] Error: %v\n", err)
 		return 2
+	}
+	if overrideRev != "" {
+		if err := systemcheckout.OfficialODDC(context.Background(), oddcBranchCache(), overrideRev); err != nil {
+			fmt.Fprintf(stderr, "[GjallarOS] Error: --override-input oddc: %v; nothing rebuilt\n", err)
+			return 2
+		}
+		fmt.Fprintf(stdout, "[GjallarOS] oddc override %s is on an official ODDC branch\n", overrideRev[:12])
 	}
 	var before, pinned string
 	if overrideRev != "" {
@@ -2076,6 +2112,7 @@ func runRebuild(args []string, stdout, stderr io.Writer) int {
 			stdout,
 			stderr,
 			"su",
+			"-l",
 			"-c",
 			shellJoin(rootArgs),
 			"root",
@@ -2112,7 +2149,7 @@ func runRebuild(args []string, stdout, stderr io.Writer) int {
 	} else {
 		status = runRebuildQuiet(stdout, stderr, host, messages, started, plan)
 	}
-	if status == 0 {
+	if status == 0 && !system {
 		if err := installercheck.RememberRepository(repo); err != nil {
 			fmt.Fprintf(
 				stderr,
@@ -2327,6 +2364,11 @@ Apply the GjallarOS configuration in the system checkout.
 Arguments after -- go to nixos-rebuild. --override-input oddc must name a
 commit (github:JadeOpenServices/oddc/<commit>); the ODDC answer for this
 machine is fetched at that commit too.
+
+When /etc/gjallar/system is the system checkout, root builds it as it is
+on the official origin: --repo, --host, --update-inputs and other
+nixos-rebuild arguments are refused, and an oddc override must be a commit
+of an official ODDC branch.
 `)
 }
 

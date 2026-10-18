@@ -5,6 +5,7 @@ package config
 import (
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"net"
 	"net/url"
 	"os"
@@ -164,7 +165,14 @@ func WriteAtomic(path string, user User) error {
 	tmpName := tmp.Name()
 	defer os.Remove(tmpName)
 
-	if err := tmp.Chmod(0600); err != nil {
+	// A new file is private; an existing one keeps its mode, so the
+	// root-owned system checkout's copy stays readable for the desktop
+	// tools. It holds no secrets.
+	mode := fs.FileMode(0600)
+	if info, err := os.Stat(path); err == nil {
+		mode = info.Mode().Perm() &^ 0o022
+	}
+	if err := tmp.Chmod(mode); err != nil {
 		tmp.Close()
 		return fmt.Errorf("set user configuration permissions: %w", err)
 	}

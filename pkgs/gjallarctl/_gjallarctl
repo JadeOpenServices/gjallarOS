@@ -19,6 +19,16 @@ _gjallarctl_rebuild() {
     '*::nixos-rebuild argument:'
 }
 
+_gjallarctl_system() {
+  local -a cmds=(
+    'check:check the root-owned system checkout (root only)'
+    'rebuild:rebuild from the system checkout (root only, started by rebuild)'
+  )
+  if (( CURRENT == 2 )); then
+    _describe -t commands 'system command' cmds
+  fi
+}
+
 _gjallarctl_usb() {
   local -a cmds=(
     'status:show the USB trust broker state'
@@ -202,6 +212,7 @@ _gjallarctl() {
     'helpme:list the GjallarOS tools'
     'check:run the safe repository checks'
     'preflight:check the repository before a rebuild'
+    'system:root side of the system checkout rebuild'
     'usb:USB trust enforcement'
     'thunderbolt:Thunderbolt and USB4 device authorization'
     'vpn:VPN and trusted Wi-Fi'
@@ -230,6 +241,7 @@ _gjallarctl() {
     args)
       case $words[1] in
         rebuild) _gjallarctl_rebuild ;;
+        system) _gjallarctl_system ;;
         usb) _gjallarctl_usb ;;
         thunderbolt) _gjallarctl_thunderbolt ;;
         vpn) _gjallarctl_vpn ;;

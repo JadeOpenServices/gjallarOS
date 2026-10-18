@@ -652,21 +652,43 @@ way to root.
 
 ### Plan
 
-- [ ] **Checkpoint 1: root-owned checkout.** `/etc/gjallar/system`,
+- [x] **Checkpoint 1: root-owned checkout.** `/etc/gjallar/system`,
       owned by root, not writable by group or others, a git checkout of the
-      official origin. `generated/` and `user.config.json` live there too
-      (`user.config.json` mode 600, it can hold a Tailscale key).
-      `/etc/gjallar/repository` names it. `programs.nh.flake` points there.
-- [ ] **Checkpoint 2: privileged rebuild ignores user input.** The user
-      command only authenticates and starts `gjallarctl system rebuild` as
-      root with a fixed argument list. The root side ignores
-      `GJALLAROS_REPO`, the remembered state file, the working directory and
-      `--repo`. It pulls, refreshes `generated/oddc`, runs the preflight and
-      evaluates as root. Before building it checks: HEAD is on the official
-      origin, or is an applied local change (below); no tracked file differs
-      from HEAD; the oddc input is the lock pin or a checked override (Plane
-      169). It prints what it builds: revision, local changes, oddc pin.
-      The built revision goes into `system.configurationRevision`.
+      official origin. `generated/` and `user.config.json` live there too.
+      `user.config.json` holds no secrets and stays readable for the desktop
+      tools; its values reach the world-readable Nix store with every
+      rebuild anyway, so secrets never go into it. `WriteAtomic` keeps an
+      existing file's mode (minus group and other write); a new one is 600.
+      `/etc/gjallar/repository` names it once `dotfilesDir` is
+      `/etc/gjallar/system`, and `programs.nh.flake` follows. Before anything
+      in it is evaluated, `gjallarctl system check` walks the checkout
+      without following links: every entry and every directory above it is
+      owned by root and not writable by group or others, no link leaves the
+      checkout, and an empty or missing checkout is named as such.
+- [ ] **Checkpoint 2: privileged rebuild ignores user input.** On a system
+      checkout the user's `rebuild` only checks its options, authenticates
+      and starts `/run/current-system/sw/bin/gjallar-system-rebuild` with a
+      fixed argument list (`sudo -n`, or `su -l` on managed devices). That
+      script starts from `env -i`, runs the installed `gjallarctl system
+      check`, builds `gjallarctl` from the checkout and runs `gjallarctl
+      system rebuild`. The root side never reads `GJALLAROS_REPO`, the
+      remembered state file, the working directory or `--repo`; `--host`,
+      `--update-inputs` and nixos-rebuild arguments are refused, except
+      `--override-input oddc <commit>`. Before building it checks: origin is
+      the official URL, HEAD is on one of its branches, no tracked file
+      differs from HEAD, and `flake.lock` differs from HEAD at most in the
+      oddc pin, which must then be on an official ODDC branch. It prints the
+      revision, its origin branches and the oddc pin.
+      Plane 169: an oddc override or moved pin must be reachable from the
+      official `stable`, `staging` or `verify/*` branches, checked in a bare
+      partial clone (`/var/cache/gjallar/oddc-official.git`, or the user's
+      cache for development checkouts) with lazy fetch off, so a commit that
+      exists only in a fork is never fetched. Fails closed in both modes.
+      Still open: the built revision in `system.configurationRevision`,
+      applied local changes (3b), the 169 notice while the deployed oddc is
+      not the pinned one, and the user-side writers of `user.config.json`
+      (add-ons, USB, Secure Boot), which fail on a system checkout until
+      checkpoint 3. Creating the checkout is checkpoint 4.
 - [ ] **Checkpoint 3: settings service.** Root service with a typed
       D-Bus API over the `user.config.json` schema, tiers, reading and
       security delay, signed export and import, per-user device keys, key
