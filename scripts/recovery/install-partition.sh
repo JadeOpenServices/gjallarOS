@@ -146,10 +146,12 @@ xorriso -osirrox on -indev "$image" \
 cp "$image" "$mount_dir/gjallar-recovery.iso"
 
 # Sign the boot executable with this endpoint's key so firmware starts it
-# under Secure Boot.
+# under Secure Boot. No --save: sbctl would keep the temporary mount path in
+# its file database, and every later `sbctl verify` reported it missing. Each
+# recovery install signs again with the current key.
 if $sign; then
   while IFS= read -r -d '' executable; do
-    sbctl sign --save "$executable" >/dev/null
+    sbctl sign "$executable" >/dev/null
     sbctl verify "$executable" >/dev/null
   done < <(find "$mount_dir/EFI" -type f -iname '*.efi' -print0)
 fi
