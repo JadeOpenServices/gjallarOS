@@ -36,7 +36,8 @@ let
       echo "[GjallarOS] Error: gjallar-system-rebuild runs as root; use rebuild" >&2
       exit 2
     fi
-    ${gjallarctl}/bin/gjallarctl system check
+    # The rebuild below prints the same source line, so only errors show.
+    ${gjallarctl}/bin/gjallarctl system check >/dev/null
     ctl=${gjallarctl}/bin/gjallarctl
     errors="$(${pkgs.coreutils}/bin/mktemp)"
     if current="$(${pkgs.nix}/bin/nix-build --no-out-link -E \
