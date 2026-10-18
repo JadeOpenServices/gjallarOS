@@ -202,6 +202,24 @@ func validateResume(tx installerresume.Transaction) error {
 	return nil
 }
 
+// maintenanceArgs keeps the mode this run settled on for the rerun after
+// the maintenance boot. By then the machine is a GjallarOS install, so the
+// first run's arguments alone would ask again whether to touch it, and the
+// default answer leaves it half installed.
+func maintenanceArgs(args []string, forceRedeploy bool) []string {
+	mode := "--accept-existing"
+	if forceRedeploy {
+		mode = "--force-redeploy"
+	}
+	out := append([]string(nil), args...)
+	for _, arg := range out {
+		if arg == mode {
+			return out
+		}
+	}
+	return append(out, mode)
+}
+
 func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer) int {
 	if os.Getenv("GJALLAR_INSTALLER_RESUMED") == "1" {
 		fmt.Fprintf(
@@ -1261,7 +1279,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 						ctx,
 						executable,
 						opt.repo,
-						originalArgs,
+						maintenanceArgs(originalArgs, opt.forceRedeploy),
 						s.deviceGate,
 					); err != nil {
 						return fail(

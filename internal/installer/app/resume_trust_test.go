@@ -38,3 +38,21 @@ func TestResumeTrustsOnlyTheTransactionRepository(t *testing.T) {
 		t.Fatal("accepted a malformed GIT_CONFIG_COUNT")
 	}
 }
+
+func TestMaintenanceArgsKeepTheChosenMode(t *testing.T) {
+	for _, tc := range []struct {
+		args  []string
+		force bool
+		want  string
+	}{
+		{nil, false, "--accept-existing"},
+		{[]string{"--repo", "/r"}, false, "--repo /r --accept-existing"},
+		{[]string{"--accept-existing"}, false, "--accept-existing"},
+		{[]string{"--repo", "/r"}, true, "--repo /r --force-redeploy"},
+		{[]string{"--force-redeploy"}, true, "--force-redeploy"},
+	} {
+		if got := strings.Join(maintenanceArgs(tc.args, tc.force), " "); got != tc.want {
+			t.Errorf("maintenanceArgs(%q, %v) = %q; want %q", tc.args, tc.force, got, tc.want)
+		}
+	}
+}
