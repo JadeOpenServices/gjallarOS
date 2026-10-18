@@ -28,7 +28,8 @@ let
   '';
   # The root side of `rebuild` for the system checkout (ROADMAP section 14).
   # The user's environment stays outside: the inner script starts from
-  # env -i with fixed values. The installed gjallarctl checks the checkout's
+  # env -i with fixed values and the Noctalia colors, which gjallarctl checks
+  # again before the evaluation sees them. The installed gjallarctl checks the checkout's
   # ownership before anything in it is evaluated.
   systemRebuildInner = pkgs.writeShellScript "gjallar-system-rebuild-inner" ''
     set -eu
@@ -56,7 +57,7 @@ let
       HOME=/root \
       TERM="''${TERM:-dumb}" \
       LANG="''${LANG:-C.UTF-8}" \
-      GJALLAR_REBUILD_CALLER_HOME="''${GJALLAR_REBUILD_CALLER_HOME:-}" \
+      GJALLAR_NOCTALIA_COLORS="''${GJALLAR_NOCTALIA_COLORS:-}" \
       ${systemRebuildInner} "$@"
   '';
   goCommand = name: command: pkgs.writeShellScriptBin name ''

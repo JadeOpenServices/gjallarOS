@@ -7,12 +7,26 @@
 }:
 let
   details = settings.themeDetails;
-  noctaliaPalettePath = builtins.getEnv "GJALLAR_NOCTALIA_PALETTE";
+  # The session's Noctalia colors as gjallarctl checked them:
+  # base00=rrggbb,...,base0F=rrggbb. The evaluation reads no file for them,
+  # and anything else stops it.
+  noctaliaColors = builtins.getEnv "GJALLAR_NOCTALIA_COLORS";
+  noctaliaKeys = map (digit: "base0${digit}") (lib.stringToCharacters "0123456789ABCDEF");
+  noctaliaFields = map (lib.match "(base0[0-9A-F])=([0-9a-f]{6})") (
+    lib.splitString "," noctaliaColors
+  );
   noctaliaPalette =
-    if noctaliaPalettePath != "" && builtins.pathExists noctaliaPalettePath then
-      builtins.fromJSON (builtins.readFile noctaliaPalettePath)
+    if noctaliaColors == "" then
+      { }
+    else if
+      builtins.all (field: field != null) noctaliaFields
+      && map builtins.head noctaliaFields == noctaliaKeys
+    then
+      builtins.listToAttrs (
+        map (field: lib.nameValuePair (builtins.head field) (builtins.elemAt field 1)) noctaliaFields
+      )
     else
-      { };
+      throw "GJALLAR_NOCTALIA_COLORS is not base00=rrggbb,...,base0F=rrggbb";
 in
 {
   stylix = {

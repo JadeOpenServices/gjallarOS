@@ -192,7 +192,7 @@ func TestRebuildPlanIsPureWithoutPalette(t *testing.T) {
 	plan := newRebuildPlan(
 		"/repo",
 		"host",
-		t.TempDir(),
+		"",
 		false,
 		[]string{"--show-trace-extra"},
 	)
@@ -208,23 +208,8 @@ func TestRebuildPlanIsPureWithoutPalette(t *testing.T) {
 	}
 }
 
-func TestRebuildPlanAddsOneImpureForNoctaliaPalette(t *testing.T) {
-	home := t.TempDir()
-	palette := filepath.Join(
-		home,
-		".local",
-		"state",
-		"noctalia",
-		"stylix-override.json",
-	)
-	if err := os.MkdirAll(filepath.Dir(palette), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(palette, []byte("{}\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	plan := newRebuildPlan("/repo", "host", home, true, nil)
+func TestRebuildPlanAddsOneImpureForNoctaliaColors(t *testing.T) {
+	plan := newRebuildPlan("/repo", "host", testNoctaliaColors, true, nil)
 
 	if got := countString(plan.eval, "--impure"); got != 1 {
 		t.Fatalf("--impure count = %d, want 1: %v", got, plan.eval)
@@ -232,8 +217,8 @@ func TestRebuildPlanAddsOneImpureForNoctaliaPalette(t *testing.T) {
 	if got := countString(plan.eval, "--show-trace"); got != 1 {
 		t.Fatalf("--show-trace count = %d, want 1: %v", got, plan.eval)
 	}
-	if len(plan.eval) < 2 || plan.eval[0] != "env" || !strings.HasPrefix(plan.eval[1], "GJALLAR_NOCTALIA_PALETTE=") {
-		t.Fatalf("palette environment prefix missing: %v", plan.eval)
+	if len(plan.eval) < 2 || plan.eval[0] != "env" || plan.eval[1] != noctaliaColorsEnv+"="+testNoctaliaColors {
+		t.Fatalf("colors environment prefix missing: %v", plan.eval)
 	}
 	if countString(plan.build, "--impure") != 0 || plan.build[0] != "nix" {
 		t.Fatalf("build carries the palette input: %v", plan.build)

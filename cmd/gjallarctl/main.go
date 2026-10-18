@@ -2080,11 +2080,7 @@ func rebuildCheckout(repo string, opts rebuildOptions, system bool, stdout, stde
 			return 1
 		}
 
-		home, _ := os.UserHomeDir()
-
 		rootArgs := []string{
-			"env",
-			"GJALLAR_REBUILD_CALLER_HOME=" + home,
 			executable,
 			"rebuild",
 			"--repo",
@@ -2101,13 +2097,16 @@ func rebuildCheckout(repo string, opts rebuildOptions, system bool, stdout, stde
 		}
 
 		rootArgs = append(rootArgs, rebuildArgs...)
+		if colors := rebuildColors(stderr); colors != "" {
+			rootArgs = append([]string{"env", noctaliaColorsEnv + "=" + colors}, rootArgs...)
+		}
 
 		fmt.Fprintln(
 			stdout,
 			"[GjallarOS] Managed endpoint: authenticating as root for rebuild.",
 		)
 
-		return runCommand(
+		status := runCommand(
 			context.Background(),
 			stdout,
 			stderr,
@@ -2117,6 +2116,13 @@ func rebuildCheckout(repo string, opts rebuildOptions, system bool, stdout, stde
 			shellJoin(rootArgs),
 			"root",
 		)
+		// Root's login has its own home; the user remembers the checkout.
+		if status == 0 {
+			if err := installercheck.RememberRepository(repo); err != nil {
+				fmt.Fprintf(stderr, "WARN: remember GjallarOS repository: %v\n", err)
+			}
+		}
+		return status
 	}
 	if os.Geteuid() != 0 {
 		if status := runPrivilegeAuthentication(
@@ -2128,10 +2134,7 @@ func rebuildCheckout(repo string, opts rebuildOptions, system bool, stdout, stde
 	}
 
 	started := time.Now()
-	rebuildHome := os.Getenv("GJALLAR_REBUILD_CALLER_HOME")
-	if rebuildHome == "" {
-		rebuildHome, _ = os.UserHomeDir()
-	}
+	colors := rebuildColors(stderr)
 	// Evaluate a staged copy: path: on the checkout copies .git (gigabytes of
 	// history) and ignored scratch such as .vm into the store on every rebuild.
 	source, err := flakesource.Stage(repo, "")
@@ -2140,7 +2143,7 @@ func rebuildCheckout(repo string, opts rebuildOptions, system bool, stdout, stde
 		return 1
 	}
 	defer source.Close()
-	plan := newRebuildPlan(source.Dir, host, rebuildHome, debug, rebuildArgs)
+	plan := newRebuildPlan(source.Dir, host, colors, debug, rebuildArgs)
 
 	var status int
 	if debug {
@@ -2245,7 +2248,7 @@ var rebuildSwitchFlags = map[string]int{
 }
 
 func newRebuildPlan(
-	repo, host, rebuildHome string,
+	repo, host, colors string,
 	debug bool,
 	rebuildArgs []string,
 ) rebuildPlan {
@@ -2279,23 +2282,14 @@ func newRebuildPlan(
 	}
 
 	// Pure evaluation is the default. The only current impure input is the
-	// explicitly discovered Noctalia palette used to snapshot live colors into
-	// build-time Stylix targets. Add --impure exactly once when that input exists.
-	if rebuildHome != "" {
-		palette := filepath.Join(
-			rebuildHome,
-			".local",
-			"state",
-			"noctalia",
-			"stylix-override.json",
+	// checked Noctalia colors (see rebuildColors), snapshotted into build-time
+	// Stylix targets. Add --impure exactly once when they exist.
+	if colors != "" {
+		plan.eval = slices.Concat(
+			[]string{"env", noctaliaColorsEnv + "=" + colors},
+			plan.eval,
+			[]string{"--impure"},
 		)
-		if info, err := os.Stat(palette); err == nil && info.Mode().IsRegular() {
-			plan.eval = slices.Concat(
-				[]string{"env", "GJALLAR_NOCTALIA_PALETTE=" + palette},
-				plan.eval,
-				[]string{"--impure"},
-			)
-		}
 	}
 	return plan
 }

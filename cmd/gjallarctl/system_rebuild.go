@@ -78,8 +78,10 @@ func startSystemRebuild(opts rebuildOptions, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "[GjallarOS] Error: %v\n", err)
 		return 2
 	}
-	home, _ := os.UserHomeDir()
-	rootArgs := append([]string{"env", "GJALLAR_REBUILD_CALLER_HOME=" + home, systemRebuildCommand}, args...)
+	rootArgs := append([]string{systemRebuildCommand}, args...)
+	if colors := rebuildColors(stderr); colors != "" {
+		rootArgs = append([]string{"env", noctaliaColorsEnv + "=" + colors}, rootArgs...)
+	}
 
 	userConfig, err := config.Load(filepath.Join(systemcheckout.Path, "user.config.json"))
 	if err == nil && userConfig.EndpointManagedDevice && os.Geteuid() != 0 {

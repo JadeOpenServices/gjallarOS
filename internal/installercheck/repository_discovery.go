@@ -162,15 +162,9 @@ func repositoryStatePath() (string, error) {
 		return filepath.Join(state, "gjallarOS", "repository"), nil
 	}
 
-	home := strings.TrimSpace(
-		os.Getenv("GJALLAR_REBUILD_CALLER_HOME"),
-	)
-	if home == "" {
-		var err error
-		home, err = os.UserHomeDir()
-		if err != nil {
-			return "", err
-		}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
 	}
 
 	return filepath.Join(
