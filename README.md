@@ -208,33 +208,57 @@ and the Home Manager side (`user/apps/default.nix`). The old `aiEnable`,
 
 ### Firefox add-ons
 
-Firefox always gets uBlock Origin. Other add-ons come in collections, listed
-in `apps/firefox-addons.json`: Privacy, Password managers, Comfort and Cookie
-banners. The installer first asks which collections you want, then which
-add-ons of each ticked collection. In `user.config.json` every collection has
-an `enable` switch and one switch per add-on:
+Add-ons come in collections, listed in `apps/firefox-addons.json`: Privacy,
+Password managers, Comfort and Cookie banners. New installs start with uBlock
+Origin on and everything else off. Each add-on has one of three modes:
+
+- `off`: not installed. If GjallarOS installed it earlier, it is removed.
+- `on`: installed, and you can turn it off in about:addons.
+- `locked`: installed and always on.
+
+The installer asks which collections you want, then the mode of each add-on in
+them. Afterwards `gjallarctl addons` changes them:
+
+```sh
+gjallarctl addons list
+gjallarctl addons set privacy.clearurls on
+gjallarctl addons set comfort off
+gjallarctl rebuild
+```
+
+In `user.config.json` this looks like:
 
 ```json
 "firefoxAddons": {
-  "passwords": { "enable": true, "passbolt": true, "bitwarden": false, "keepassxc-browser": false, "nextcloud-passwords": false }
+  "privacy": { "enable": true, "addons": { "ublock-origin": "on", "clearurls": "locked" } }
 }
 ```
 
-An add-on can only be `true` while its collection's `enable` is `true`; the
-installer refuses anything else. Missing switches count as `false`.
+Add-ons of a collection are only installed while its `enable` is `true`.
+Missing add-ons count as `off`.
 
-Other add-ons from addons.mozilla.org go in `firefoxStoreAddons`, by add-on
-ID (about:support lists the ID of each installed add-on):
+Add-ons from addons.mozilla.org are pinned to one reviewed file.
+`gjallarctl addons pin ID` downloads the newest version, shows its name and
+permissions and asks before it saves the URL and SHA-256 to
+`firefoxStoreAddons`. The build fetches exactly that file, so a changed file
+on addons.mozilla.org breaks the build instead of reaching Firefox.
+`gjallarctl addons update` moves pins to the newest version and lists the
+permissions the new version adds. About:support shows the ID of each
+installed add-on.
 
-```json
-"firefoxStoreAddons": ["addon@example.org", "{11111111-2222-3333-4444-555555555555}"]
-```
+Firefox installs all of these through its enterprise policy, from the Nix
+store, and does not update them by itself; new versions arrive with
+`gjallarctl rebuild`. The rebuild, or the next login if Firefox was open,
+removes add-ons that left the list, but only those Firefox itself installed
+from the policy. GjallarOS
+keeps a list of them in `~/.local/state/gjallaros/managed/`. Add-ons you
+installed by hand stay untouched. JODS and unattended installs set both keys
+in the same way.
 
-Firefox downloads them from addons.mozilla.org on start and cancels the
-install when the downloaded add-on has another ID, so an ID can only bring
-that one add-on. Users can turn these add-ons off, but not remove them. When
-an ID leaves the list, Firefox keeps the add-on until it is removed in
-about:addons. JODS and unattended installs set both keys in the same way.
+Upgrading from a version that linked add-ons into the profile: close Firefox
+before `gjallarctl rebuild`. On the next start Firefox keeps uBlock Origin
+with its settings, at the version it had. The Stylix theme comes back on the
+second start. A rollback never downgrades an add-on; Firefox refuses that.
 
 <div align="right"><a href="#gjallaros">↑ back to top</a></div>
 
