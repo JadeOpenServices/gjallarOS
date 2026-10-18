@@ -11,6 +11,7 @@ import (
 
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/config"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/prompt"
+	installerresume "github.com/JadeOpenServices/gjallarOS/internal/installer/resume"
 	"github.com/JadeOpenServices/gjallarOS/internal/installercheck"
 )
 
@@ -357,5 +358,47 @@ func TestRecoveryInstalledRootAcceptsAuthenticatedMapper(t *testing.T) {
 	}
 	if !existing {
 		t.Fatal("authenticated mounted recovery root was not accepted")
+	}
+}
+
+func TestRecoveryAfterMaintenanceNeedsNoAnswers(t *testing.T) {
+	original := findRecoveryPartition
+	t.Cleanup(func() { findRecoveryPartition = original })
+	findRecoveryPartition = func(context.Context) string { return "/dev/vda3" }
+
+	for _, tc := range []struct {
+		name, state, input, want string
+	}{
+		{"maintenance resume", installerresume.StateMaintenanceReboot, "", "/dev/vda3"},
+		{"rerun, default no", "", "\n", ""},
+		{"rerun, yes", "", "y\n", "/dev/vda3"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("GJALLAR_INSTALLER_RESUME_STATE", tc.state)
+			s := state{
+				existing: true,
+				user: config.User{
+					RecoveryEnable:          true,
+					RecoveryPartitionEnable: true,
+					SecureBootEnable:        true,
+				},
+			}
+			var out bytes.Buffer
+			err := configureRecoveryProvisioning(
+				context.Background(),
+				prompt.New(strings.NewReader(tc.input), &out),
+				options{},
+				&s,
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if s.recoveryPartition != tc.want {
+				t.Fatalf("recovery partition %q; want %q", s.recoveryPartition, tc.want)
+			}
+			if strings.Contains(out.String(), "signing key") {
+				t.Fatalf("asked for release signing keys:\n%s", out.String())
+			}
+		})
 	}
 }

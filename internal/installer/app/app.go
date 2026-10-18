@@ -2565,9 +2565,16 @@ func configureRecoveryProvisioning(ctx context.Context, ui prompt.UI, opt option
 		return nil
 	}
 	if s.recoveryPartition != "" {
-		yes, err := ui.Confirm(ctx, "Install/update the recovery environment on "+s.recoveryPartition+" after a successful rebuild? That partition will be formatted.", false)
-		if err != nil {
-			return err
+		// After the maintenance boot the partition is the one this install
+		// made for itself and is still empty. Filling it is why the run
+		// continues, so asking again would only let the default undo it.
+		yes := os.Getenv("GJALLAR_INSTALLER_RESUME_STATE") == installerresume.StateMaintenanceReboot
+		if !yes {
+			var err error
+			yes, err = ui.Confirm(ctx, "Install/update the recovery environment on "+s.recoveryPartition+" after a successful rebuild? That partition will be formatted.", false)
+			if err != nil {
+				return err
+			}
 		}
 		if !yes {
 			s.recoveryPartition = ""
@@ -2584,24 +2591,16 @@ func configureRecoveryProvisioning(ctx context.Context, ui prompt.UI, opt option
 		// still rediscovers the actual Btrfs/LUKS/GPT topology before mutation.
 		s.recoveryDisk = ""
 	}
-	if s.recoverySigningKey == "" {
-		var err error
-		s.recoverySigningKey, err = ui.Value(ctx, "Runtime path to the offline recovery-image Ed25519 private signing key", "")
-		if err != nil {
-			return err
-		}
+	// As on a fresh install, the image is built here and signed with this
+	// device's Secure Boot key. The offline release key pair is only used
+	// when an operator passes both paths.
+	if (s.recoverySigningKey == "") != (s.recoverySigningPublicKey == "") {
+		return errors.New("pass both --recovery-signing-key and --recovery-signing-public-key, or neither")
 	}
-	if s.recoverySigningPublicKey == "" {
-		var err error
-		s.recoverySigningPublicKey, err = ui.Value(ctx, "Runtime path to the separately pinned recovery-image Ed25519 public key", "")
-		if err != nil {
-			return err
-		}
-	}
-	if !filepath.IsAbs(s.recoverySigningKey) {
+	if s.recoverySigningKey != "" && !filepath.IsAbs(s.recoverySigningKey) {
 		return errors.New("recovery signing key path must be absolute")
 	}
-	if !filepath.IsAbs(s.recoverySigningPublicKey) {
+	if s.recoverySigningPublicKey != "" && !filepath.IsAbs(s.recoverySigningPublicKey) {
 		return errors.New("recovery signing public-key path must be absolute")
 	}
 	if !s.user.SecureBootEnable {
@@ -2906,7 +2905,7 @@ func prepareInstalledRecoveryStorage(
 	}
 }
 
-func findRecoveryPartition(ctx context.Context) string {
+var findRecoveryPartition = func(ctx context.Context) string {
 	out, err := exec.CommandContext(ctx, "lsblk", "-pnro", "PATH,PARTLABEL,LABEL").Output()
 	if err != nil {
 		return ""
