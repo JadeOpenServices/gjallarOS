@@ -179,8 +179,8 @@ func NixState(p Policy) string {
 	}
 	attrs += "}"
 	return fmt.Sprintf(
-		"tailscale = { enable = true; homeSubnets = %s; trustedWifis = %s; exitNode = %s; wifiExitNodes = %s; siteRouterTrust = %t; siteRouterTargets = %s; };",
-		list(p.HomeSubnets), list(p.TrustedWifis), nixString(p.ExitNode), attrs, p.SiteRouterTrust, list(p.SiteRouterTargets),
+		"tailscale = { enable = true; homeSubnets = %s; trustedWifis = %s; exitNode = %s; wifiExitNodes = %s; routerHome = %t; siteRouterTrust = %t; siteRouterTargets = %s; };",
+		list(p.HomeSubnets), list(p.TrustedWifis), nixString(p.ExitNode), attrs, p.RouterHome, p.SiteRouterTrust, list(p.SiteRouterTargets),
 	)
 }
 

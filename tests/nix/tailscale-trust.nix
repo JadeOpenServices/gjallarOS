@@ -54,6 +54,13 @@ let
       siteRouterTargets = [ "192.168.8.1:53" ];
     };
   };
+  routerHome = evaluate {
+    apps = [ "tailscale" ];
+    tailscale = {
+      exitNode = "exit-1";
+      routerHome = true;
+    };
+  };
   off = evaluate {
     apps = [ ];
     tailscale = {
@@ -72,6 +79,7 @@ assert
     trustedWifis = [ ];
     exitNode = "";
     wifiExitNodes = { };
+    routerHome = false;
     siteRouterTrust = false;
     siteRouterTargets = [ ];
   };
@@ -88,6 +96,8 @@ assert
 assert (policyOf vpn).exitNode == "home-router";
 assert (policyOf vpn).wifiExitNodes == { fizzlipuzzli = "auto"; };
 assert vpn.services.tailscale.useRoutingFeatures == "client";
+assert !(policyOf vpn).routerHome;
+assert (policyOf routerHome).routerHome && (policyOf routerHome).homeSubnets == [ ];
 assert vpn.systemd.paths.gjallar-vpn-trust.pathConfig.Unit == "gjallar-vpn-trust.service";
 assert builtins.elem "timers.target" vpn.systemd.timers.gjallar-vpn-trust.wantedBy;
 assert nixpkgs.lib.hasInfix "restart --no-block gjallar-vpn-trust.service"

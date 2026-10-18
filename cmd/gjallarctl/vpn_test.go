@@ -54,7 +54,7 @@ func TestVPNOverrideCommands(t *testing.T) {
 	if code := runVPN([]string{"export"}, &out, &errOut); code != 0 {
 		t.Fatalf("export: %s", errOut.String())
 	}
-	want := `tailscale = { enable = true; homeSubnets = [ "192.168.8.0/24" ]; trustedWifis = [ "Shi 2,4" ]; exitNode = "auto"; wifiExitNodes = { }; siteRouterTrust = false; siteRouterTargets = [ ]; };`
+	want := `tailscale = { enable = true; homeSubnets = [ "192.168.8.0/24" ]; trustedWifis = [ "Shi 2,4" ]; exitNode = "auto"; wifiExitNodes = { }; routerHome = false; siteRouterTrust = false; siteRouterTargets = [ ]; };`
 	if strings.TrimSpace(out.String()) != want {
 		t.Fatalf("export = %s", out.String())
 	}

@@ -87,11 +87,12 @@ func Tailscale(t *config.TailscaleIntent) string {
 		return "null"
 	}
 	return fmt.Sprintf(
-		"{ homeSubnets = %s; trustedWifis = %s; exitNode = %s; wifiExitNodes = %s; siteRouterTrust = %t; siteRouterTargets = %s; }",
+		"{ homeSubnets = %s; trustedWifis = %s; exitNode = %s; wifiExitNodes = %s; routerHome = %t; siteRouterTrust = %t; siteRouterTargets = %s; }",
 		Strings(t.HomeSubnets),
 		Strings(t.TrustedWifis),
 		String(t.ExitNode),
 		StringAttrs(t.WifiExitNodes),
+		t.RouterHome,
 		t.SiteRouterTrust,
 		Strings(t.SiteRouterTargets),
 	)

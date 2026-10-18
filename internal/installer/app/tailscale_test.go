@@ -28,9 +28,10 @@ func TestCollectTailscaleHomeWifisAndSiteRouter(t *testing.T) {
 		"y",
 		"home-router",
 		"bakasifu-5Ghz, bakasifu-2.4Ghz,fizzlipuzzli",
-		"", // no trusted Wi-Fi uses the exit node
-		"", // site router trust
-		"", // targets: default
+		"",  // no trusted Wi-Fi uses the exit node
+		"n", // router home
+		"",  // site router trust
+		"",  // targets: default
 	)
 	want := config.TailscaleIntent{
 		HomeSubnets:       []string{"192.168.8.0/24"},
@@ -55,6 +56,7 @@ func TestCollectTailscaleReasksInvalidAnswers(t *testing.T) {
 		"bad name", // not a node name
 		"exit-1",
 		"",
+		"n",
 		"y",
 		"router", // no port
 		"10.0.0.1:443",
@@ -75,7 +77,7 @@ func TestCollectTailscaleQuotedWifiNames(t *testing.T) {
 		`bakasifu-5ghz, "cafe, upstairs", fizzlipuzzli`,
 		"elsewhere", // not a trusted Wi-Fi: asked again
 		`"cafe, upstairs"`,
-		"n",
+		"n", "n",
 	)
 	if !strings.Contains(out, "missing closing") || !strings.Contains(out, `"elsewhere" is not a trusted Wi-Fi`) {
 		t.Fatalf("missing validation messages:\n%s", out)
@@ -88,6 +90,13 @@ func TestCollectTailscaleQuotedWifiNames(t *testing.T) {
 	}
 }
 
+func TestCollectTailscaleRouterHomeSkipsSiteTargets(t *testing.T) {
+	got, _ := collectTailscaleAnswers(t, "", "y", "exit-1", "", "")
+	if !got.RouterHome || got.SiteRouterTrust || len(got.SiteRouterTargets) != 0 || got.ExitNode != "exit-1" {
+		t.Fatalf("tailscale = %#v", got)
+	}
+}
+
 func TestCollectTailscaleWithoutVPNKeepsHomeBypassOnly(t *testing.T) {
 	got, _ := collectTailscaleAnswers(t, "", "n")
 	if got.ExitNode != "" || got.SiteRouterTrust || len(got.TrustedWifis) != 0 {
@@ -96,7 +105,7 @@ func TestCollectTailscaleWithoutVPNKeepsHomeBypassOnly(t *testing.T) {
 }
 
 func TestCollectTailscaleExitNodeDefaultsToAuto(t *testing.T) {
-	got, _ := collectTailscaleAnswers(t, "", "y", "", "home", "", "n")
+	got, _ := collectTailscaleAnswers(t, "", "y", "", "home", "", "n", "n")
 	if got.ExitNode != "auto" || !slices.Equal(got.TrustedWifis, []string{"home"}) || got.WifiExitNodes != nil {
 		t.Fatalf("tailscale = %#v", got)
 	}

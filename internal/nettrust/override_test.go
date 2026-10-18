@@ -115,7 +115,7 @@ func TestNixStateQuotesNames(t *testing.T) {
 		ExitNode:      ExitNodeAuto,
 		WifiExitNodes: map[string]string{"Shi 2,4": "OpenWrt", `a"b`: ExitNodeAuto},
 	})
-	want := `tailscale = { enable = true; homeSubnets = [ "192.168.8.0/24" ]; trustedWifis = [ "Shi 2,4" "a\"b" "\${x}" ]; exitNode = "auto"; wifiExitNodes = { "Shi 2,4" = "OpenWrt"; "a\"b" = "auto"; }; siteRouterTrust = false; siteRouterTargets = [ ]; };`
+	want := `tailscale = { enable = true; homeSubnets = [ "192.168.8.0/24" ]; trustedWifis = [ "Shi 2,4" "a\"b" "\${x}" ]; exitNode = "auto"; wifiExitNodes = { "Shi 2,4" = "OpenWrt"; "a\"b" = "auto"; }; routerHome = false; siteRouterTrust = false; siteRouterTargets = [ ]; };`
 	if got != want {
 		t.Fatalf("got\n%s\nwant\n%s", got, want)
 	}

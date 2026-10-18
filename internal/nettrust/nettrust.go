@@ -5,6 +5,8 @@
 //
 //   - home: a local subnet is a home subnet, and either a tailnet router
 //     proves it is on this LAN or the Wi-Fi is a trusted, secured network.
+//     With RouterHome, a tailnet router that proves it is on this LAN is
+//     enough, whatever the subnet.
 //   - site: a tailnet router proves it is on this LAN, advertises this LAN,
 //     and the required targets answer through it outside the tunnel.
 //   - trusted-wifi: the Wi-Fi name is trusted and the connection is secured.
@@ -43,15 +45,19 @@ type Policy struct {
 	// WifiExitNodes sends the internet through an exit node on these
 	// trusted Wi-Fis too, keeping their LAN reachable. Keys are Wi-Fi
 	// names, values are like ExitNode.
-	WifiExitNodes     map[string]string `json:"wifiExitNodes,omitempty"`
-	SiteRouterTrust   bool              `json:"siteRouterTrust"`
-	SiteRouterTargets []string          `json:"siteRouterTargets"`
+	WifiExitNodes map[string]string `json:"wifiExitNodes,omitempty"`
+	// RouterHome makes any LAN home whose tailnet router proves it is
+	// there. Any member of this tailnet counts; nodes shared in from
+	// another tailnet never bring their subnet routes, so they cannot.
+	RouterHome        bool     `json:"routerHome"`
+	SiteRouterTrust   bool     `json:"siteRouterTrust"`
+	SiteRouterTargets []string `json:"siteRouterTargets"`
 }
 
 // Managed reports whether the policy asks for trust decisions. Without
 // one, the home subnets stay bypassed everywhere, as before nettrust.
 func (p Policy) Managed() bool {
-	return len(p.TrustedWifis) > 0 || p.ExitNode != "" || len(p.WifiExitNodes) > 0 || p.SiteRouterTrust
+	return len(p.TrustedWifis) > 0 || p.ExitNode != "" || len(p.WifiExitNodes) > 0 || p.RouterHome || p.SiteRouterTrust
 }
 
 func LoadPolicy(path string) (Policy, error) {
@@ -244,6 +250,12 @@ func Decide(ctx context.Context, p Policy, net *Network, tn Tailnet, pr Prober) 
 		v.Bypass = strs(localHome)
 		return v, nil
 
+	case router != nil && p.RouterHome:
+		v.Trust = TrustHome
+		v.Reason = "tailnet router " + router.HostName + " is on this LAN"
+		v.Bypass = strs(net.Subnets)
+		return v, nil
+
 	case router != nil && p.SiteRouterTrust:
 		if missing := unreachable(ctx, p.SiteRouterTargets, pr); missing != "" {
 			v.Warnings = append(v.Warnings, "site router "+router.HostName+" does not reach "+missing)
@@ -262,6 +274,7 @@ func Decide(ctx context.Context, p Policy, net *Network, tn Tailnet, pr Prober) 
 		if node := p.WifiExitNodes[net.SSID]; node != "" {
 			v.Reason += ", internet through an exit node"
 			v.ExitNode, v.ExitNodeError = pickExitNode(node, tn, home, v.ManageExitNode)
+			v.warnOffline(tn)
 		}
 		return v, nil
 	}
@@ -270,6 +283,7 @@ func Decide(ctx context.Context, p Policy, net *Network, tn Tailnet, pr Prober) 
 	v.Reason = "no trusted Wi-Fi and no tailnet router proof"
 	v.Bypass = []string{}
 	v.ExitNode, v.ExitNodeError = pickExitNode(p.ExitNode, tn, home, v.ManageExitNode)
+	v.warnOffline(tn)
 	if len(localHome) > 0 {
 		v.Warnings = append(v.Warnings, fmt.Sprintf(
 			"local subnet collides with home subnet %s; home traffic stays in the tunnel",
@@ -277,6 +291,20 @@ func Decide(ctx context.Context, p Policy, net *Network, tn Tailnet, pr Prober) 
 		))
 	}
 	return v, nil
+}
+
+// warnOffline: a named exit node stays set while it is offline, so
+// Tailscale blocks the internet instead of sending it around the tunnel.
+func (v *Verdict) warnOffline(tn Tailnet) {
+	if !v.ManageExitNode || v.ExitNode == "" {
+		return
+	}
+	for _, peer := range tn.Peers {
+		if peer.Matches(v.ExitNode) && !peer.Online {
+			v.Warnings = append(v.Warnings, "exit node "+v.ExitNode+" is offline; internet is blocked until it is back")
+			return
+		}
+	}
 }
 
 // pickExitNode resolves a policy exit node choice to the node to use.

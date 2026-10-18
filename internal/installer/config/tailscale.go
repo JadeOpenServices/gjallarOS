@@ -24,6 +24,9 @@ type TailscaleIntent struct {
 	// WifiExitNodes still send the internet through an exit node on these
 	// trusted Wi-Fis, keeping their LAN reachable.
 	WifiExitNodes map[string]string `json:"wifiExitNodes,omitempty"`
+	// RouterHome trusts any LAN where a subnet router of the tailnet
+	// proves it is, without home subnets or targets.
+	RouterHome bool `json:"routerHome"`
 	// SiteRouterTrust trusts a LAN whose tailnet router is nearby and
 	// reaches every SiteRouterTargets entry.
 	SiteRouterTrust   bool     `json:"siteRouterTrust"`

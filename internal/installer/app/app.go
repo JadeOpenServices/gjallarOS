@@ -2232,7 +2232,13 @@ func collectTailscale(ctx context.Context, ui prompt.UI, u *config.User) error {
 			return err
 		}
 	}
-	t.SiteRouterTrust, err = ui.Confirm(ctx, "Also switch the VPN off near a Tailscale subnet router of your tailnet when that router reaches your home LAN?", true)
+	// Any subnet router of the tailnet counts, a friend's too: the tailnet
+	// admin approved its routes, and the signed ping shows it is here.
+	t.RouterHome, err = ui.Confirm(ctx, "Switch the VPN off on any LAN where a subnet router of your tailnet is (yours or a friend's in the same tailnet)?", true)
+	if err != nil || t.RouterHome {
+		return err
+	}
+	t.SiteRouterTrust, err = ui.Confirm(ctx, "Then switch it off near such a router only when it reaches your home LAN?", true)
 	if err != nil || !t.SiteRouterTrust {
 		return err
 	}

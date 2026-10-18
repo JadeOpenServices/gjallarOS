@@ -21,7 +21,7 @@ func TestTailscaleRender(t *testing.T) {
 		SiteRouterTrust:   true,
 		SiteRouterTargets: []string{"192.168.8.1:53"},
 	})
-	want := `{ homeSubnets = [ "192.168.8.0/24" ]; trustedWifis = [ "bakasifu-5Ghz" "\${evil}" ]; exitNode = "home-router"; wifiExitNodes = { "\${evil}" = "auto"; }; siteRouterTrust = true; siteRouterTargets = [ "192.168.8.1:53" ]; }`
+	want := `{ homeSubnets = [ "192.168.8.0/24" ]; trustedWifis = [ "bakasifu-5Ghz" "\${evil}" ]; exitNode = "home-router"; wifiExitNodes = { "\${evil}" = "auto"; }; routerHome = false; siteRouterTrust = true; siteRouterTargets = [ "192.168.8.1:53" ]; }`
 	if got != want {
 		t.Fatalf("got  %s\nwant %s", got, want)
 	}

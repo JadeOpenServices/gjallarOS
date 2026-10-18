@@ -134,6 +134,41 @@ func TestSiteRouterTrustOffFallsBackToWifi(t *testing.T) {
 	}
 }
 
+func TestRouterHomeTrustsAnyProvenTailnetRouter(t *testing.T) {
+	p := Policy{ExitNode: "exit-1", RouterHome: true}
+	n := wifi("cafe-net", "wpa-psk", "10.30.0.0/24")
+	tn := Tailnet{Running: true, Peers: []Peer{router("friend-router", "10.30.0.0/24")}}
+
+	v := decide(t, p, n, tn, fakeProber{via: map[string]string{"friend-router": "10.30.0.1"}})
+	if v.Trust != TrustHome || v.ExitNode != "" || !v.ManageExitNode || !slices.Equal(v.Bypass, []string{"10.30.0.0/24"}) {
+		t.Fatalf("verdict = %+v", v)
+	}
+
+	// The same subnet elsewhere: the router answers from its real place.
+	v = decide(t, p, n, tn, fakeProber{via: map[string]string{"friend-router": "203.0.113.7"}})
+	if v.Trust != TrustUntrusted || v.ExitNode != "exit-1" || len(v.Bypass) != 0 {
+		t.Fatalf("verdict = %+v", v)
+	}
+}
+
+func TestRouterHomeIgnoresExitNodeRoute(t *testing.T) {
+	p := Policy{ExitNode: "exit-1", RouterHome: true}
+	tn := Tailnet{Running: true, Peers: []Peer{router("exit-1", "0.0.0.0/0")}}
+	v := decide(t, p, wifi("cafe-net", "wpa-psk", "10.30.0.0/24"), tn, fakeProber{via: map[string]string{"exit-1": "10.30.0.5"}})
+	if v.Trust != TrustUntrusted || v.ExitNode != "exit-1" {
+		t.Fatalf("verdict = %+v", v)
+	}
+}
+
+func TestOfflineExitNodeStaysSet(t *testing.T) {
+	exit := router("exit-1", "0.0.0.0/0")
+	exit.Online = false
+	v := decide(t, Policy{ExitNode: "exit-1", RouterHome: true}, wifi("cafe-net", "", "10.30.0.0/24"), Tailnet{Running: true, Peers: []Peer{exit}}, fakeProber{})
+	if v.ExitNode != "exit-1" || len(v.Warnings) != 1 || !strings.Contains(v.Warnings[0], "offline") {
+		t.Fatalf("verdict = %+v", v)
+	}
+}
+
 func TestUnmanagedPolicyKeepsLegacyBypass(t *testing.T) {
 	v := decide(t, Policy{HomeSubnets: []string{"192.168.8.0/24"}}, nil, Tailnet{}, fakeProber{})
 	if v.Trust != TrustLegacy || !slices.Equal(v.Bypass, []string{"192.168.8.0/24"}) || v.ManageExitNode {

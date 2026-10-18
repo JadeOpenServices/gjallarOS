@@ -505,6 +505,7 @@ every five minutes how far to trust the current network:
 | Network | Recognized by | Local subnets | Exit node |
 | --- | --- | --- | --- |
 | home | a home subnet, proven by a trusted Wi-Fi name or your tailnet router answering on it | home subnets | off |
+| home | `routerHome`: any subnet router of your tailnet answering on this LAN, yours or a friend's | this LAN | off |
 | site | `siteRouterTrust`: a tailnet subnet router on this LAN that reaches every `siteRouterTargets` host | this LAN | off |
 | trusted-wifi | a `trustedWifis` name on a network that needs a key | this LAN | off, or its `wifiExitNodes` entry |
 | untrusted | anything else | none | `exitNode` |
@@ -514,9 +515,24 @@ every five minutes how far to trust the current network:
 > A trusted name on an open network only produces a warning, since anyone can
 > clone it.
 
+> [!WARNING]
+> With `routerHome`, every LAN behind a router of your tailnet is home. A travel
+> router in a hotel is one too, so the hotel network sees your traffic unless
+> that router sends it through its own VPN.
+
+Router proof is a signed Tailscale ping answered from this LAN or by its
+gateway, so copying a subnet or a Wi-Fi name is not enough. Every member of the
+tailnet counts, tagged routers too, because the tailnet admin approves each
+subnet route. A node shared in from another tailnet never counts as a router:
+Tailscale does not pass on its subnet routes. It can still be your exit node
+when its owner allows that, so a friend's exit node works too.
+
 `exitNode` is a tailnet host name or 100.x address; `auto` picks an
 online exit node, preferring one that routes a home subnet; `off` keeps it off
 everywhere; empty leaves the exit node to you unless `wifiExitNodes` is set.
+An exit node that is offline stays set, so Tailscale blocks the internet
+instead of sending it around the tunnel; `gjallarctl vpn status` warns about
+it. `auto` with no exit node online leaves the internet open.
 LAN access stays on while an exit node is active so captive portals and
 printers keep working. DNS then goes to the exit node, so a home router's
 filtering also applies away from home unless the tailnet's admin console
