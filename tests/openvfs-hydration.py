@@ -38,7 +38,7 @@ def pack(x):
 def attrs(name, state):
     return pack(dict(etag='test', fileid=name, size=0 if state == 0 else 7, state=state, pinstate=1))
 os.setxattr(mount, 'user.openvfs.registration', pack(dict(owner='test', version=0)))
-for name in ('duplicate', 'inflight', 'preview', 'error', 'cancel', 'timeout', 'copy', 'real-kio'):
+for name in ('duplicate', 'inflight', 'preview', 'error', 'cancel', 'timeout', 'copy', 'real-kio', 'gone'):
     p = mount / name
     p.touch()
     os.setxattr(p, 'user.openvfs.data', attrs(name, 2 if name == 'inflight' else 1))
@@ -74,6 +74,10 @@ def server():
                 requests.append((name, req['id']))
                 if name in ('cancel', 'timeout'):
                     continue
+                if name == 'gone':
+                    # The sync client quits with a hydration still open.
+                    conn.shutdown(socket.SHUT_RDWR)
+                    return
                 pending.setdefault(name, []).append(req)
                 if name == 'duplicate' and len(pending[name]) < 3:
                     continue
@@ -92,6 +96,8 @@ threading.Thread(target=server, daemon=True).start()
 log = open(base / 'daemon.log', 'w')
 daemon = subprocess.Popen([sys.argv[1], '-f', '-i', str(config), '-o', 'test', '-s', str(base / 'socket'), str(mount)], stdout=log, stderr=log)
 children = []
+daemon2 = None
+mount2 = base / 'mount2'
 
 def cat(name, exe='cat'):
     p = subprocess.Popen(['cat', str(mount / name)], executable=exe, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -165,9 +171,68 @@ try:
         p.communicate(timeout=310)
         assert p.returncode != 0 and 295 <= time.monotonic() - start < 310
         print('PASS: unanswered request expires after five minutes', flush=True)
+    # A second mount whose client never answers: SIGTERM must end openvfs
+    # and unmount while a reader still waits for hydration.
+    mount2.mkdir()
+    os.setxattr(mount2, 'user.openvfs.registration', pack(dict(owner='test', version=0)))
+    (mount2 / 'stuck').touch()
+    os.setxattr(mount2 / 'stuck', 'user.openvfs.data', attrs('stuck', 1))
+    sock2 = socket.socket(socket.AF_UNIX)
+    sock2.bind(str(base / 'socket2'))
+    sock2.listen()
+    stuck = []
+
+    def silent_server():
+        c, _ = sock2.accept()
+        try:
+            while (data := c.recv(4096)):
+                if data.startswith(b'VERSION'):
+                    c.sendall(b'VERSION:34.0.50:1.1\n')
+                stuck.extend(line for line in data.split(b'\n') if line.startswith(b'V2/HYDRATE_FILE:'))
+        except ConnectionResetError:
+            pass  # openvfs exited
+    threading.Thread(target=silent_server, daemon=True).start()
+    daemon2 = subprocess.Popen([sys.argv[1], '-f', '-i', str(config), '-o', 'test', '-s', str(base / 'socket2'), str(mount2)],
+                               stdout=log, stderr=log)
+    for _ in range(100):
+        if os.path.ismount(mount2):
+            break
+        time.sleep(0.1)
+    assert os.path.ismount(mount2)
+    p = subprocess.Popen(['cat', str(mount2 / 'stuck')], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    children.append(p)
+    for _ in range(50):
+        if stuck:
+            break
+        time.sleep(0.1)
+    assert stuck
+    start = time.monotonic()
+    daemon2.send_signal(signal.SIGTERM)
+    try:
+        daemon2.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        raise AssertionError('openvfs ignored SIGTERM during hydration') from None
+    p.communicate(timeout=5)
+    assert p.returncode != 0 and not os.path.ismount(mount2)
+    print(f'PASS: SIGTERM during hydration exits and unmounts in {time.monotonic() - start:.1f} s', flush=True)
+    # Last case: it ends the fake client. The waiter and later opens fail fast.
+    start = time.monotonic()
+    p = cat('gone')
+    p.communicate(timeout=5)
+    assert p.returncode != 0
+    p = cat('gone')
+    p.communicate(timeout=5)
+    assert p.returncode != 0 and time.monotonic() - start < 5
+    print('PASS: sync client exit releases the waiter and later opens fail fast', flush=True)
     assert not errors, errors
 finally:
     subprocess.run(['fusermount3', '-uz', str(mount)], capture_output=True, timeout=5)
+    if daemon2 is not None:
+        # A hung daemon also hangs stat() on its mount, so kill it first.
+        if daemon2.poll() is None:
+            daemon2.kill()
+            daemon2.wait()
+        subprocess.run(['fusermount3', '-uz', str(mount2)], capture_output=True, timeout=5)
     daemon.terminate()
     try:
         daemon.wait(timeout=3)

@@ -21,7 +21,11 @@ let
     };
 
     # Bound hydration waits, deliver cancellation, and recognize Nix-wrapped KIO.
-    patches = [ ./patches/openvfs-hydration-liveness.patch ];
+    # Release waiters on shutdown or when the sync client goes away.
+    patches = [
+      ./patches/openvfs-hydration-liveness.patch
+      ./patches/openvfs-shutdown.patch
+    ];
 
     nativeBuildInputs = [
       pkgs.cmake

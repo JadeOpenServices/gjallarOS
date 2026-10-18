@@ -1,0 +1,102 @@
+--- a/src/openvfsfuse/openvfsfuse.cpp
++++ b/src/openvfsfuse/openvfsfuse.cpp
+@@ -28,6 +28,7 @@
+ #include <format>
+ #include <fstream>
+ #include <fuse3/fuse.h>
++#include <fuse3/fuse_lowlevel.h>
+ #include <grp.h>
+ #include <iostream>
+ #include <pwd.h>
+@@ -612,6 +613,13 @@ static int openVFSfuse_open(const char *orig_path, struct fuse_file_info *fi)
+                         _jobs.remove(msgData->id);
+                         return -EINTR;
+                     }
++                    // On SIGTERM libfuse joins every worker before it
++                    // unmounts, and a worker cannot be cancelled here.
++                    if (fuse_session_exited(fuse_get_session(fuse_get_context()->fuse))) {
++                        _jobs.remove(msgData->id);
++                        openvfsfuse_log(path, "open", 0, "Shutting down, dropping job %d", msgData->id);
++                        return -EIO;
++                    }
+                     if (std::chrono::steady_clock::now() >= deadline) {
+                         state = 2;
+                         break;
+--- a/src/openvfsfuse/sharedmap.cpp
++++ b/src/openvfsfuse/sharedmap.cpp
+@@ -52,6 +52,16 @@ bool SharedMap::set(int key, const HydJob &value)
+     return false;
+ }
+ 
++void SharedMap::failPending()
++{
++    std::lock_guard<std::mutex> lock(_mutex);
++    for (auto &[k, v] : _data) {
++        if (v.state == 1) {
++            v.state = -1;
++        }
++    }
++}
++
+ bool SharedMap::remove(int id)
+ {
+     std::lock_guard<std::mutex> lock(_mutex);
+--- a/src/openvfsfuse/sharedmap.h
++++ b/src/openvfsfuse/sharedmap.h
+@@ -43,6 +43,7 @@ public:
+     bool get(int key, HydJob &outValue);
+     bool remove(int id);
+     bool set(int key, const HydJob &value);
++    void failPending();
+ 
+     void printAll();
+     void setDesktopClientPid(long pid);
+--- a/src/openvfsfuse/socketthread.cpp
++++ b/src/openvfsfuse/socketthread.cpp
+@@ -24,6 +24,7 @@
+ #include "sharedmap.h"
+ #include "strtools.h"
+ 
++#include <cerrno>
+ #include <cstring>
+ #include <fcntl.h>
+ #include <iostream>
+@@ -159,10 +160,14 @@ bool SocketThread::socketSendMsg(std::shared_ptr<MsgData> msgData)
+     // send message
+     ssize_t value;
+ 
++    if (_socket < 0) {
++        return false;
++    }
+     value = write(_socket, msg.c_str(), msg.size());
+     if (value < 0) {
+         perror("write");
+         close(_socket);
++        _socket = -1;
+         return false;
+     }
+ 
+@@ -175,9 +180,22 @@ std::string SocketThread::readSocket()
+ {
+     // read answer FIXME: Split messages by \n and keep the rest
+     char buf[1024];
++    if (_socket < 0)
++        return std::string();
+     ssize_t n = read(_socket, buf, sizeof(buf) - 1);
+-    if (n <= 0)
++    if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR))
+         return std::string();
++    if (n <= 0) {
++        // The client is gone and no answer can come. Release the waiters,
++        // and new requests fail in socketSendMsg().
++        if (n < 0)
++            perror("read");
++        std::cerr << "Sync client closed the socket, failing pending hydrations" << std::endl;
++        close(_socket);
++        _socket = -1;
++        _sharedMap.failPending();
++        return std::string();
++    }
+     return std::string(buf, n);
+ }
+ 

@@ -17,6 +17,14 @@ These patches apply to the source revisions pinned in `../package.nix` and
 - OpenVFS registers requests before sending them, uses atomic request IDs,
   waits for files already being hydrated, and releases waiters on errors,
   cancellation, or a five-minute deadline.
+- OpenVFS ends a hydration wait when the FUSE session exits. libfuse joins
+  every worker before it unmounts and a worker cannot be cancelled during a
+  request, so upstream ignored SIGTERM for up to five minutes. systemd then
+  killed openvfs together with its unmount helper and left a dead mount.
+- OpenVFS notices when the sync client closes its socket. Pending hydrations
+  fail at once and new ones fail without waiting for the deadline. Upstream
+  read EOF as "no data" and kept the closed socket's fd number for later
+  writes.
 - OpenVFS placeholders always report themselves in sync. Upstream marked every
   unchanged file for a metadata update on each sync run, but OpenVFS cannot
   record that it finished, so tens of thousands of no-op jobs repeated forever.
@@ -42,7 +50,8 @@ python3 tests/openvfs-hydration.py /path/to/openvfs --timeout
 ```
 
 It checks concurrent opens, in-progress hydration, wrapped preview exclusion,
-server errors, cancellation with zero blocked requests, and the actual deadline.
+server errors, cancellation with zero blocked requests, SIGTERM and sync
+client exit during a hydration, and the actual deadline.
 It does not replace an integration check against the rebuilt Nextcloud client.
 
 KIO 6.26 normally runs its file worker inside Dolphin. `dolphin.nix` uses
