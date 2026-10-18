@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/JadeOpenServices/gjallarOS/apps"
 	"github.com/JadeOpenServices/gjallarOS/internal/hardware/graphics"
 )
 
@@ -101,6 +102,8 @@ const (
 	presetTailscale
 	presetStringMap
 	presetInt
+	presetFirefoxAddons
+	presetFirefoxStoreAddons
 )
 
 var presetSchema = map[string]presetValueType{
@@ -115,9 +118,11 @@ var presetSchema = map[string]presetValueType{
 	"shell": presetString, "editors": presetStringList, "browsers": presetStringList,
 	"preferredEditor": presetString, "preferredBrowser": presetString, "theme": presetString,
 	"weatherCity": presetString, "weatherCountry": presetString,
-	"webApplications": presetWebApplicationList,
-	"tailscale":       presetTailscale,
-	"planeEnable":     presetBool, "planeHost": presetString, "drawioEnable": presetBool, "drawioSelfHosted": presetBool, "drawioHost": presetString, "nextcloudEnable": presetBool, "nextcloudHost": presetString,
+	"webApplications":    presetWebApplicationList,
+	"firefoxAddons":      presetFirefoxAddons,
+	"firefoxStoreAddons": presetFirefoxStoreAddons,
+	"tailscale":          presetTailscale,
+	"planeEnable":        presetBool, "planeHost": presetString, "drawioEnable": presetBool, "drawioSelfHosted": presetBool, "drawioHost": presetString, "nextcloudEnable": presetBool, "nextcloudHost": presetString,
 	"apps": presetStringList, "debugFunctions": presetBool,
 	"overrideAiSelection": presetBool, "overrideModelWith": presetString, "aiAgentMode": presetString,
 	"aiEndpoint": presetString, "aiRemoteModel": presetString, "aiRemoteContextTokens": presetInt,
@@ -170,6 +175,12 @@ func matchesPresetType(raw json.RawMessage, expected presetValueType) bool {
 		return json.Unmarshal(raw, &value) == nil
 	case presetInt:
 		var value int
+		return json.Unmarshal(raw, &value) == nil
+	case presetFirefoxAddons:
+		var value map[string]apps.FirefoxCollectionChoice
+		return json.Unmarshal(raw, &value) == nil
+	case presetFirefoxStoreAddons:
+		var value []apps.FirefoxStoreAddon
 		return json.Unmarshal(raw, &value) == nil
 	default:
 		return false
