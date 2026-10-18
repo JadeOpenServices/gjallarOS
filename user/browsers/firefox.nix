@@ -1,4 +1,5 @@
 {
+  config,
   lib,
   pkgs,
   settings,
@@ -6,26 +7,103 @@
 }:
 let
   profileName = "Default";
+  firefoxAppId = "{ec8030f7-c20a-464f-9b0e-13a3a9e97384}";
 
-  # uBlock Origin is always on; the rest come from the add-on collections in
-  # apps/firefox-addons.json that the installer asks about.
+  # Firefox installs every add-on from its enterprise policy, from a file in
+  # the Nix store: no download at start, and the version only moves with a
+  # rebuild. "on" can be turned off in Firefox, "locked" cannot; "off" never
+  # reaches this file. Firefox refuses an older file than the one installed,
+  # so rolling back a build keeps the newer add-on.
+  addonPolicy = mode: xpi: {
+    installation_mode =
+      {
+        on = "normal_installed";
+        locked = "force_installed";
+      }
+      .${mode} or (throw "Firefox add-on mode ${builtins.toJSON mode} is not on or locked");
+    install_url = "file://${xpi}";
+    updates_disabled = true;
+  };
+
+  # Add-ons from the collections in apps/firefox-addons.json, built by NUR.
   addons = pkgs.nur.repos.rycee.firefox-addons;
-  chosenAddons = map (name: addons.${name}) (settings.firefoxAddons or [ ]);
-
-  # Add-ons from addons.mozilla.org by ID. Firefox cancels the install when
-  # the downloaded add-on has another ID, so an ID can only bring that one
-  # add-on. The installer checks the format; this check guards hand edits.
-  storeAddonIdPattern = "[{][0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}[}]|[a-zA-Z0-9._-]*@[a-zA-Z0-9._-]+";
-  storeAddonId =
-    id:
-    if builtins.match storeAddonIdPattern id != null then
-      id
+  catalogue = lib.listToAttrs (
+    lib.concatMap (c: map (a: lib.nameValuePair a.id a) c.addons) (
+      lib.importJSON ../../apps/firefox-addons.json
+    )
+  );
+  # A config written before add-ons became a choice gets the catalogue
+  # defaults, the same ones gjallarctl writes into user.config.json.
+  defaultAddons = lib.mapAttrs (_: a: a.defaultMode) (
+    lib.filterAttrs (_: a: (a.defaultMode or "off") != "off") catalogue
+  );
+  chosenAddons = settings.firefoxAddons or defaultAddons;
+  catalogueAddon =
+    name: mode:
+    let
+      entry =
+        catalogue.${name}
+          or (throw "firefoxAddons: ${builtins.toJSON name} is not in apps/firefox-addons.json");
+      pkg = addons.${name};
+    in
+    if pkg.addonId != entry.addonId then
+      throw "firefoxAddons: NUR ${name} has ID ${pkg.addonId}, apps/firefox-addons.json says ${entry.addonId}"
     else
-      throw "firefoxStoreAddons: ${builtins.toJSON id} is not an add-on ID from addons.mozilla.org";
-  storeAddons = lib.genAttrs (map storeAddonId (settings.firefoxStoreAddons or [ ])) (id: {
-    installation_mode = "normal_installed";
-    install_url = "https://addons.mozilla.org/firefox/downloads/latest/${id}/latest.xpi";
-  });
+      lib.nameValuePair entry.addonId (
+        addonPolicy mode "${pkg}/share/mozilla/extensions/${firefoxAppId}/${entry.addonId}.xpi"
+      );
+
+  # Add-ons from addons.mozilla.org, pinned to one reviewed file by
+  # gjallarctl addons pin. Firefox cancels the install when the file holds
+  # another ID. The installer checks these values; the checks here guard
+  # hand edits.
+  storeAddonIdPattern = "[{][0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}[}]|[a-zA-Z0-9._-]*@[a-zA-Z0-9._-]+";
+  storeAddonUrlPattern = "https://addons[.]mozilla[.]org/firefox/downloads/file/[0-9]{1,12}/[A-Za-z0-9._%+-]{1,200}[.]xpi";
+  storeAddon =
+    a:
+    if builtins.match storeAddonIdPattern a.id == null then
+      throw "firefoxStoreAddons: ${builtins.toJSON a.id} is not an add-on ID from addons.mozilla.org"
+    else if builtins.match storeAddonUrlPattern a.url == null then
+      throw "firefoxStoreAddons: ${a.id}: url must be a file on https://addons.mozilla.org/firefox/downloads/file/"
+    else if builtins.match "[0-9a-f]{64}" a.sha256 == null then
+      throw "firefoxStoreAddons: ${a.id}: sha256 must be 64 lowercase hex digits"
+    else
+      lib.nameValuePair a.id (
+        addonPolicy a.mode (
+          pkgs.fetchurl {
+            inherit (a) url sha256;
+            name = "amo-addon.xpi";
+          }
+        )
+      );
+
+  # Stylix themes Firefox through the Firefox Color add-on. Stylix would link
+  # it into the profile; the policy installs it like every other add-on.
+  themeAddon = lib.optional config.stylix.targets.firefox.colorTheme.enable (
+    let
+      pkg = addons.firefox-color;
+    in
+    lib.nameValuePair pkg.addonId (
+      addonPolicy "on" "${pkg}/share/mozilla/extensions/${firefoxAppId}/${pkg.addonId}.xpi"
+    )
+  );
+
+  extensionSettings = lib.listToAttrs (
+    themeAddon
+    ++ lib.mapAttrsToList catalogueAddon chosenAddons
+    ++ map storeAddon (settings.firefoxStoreAddons or [ ])
+  );
+
+  # Firefox keeps a policy add-on when it leaves the policy. The ledger in
+  # gjallarctl remembers what the policy installed and removes what is no
+  # longer wanted while Firefox is closed.
+  desiredAddons = pkgs.writeText "firefox-addons-desired.json" (
+    builtins.toJSON { items = lib.attrNames extensionSettings; }
+  );
+  gjallarctl = pkgs.callPackage ../../pkgs/gjallarctl { };
+  profileDir = "%h/${config.programs.firefox.profilesPath}/${
+    config.programs.firefox.profiles.${profileName}.path
+  }";
 
   # Hardening that follows LibreWolf's defaults (codeberg.org/librewolf/settings,
   # librewolf.cfg). defaultPref stays changeable in about:config and Settings;
@@ -208,7 +286,7 @@ let
   package = pkgs.firefox.override {
     extraPrefs = hardening;
     extraPolicies = {
-      ExtensionSettings = storeAddons;
+      ExtensionSettings = extensionSettings;
       DisableTelemetry = true;
       DisableFirefoxStudies = true;
       DisablePocket = true;
@@ -258,15 +336,27 @@ in
         default = "ddg";
         privateDefault = "ddg";
       };
-      # Firefox disables add-ons it finds on disk until the user approves
-      # them. Only the profile scope (1), where the packages below are
-      # linked, is exempt; the user (2), application (4) and system (8)
-      # scopes that other installers write to stay disabled.
-      settings."extensions.autoDisableScopes" = 14;
       extensions = {
-        force = true;
-        packages = [ addons.ublock-origin ] ++ chosenAddons;
+        packages = lib.mkForce [ ];
+        # Stylix writes the theme into the add-on's storage file.
+        settings."FirefoxColor@mozilla.com".force = true;
       };
+      # The profile scope stays trusted: the LibreWolf import copies the
+      # user's own add-ons there. Firefox still asks before it enables
+      # add-ons that other programs put anywhere else.
+      settings."extensions.autoDisableScopes" = 14;
     };
+  };
+
+  systemd.user.services.firefox-addons-reconcile = {
+    Unit = {
+      Description = "Remove Firefox add-ons GjallarOS no longer installs";
+      Before = [ "graphical-session.target" ];
+    };
+    Service = {
+      Type = "oneshot";
+      ExecStart = "${gjallarctl}/bin/gjallarctl addons reconcile firefox --desired ${desiredAddons} --profile ${profileDir}";
+    };
+    Install.WantedBy = [ "graphical-session-pre.target" ];
   };
 }
