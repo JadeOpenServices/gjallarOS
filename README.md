@@ -343,6 +343,11 @@ commits or uncommitted edits stop the pull, and nothing is rebuilt.
 `rebuild --update-inputs` moves every flake input first (for development
 checkouts). `rebuild --help` lists every option.
 
+When `dotfilesDir` is `/etc/gjallar/system`, root owns the checkout and
+builds it only as it is on the official origin. `--repo`, `--host`,
+`--update-inputs` and other `nixos-rebuild` arguments are refused there; the
+oddc pin may move only to a commit of an official ODDC branch (ROADMAP §14).
+
 To try a `gjallarctl` change before rebuilding, run it from the checkout with
 `go run ./cmd/gjallarctl rebuild` (or any other command). It uses the sudo
 helpers of the installed system, so this works only on a machine that already
