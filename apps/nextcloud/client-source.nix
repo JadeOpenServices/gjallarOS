@@ -1,6 +1,9 @@
 # Pinned Nextcloud desktop source and the GjallarOS patches on top of it.
 # Shared by apps/nextcloud/package.nix and tests/nix/nextcloud-client-patches.nix.
-{ fetchFromGitHub }:
+{ fetchFromGitHub, replaceVars }:
+let
+  dolphinNextcloudIcons = import ../../themes/apps/dolphin/nextcloud-icons.nix;
+in
 {
   src = fetchFromGitHub {
     owner = "nextcloud";
@@ -27,5 +30,19 @@
     # Windows, menus and popups follow the Qt palette (Noctalia via qt6ct,
     # else the system palette) instead of hardcoded light/dark colors.
     ./patches/nextcloud-palette-theme.patch
+    # A rebuilt client never adds itself to autostart; GjallarOS starts it.
+    ./patches/nextcloud-no-autostart.patch
+    # A folder added in the settings follows the VFS default too, not only
+    # the wizard checkbox.
+    ./patches/nextcloud-vfs-folder-wizard.patch
+    # NEXTCLOUD_BROWSER_OPENER gets web links (login flow included) and
+    # NEXTCLOUD_BROWSER_CLOSER runs after login. Mail links stay with the
+    # desktop default.
+    ./patches/nextcloud-browser-hooks.patch
+    # The socket reports OpenVFS availability, Dolphin shows it as emblems.
+    (replaceVars ./patches/nextcloud-dolphin-vfs-overlays.patch {
+      onlineOnlyIcon = dolphinNextcloudIcons.onlineOnly;
+      localIcon = dolphinNextcloudIcons.local;
+    })
   ];
 }

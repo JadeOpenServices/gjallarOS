@@ -1,7 +1,25 @@
 # Nextcloud/OpenVFS hydration patches
 
 These patches apply to the source revisions pinned in `../package.nix` and
-`../client-source.nix`.
+`../client-source.nix`. Every source change is a patch file here; the build
+only checks that upstream still has the options GjallarOS relies on.
+
+Client behaviour patches:
+
+- `nextcloud-no-autostart.patch`: the client never adds itself to autostart.
+  The session starts it.
+- `nextcloud-vfs-folder-wizard.patch`: a folder added in the settings
+  becomes a virtual-files folder when VFS is the default, not only when the
+  wizard checkbox is set.
+- `nextcloud-browser-hooks.patch`: web links go to `NEXTCLOUD_BROWSER_OPENER`
+  (the login window for login flow URLs) and `NEXTCLOUD_BROWSER_CLOSER` runs
+  after a successful login. Mail links keep the desktop default.
+- `nextcloud-dolphin-vfs-overlays.patch`: the socket appends the OpenVFS
+  availability to file status and the Dolphin plugin maps it to emblems.
+  `@onlineOnlyIcon@` and `@localIcon@` come from
+  `themes/apps/dolphin/nextcloud-icons.nix` through `replaceVars`.
+
+Hydration patches:
 
 - Nextcloud shares an existing hydration job with every requesting socket job,
   starts its download only once, and returns an error when setup fails.

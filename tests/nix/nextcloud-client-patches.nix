@@ -1,6 +1,6 @@
 { pkgs }:
 let
-  client = import ../../apps/nextcloud/client-source.nix { inherit (pkgs) fetchFromGitHub; };
+  client = import ../../apps/nextcloud/client-source.nix { inherit (pkgs) fetchFromGitHub replaceVars; };
 in
 pkgs.stdenvNoCC.mkDerivation {
   name = "gjallar-nextcloud-client-patches-check";
@@ -46,6 +46,10 @@ pkgs.stdenvNoCC.mkDerivation {
     # Only warning and error colors stay fixed.
     ! grep -E 'property color (wizard|listItemHover)[A-Za-z]*: .*"#' theme/Style/Style.qml \
       | grep -Ev 'wizard(Warning|Error)'
+    # The login-window opener rejects anything but https. A string edit also
+    # hooked the mail composer, so mail links did nothing (2026-10-19).
+    [ "$(grep -c NEXTCLOUD_BROWSER_OPENER src/gui/guiutility.cpp)" = 1 ]
+    grep -A25 'bool Utility::openBrowser' src/gui/guiutility.cpp | grep -Fq NEXTCLOUD_BROWSER_OPENER
     touch $out
   '';
 }

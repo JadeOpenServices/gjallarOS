@@ -1,0 +1,12 @@
+diff --git a/src/gui/application.cpp b/src/gui/application.cpp
+--- a/src/gui/application.cpp
++++ b/src/gui/application.cpp
+@@ -927,7 +927,7 @@
+         _checkConnectionTimer.start();
+         slotCheckConnection();
+ 
+-        Utility::setLaunchOnStartup(_theme->appName(), _theme->appNameGUI(), true);
++        Utility::setLaunchOnStartup(_theme->appName(), _theme->appNameGUI(), false);
+ 
+         Systray::instance()->showTrayPopup();
+     }

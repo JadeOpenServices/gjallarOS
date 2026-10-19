@@ -1,0 +1,79 @@
+diff --git a/src/gui/socketapi/socketapi.cpp b/src/gui/socketapi/socketapi.cpp
+--- a/src/gui/socketapi/socketapi.cpp
++++ b/src/gui/socketapi/socketapi.cpp
+@@ -202,6 +202,34 @@
+     return text;
+ }
+ 
++QString openVfsAvailabilitySocketSuffix(OCC::Folder *folder, const QString &relativePath)
++{
++    if (!folder || folder->vfs().mode() != OCC::Vfs::OpenVFS) {
++        return {};
++    }
++
++    const auto availability = folder->vfs().availability(
++        relativePath,
++        OCC::Vfs::AvailabilityRecursivity::NotRecursiveAvailability);
++
++    if (!availability) {
++        return {};
++    }
++
++    switch (*availability) {
++    case OCC::VfsItemAvailability::AlwaysLocal:
++    case OCC::VfsItemAvailability::AllHydrated:
++        return QStringLiteral("+VFS_LOCAL");
++    case OCC::VfsItemAvailability::AllDehydrated:
++    case OCC::VfsItemAvailability::OnlineOnly:
++        return QStringLiteral("+VFS_ONLINE_ONLY");
++    case OCC::VfsItemAvailability::Mixed:
++        return QStringLiteral("+VFS_HYDRATING");
++    }
++
++    return {};
++}
++
+ void setClipboardText(const QString &text)
+ {
+ #ifdef HAVE_KGUIADDONS
+@@ -722,7 +750,10 @@
+ 
+ void SocketApi::broadcastStatusPushMessage(const QString &systemPath, SyncFileStatus fileStatus)
+ {
+-    QString msg = buildMessage(QLatin1String("STATUS"), systemPath, fileStatus.toSocketAPIString());
++    const auto fileData = FileData::get(systemPath);
++    const QString statusString = fileStatus.toSocketAPIString()
++        + openVfsAvailabilitySocketSuffix(fileData.folder, fileData.folderRelativePath);
++    QString msg = buildMessage(QLatin1String("STATUS"), systemPath, statusString);
+     Q_ASSERT(!systemPath.endsWith('/'));
+     uint directoryHash = qHash(systemPath.left(systemPath.lastIndexOf('/')));
+     for (const auto &listener : std::as_const(_listeners)) {
+@@ -761,7 +792,8 @@
+         listener->registerMonitoredDirectory(qHash(directory));
+ 
+         SyncFileStatus fileStatus = fileData.syncFileStatus();
+-        statusString = fileStatus.toSocketAPIString();
++        statusString = fileStatus.toSocketAPIString()
++            + openVfsAvailabilitySocketSuffix(fileData.folder, fileData.folderRelativePath);
+     }
+ 
+     const QString message = QLatin1String("STATUS:") % statusString % QLatin1Char(':') % QDir::toNativeSeparators(argument);
+diff --git a/shell_integration/dolphin/ownclouddolphinoverlayplugin.cpp b/shell_integration/dolphin/ownclouddolphinoverlayplugin.cpp
+--- a/shell_integration/dolphin/ownclouddolphinoverlayplugin.cpp
++++ b/shell_integration/dolphin/ownclouddolphinoverlayplugin.cpp
+@@ -56,7 +56,14 @@
+         }
+ 
+         if (status.startsWith("OK")) {
+-            r << QStringLiteral("vcs-normal");
++            if (status.contains("+VFS_ONLINE_ONLY")) {
++                r << QStringLiteral("@onlineOnlyIcon@");
++            } else if (status.contains("+VFS_HYDRATING")) {
++                r << QStringLiteral("vcs-update-required");
++            } else {
++                // Any other OK state is fully synced and locally available.
++                r << QStringLiteral("@localIcon@");
++            }
+         }
+         if (status.startsWith("SYNC") || status.startsWith("NEW")) {
+             r << QStringLiteral("vcs-update-required");

@@ -1,0 +1,51 @@
+diff --git a/src/gui/guiutility.cpp b/src/gui/guiutility.cpp
+--- a/src/gui/guiutility.cpp
++++ b/src/gui/guiutility.cpp
+@@ -12,6 +12,7 @@
+ #include <QApplication>
+ #include <QCoreApplication>
+ #include <QDesktopServices>
++#include <QProcess>
+ #include <QLabel>
+ #include <QLoggingCategory>
+ #include <QMessageBox>
+@@ -44,6 +45,16 @@
+         return false;
+     }
+ 
++    const auto nextcloudBrowserOpener = qEnvironmentVariable("NEXTCLOUD_BROWSER_OPENER");
++    if (!nextcloudBrowserOpener.isEmpty()) {
++        const QStringList nextcloudBrowserArguments{url.toString(QUrl::FullyEncoded)};
++        if (QProcess::startDetached(nextcloudBrowserOpener, nextcloudBrowserArguments)) {
++            return true;
++        }
++        qCWarning(lcUtility) << "Nextcloud browser opener failed for" << url;
++        return false;
++    }
++
+     if (!QDesktopServices::openUrl(url)) {
+         if (errorWidgetParent) {
+             QMessageBox::warning(
+diff --git a/src/gui/creds/flow2auth.cpp b/src/gui/creds/flow2auth.cpp
+--- a/src/gui/creds/flow2auth.cpp
++++ b/src/gui/creds/flow2auth.cpp
+@@ -19,6 +19,7 @@
+ #include <QBuffer>
+ #include <QJsonObject>
+ #include <QJsonDocument>
++#include <QProcess>
+ 
+ namespace OCC {
+ 
+@@ -209,6 +210,11 @@
+ 
+         Q_EMIT result(LoggedIn, QString(), loginName, appPassword);
+ 
++        const auto nextcloudBrowserCloser = qEnvironmentVariable("NEXTCLOUD_BROWSER_CLOSER");
++        if (!nextcloudBrowserCloser.isEmpty()) {
++            QProcess::startDetached(nextcloudBrowserCloser, {});
++        }
++
+         // Forget sensitive data
+         appPassword.clear();
+         loginName.clear();
