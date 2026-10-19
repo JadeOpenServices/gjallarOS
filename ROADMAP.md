@@ -884,6 +884,20 @@ router is proven during the wait, Apply opens after the 10 s reading delay.
   counts; a trusted Wi-Fi does not. Critical changes ignore home.
 - **Managed devices** get security and critical keys from JODS only; the
   service refuses them locally.
+- **Unique hostname** (decided with Jade 2026-10-19). Tailscale gives a
+  clashing machine a `-1` name that sticks
+  ([machine names](https://tailscale.com/kb/1098/machine-names)), and mDNS
+  renames on a conflict ([RFC 6762](https://rfc-editor.org/rfc/rfc6762)
+  sections 8 and 9), so a clash is better refused up front. The config check
+  holds `hostname` to the NixOS label rule. `Request` and again `Apply`
+  refuse a new name that a tailnet peer uses as host or MagicDNS name,
+  shared peers included, or that someone answers for as `<name>.local` on
+  the current network; letter case does not count and the answer names the
+  peer or address. The network is asked only when root's verdict is home,
+  site or trusted Wi-Fi; elsewhere a query would announce the name to
+  strangers, so the answer carries a note instead. A check that fails
+  refuses the change. The mDNS question is a legacy unicast query (section
+  6.7) for A and AAAA, three times within a second.
 
 ### Settings service security pass
 
@@ -915,6 +929,15 @@ What broke elsewhere, and the answer here:
 - **Shown is not applied.** If Apply took values, a program could show one
   change and apply another. Apply takes the id of what root stored and
   re-checks the old values.
+
+- **Root reading the network.** mDNS answers come from anyone on the
+  link, and DNS parsers have a long record of bugs in name decompression
+  ([NAME:WRECK](https://www.forescout.com/research-labs/namewreck/)).
+  `gjallar-settingsd` keeps `PrivateNetwork` and never reads them: a
+  socket-activated `gjallar-namecheck` runs per question as a dynamic user
+  with no capabilities, may only reach multicast and local addresses, and
+  answers one JSON line over a root-only socket. Its parser only follows
+  compression pointers backwards and stops at 255 bytes.
 
 Residual, unchanged: the polkit agent and the terminal run in the user's
 session, so code there can fake the dialog. Logged on the security review

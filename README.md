@@ -212,6 +212,12 @@ writes the file and starts the rebuild, and `set` follows it until the
 change is live. A waiting change lives only in your login session, so
 logging out or rebooting drops it.
 
+A new hostname must be free. The service refuses a name that a machine on
+your tailnet already uses, and, on a home, site or trusted Wi-Fi network, a
+name another device there answers for as `<name>.local`. Letter case does
+not count. It checks again before it writes the change. When Tailscale is
+off or the network is not trusted, `set` says that part was not checked.
+
 ### App catalogue
 
 Optional applications live in `apps/<id>/`: `meta.json` (name, description,
