@@ -26,7 +26,7 @@ import (
 
 func runUSB(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		fmt.Fprintln(stderr, "Usage: gjallarctl usb {status|audit|policy|review|provision-key|allow-once|trust-permanent|keep-blocked|enroll-internal|accept-replacement|forget|disarm|allow-media} [--runtime-id ID --connection TOKEN] [--trusted-id ID] [--role ROLE] [--portable=true|false] [--media H:C:T:L --connection TOKEN]")
+		fmt.Fprintln(stderr, "Usage: gjallarctl usb {status|audit|policy|review|provision-key|allow-once|trust-permanent|keep-blocked|enroll-internal|accept-replacement|forget|renew|disarm|allow-media} [--runtime-id ID --connection TOKEN] [--trusted-id ID] [--role ROLE] [--portable=true|false] [--media H:C:T:L --connection TOKEN]")
 		return 2
 	}
 	if args[0] == "review" {
@@ -100,7 +100,8 @@ func runUSBReview(args []string, stderr io.Writer) int {
 		return 1
 	}
 	review := newUSBReviewState()
-	// Media notices close their cards when ctx ends; wait for that on exit.
+	// Media and renewal notices close their cards when ctx ends; wait for
+	// that on exit.
 	var media sync.WaitGroup
 	defer media.Wait()
 	// The same failure every 2 s says nothing new: report it once, and once
@@ -137,6 +138,16 @@ func runUSBReview(args []string, stderr io.Writer) int {
 				go func() {
 					defer media.Done()
 					usbReviewMedia(ctx, executable, m)
+				}()
+			}
+			for _, l := range response.Renewals {
+				if !review.wantsRenewal(l) {
+					continue
+				}
+				media.Add(1)
+				go func() {
+					defer media.Done()
+					usbReviewRenewal(ctx, executable, l)
 				}()
 			}
 			review.prune()
@@ -182,10 +193,13 @@ type usbReviewState struct {
 	answered map[string]bool
 	// What the current poll listed.
 	active, present map[string]bool
+	// Lapse warnings shown, by record and lapse time. Renewing moves the
+	// time, so a later warning for the same device shows again.
+	warned map[string]bool
 }
 
 func newUSBReviewState() *usbReviewState {
-	return &usbReviewState{seen: map[string]bool{}, answered: map[string]bool{}}
+	return &usbReviewState{seen: map[string]bool{}, answered: map[string]bool{}, warned: map[string]bool{}}
 }
 
 // begin starts a poll.
@@ -227,6 +241,17 @@ func (r *usbReviewState) wantsMedia(m usbtrust.MediaDecision) bool {
 		return false
 	}
 	r.seen[m.Connection] = true
+	return true
+}
+
+// wantsRenewal reports whether the lapse warning for l should be shown now,
+// and marks it as shown.
+func (r *usbReviewState) wantsRenewal(l broker.TrustLapse) bool {
+	key := l.TrustedID + "@" + l.LapsesAt
+	if r.warned[key] {
+		return false
+	}
+	r.warned[key] = true
 	return true
 }
 
@@ -328,6 +353,51 @@ func usbReviewMedia(ctx context.Context, executable string, m usbtrust.MediaDeci
 		return
 	}
 	_, _ = exec.Command("zenity", "--error", "--title=Storage stays closed", "--text="+html.EscapeString(string(output))).Output()
+}
+
+// usbReviewRenewal warns that a device's trust lapses soon and renews it on
+// request. Not renewing is fine: the device asks again on its next connection.
+func usbReviewRenewal(ctx context.Context, executable string, l broker.TrustLapse) {
+	picked, err := showNotice(ctx, usbRenewalNotice(l, time.Local))
+	if err != nil || ctx.Err() != nil {
+		return
+	}
+	switch picked {
+	case "renew", "default":
+	default:
+		return
+	}
+	output, err := usbAuthorize(ctx, usbRenewalName(l), []string{executable, "usb", "renew", "--trusted-id", l.TrustedID})
+	if err == nil || ctx.Err() != nil {
+		return
+	}
+	_, _ = exec.Command("zenity", "--error", "--title=Trust not renewed", "--text="+html.EscapeString(string(output))).Output()
+}
+
+func usbRenewalName(l broker.TrustLapse) string {
+	if l.Name == "" {
+		return "a trusted USB device"
+	}
+	return l.Name
+}
+
+// usbRenewalNotice builds the warning for trust that lapses soon.
+func usbRenewalNotice(l broker.TrustLapse, zone *time.Location) desktopNotice {
+	body := usbRenewalName(l) + " has not been connected"
+	if used, err := time.Parse(time.RFC3339, l.LastUsed); err == nil {
+		body += " since " + used.In(zone).Format("2 Jan")
+	}
+	body += "."
+	if at, err := time.Parse(time.RFC3339, l.LapsesAt); err == nil {
+		body += "\nFrom " + at.In(zone).Format("Mon 2 Jan 15:04") + " it has to be allowed again. Connect it or renew it to keep it trusted."
+	}
+	return desktopNotice{
+		App:     "USB Guard",
+		Icon:    "drive-removable-media-usb",
+		Summary: "USB device trust ends soon",
+		Body:    html.EscapeString(body),
+		Actions: []noticeAction{{"default", "Renew"}, {"renew", "Renew"}, {"later", "Not now"}},
+	}
 }
 
 func usbMediaReader(m usbtrust.MediaDecision) string {

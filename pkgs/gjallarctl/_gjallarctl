@@ -42,6 +42,7 @@ _gjallarctl_usb() {
     'enroll-internal:enroll a built-in device'
     'accept-replacement:accept a replaced built-in device'
     'forget:forget a trusted device'
+    'renew:keep trusting a device whose trust lapses soon'
     'disarm:turn enforcement off until the next arm'
     'allow-media:open the card or storage in an allowed reader'
   )

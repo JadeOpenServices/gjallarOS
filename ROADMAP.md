@@ -189,6 +189,11 @@ Security pass:
   keep blocked, allow once, or renew. Renewing keeps the record and its
   first-accepted time and needs the same fingerprint or password as any
   other trust change. Allowing it once does not renew it.
+- **Renewing ahead.** The three-day notice renews a device that is not
+  connected. The broker accepts that only inside the last three days before
+  the lapse, never after it, and only with the same fingerprint or password
+  as any other trust change. A device that has lapsed has to be connected
+  and reviewed, so its identity is checked again.
 - **Turning it off.** Switching lapse off or raising N lowers protection.
   The settings service holds that change like it holds turning blocking
   off.
@@ -206,7 +211,8 @@ Plan:
 - [x] C2: `--lapse-days N`, Nix
       option `services.gjallar-usbtrust.lapseDays` (null = off), status
       shows when each device lapses.
-- [ ] C3: warning three days ahead with a Renew button.
+- [x] C3: warning three days ahead with a Renew button (`gjallarctl usb
+      renew`, accepted only in that window).
 - [ ] C4: `usbTrustLapseDays` setting (held when it lowers protection),
       installer question (default off, 30 when on, any N from 1).
 - [ ] C5: fw13 VM test.

@@ -90,7 +90,15 @@ func (h Handler) Handle(
 		}); ok {
 			media = gate.MediaPolicy()
 		}
-		return Response{OK: true, Policy: policy, Media: media, Revision: revision, Enforcing: enforcing}
+		var renewals []TrustLapse
+		if lapse, ok := h.Reader.(interface {
+			Renewals(context.Context) ([]TrustLapse, error)
+		}); ok {
+			if renewals, err = lapse.Renewals(ctx); err != nil {
+				return errorResponse(err)
+			}
+		}
+		return Response{OK: true, Policy: policy, Media: media, Renewals: renewals, Revision: revision, Enforcing: enforcing}
 	case ActionStatus:
 		status, err := h.Reader.Status(ctx)
 		if err != nil {

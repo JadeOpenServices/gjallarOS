@@ -105,3 +105,28 @@ func TestRefreshLastUsed(t *testing.T) {
 		t.Fatal("record from the future refreshed instead of asking")
 	}
 }
+
+func TestRenewableOnlyInTheWarningWindow(t *testing.T) {
+	dock := syntheticDock()
+	cases := []struct {
+		lastUsed  string
+		renewable bool
+	}{
+		{"2026-10-18T12:00:00Z", false},
+		{"2026-09-22T12:00:01Z", false},
+		{"2026-09-22T12:00:00Z", true},
+		{"2026-09-19T12:00:01Z", true},
+		{"2026-09-19T12:00:00Z", false},
+		{"2027-01-01T00:00:00Z", false},
+		{"yesterday", false},
+	}
+	for _, c := range cases {
+		dock.LastUsed = c.lastUsed
+		if got := thirtyDays().Renewable(dock); got != c.renewable {
+			t.Errorf("lastUsed %s: renewable %v, want %v", c.lastUsed, got, c.renewable)
+		}
+	}
+	if (Lapse{Now: lapseNow}).Renewable(dock) {
+		t.Fatal("renewable while lapse is off")
+	}
+}

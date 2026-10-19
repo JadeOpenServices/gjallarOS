@@ -6,8 +6,10 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/JadeOpenServices/gjallarOS/internal/usbtrust"
+	"github.com/JadeOpenServices/gjallarOS/internal/usbtrust/broker"
 )
 
 func TestUSBReviewUsesOnlyDomainActions(t *testing.T) {
@@ -323,5 +325,22 @@ func TestUSBReviewAfterBrokerRestart(t *testing.T) {
 	poll(r)
 	if got := poll(r, device("d", usbtrust.TargetBlock)); !reflect.DeepEqual(got, []string{"d"}) {
 		t.Fatalf("replugged device announced %v, want [d]", got)
+	}
+}
+
+func TestUSBRenewalNotice(t *testing.T) {
+	// SYNTHETIC record name and times.
+	l := broker.TrustLapse{TrustedID: "device:synthetic", Name: "Synthetic <Dock>", LastUsed: "2026-09-21T10:00:00Z", LapsesAt: "2026-10-21T10:00:00Z"}
+	n := usbRenewalNotice(l, time.UTC)
+	if !strings.Contains(n.Body, "Synthetic &lt;Dock&gt; has not been connected since 21 Sep.") || !strings.Contains(n.Body, "From Wed 21 Oct 10:00") {
+		t.Fatalf("renewal body: %q", n.Body)
+	}
+	r := newUSBReviewState()
+	if !r.wantsRenewal(l) || r.wantsRenewal(l) {
+		t.Fatal("warning must show once per lapse time")
+	}
+	l.LapsesAt = "2026-11-20T10:00:00Z"
+	if !r.wantsRenewal(l) {
+		t.Fatal("new lapse time not warned")
 	}
 }

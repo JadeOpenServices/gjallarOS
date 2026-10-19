@@ -118,19 +118,51 @@ func (c *Controller) Status(ctx context.Context) (broker.Status, error) {
 		if input.Lapse.Enabled() {
 			s.LapseDays = int(input.Lapse.After / (24 * time.Hour))
 			for _, device := range input.Trusted.Devices {
-				at, ok := input.Lapse.LapsesAt(device)
-				if !ok {
-					continue
+				if lapse, ok := trustLapse(input.Lapse, device); ok {
+					s.Lapses = append(s.Lapses, lapse)
 				}
-				lapse := broker.TrustLapse{TrustedID: device.ID, Lapsed: input.Lapse.Lapsed(device)}
-				if !at.IsZero() {
-					lapse.LapsesAt = at.UTC().Format(time.RFC3339)
-				}
-				s.Lapses = append(s.Lapses, lapse)
 			}
 		}
 	}
 	return s, nil
+}
+
+// Renewals lists the trusted devices whose trust lapses within
+// usbtrust.LapseWarning, for the renewal notice.
+func (c *Controller) Renewals(ctx context.Context) ([]broker.TrustLapse, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !c.persistenceReady {
+		return nil, nil
+	}
+	input, err := c.snapshot(ctx)
+	if err != nil || input.Trusted == nil {
+		return nil, err
+	}
+	var renewals []broker.TrustLapse
+	for _, device := range input.Trusted.Devices {
+		if !input.Lapse.Renewable(device) {
+			continue
+		}
+		lapse, _ := trustLapse(input.Lapse, device)
+		renewals = append(renewals, lapse)
+	}
+	return renewals, nil
+}
+
+func trustLapse(l usbtrust.Lapse, device usbtrust.Device) (broker.TrustLapse, bool) {
+	at, ok := l.LapsesAt(device)
+	if !ok {
+		return broker.TrustLapse{}, false
+	}
+	lapse := broker.TrustLapse{TrustedID: device.ID, Name: device.Identity.Name, Lapsed: l.Lapsed(device)}
+	if used, valid := usbtrust.LastUsed(device); valid {
+		lapse.LastUsed = used.UTC().Format(time.RFC3339)
+	}
+	if !at.IsZero() {
+		lapse.LapsesAt = at.UTC().Format(time.RFC3339)
+	}
+	return lapse, true
 }
 
 func (c *Controller) Audit(ctx context.Context) (usbtrust.AuditResult, uint64, error) {
@@ -553,7 +585,7 @@ func (c *Controller) Mutate(ctx context.Context, request broker.Request) (broker
 	if err != nil {
 		return broker.Response{}, err
 	}
-	if request.Action != broker.ActionForget {
+	if request.Action != broker.ActionForget && request.Action != broker.ActionRenew {
 		if err := c.sessions.Check(request.RuntimeID, request.Connection); err != nil {
 			return broker.Response{}, err
 		}
@@ -585,7 +617,7 @@ func (c *Controller) Mutate(ctx context.Context, request broker.Request) (broker
 		// Revoke choices/reviews for affected identities only. Trusting a disk
 		// must not discard an unrelated keyboard's current allow-once grant.
 		for _, decision := range previousPolicy {
-			if decision.RuntimeID == request.RuntimeID || (request.TrustedID != "" && decision.TrustedID == request.TrustedID) {
+			if decision.RuntimeID == request.RuntimeID || (request.TrustedID != "" && request.Action != broker.ActionRenew && decision.TrustedID == request.TrustedID) {
 				c.sessions.Disconnect(decision.RuntimeID)
 			}
 		}
@@ -630,7 +662,8 @@ func persistentMutation(action broker.Action) bool {
 		broker.ActionForget,
 		broker.ActionAcceptReplacement,
 		broker.ActionEnrollInternal,
-		broker.ActionDisarm:
+		broker.ActionDisarm,
+		broker.ActionRenew:
 		return true
 	default:
 		return false
@@ -678,6 +711,19 @@ func (c *Controller) change(input usbtrust.AuditInput, request broker.Request) (
 			return doc, fmt.Errorf("trusted device not found")
 		}
 		doc.Devices = append(doc.Devices[:index], doc.Devices[index+1:]...)
+		return doc, doc.Validate()
+	}
+	if request.Action == broker.ActionRenew {
+		if index < 0 {
+			return doc, fmt.Errorf("trusted device not found")
+		}
+		// Only the warning window: a lapsed device has to be connected and
+		// reviewed, so renewing cannot bring back trust the machine already
+		// dropped.
+		if !input.Lapse.Renewable(doc.Devices[index]) {
+			return doc, fmt.Errorf("renewal is offered only in the last days before this device's trust lapses")
+		}
+		doc.Devices[index].LastUsed = input.Lapse.Now.UTC().Format(time.RFC3339)
 		return doc, doc.Validate()
 	}
 	var observed usbtrust.ObservedDevice
