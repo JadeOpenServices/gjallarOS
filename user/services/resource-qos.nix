@@ -167,25 +167,28 @@ let
 
       event_socket="$runtime_dir/hypr/$HYPRLAND_INSTANCE_SIGNATURE/.socket2.sock"
 
-      while [ ! -S "$event_socket" ]; do
-        sleep 1
-      done
-
+      # Hyprland listens on socket2 before it starts hyprland-session.target,
+      # so the socket is there when this unit starts.
       update_focus
 
-      while true; do
-        while IFS= read -r event; do
-          case "$event" in
-            activewindowv2'>>'*)
-              update_focus
-              ;;
-          esac
-        done < <(
-          socat -U - "UNIX-CONNECT:$event_socket" 2>/dev/null
-        )
+      while IFS= read -r event; do
+        case "$event" in
+          activewindowv2'>>'*)
+            update_focus
+            ;;
+        esac
+      done < <(
+        socat -U - "UNIX-CONNECT:$event_socket"
+      )
 
-        sleep 1
-      done
+      # Hyprland removes hyprland.lock when it quits (its sockets stay), so a
+      # missing lock means the session is over. Otherwise the stream broke:
+      # fail and let systemd restart the unit.
+      if [ ! -e "$runtime_dir/hypr/$HYPRLAND_INSTANCE_SIGNATURE/hyprland.lock" ]; then
+        exit 0
+      fi
+      printf '%s\n' 'gjallar-resource-qos: Hyprland event stream ended' >&2
+      exit 1
     '';
   };
 
@@ -206,8 +209,8 @@ in
   systemd.user.services.interactive-resource-qos = {
     Unit = {
       Description = "Interactive application QoS";
-      After = [ "graphical-session.target" ];
-      PartOf = [ "graphical-session.target" ];
+      After = [ "hyprland-session.target" ];
+      PartOf = [ "hyprland-session.target" ];
     };
 
     Service = {
@@ -217,6 +220,6 @@ in
       RestartSec = 2;
     };
 
-    Install.WantedBy = [ "graphical-session.target" ];
+    Install.WantedBy = [ "hyprland-session.target" ];
   };
 }

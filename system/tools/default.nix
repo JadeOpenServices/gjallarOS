@@ -59,14 +59,13 @@ let
         ${coreutils}/id
         ${pkgs.systemd}/bin/systemctl --user show hyprland-session.target --property=ActiveState --property=SubState --property=Result --no-pager || true
         ${coreutils}/printenv | ${pkgs.gnugrep}/bin/grep -E '^(PATH|XDG_|WAYLAND_DISPLAY|HYPRLAND_INSTANCE_SIGNATURE|DBUS_SESSION_BUS_ADDRESS)=' || true
+        # Hyprland opens its IPC socket during init and starts
+        # hyprland-session.target later from exec-once, so one try is enough;
+        # false here is a real finding.
         hyprland_ready=false
-        for attempt in $(${coreutils}/seq 1 300); do
-          if ${pkgs.hyprland}/bin/hyprctl monitors >/dev/null 2>&1; then
-            hyprland_ready=true
-            break
-          fi
-          ${coreutils}/bin/sleep 0.1
-        done
+        if ${pkgs.hyprland}/bin/hyprctl monitors >/dev/null 2>&1; then
+          hyprland_ready=true
+        fi
         log "hyprland-ipc-ready=$hyprland_ready"
         for command in fuzzel ghostty noctalia; do
           path="$(${pkgs.findutils}/bin/find "$HOME/.nix-profile/bin" "/etc/profiles/per-user/$USER/bin" -maxdepth 1 -name "$command" \( -type l -o -type f \) -print -quit 2>/dev/null || true)"
