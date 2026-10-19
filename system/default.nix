@@ -36,6 +36,7 @@
     ./maintenance/binary-cache.nix
     ./services/printing.nix
     ./services/removable-media.nix
+    ./services/settings-service.nix
 
     inputs.oddc.nixosModules.default
 
