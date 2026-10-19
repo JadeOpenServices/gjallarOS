@@ -84,7 +84,11 @@ in
     };
     lapseDays = lib.mkOption {
       type = lib.types.nullOr (lib.types.ints.between 1 36500);
-      default = settings.usbTrustLapseDays or null;
+      default =
+        let
+          days = settings.usbTrustLapseDays or 0;
+        in
+        if days > 0 then days else null;
       example = 30;
       description = "Days an external USB device may stay unconnected before its permanent trust lapses and it asks again. null never lapses. Built-in parts never lapse.";
     };

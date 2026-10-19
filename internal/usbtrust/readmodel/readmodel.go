@@ -166,7 +166,7 @@ func (r Reader) Audit(
 		Expected: state.expected,
 		Trusted:  state.trusted,
 		Observed: state.observed,
-		Lapse:    usbtrust.Lapse{After: r.LapseAfter, Now: time.Now().UTC()},
+		Lapse:    usbtrust.NewLapse(r.LapseAfter, time.Now().UTC(), state.trusted),
 	})
 	if err != nil {
 		return usbtrust.AuditResult{}, 0, fmt.Errorf(

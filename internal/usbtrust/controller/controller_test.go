@@ -406,6 +406,41 @@ func TestStatusListsWhenTrustLapses(t *testing.T) {
 	}
 }
 
+func TestLapseClockStartsWhenSwitchedOn(t *testing.T) {
+	c, s := fixture()
+	ctx := context.Background()
+	policy, _, _ := c.Policy(ctx)
+	portable := false
+	if _, err := c.Mutate(ctx, broker.Request{Action: broker.ActionTrustPermanent, RuntimeID: "12", Connection: policy[0].Connection, Portable: &portable}); err != nil {
+		t.Fatal(err)
+	}
+	// SYNTHETIC: last used 40 days ago, while lapsing was off.
+	s.doc.Devices[0].LastUsed = time.Now().UTC().Add(-40 * 24 * time.Hour).Format(time.RFC3339)
+	s.observed = nil
+	if err := c.Reconcile(ctx); err != nil || s.doc.LapseSince != "" {
+		t.Fatalf("start marked while off: %q %v", s.doc.LapseSince, err)
+	}
+	c.Reader.LapseAfter = 30 * 24 * time.Hour
+	if err := c.Reconcile(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if since, err := time.Parse(time.RFC3339, s.doc.LapseSince); err != nil || time.Since(since) > time.Hour {
+		t.Fatalf("start %q", s.doc.LapseSince)
+	}
+	status, err := c.Status(ctx)
+	if err != nil || len(status.Lapses) != 1 || status.Lapses[0].Lapsed {
+		t.Fatalf("lapsed when switched on: %+v %v", status.Lapses, err)
+	}
+	revision := s.doc.Revision
+	if err := c.Reconcile(ctx); err != nil || s.doc.Revision != revision {
+		t.Fatalf("start marked again: %v", err)
+	}
+	c.Reader.LapseAfter = 0
+	if err := c.Reconcile(ctx); err != nil || s.doc.LapseSince != "" {
+		t.Fatalf("start kept while off: %q %v", s.doc.LapseSince, err)
+	}
+}
+
 func TestRenewOnlyBeforeTrustLapses(t *testing.T) {
 	c, s := fixture()
 	ctx := context.Background()

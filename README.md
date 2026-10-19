@@ -541,6 +541,16 @@ later with `"usbTrustEnforce": true` in `user.config.json` and a `rebuild`. To t
 `sudo gjallarctl usb disarm` and enter the disk encryption passphrase. Disarm
 alone is temporary: the broker re-arms from the config on its next restart.
 
+On a machine with TPM2 the installer also asks "Let approved USB devices expire
+when unused?" (default no). With it on, an approved external device that was
+not connected for `usbTrustLapseDays` days (30 by default, any number from 1)
+asks for approval again. The days count from the last connection, and from the
+moment the setting was turned on, so old devices do not all ask at once. Three
+days before a device expires, a notice offers to renew it. Built-in devices
+never expire. Without a built-in USB keyboard, the keyboard and mouse used last
+never expire either. `gjallarctl settings` turns it on or shortens it at once;
+turning it off (`0`) or lengthening it waits out the security delay.
+
 The review dialog opens in a simple view. "Techy view" shows IDs, ports and
 interfaces for that dialog only. The "Always techy view" box writes
 `"usbReviewTechnicalView": true` or `false` into `user.config.json`, so the

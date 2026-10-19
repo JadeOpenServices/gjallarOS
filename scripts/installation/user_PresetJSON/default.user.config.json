@@ -117,6 +117,7 @@
   "usbReviewTechnicalView": false,
   "usbTrustEnforce": false,
   "usbTrustTpmHandle": "",
+  "usbTrustLapseDays": 0,
   "usbguardEnable": false,
   "username": "usernamehere",
   "weatherCity": "",

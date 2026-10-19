@@ -35,6 +35,7 @@ type User struct {
 	USBGuardEnable         bool                   `json:"usbguardEnable" tier:"security"`
 	USBTrustEnforce        bool                   `json:"usbTrustEnforce" tier:"security"`
 	USBTrustTPMHandle      string                 `json:"usbTrustTpmHandle" tier:"security"`
+	USBTrustLapseDays      int                    `json:"usbTrustLapseDays" tier:"security"`
 	USBReviewTechnical     bool                   `json:"usbReviewTechnicalView" tier:"everyday"`
 	PrintingEnable         bool                   `json:"printingEnable" tier:"everyday"`
 	NetworkPrintingEnable  bool                   `json:"networkPrintingEnable" tier:"security"`
@@ -213,6 +214,10 @@ var usbTrustTPMHandlePattern = regexp.MustCompile(`^0x810[0-9a-fA-F]{5}$`)
 // (0x81000001, 0x81000002) and the endorsement range (0x8101xxxx).
 const DefaultUSBTrustTPMHandle = "0x81000042"
 
+// MaxUSBTrustLapseDays bounds usbTrustLapseDays to what the Nix option
+// accepts. 0 means permanent USB trust never lapses.
+const MaxUSBTrustLapseDays = 36500
+
 func Load(path string) (User, error) {
 	contents, err := os.ReadFile(path)
 	if err != nil {
@@ -280,6 +285,9 @@ func Validate(user User) error {
 	}
 	if user.USBTrustTPMHandle != "" && !usbTrustTPMHandlePattern.MatchString(user.USBTrustTPMHandle) {
 		return fmt.Errorf("invalid usbTrustTpmHandle: %q", user.USBTrustTPMHandle)
+	}
+	if user.USBTrustLapseDays < 0 || user.USBTrustLapseDays > MaxUSBTrustLapseDays {
+		return fmt.Errorf("invalid usbTrustLapseDays: %d; use 0 (never) or 1 to %d", user.USBTrustLapseDays, MaxUSBTrustLapseDays)
 	}
 	if user.USBTrustEnforce {
 		if !user.USBGuardEnable {

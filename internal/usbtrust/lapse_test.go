@@ -130,3 +130,78 @@ func TestRenewableOnlyInTheWarningWindow(t *testing.T) {
 		t.Fatal("renewable while lapse is off")
 	}
 }
+
+func TestLapseClockStartsWhenSwitchedOn(t *testing.T) {
+	dock := syntheticDock()
+	dock.LastUsed = "2026-08-01T00:00:00Z"
+	l := thirtyDays()
+	if !l.Lapsed(dock) {
+		t.Fatal("record unused for 79 days kept without a start")
+	}
+	l.Since = lapseNow.Add(-24 * time.Hour)
+	if l.Lapsed(dock) {
+		t.Fatal("record lapsed the day after lapsing was switched on")
+	}
+	if at, _ := l.LapsesAt(dock); !at.Equal(l.Since.Add(l.After)) {
+		t.Fatalf("lapses at %s, want 30 days after the start", at)
+	}
+	l.Since = lapseNow.Add(48 * time.Hour)
+	if !l.Lapsed(dock) {
+		t.Fatal("a start in the future bought extra days")
+	}
+
+	doc := trustedDocument()
+	doc.LapseSince = "yesterday"
+	if doc.Validate() == nil {
+		t.Fatal("accepted a broken lapseSince")
+	}
+	doc.LapseSince = "2026-10-18T12:00:00Z"
+	if err := doc.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if got := NewLapse(30*24*time.Hour, lapseNow, doc).Since; !got.Equal(lapseNow.Add(-24 * time.Hour)) {
+		t.Fatalf("since %s", got)
+	}
+	if got := NewLapse(0, lapseNow, doc); got.Enabled() || !got.Since.IsZero() {
+		t.Fatalf("lapse off: %+v", got)
+	}
+}
+
+// SYNTHETIC: input devices built from the dock record.
+func inputDevice(id, lastUsed string, interfaces ...string) Device {
+	device := syntheticDock()
+	device.ID = id
+	device.LastUsed = lastUsed
+	device.Identity.Hash = id + "-hash"
+	device.Identity.Interfaces = interfaces
+	return device
+}
+
+func TestLastUsedKeyboardAndMouseNeverLapse(t *testing.T) {
+	older := inputDevice("external:keyboard-a", "2026-08-01T00:00:00Z", "03:01:01")
+	newer := inputDevice("external:keyboard-b", "2026-08-02T00:00:00Z", "03:01:01")
+	mouse := inputDevice("external:mouse", "2026-07-01T00:00:00Z", "03:01:02")
+	pad := inputDevice("external:pad", "2026-08-03T00:00:00Z", "03:00:00")
+	doc := trustedDocument(older, newer, mouse, pad)
+	kept := KeptInput(*doc)
+	if len(kept) != 2 || !kept[newer.ID] || !kept[mouse.ID] {
+		t.Fatalf("kept %v, want the newer keyboard and the mouse", kept)
+	}
+	l := NewLapse(30*24*time.Hour, lapseNow, doc)
+	if l.Lapsed(newer) || l.Lapsed(mouse) || !l.Lapsed(older) || !l.Lapsed(pad) {
+		t.Fatal("wrong records lapsed")
+	}
+	if l.Renewable(newer) {
+		t.Fatal("kept keyboard offered for renewal")
+	}
+
+	builtIn := internalTrusted()
+	builtIn.Identity.Interfaces = []string{"03:01:01"}
+	doc.Devices = append(doc.Devices, builtIn)
+	if kept := KeptInput(*doc); len(kept) != 0 {
+		t.Fatalf("kept %v beside a built-in keyboard", kept)
+	}
+	if !NewLapse(30*24*time.Hour, lapseNow, doc).Lapsed(newer) {
+		t.Fatal("external keyboard kept beside a built-in one")
+	}
+}

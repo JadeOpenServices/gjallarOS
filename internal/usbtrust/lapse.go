@@ -1,6 +1,9 @@
 package usbtrust
 
-import "time"
+import (
+	"slices"
+	"time"
+)
 
 // ClockSlack is how far a stored time may lie in the future before the
 // record counts as lapsed. More than that means the clock went back or the
@@ -12,6 +15,64 @@ const ClockSlack = 24 * time.Hour
 type Lapse struct {
 	After time.Duration
 	Now   time.Time
+	// Since is when the lapse was switched on. No clock starts earlier, so
+	// switching it on never lapses anything at once.
+	Since time.Time
+	// Kept names the records that never lapse; see KeptInput.
+	Kept map[string]bool
+}
+
+// NewLapse builds the lapse rule for the stored trust document.
+func NewLapse(after time.Duration, now time.Time, trusted *Document) Lapse {
+	l := Lapse{After: after, Now: now}
+	if after <= 0 || trusted == nil {
+		return l
+	}
+	if since, err := time.Parse(time.RFC3339, trusted.LapseSince); err == nil {
+		l.Since = since
+	}
+	l.Kept = KeptInput(*trusted)
+	return l
+}
+
+// Boot-protocol HID interfaces. Firmware setup and the disk unlock prompt
+// drive only these, so they mark the keyboard and mouse a person needs.
+const (
+	bootKeyboard = "03:01:01"
+	bootMouse    = "03:01:02"
+)
+
+// KeptInput picks the external keyboard and mouse that never lapse: the most
+// recently used of each, unless a built-in keyboard is stored as an internal
+// part. A built-in keyboard that is not on USB is not in the document and
+// does not count; keeping one keyboard too many is safer than locking the
+// owner out.
+func KeptInput(doc Document) map[string]bool {
+	for _, device := range doc.Devices {
+		if device.Class == ClassInternal && slices.Contains(device.Identity.Interfaces, bootKeyboard) {
+			return nil
+		}
+	}
+	kept := map[string]bool{}
+	for _, class := range []string{bootKeyboard, bootMouse} {
+		best, bestUsed := "", time.Time{}
+		for _, device := range doc.Devices {
+			if device.Class != ClassExternal || !slices.Contains(device.Identity.Interfaces, class) {
+				continue
+			}
+			used, ok := LastUsed(device)
+			if !ok {
+				continue
+			}
+			if best == "" || used.After(bestUsed) || used.Equal(bestUsed) && device.ID < best {
+				best, bestUsed = device.ID, used
+			}
+		}
+		if best != "" {
+			kept[best] = true
+		}
+	}
+	return kept
 }
 
 func (l Lapse) Enabled() bool { return l.After > 0 }
@@ -30,10 +91,13 @@ func LastUsed(device Device) (time.Time, bool) {
 // LapsesAt is when the device's trust runs out. ok is false when it never
 // lapses; a zero time means it has lapsed already for a bad stored time.
 func (l Lapse) LapsesAt(device Device) (at time.Time, ok bool) {
-	if !l.Enabled() || device.Class != ClassExternal {
+	if !l.Enabled() || device.Class != ClassExternal || l.Kept[device.ID] {
 		return time.Time{}, false
 	}
 	used, valid := LastUsed(device)
+	if valid && used.Before(l.Since) {
+		used = l.Since
+	}
 	if !valid || used.After(l.Now.Add(ClockSlack)) {
 		return time.Time{}, true
 	}

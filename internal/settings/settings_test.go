@@ -2,6 +2,7 @@ package settings
 
 import (
 	"encoding/json"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -90,6 +91,51 @@ func TestPlanOnManagedDeviceAllowsEverydayOnly(t *testing.T) {
 	}
 	if _, err := Plan(data, raw(map[string]string{"hostname": `"desk-07"`})); err == nil {
 		t.Fatal("accepted a security change on a managed device")
+	}
+}
+
+func TestPlanLapseWaitsOnlyWhenLoosened(t *testing.T) {
+	user := defaults(t)
+	cases := []struct {
+		old, new int
+		tier     config.Tier
+	}{
+		{0, 30, config.TierEveryday},
+		{30, 7, config.TierEveryday},
+		{30, 60, config.TierSecurity},
+		{30, 0, config.TierSecurity},
+	}
+	for _, c := range cases {
+		user.USBTrustLapseDays = c.old
+		change, err := Plan(configText(t, user), raw(map[string]string{"usbTrustLapseDays": strconv.Itoa(c.new)}))
+		if err != nil {
+			t.Fatalf("%d → %d: %v", c.old, c.new, err)
+		}
+		if change.Tier != c.tier {
+			t.Errorf("%d → %d: tier %s, want %s", c.old, c.new, change.Tier, c.tier)
+		}
+	}
+	user.USBTrustLapseDays = 0
+	change, err := Plan(configText(t, user), raw(map[string]string{"usbTrustLapseDays": `30`, "hostname": `"desk-07"`}))
+	if err != nil || change.Tier != config.TierSecurity {
+		t.Fatalf("lapse on beside a security key: %s %v", change.Tier, err)
+	}
+	if _, err := Plan(configText(t, user), raw(map[string]string{"usbTrustLapseDays": `-1`})); err == nil {
+		t.Fatal("accepted a negative lapse")
+	}
+}
+
+func TestPlanOnManagedDeviceRefusesTighteningToo(t *testing.T) {
+	user := defaults(t)
+	user.EndpointManagedDevice = true
+	user.JODSEndpoint = "https://jods.example.test:1666"
+	user.JODSPolicySigningKey = strings.Repeat("ab", 32)
+	user.JODSRecoverySigningKey = strings.Repeat("cd", 32)
+	user.JODSEnrollmentMode = "manual"
+	user.JODSDeviceClass = "laptop"
+	user.JODSDesktopProfile = "headless"
+	if _, err := Plan(configText(t, user), raw(map[string]string{"usbTrustLapseDays": `30`})); err == nil {
+		t.Fatal("JODS-managed lapse changed locally")
 	}
 }
 

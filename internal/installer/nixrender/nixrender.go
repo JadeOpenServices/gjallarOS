@@ -110,6 +110,7 @@ type Settings struct {
 	ClamshellEnable, USBGuardEnable, USBTrustEnforce, PrintingEnable, NetworkPrintingEnable bool
 	ConsoleLoginEnable, USBReviewTechnical, DolphinDriveUsage, FirmwareFlashReadEntry       bool
 	USBTrustTPMHandle                                                                       string
+	USBTrustLapseDays                                                                       int
 	Name, Email, GitHubUsername, DotfilesDir                                                string
 	RootPasswordFile, UserPasswordFile                                                      string
 	DebugFunctions                                                                          bool
@@ -164,6 +165,7 @@ func FromUser(user config.User) Settings {
 		USBGuardEnable:                      user.USBGuardEnable,
 		USBTrustEnforce:                     user.USBTrustEnforce,
 		USBTrustTPMHandle:                   user.USBTrustTPMHandle,
+		USBTrustLapseDays:                   user.USBTrustLapseDays,
 		USBReviewTechnical:                  user.USBReviewTechnical,
 		PrintingEnable:                      user.PrintingEnable,
 		NetworkPrintingEnable:               user.NetworkPrintingEnable,
@@ -254,6 +256,7 @@ var userIntentKeys = []string{
 	"usbguardEnable",
 	"usbTrustEnforce",
 	"usbTrustTpmHandle",
+	"usbTrustLapseDays",
 	"usbReviewTechnicalView",
 	"printingEnable",
 	"networkPrintingEnable",
@@ -432,6 +435,7 @@ func Render(s Settings) []byte {
 	boolean("usbguardEnable", s.USBGuardEnable)
 	boolean("usbTrustEnforce", s.USBTrustEnforce)
 	str("usbTrustTpmHandle", s.USBTrustTPMHandle)
+	integer("usbTrustLapseDays", s.USBTrustLapseDays)
 	boolean("usbReviewTechnicalView", s.USBReviewTechnical)
 	boolean("printingEnable", s.PrintingEnable)
 	boolean("networkPrintingEnable", s.NetworkPrintingEnable)

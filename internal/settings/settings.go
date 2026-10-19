@@ -127,6 +127,9 @@ func Plan(data []byte, values map[string]json.RawMessage) (Change, error) {
 		}
 		wanted[key] = newValue
 		change.Keys = append(change.Keys, KeyChange{Key: key, Old: oldValue, New: newValue})
+		if tightens(key, oldValue, newValue) {
+			tier = config.TierEveryday
+		}
 		if tierRank[tier] > tierRank[change.Tier] {
 			change.Tier = tier
 		}
@@ -146,6 +149,26 @@ func Plan(data []byte, values map[string]json.RawMessage) (Change, error) {
 	}
 	change.ID = hex.EncodeToString(id)
 	return change, nil
+}
+
+// tightens reports whether a change only makes the system stricter, so it
+// need not wait out its tier's delay. Only the keys named here qualify; the
+// managed-device check still runs on their real tier.
+func tightens(key string, oldValue, newValue json.RawMessage) bool {
+	switch key {
+	case "usbTrustLapseDays":
+		// Turning the lapse on or shortening it applies at once; turning it
+		// off or lengthening it waits.
+		var before, after int
+		if json.Unmarshal(newValue, &after) != nil || after <= 0 {
+			return false
+		}
+		if len(oldValue) > 0 && json.Unmarshal(oldValue, &before) != nil {
+			return false
+		}
+		return before <= 0 || after < before
+	}
+	return false
 }
 
 // ReadyAt is the earliest time the change may be applied. home says whether

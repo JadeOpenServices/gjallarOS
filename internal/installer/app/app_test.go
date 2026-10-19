@@ -412,12 +412,12 @@ func TestCollectUSBTrust(t *testing.T) {
 		wantBlockQuestion       bool
 	}{
 		{name: "review declined", encryptedRoot: true, tpm2: true, input: "no\n"},
-		{name: "blocking asked, default no", encryptedRoot: true, tpm2: true, input: "yes\n\n",
+		{name: "blocking asked, default no", encryptedRoot: true, tpm2: true, input: "yes\n\n\n",
 			wantReview: true, wantHandle: config.DefaultUSBTrustTPMHandle, wantBlockQuestion: true},
-		{name: "blocking chosen", encryptedRoot: true, tpm2: true, input: "yes\nyes\n",
+		{name: "blocking chosen", encryptedRoot: true, tpm2: true, input: "yes\nyes\n\n",
 			wantReview: true, wantEnforce: true, wantHandle: config.DefaultUSBTrustTPMHandle, wantBlockQuestion: true},
 		{name: "no TPM2: review only, no key", encryptedRoot: true, input: "yes\nyes\n", wantReview: true},
-		{name: "plain root: key, no blocking", tpm2: true, input: "yes\nyes\n",
+		{name: "plain root: key, no blocking", tpm2: true, input: "yes\n\n",
 			wantReview: true, wantHandle: config.DefaultUSBTrustTPMHandle},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -431,6 +431,35 @@ func TestCollectUSBTrust(t *testing.T) {
 			}
 			if strings.Contains(output.String(), "Block unknown USB devices") != test.wantBlockQuestion {
 				t.Fatalf("block question shown=%t output:\n%s", !test.wantBlockQuestion, output.String())
+			}
+		})
+	}
+}
+
+func TestCollectUSBTrustLapse(t *testing.T) {
+	for _, test := range []struct {
+		name         string
+		tpm2         bool
+		input        string
+		want         int
+		wantQuestion bool
+	}{
+		{name: "default off", tpm2: true, input: "yes\n\n\n", wantQuestion: true},
+		{name: "on with the default 30", tpm2: true, input: "yes\n\nyes\n\n", want: 30, wantQuestion: true},
+		{name: "any N, asked again until valid", tpm2: true, input: "yes\n\nyes\n0\nmany\n36501\n400\n", want: 400, wantQuestion: true},
+		{name: "no TPM2: nothing stored, nothing to expire", input: "yes\nyes\n"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var output bytes.Buffer
+			u := config.User{USBTrustLapseDays: 9}
+			if err := collectUSBTrust(context.Background(), prompt.New(strings.NewReader(test.input), &output), true, true, test.tpm2, &u); err != nil {
+				t.Fatal(err)
+			}
+			if u.USBTrustLapseDays != test.want {
+				t.Fatalf("lapse days = %d, want %d; output:\n%s", u.USBTrustLapseDays, test.want, output.String())
+			}
+			if strings.Contains(output.String(), "expire when unused") != test.wantQuestion {
+				t.Fatalf("lapse question shown=%t output:\n%s", !test.wantQuestion, output.String())
 			}
 		})
 	}

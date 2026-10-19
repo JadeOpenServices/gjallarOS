@@ -164,6 +164,14 @@ Jade decisions (2026-10-19):
 - Three days before a device lapses, a notification offers to renew it.
 - Only external devices lapse. Built-ins enrolled from ODDC never lapse;
   they are checked against ODDC on every boot.
+- The clock starts when lapse is turned on (`lapseSince` in the signed
+  record). Turning it on does not make every old device ask at once.
+- Turning lapse on or lowering N applies at once. Turning it off or raising
+  N waits out the security delay.
+- Without a trusted built-in USB keyboard, the most recently used external
+  keyboard and mouse (boot interfaces 03:01:01 and 03:01:02) never lapse.
+  Other input devices do. With a built-in USB keyboard, every external
+  device lapses.
 
 Security pass:
 
@@ -196,11 +204,19 @@ Security pass:
   and reviewed, so its identity is checked again.
 - **Turning it off.** Switching lapse off or raising N lowers protection.
   The settings service holds that change like it holds turning blocking
-  off.
-- **Lockout.** A desktop with only a USB keyboard cannot lose it while it is
-  used every day, and a lapse while plugged in does not cut it off. A
-  keyboard left unplugged for N days asks again at the login screen; the
-  installer question says so.
+  off. Turning it on or lowering N only tightens, so it applies at once. On
+  a JODS-managed machine both directions stay with JODS.
+- **Turn-on time.** `lapseSince` sits in the TPM-signed document, so it
+  cannot be moved back to make devices lapse, or forward to keep them.
+  A `lapseSince` more than a day in the future counts as lapsed, like
+  `lastUsed`.
+- **Lockout.** The kept keyboard and mouse are picked only from devices
+  that are already trusted, so keeping them adds no new trust. A
+  keyboard built in over PS/2 or i2c is not in the USB record, so laptops
+  keep their last USB keyboard and mouse too for now. That is the safe side.
+  Asking ODDC whether its device list can name a non-USB built-in keyboard
+  is open; the kernel's own list was ruled out because desktops show a
+  phantom i8042 keyboard.
 
 Plan:
 
@@ -213,8 +229,9 @@ Plan:
       shows when each device lapses.
 - [x] C3: warning three days ahead with a Renew button (`gjallarctl usb
       renew`, accepted only in that window).
-- [ ] C4: `usbTrustLapseDays` setting (held when it lowers protection),
-      installer question (default off, 30 when on, any N from 1).
+- [x] C4: `usbTrustLapseDays` setting (held when it lowers protection),
+      installer question (default off, 30 when on, any N from 1), clock
+      starts at turn-on, last-used keyboard and mouse kept.
 - [ ] C5: fw13 VM test.
 
 ## 2. USB review UX

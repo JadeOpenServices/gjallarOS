@@ -2460,6 +2460,7 @@ func disableTPMDependentSecurity(u *config.User) {
 	u.LUKSTPM2Enable = false
 	u.JODSPrebootLockEnable = false
 	u.USBTrustEnforce = false
+	u.USBTrustLapseDays = 0
 	u.USBTrustTPMHandle = ""
 }
 
@@ -2694,6 +2695,7 @@ func jodsManagementBlocker(secureBootSupported, tpm2 bool) string {
 // passphrase).
 func collectUSBTrust(ctx context.Context, ui prompt.UI, modelSelected, encryptedRoot, tpm2 bool, u *config.User) error {
 	u.USBTrustEnforce = false
+	u.USBTrustLapseDays = 0
 	if !modelSelected {
 		u.USBGuardEnable = false
 		u.USBTrustTPMHandle = ""
@@ -2716,12 +2718,38 @@ func collectUSBTrust(ctx context.Context, ui prompt.UI, modelSelected, encrypted
 	}
 	if !encryptedRoot {
 		fmt.Fprintln(ui.Out, "USB blocking stays off: turning it off again needs the disk passphrase, and this root is not encrypted.")
-		return nil
+	} else {
+		fmt.Fprintln(ui.Out, "With blocking on, only built-in devices and devices you approve work.")
+		fmt.Fprintln(ui.Out, "A USB keyboard or mouse that is not built in stays blocked until you approve it with the built-in keyboard.")
+		if u.USBTrustEnforce, err = ui.Confirm(ctx, "Block unknown USB devices from the first boot?", false); err != nil {
+			return err
+		}
 	}
-	fmt.Fprintln(ui.Out, "With blocking on, only built-in devices and devices you approve work.")
-	fmt.Fprintln(ui.Out, "A USB keyboard or mouse that is not built in stays blocked until you approve it with the built-in keyboard.")
-	u.USBTrustEnforce, err = ui.Confirm(ctx, "Block unknown USB devices from the first boot?", false)
-	return err
+	return collectUSBTrustLapse(ctx, ui, u)
+}
+
+// collectUSBTrustLapse asks whether approved USB devices expire after some
+// days without use. It needs the TPM key, since only then are approvals
+// stored at all. Off by default.
+func collectUSBTrustLapse(ctx context.Context, ui prompt.UI, u *config.User) error {
+	fmt.Fprintln(ui.Out, "Approved USB devices can expire when they are not used for some days. An expired device asks for approval again.")
+	fmt.Fprintln(ui.Out, "Without a built-in USB keyboard, the keyboard and mouse you used last never expire, so you cannot lock yourself out.")
+	expire, err := ui.Confirm(ctx, "Let approved USB devices expire when unused?", false)
+	if err != nil || !expire {
+		return err
+	}
+	for {
+		answer, err := ui.Value(ctx, fmt.Sprintf("Days without use before a device expires (1 to %d)", config.MaxUSBTrustLapseDays), "30")
+		if err != nil {
+			return err
+		}
+		days, err := strconv.Atoi(answer)
+		if err == nil && days >= 1 && days <= config.MaxUSBTrustLapseDays {
+			u.USBTrustLapseDays = days
+			return nil
+		}
+		fmt.Fprintf(ui.Out, "Enter a whole number from 1 to %d.\n", config.MaxUSBTrustLapseDays)
+	}
 }
 
 func discoverInstalledRecoveryTopology(

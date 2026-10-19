@@ -220,6 +220,9 @@ func (c *Controller) Reconcile(ctx context.Context) error {
 		if err := c.learnBluetoothAddresses(ctx, &input); err != nil {
 			return fmt.Errorf("store Bluetooth addresses: %w", err)
 		}
+		if err := c.markLapseStart(ctx, &input); err != nil {
+			return fmt.Errorf("store USB trust lapse start: %w", err)
+		}
 		if err := c.refreshLastUsed(ctx, &input); err != nil {
 			return fmt.Errorf("store USB last use: %w", err)
 		}
@@ -295,6 +298,32 @@ func (c *Controller) learnBluetoothAddresses(ctx context.Context, input *usbtrus
 		return err
 	}
 	input.Trusted = &doc
+	return nil
+}
+
+// markLapseStart signs when lapsing trust was switched on, so that records
+// last used long ago do not all lapse at once, and drops the mark once it
+// is off again.
+func (c *Controller) markLapseStart(ctx context.Context, input *usbtrust.AuditInput) error {
+	if input.Trusted == nil || input.Lapse.Enabled() == (input.Trusted.LapseSince != "") {
+		return nil
+	}
+	doc, err := c.next(input.Trusted)
+	if err != nil {
+		return err
+	}
+	doc.LapseSince = ""
+	if input.Lapse.Enabled() {
+		doc.LapseSince = input.Lapse.Now.UTC().Format(time.RFC3339)
+	}
+	if err := doc.Validate(); err != nil {
+		return err
+	}
+	if err := c.commit(ctx, doc); err != nil {
+		return err
+	}
+	input.Trusted = &doc
+	input.Lapse = usbtrust.NewLapse(input.Lapse.After, input.Lapse.Now, &doc)
 	return nil
 }
 
@@ -540,7 +569,7 @@ func (c *Controller) snapshot(ctx context.Context) (input usbtrust.AuditInput, e
 		}
 	}
 	c.armed.Store(input.Trusted != nil && input.Trusted.Enforcement != nil && input.Trusted.Enforcement.Armed)
-	input.Lapse = usbtrust.Lapse{After: c.Reader.LapseAfter, Now: time.Now().UTC()}
+	input.Lapse = usbtrust.NewLapse(c.Reader.LapseAfter, time.Now().UTC(), input.Trusted)
 	input.Observed, err = c.Reader.Observed(ctx)
 	if err != nil {
 		return input, err
