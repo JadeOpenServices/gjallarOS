@@ -89,6 +89,14 @@ func TestRefreshLastUsed(t *testing.T) {
 		t.Fatal("refreshed twice in a day")
 	}
 
+	// A one-day lapse refreshes twice a day, so a device that stays
+	// connected never runs out.
+	doc.Devices[0].LastUsed = "2026-10-19T00:00:00Z"
+	input.Lapse = Lapse{After: 24 * time.Hour, Now: lapseNow}
+	if changed, _ := RefreshLastUsed(input, doc); !changed {
+		t.Fatal("one-day lapse not refreshed after 12 hours")
+	}
+
 	lapsed := syntheticDock()
 	lapsed.LastUsed = "2026-09-01T00:00:00Z"
 	doc = trustedDocument(lapsed)

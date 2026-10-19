@@ -120,9 +120,19 @@ func (l Lapse) Renewable(device Device) bool {
 	return ok && !at.IsZero() && l.Now.Before(at) && !l.Now.Before(at.Add(-LapseWarning))
 }
 
+// refreshEvery is how often lastUsed moves while a device stays connected:
+// once a day, or twice per lapse when that is shorter. Refreshing only at
+// the full lapse time would let a one-day lapse run out first.
+func (l Lapse) refreshEvery() time.Duration {
+	if l.Enabled() && l.After/2 < 24*time.Hour {
+		return l.After / 2
+	}
+	return 24 * time.Hour
+}
+
 // RefreshLastUsed moves lastUsed to now for external devices that are
-// connected under live trust, at most once a day. Lapsed devices are left
-// alone: only renewing them restarts their clock.
+// connected under live trust, at most once per refreshEvery. Lapsed devices
+// are left alone: only renewing them restarts their clock.
 func RefreshLastUsed(input AuditInput, doc *Document) (bool, error) {
 	audit, err := Audit(input)
 	if err != nil {
@@ -139,7 +149,7 @@ func RefreshLastUsed(input AuditInput, doc *Document) (bool, error) {
 			if device.ID != finding.TrustedID {
 				continue
 			}
-			if used, ok := LastUsed(*device); ok && now.Sub(used) < 24*time.Hour {
+			if used, ok := LastUsed(*device); ok && now.Sub(used) < input.Lapse.refreshEvery() {
 				continue
 			}
 			device.LastUsed = now.Format(time.RFC3339)
