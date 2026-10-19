@@ -353,7 +353,7 @@ func TestCollectProjectToolsBlankEndpointSkips(t *testing.T) {
 func TestCollectRecoverySkipsPartitionOnUnencryptedRoot(t *testing.T) {
 	var output bytes.Buffer
 	u := config.User{}
-	if err := collectRecovery(context.Background(), prompt.New(strings.NewReader("yes\n"), &output), false, &u); err != nil {
+	if err := collectRecovery(context.Background(), prompt.New(strings.NewReader("yes\n"), &output), false, true, &u); err != nil {
 		t.Fatal(err)
 	}
 	if !u.RecoveryEnable || u.RecoveryPartitionEnable {
@@ -367,11 +367,27 @@ func TestCollectRecoverySkipsPartitionOnUnencryptedRoot(t *testing.T) {
 func TestCollectRecoveryAsksPartitionWhenPossible(t *testing.T) {
 	var output bytes.Buffer
 	u := config.User{}
-	if err := collectRecovery(context.Background(), prompt.New(strings.NewReader("yes\nyes\n"), &output), true, &u); err != nil {
+	if err := collectRecovery(context.Background(), prompt.New(strings.NewReader("yes\nyes\n"), &output), true, true, &u); err != nil {
 		t.Fatal(err)
 	}
 	if !u.RecoveryEnable || !u.RecoveryPartitionEnable {
 		t.Fatalf("recovery=%t partition=%t", u.RecoveryEnable, u.RecoveryPartitionEnable)
+	}
+}
+
+// Jade 2026-10-19: no recovery partition and no shrink without GjallarOS
+// Secure Boot; the partition question is not even asked.
+func TestCollectRecoverySkipsPartitionWithoutSecureBoot(t *testing.T) {
+	var output bytes.Buffer
+	u := config.User{RecoveryPartitionEnable: true}
+	if err := collectRecovery(context.Background(), prompt.New(strings.NewReader("yes\nyes\n"), &output), true, false, &u); err != nil {
+		t.Fatal(err)
+	}
+	if !u.RecoveryEnable || u.RecoveryPartitionEnable {
+		t.Fatalf("recovery=%t partition=%t", u.RecoveryEnable, u.RecoveryPartitionEnable)
+	}
+	if strings.Contains(output.String(), "recovery partition (recommended)") || !strings.Contains(output.String(), "Secure Boot") {
+		t.Fatalf("output:\n%s", output.String())
 	}
 }
 

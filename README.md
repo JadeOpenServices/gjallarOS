@@ -470,7 +470,13 @@ GjallarOS. If the ESP itself is broken, boot the recovery ISO from USB.
 ### Secure Boot
 
 The installer offers Secure Boot on models whose ODDC entry has a Secure Boot
-setup. A system installed without it gets it with:
+setup, with yes as the default. It asks this before the recovery questions:
+the recovery partition is signed with this machine's Secure Boot key, so
+without Secure Boot there is no recovery partition and the disk is not shrunk
+for one. Saying no, or a model without an ODDC Secure Boot setup, shows what
+the install goes without: nothing checks the startup files, the disk
+passphrase is typed at every startup, repairs start from a USB stick, and JODS
+cannot manage the machine. A system installed without it gets it with:
 
 ```bash
 gjallarctl secure-boot setup

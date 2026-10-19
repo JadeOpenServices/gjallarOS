@@ -580,6 +580,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 	if err != nil {
 		return fail(errOut, err)
 	}
+	partitionable := !persistentInstalledHost || rootEncrypted(ctx, "/")
 	if s.preset {
 		normalizePreset(&s.user, root)
 		if s.user.USBGuardEnable && resolvedDevice.ModelID == "" {
@@ -588,7 +589,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 		if s.user.USBGuardEnable && s.user.USBTrustTPMHandle == "" && diskcrypto.TPMAvailable() {
 			s.user.USBTrustTPMHandle = config.DefaultUSBTrustTPMHandle
 		}
-	} else if err := collectInteractive(ctx, ui, root, !persistentInstalledHost || rootEncrypted(ctx, "/"), resolvedDevice.ModelID != "", diskcrypto.TPMAvailable(), jodsManagementBlocker(s.secureBootFirmware.Policy.Supported, diskcrypto.TPMAvailable()), hardware, choices, &s.user); err != nil {
+	} else if err := collectInteractive(ctx, ui, root, partitionable, resolvedDevice.ModelID != "", diskcrypto.TPMAvailable(), jodsManagementBlocker(s.secureBootFirmware.Policy.Supported, diskcrypto.TPMAvailable()), hardware, choices, &s.user); err != nil {
 		return fail(errOut, err)
 	}
 	if err := configureWeatherLocation(ctx, ui, &s.user, out); err != nil {
@@ -699,13 +700,17 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 				firmwareName + "?"
 		}
 
+		// ODDC has a tested setup for this model, so yes is the default.
 		s.user.SecureBootEnable, err = ui.Confirm(
 			ctx,
 			promptText,
-			false,
+			true,
 		)
 		if err != nil {
 			return fail(errOut, err)
+		}
+		if !s.user.SecureBootEnable {
+			fmt.Fprint(out, secureBootDeclinedNotice("You can set it up later with: gjallarctl secure-boot setup"))
 		}
 
 		if s.user.SecureBootEnable {
@@ -726,6 +731,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 		!s.user.SecureBootEnable &&
 		!s.user.EndpointManagedDevice {
 		fmt.Fprint(out, noSecureBootPolicyNotice(resolvedDevice.ModelID))
+		fmt.Fprint(out, secureBootDeclinedNotice("Once ODDC has a Secure Boot setup for this machine, gjallarctl secure-boot setup turns it on."))
 	} else if s.user.SecureBootEnable &&
 		s.secureBootFirmware.Policy.Supported {
 		// user.config.json or endpoint management already decided; still
@@ -829,6 +835,17 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 				return 0
 			}
 		}
+	}
+
+	// Asked only now: the recovery partition depends on the Secure Boot
+	// decision, and nothing is partitioned or shrunk without it.
+	if !s.preset {
+		if err := collectRecovery(ctx, ui, partitionable, s.user.SecureBootEnable, &s.user); err != nil {
+			return fail(errOut, err)
+		}
+	} else if s.user.RecoveryPartitionEnable && !s.user.SecureBootEnable {
+		s.user.RecoveryPartitionEnable = false
+		fmt.Fprintln(out, noRecoveryPartitionNotice)
 	}
 
 	if s.existing &&
@@ -1870,9 +1887,6 @@ func collectInteractive(ctx context.Context, ui prompt.UI, root string, partitio
 	if err := collectFirefoxAddons(ctx, ui, u); err != nil {
 		return err
 	}
-	if err := collectRecovery(ctx, ui, partitionable, u); err != nil {
-		return err
-	}
 	// Device-specific hardware policy is resolved through ODDC.
 	// Do not ask users to manually select a vendor/model that hardware
 	// discovery and the resolved ODDC device graph already determine.
@@ -1881,16 +1895,23 @@ func collectInteractive(ctx context.Context, ui prompt.UI, root string, partitio
 	return nil
 }
 
+// noRecoveryPartitionNotice says why a recovery partition was dropped: its
+// image is signed with this machine's Secure Boot key, and without that key
+// nothing checks it before it starts.
+const noRecoveryPartitionNotice = "No recovery partition: it needs GjallarOS Secure Boot, which is off for this install. The disk is not shrunk."
+
 // collectRecovery asks for the recovery boot entry and, where the root can
-// take one, the recovery partition.
-func collectRecovery(ctx context.Context, ui prompt.UI, partitionable bool, u *config.User) error {
+// take one and GjallarOS Secure Boot is on, the recovery partition.
+func collectRecovery(ctx context.Context, ui prompt.UI, partitionable, secureBoot bool, u *config.User) error {
 	var err error
 	u.RecoveryEnable, err = ui.Confirm(ctx, "Install the trusted local GjallarOS recovery/JODS boot entry?", true)
 	if err != nil {
 		return err
 	}
 	u.RecoveryPartitionEnable = false
-	if u.RecoveryEnable && !partitionable {
+	if u.RecoveryEnable && !secureBoot {
+		fmt.Fprintln(ui.Out, noRecoveryPartitionNotice)
+	} else if u.RecoveryEnable && !partitionable {
 		fmt.Fprintln(ui.Out, "No recovery partition: this root is not on encrypted Btrfs, which recovery partitioning needs. The recovery boot entry is still installed.")
 	} else if u.RecoveryEnable {
 		u.RecoveryPartitionEnable, err = ui.Confirm(

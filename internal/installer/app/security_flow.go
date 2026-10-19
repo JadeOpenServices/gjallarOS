@@ -69,6 +69,21 @@ func noSecureBootPolicyNotice(modelID string) string {
 	return strings.Join(lines, "\n") + "\n"
 }
 
+// secureBootDeclinedNotice says what an install without GjallarOS Secure
+// Boot does not have, in words a non-technical owner can follow. later says
+// how to get it afterwards.
+func secureBootDeclinedNotice(later string) string {
+	return strings.Join([]string{
+		"Without GjallarOS Secure Boot:",
+		"  - Nothing checks the startup files before they run. Someone who gets the machine",
+		"    alone for a while could change them to record the disk passphrase.",
+		"  - The disk does not unlock on its own; the passphrase is typed at every startup.",
+		"  - No recovery partition. Repairs start from a GjallarOS USB stick.",
+		"  - JODS cannot manage this machine.",
+		"  " + later,
+	}, "\n") + "\n"
+}
+
 // firmwareSecureBootNotice reports the firmware's own Secure Boot state when
 // GjallarOS installs without its Secure Boot keys. It used to print only
 // inside the no-ODDC-setup branch, which needs a TPM and secureBootPrompt, so

@@ -212,6 +212,18 @@ Ideas worth taking:
         without the Secure Boot result, so ODDC still grows from many
         installs, and someone can turn a working attempt into a real setup
         later.
+      - Jade decisions (2026-10-19): only on machines with TPM2. The try
+        keeps the firmware's keys and adds ours, runs the option ROM check
+        from the event log, and shows generic setup-mode steps. The recovery
+        partition and the disk shrink happen only after the first verified
+        Secure Boot start, with the same marker for the first run and a
+        rerun. On failure Secure Boot goes off, and `gjallarctl secure-boot
+        setup` can try again later. Research flow and security pass first.
+- [x] **Secure Boot before recovery.** The installer asks about Secure Boot
+      first and about the recovery partition only when Secure Boot is on.
+      Without it there is no recovery partition and no shrink, for presets
+      too. ODDC models default to yes. Saying no lists what the install goes
+      without in plain words.
 - [ ] **Desktop notice for Secure Boot state.** Keys enrolled but firmware
       enforcement still off shows only in the journal today. Show it like the
       low-battery warning.
