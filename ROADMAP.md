@@ -846,6 +846,79 @@ fails when a field has none. Decided with Jade 2026-10-19:
 - **Managed devices.** Security and critical keys come only from JODS;
   the local editor shows them read-only.
 
+### Settings service (step 3.3)
+
+Decided with Jade 2026-10-19: Apply also starts the rebuild, so one
+password covers it and the build is exactly the approved change.
+`gjallarctl settings` comes first; the graphical editor is its own job on
+the same API. A device with no proven home (no Tailscale, or no router of
+the user's tailnet on the network) always waits the hour. Once a home
+router is proven during the wait, Apply opens after the 10 s reading delay.
+
+- **`gjallar-settingsd`** owns `org.gjallaros.Settings1` on the system bus
+  and starts on demand. Small typed methods:
+  - `List` gives every key with its tier; `Get` one value.
+  - `Request` takes key -> JSON value pairs. Each key must exist and must
+    not be `installer`; each value must decode into the key's type, and the
+    whole result must pass the same validation as the installer. Root
+    stores old and new value, tier, the caller's user and session, and the
+    earliest apply time, and gives back an id. Critical changes ask the
+    password here already.
+  - `Apply` takes that id, never values again, and the checked Noctalia
+    colors of the caller (loophole 21 rule). It asks the password, checks
+    the wait, refuses when a stored old value no longer matches the file,
+    writes `user.config.json` atomically and starts the rebuild unit.
+  - `Pending`, `Cancel`, and signals for a finished wait and rebuild.
+  A request that mixes tiers follows the strictest one.
+- **Polkit.** One action per tier (`org.gjallaros.settings.everyday`,
+  `.security`, `.critical`), `auth_admin` without `_keep`. Root passes the
+  keys and an "old -> new" message in the details, so the password dialog
+  shows what root will write, and polkit rules can match single keys,
+  which is how JODS can lock keys per device later.
+- **Waits** are kept by the service, not by polkit, so a rule that drops
+  the password still keeps the delay. Pending changes live in
+  `/run/gjallar/settings` (gone at reboot); the service drops a change when
+  the logind session that asked for it ends. Locking keeps it. Home is
+  root's own verdict in `/run/gjallar/vpn-trust.json`, and only `home`
+  counts; a trusted Wi-Fi does not. Critical changes ignore home.
+- **Managed devices** get security and critical keys from JODS only; the
+  service refuses them locally.
+
+### Settings service security pass
+
+Threat model: code running as the user (a hostile program in the session,
+a browser exploit) wants a security key changed, or wants root through the
+service. Out of scope: an attacker who is already root, firmware attacks.
+
+What broke elsewhere, and the answer here:
+
+- **Caller identified by PID.** polkit's `unix-process` subject let a
+  caller swap the process behind a PID
+  ([CVE-2013-4288](https://bugzilla.redhat.com/show_bug.cgi?id=1002375));
+  InputPlumber made the same mistake in 2026
+  ([SUSE](https://security.opensuse.org/2026/01/09/inputplumber-lack-of-dbus-auth.html)).
+  The service only uses the `system-bus-name` subject.
+- **Caller leaves the bus during the check.** polkit treated such a caller
+  as authorized
+  ([CVE-2021-3560](https://thehackernews.com/2021/06/7-year-old-polkit-flaw-lets.html)).
+  Any error, or a caller whose user cannot be read from the bus, is a
+  refusal.
+- **Checks that do not gate anything.** SUSE found services that ask
+  polkit and carry on regardless, generic methods that pick an operation
+  from a string, one action for everything, root opening caller-supplied
+  paths, and early decoding of untrusted blobs
+  ([SUSE, KDE 6 review](https://security.opensuse.org/2024/04/02/kde6-dbus-polkit.html)).
+  Here: one code path where the polkit result gates the write, one action
+  per tier, no paths in the API, values decoded into the typed field with
+  unknown fields refused and a size limit per request.
+- **Shown is not applied.** If Apply took values, a program could show one
+  change and apply another. Apply takes the id of what root stored and
+  re-checks the old values.
+
+Residual, unchanged: the polkit agent and the terminal run in the user's
+session, so code there can fake the dialog. Logged on the security review
+page.
+
 ### Signed settings files
 
 Decided with Jade 2026-10-18: imports must be signed, and GjallarOS does
