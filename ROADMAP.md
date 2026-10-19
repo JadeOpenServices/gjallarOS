@@ -233,7 +233,7 @@ Plan:
 - [x] C4: `usbTrustLapseDays` setting (held when it lowers protection),
       installer question (default off, 30 when on, any N from 1), clock
       starts at turn-on, last-used keyboard and mouse kept.
-- [ ] C5: fw13 VM test.
+- [x] C5: fw13 VM test (2026-10-19, 388245b0).
 
 ## 2. USB review UX
 
