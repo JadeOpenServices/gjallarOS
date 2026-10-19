@@ -45,10 +45,9 @@ func (b busSystem) Caller(ctx context.Context, sender string) (caller, error) {
 	if err := bus.CallWithContext(ctx, "org.freedesktop.DBus.GetConnectionUnixProcessID", 0, sender).Store(&pid); err != nil {
 		return caller{}, fmt.Errorf("identify caller: %w", err)
 	}
-	login := b.conn.Object("org.freedesktop.login1", "/org/freedesktop/login1")
-	var path dbus.ObjectPath
-	if err := login.CallWithContext(ctx, "org.freedesktop.login1.Manager.GetSessionByPID", 0, pid).Store(&path); err != nil {
-		return caller{}, fmt.Errorf("%w: the caller is not in a login session", errRefused)
+	path, err := b.session(ctx, uid, pid)
+	if err != nil {
+		return caller{}, err
 	}
 	session := b.conn.Object("org.freedesktop.login1", path)
 	id, err := session.GetProperty("org.freedesktop.login1.Session.Id")
@@ -77,6 +76,33 @@ func (b busSystem) Caller(ctx context.Context, sender string) (caller, error) {
 		return caller{}, fmt.Errorf("read login session: no id")
 	}
 	return caller{UID: uid, Session: name}, nil
+}
+
+// session finds the login session of a process. Apps the desktop starts as
+// user units run outside the session scope; like polkit, those count for
+// the user's display session.
+func (b busSystem) session(ctx context.Context, uid, pid uint32) (dbus.ObjectPath, error) {
+	login := b.conn.Object("org.freedesktop.login1", "/org/freedesktop/login1")
+	var path dbus.ObjectPath
+	if err := login.CallWithContext(ctx, "org.freedesktop.login1.Manager.GetSessionByPID", 0, pid).Store(&path); err == nil {
+		return path, nil
+	}
+	var user dbus.ObjectPath
+	if err := login.CallWithContext(ctx, "org.freedesktop.login1.Manager.GetUser", 0, uid).Store(&user); err != nil {
+		return "", fmt.Errorf("%w: the caller is not in a login session", errRefused)
+	}
+	display, err := b.conn.Object("org.freedesktop.login1", user).GetProperty("org.freedesktop.login1.User.Display")
+	if err != nil {
+		return "", fmt.Errorf("read login user: %w", err)
+	}
+	var value struct {
+		ID   string
+		Path dbus.ObjectPath
+	}
+	if err := dbus.Store([]any{display.Value()}, &value); err != nil || value.ID == "" {
+		return "", fmt.Errorf("%w: the caller is not in a login session", errRefused)
+	}
+	return value.Path, nil
 }
 
 func (b busSystem) Authorize(ctx context.Context, sender, action string, details map[string]string) error {
