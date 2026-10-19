@@ -696,9 +696,11 @@ way to root.
       wipe on user removal and factory reset. The settings editor and
       `gjallarctl` use it. A Noctalia palette (loophole 21) becomes checked
       colour values instead of a file path root reads.
-      Done: the palette as checked colours (d6f94109) and a tier on every
-      `user.config.json` key (34ea9a04). Next: the service itself (3.3),
-      signed export and import (3.4), then the user-side writers (3.5).
+      Done: the palette as checked colours (d6f94109), a tier on every
+      `user.config.json` key (34ea9a04), the service itself with its
+      `gjallarctl settings` front end (3.3, 887c1c5b) and the unique
+      hostname check. Next: signed export and import (3.4), then the
+      user-side writers (3.5).
 - [ ] **Checkpoint 3b: developer mode.** `~/GjallarOS-local/`, the copy
       into `/etc/gjallar/local`, the `local` flake input, notice, boot
       entry name and the recovery exit.
@@ -897,7 +899,10 @@ router is proven during the wait, Apply opens after the 10 s reading delay.
   site or trusted Wi-Fi; elsewhere a query would announce the name to
   strangers, so the answer carries a note instead. A check that fails
   refuses the change. The mDNS question is a legacy unicast query (section
-  6.7) for A and AAAA, three times within a second.
+  6.7) for A and AAAA, three times within a second, asked from the fixed
+  port 1015 (IANA keeps 1011-1020 reserved). The firewall lets in answers
+  to that port only from port 5353 and from private and link-local
+  addresses (decided with Jade 2026-10-19, see the security pass below).
 
 ### Settings service security pass
 
@@ -929,15 +934,35 @@ What broke elsewhere, and the answer here:
 - **Shown is not applied.** If Apply took values, a program could show one
   change and apply another. Apply takes the id of what root stored and
   re-checks the old values.
-
 - **Root reading the network.** mDNS answers come from anyone on the
   link, and DNS parsers have a long record of bugs in name decompression
   ([NAME:WRECK](https://www.forescout.com/research-labs/namewreck/)).
   `gjallar-settingsd` keeps `PrivateNetwork` and never reads them: a
   socket-activated `gjallar-namecheck` runs per question as a dynamic user
-  with no capabilities, may only reach multicast and local addresses, and
-  answers one JSON line over a root-only socket. Its parser only follows
-  compression pointers backwards and stops at 255 bytes.
+  whose only capability is `CAP_NET_BIND_SERVICE`, may only reach multicast
+  and local addresses, and answers one JSON line over a root-only socket.
+  Its parser only follows compression pointers backwards and stops at 255
+  bytes.
+- **Answers the firewall drops.** The first version asked from a random
+  port and found every name free: a unicast answer to a question sent to a
+  multicast group is not part of any connection conntrack knows, so
+  `nixos-fw` dropped it. This is old and known
+  ([netfilter bug 795](https://lists.netfilter.org/pipermail/netfilter-buglog/2012-June/002447.html),
+  [OpenWrt forum](https://forum.openwrt.org/t/transforming-an-udp-broadcast-packet-to-a-unicast-packet-to-traverse-subnets/114381/22));
+  a conntrack helper for it was never taken upstream
+  ([SUSE SLP patch](https://code.opensuse.org/kernel/kernel-source/blob/SLE12-SP5/f/patches.suse/netfilter-ip_conntrack_slp.patch)),
+  and the usual advice is to open UDP 5353
+  ([ArchWiki, systemd-resolved](https://wiki.archlinux.org/title/Systemd-resolved#mDNS)).
+  A check that cannot hear answers fails open, so Jade chose a fixed port
+  with a narrow rule (2026-10-19): the helper asks from port 1015, and the
+  firewall accepts only UDP from port 5353 to port 1015 from private and
+  link-local addresses. A port below 1024 needs the capability, so no local
+  program can sit on it and read or fake answers; the helper therefore has
+  no `PrivateUsers`, whose capabilities do not count for host network
+  binds. The service runs one check at a time and the socket takes one
+  connection. Nothing listens on the port outside a check. Tested on the
+  fw13 VM with a SYNTHETIC responder in a second network namespace: its
+  answer counts, answers from another port or a public address do not.
 
 Residual, unchanged: the polkit agent and the terminal run in the user's
 session, so code there can fake the dialog. Logged on the security review

@@ -216,7 +216,10 @@ A new hostname must be free. The service refuses a name that a machine on
 your tailnet already uses, and, on a home, site or trusted Wi-Fi network, a
 name another device there answers for as `<name>.local`. Letter case does
 not count. It checks again before it writes the change. When Tailscale is
-off or the network is not trusted, `set` says that part was not checked.
+off or the network is not trusted, `set` says that part was not checked. To
+hear the answers, the firewall lets in UDP from port 5353 to port 1015, only
+from private and link-local addresses; nothing listens there outside a
+check.
 
 ### App catalogue
 
