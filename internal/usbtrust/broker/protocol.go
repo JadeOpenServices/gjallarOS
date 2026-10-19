@@ -79,6 +79,9 @@ type Response struct {
 	Audit     *usbtrust.AuditResult    `json:"audit,omitempty"`
 	Policy    []usbtrust.Decision      `json:"policy,omitempty"`
 	Media     []usbtrust.MediaDecision `json:"media,omitempty"`
+	// MediaPending is set while the broker has not scanned the readers since
+	// it started: Media may then miss inserted media.
+	MediaPending bool `json:"mediaPending,omitempty"`
 	// Renewals lists trusted devices that lapse soon and may be renewed.
 	Renewals []TrustLapse `json:"renewals,omitempty"`
 }

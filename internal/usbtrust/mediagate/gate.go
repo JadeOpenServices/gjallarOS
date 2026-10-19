@@ -93,7 +93,10 @@ type Gate struct {
 	mu        sync.Mutex
 	started   bool
 	enforcing bool
-	luns      map[string]*state
+	// listed is set once a scan since the start or the last mode change
+	// succeeded, so luns holds every medium in a gated reader.
+	listed bool
+	luns   map[string]*state
 }
 
 // Sync applies one poll. While enforcing, every gated LUN stays unbound unless
@@ -114,13 +117,14 @@ func (g *Gate) Sync(enforcing bool) error {
 		if err := g.write("bus/scsi/drivers_autoprobe", boolText(!enforcing)); err != nil {
 			return err
 		}
-		g.started, g.enforcing = true, enforcing
+		g.started, g.enforcing, g.listed = true, enforcing, false
 		clear(g.luns)
 	}
 	luns, err := g.scan()
 	if err != nil {
 		return err
 	}
+	g.listed = true
 	if !enforcing {
 		var errs []error
 		for _, lun := range luns {
@@ -241,17 +245,18 @@ func (g *Gate) MountedPorts() map[string]bool {
 	return ports
 }
 
-// MediaPolicy lists the media that are in gated LUNs now.
-func (g *Gate) MediaPolicy() []usbtrust.MediaDecision {
+// MediaPolicy lists the media that are in gated LUNs now. listed is false
+// until the first scan after a start or mode change: an empty list then
+// does not mean that no medium is inserted.
+func (g *Gate) MediaPolicy() (media []usbtrust.MediaDecision, listed bool) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	var result []usbtrust.MediaDecision
 	for _, st := range g.luns {
 		if st.present {
-			result = append(result, decision(st))
+			media = append(media, decision(st))
 		}
 	}
-	return result
+	return media, g.listed
 }
 
 // AllowMedia opens the medium that is in LUN id now. connection must match

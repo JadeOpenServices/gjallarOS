@@ -39,7 +39,7 @@ type Controller struct {
 	DisarmDelay time.Duration
 	// Media keeps media in allowed USB readers closed until allowed.
 	Media interface {
-		MediaPolicy() []usbtrust.MediaDecision
+		MediaPolicy() (media []usbtrust.MediaDecision, listed bool)
 		AllowMedia(id, connection string) error
 		// MountedPorts lists USB devices, by port, with a mounted medium.
 		MountedPorts() map[string]bool
@@ -82,10 +82,11 @@ func (c *Controller) EnforcementEnabled() bool {
 	return c.armed.Load() || (c.ArmOnStart && !c.disarmed.Load())
 }
 
-// MediaPolicy lists the media in gated USB readers.
-func (c *Controller) MediaPolicy() []usbtrust.MediaDecision {
+// MediaPolicy lists the media in gated USB readers; listed is false while
+// the gate has not scanned yet.
+func (c *Controller) MediaPolicy() (media []usbtrust.MediaDecision, listed bool) {
 	if c.Media == nil {
-		return nil
+		return nil, true
 	}
 	return c.Media.MediaPolicy()
 }

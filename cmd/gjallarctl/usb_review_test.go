@@ -295,7 +295,7 @@ func poll(r *usbReviewState, policy ...usbtrust.Decision) []string {
 			asked = append(asked, d.Connection)
 		}
 	}
-	r.prune()
+	r.prune(true)
 	return asked
 }
 
@@ -328,6 +328,91 @@ func TestUSBReviewAfterBrokerRestart(t *testing.T) {
 	poll(r)
 	if got := poll(r, device("d", usbtrust.TargetBlock)); !reflect.DeepEqual(got, []string{"d"}) {
 		t.Fatalf("replugged device announced %v, want [d]", got)
+	}
+}
+
+// pollMedia runs one broker poll of media through r and returns the
+// connections it would announce.
+func pollMedia(r *usbReviewState, pending bool, media ...usbtrust.MediaDecision) []string {
+	r.begin()
+	var asked []string
+	for _, m := range media {
+		if !pending && r.wantsMedia(m) {
+			asked = append(asked, m.Connection)
+		}
+	}
+	r.prune(!pending)
+	return asked
+}
+
+func TestUSBMediaKeptClosedAcrossRestarts(t *testing.T) {
+	// SYNTHETIC reader and card.
+	card := func(connection string) usbtrust.MediaDecision {
+		return usbtrust.MediaDecision{ID: "6:0:0:0", Connection: connection, VIDPID: "0000:0000", Port: "2-1", Bytes: 64e9}
+	}
+	path := filepath.Join(t.TempDir(), "gjallar", "usb-review.json")
+	r := newUSBReviewState()
+	r.path = path
+	if got := pollMedia(r, false, card("a")); !reflect.DeepEqual(got, []string{"a"}) {
+		t.Fatalf("new card announced %v, want [a]", got)
+	}
+	r.mediaDone(card("a"))
+	// A restarted broker lists nothing until it scanned, then the same card
+	// under a new token.
+	if got := pollMedia(r, true); got != nil {
+		t.Fatalf("pending poll announced %v", got)
+	}
+	if got := pollMedia(r, false, card("b")); got != nil {
+		t.Fatalf("card kept closed announced again after a broker restart: %v", got)
+	}
+	if err := r.save(); err != nil {
+		t.Fatal(err)
+	}
+	// A restarted review (a rebuild) remembers the answer.
+	r = newUSBReviewState()
+	r.path = path
+	if err := r.load(); err != nil {
+		t.Fatal(err)
+	}
+	if got := pollMedia(r, false, card("b")); got != nil {
+		t.Fatalf("card kept closed announced again after a review restart: %v", got)
+	}
+	// Pulled and put back: ask again.
+	pollMedia(r, false)
+	if got := pollMedia(r, false, card("c")); !reflect.DeepEqual(got, []string{"c"}) {
+		t.Fatalf("reinserted card announced %v, want [c]", got)
+	}
+	// Not answered (opened, or the notice closed with the review): a later
+	// token asks again.
+	if got := pollMedia(r, false, card("d")); !reflect.DeepEqual(got, []string{"d"}) {
+		t.Fatalf("card that was not kept closed announced %v, want [d]", got)
+	}
+}
+
+func TestUSBReviewKeptBlockedAcrossReviewRestart(t *testing.T) {
+	device := usbtrust.Decision{
+		Connection:     "a",
+		Target:         usbtrust.TargetBlock,
+		ObservedDevice: usbtrust.ObservedDevice{Identity: usbtrust.Identity{Hash: "SYNTHETIC-hash", Port: "2-2"}},
+	}
+	path := filepath.Join(t.TempDir(), "usb-review.json")
+	r := newUSBReviewState()
+	r.path = path
+	poll(r, device)
+	r.done(device, usbReviewAnswered)
+	if err := r.save(); err != nil {
+		t.Fatal(err)
+	}
+	if info, err := os.Stat(path); err != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("saved answers: %v %v", info, err)
+	}
+	r = newUSBReviewState()
+	r.path = path
+	if err := r.load(); err != nil {
+		t.Fatal(err)
+	}
+	if got := poll(r, device); got != nil {
+		t.Fatalf("device kept blocked announced again after a review restart: %v", got)
 	}
 }
 

@@ -85,10 +85,11 @@ func (h Handler) Handle(
 			enforcing = mode.EnforcementEnabled()
 		}
 		var media []usbtrust.MediaDecision
+		mediaListed := true
 		if gate, ok := h.Reader.(interface {
-			MediaPolicy() []usbtrust.MediaDecision
+			MediaPolicy() ([]usbtrust.MediaDecision, bool)
 		}); ok {
-			media = gate.MediaPolicy()
+			media, mediaListed = gate.MediaPolicy()
 		}
 		var renewals []TrustLapse
 		if lapse, ok := h.Reader.(interface {
@@ -98,7 +99,7 @@ func (h Handler) Handle(
 				return errorResponse(err)
 			}
 		}
-		return Response{OK: true, Policy: policy, Media: media, Renewals: renewals, Revision: revision, Enforcing: enforcing}
+		return Response{OK: true, Policy: policy, Media: media, MediaPending: !mediaListed, Renewals: renewals, Revision: revision, Enforcing: enforcing}
 	case ActionStatus:
 		status, err := h.Reader.Status(ctx)
 		if err != nil {

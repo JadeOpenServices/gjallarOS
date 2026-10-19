@@ -117,9 +117,9 @@ func TestDisarmRejectsExtraArguments(t *testing.T) {
 
 type mountedMedia map[string]bool
 
-func (mountedMedia) MediaPolicy() []usbtrust.MediaDecision { return nil }
-func (mountedMedia) AllowMedia(string, string) error       { return nil }
-func (m mountedMedia) MountedPorts() map[string]bool       { return m }
+func (mountedMedia) MediaPolicy() ([]usbtrust.MediaDecision, bool) { return nil, true }
+func (mountedMedia) AllowMedia(string, string) error               { return nil }
+func (m mountedMedia) MountedPorts() map[string]bool               { return m }
 
 func targets(t *testing.T, c *Controller) map[string]usbtrust.Target {
 	t.Helper()

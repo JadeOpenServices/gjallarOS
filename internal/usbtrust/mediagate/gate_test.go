@@ -101,8 +101,8 @@ func newGate(t *testing.T) (*Gate, *fakeKernel, fakeProbe) {
 
 func only(t *testing.T, g *Gate) (id, token string, allowed bool) {
 	t.Helper()
-	media := g.MediaPolicy()
-	if len(media) != 1 {
+	media, listed := g.MediaPolicy()
+	if !listed || len(media) != 1 {
 		t.Fatalf("media = %+v, want one", media)
 	}
 	return media[0].ID, media[0].Connection, media[0].Allowed
@@ -147,7 +147,7 @@ func TestCardStaysClosedUntilAllowed(t *testing.T) {
 	if k.bound("6:0:0:0") {
 		t.Fatal("empty reader stayed bound")
 	}
-	if len(g.MediaPolicy()) != 0 {
+	if media, _ := g.MediaPolicy(); len(media) != 0 {
 		t.Fatal("removed card still listed")
 	}
 	probe["6:0:0:0"] = MediumPresent
@@ -161,6 +161,27 @@ func TestCardStaysClosedUntilAllowed(t *testing.T) {
 	}
 	if err := g.AllowMedia(id, token); err == nil {
 		t.Fatal("old approval opened the new card")
+	}
+}
+
+// A broker that has not scanned yet must not report "no media": the review
+// would forget which cards the owner kept closed.
+func TestMediaListedOnlyAfterScan(t *testing.T) {
+	g, k, probe := newGate(t)
+	k.add("6:0:0:0", true, true, 0, "5")
+	probe["6:0:0:0"] = MediumPresent
+	if _, listed := g.MediaPolicy(); listed {
+		t.Fatal("media listed before the first scan")
+	}
+	if err := g.Sync(true); err != nil {
+		t.Fatal(err)
+	}
+	only(t, g)
+	if err := g.Sync(false); err != nil {
+		t.Fatal(err)
+	}
+	if _, listed := g.MediaPolicy(); !listed {
+		t.Fatal("audit-mode scan left media unlisted")
 	}
 }
 
@@ -304,7 +325,7 @@ func TestFixedAndNonUSBDisksBind(t *testing.T) {
 	if !k.bound("6:0:0:0") {
 		t.Fatal("fixed USB disk was not bound")
 	}
-	if len(g.MediaPolicy()) != 0 {
+	if media, _ := g.MediaPolicy(); len(media) != 0 {
 		t.Fatal("fixed disk listed as a medium")
 	}
 }

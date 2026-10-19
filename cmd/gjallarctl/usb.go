@@ -100,13 +100,17 @@ func runUSBReview(args []string, stderr io.Writer) int {
 		return 1
 	}
 	review := newUSBReviewState()
+	review.path = usbReviewStatePath()
+	if err := review.load(); err != nil {
+		fmt.Fprintf(stderr, "WARN: USB review: %v\n", err)
+	}
 	// Media and renewal notices close their cards when ctx ends; wait for
 	// that on exit.
 	var media sync.WaitGroup
 	defer media.Wait()
 	// The same failure every 2 s says nothing new: report it once, and once
 	// more when the broker answers again.
-	lastErr := ""
+	lastErr, lastSaveErr := "", ""
 	for ctx.Err() == nil {
 		requestCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		response, err := broker.Call(requestCtx, broker.DefaultSocket, broker.Request{Action: broker.ActionPolicy})
@@ -131,13 +135,15 @@ func runUSBReview(args []string, stderr io.Writer) int {
 			// Media notices run on their own: a card left closed must not hold
 			// back the review of the next USB device.
 			for _, m := range response.Media {
-				if !review.wantsMedia(m) {
+				if response.MediaPending || !review.wantsMedia(m) {
 					continue
 				}
 				media.Add(1)
 				go func() {
 					defer media.Done()
-					usbReviewMedia(ctx, executable, m)
+					if usbReviewMedia(ctx, executable, m) {
+						review.mediaDone(m)
+					}
 				}()
 			}
 			for _, l := range response.Renewals {
@@ -150,7 +156,11 @@ func runUSBReview(args []string, stderr io.Writer) int {
 					usbReviewRenewal(ctx, executable, l)
 				}()
 			}
-			review.prune()
+			review.prune(!response.MediaPending)
+			if err := review.save(); err != nil && err.Error() != lastSaveErr {
+				fmt.Fprintf(stderr, "WARN: USB review: %v\n", err)
+				lastSaveErr = err.Error()
+			}
 		}
 		select {
 		case <-ctx.Done():
@@ -182,6 +192,12 @@ func usbReviewKey(d usbtrust.Decision) string {
 	return d.Identity.Hash + "\x00" + d.Identity.Port
 }
 
+// usbMediaKey names a medium across broker restarts: the reader, its slot
+// and the size of what is in it, without the per-insertion token.
+func usbMediaKey(m usbtrust.MediaDecision) string {
+	return strings.Join([]string{m.VIDPID, m.Port, m.ID, strconv.FormatUint(m.Bytes, 10)}, "\x00")
+}
+
 // usbReviewState remembers what the review loop already asked, from one
 // broker poll to the next.
 type usbReviewState struct {
@@ -196,15 +212,113 @@ type usbReviewState struct {
 	// Lapse warnings shown, by record and lapse time. Renewing moves the
 	// time, so a later warning for the same device shows again.
 	warned map[string]bool
+
+	// Media connections with an open or finished notice, and those the
+	// current poll listed.
+	mediaSeen, mediaActive map[string]bool
+	// Media the user kept closed, by usbMediaKey, and those the current poll
+	// listed. Notices answer from their own goroutines.
+	mu                   sync.Mutex
+	closed, mediaPresent map[string]bool
+
+	// path keeps answered and closed across a restart of the review, such
+	// as the one a rebuild causes; empty keeps them in memory only.
+	path  string
+	dirty bool
 }
 
 func newUSBReviewState() *usbReviewState {
-	return &usbReviewState{seen: map[string]bool{}, answered: map[string]bool{}, warned: map[string]bool{}}
+	return &usbReviewState{
+		seen: map[string]bool{}, answered: map[string]bool{}, warned: map[string]bool{},
+		mediaSeen: map[string]bool{}, closed: map[string]bool{},
+	}
+}
+
+// usbReviewStatePath lives in the runtime directory: answers last until
+// logout, like the notices they close.
+func usbReviewStatePath() string {
+	dir := os.Getenv("XDG_RUNTIME_DIR")
+	if dir == "" {
+		dir = filepath.Join("/run/user", strconv.Itoa(os.Getuid()))
+	}
+	return filepath.Join(dir, "gjallar", "usb-review.json")
+}
+
+type usbReviewSaved struct {
+	Blocked []string `json:"blocked,omitempty"`
+	Closed  []string `json:"closed,omitempty"`
+}
+
+// load restores the answers of an earlier run. The first poll forgets the
+// devices and media that left in between.
+func (r *usbReviewState) load() error {
+	if r.path == "" {
+		return nil
+	}
+	data, err := os.ReadFile(r.path)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	var saved usbReviewSaved
+	if err := json.Unmarshal(data, &saved); err != nil {
+		return fmt.Errorf("%s: %w", r.path, err)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, key := range saved.Blocked {
+		r.answered[key] = true
+	}
+	for _, key := range saved.Closed {
+		r.closed[key] = true
+	}
+	return nil
+}
+
+// save writes the answers when they changed since the last save.
+func (r *usbReviewState) save() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.path == "" || !r.dirty {
+		return nil
+	}
+	saved := usbReviewSaved{Blocked: sortedKeys(r.answered), Closed: sortedKeys(r.closed)}
+	data, err := json.Marshal(saved)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(r.path), 0o700); err != nil {
+		return err
+	}
+	tmp := r.path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, r.path); err != nil {
+		return err
+	}
+	r.dirty = false
+	return nil
+}
+
+func sortedKeys(set map[string]bool) []string {
+	keys := make([]string, 0, len(set))
+	for key := range set {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 // begin starts a poll.
 func (r *usbReviewState) begin() {
 	r.active, r.present = map[string]bool{}, map[string]bool{}
+	r.mediaActive = map[string]bool{}
+	r.mu.Lock()
+	r.mediaPresent = map[string]bool{}
+	r.mu.Unlock()
 }
 
 // wants reports whether d should be announced now, and marks it as asked.
@@ -227,7 +341,10 @@ func (r *usbReviewState) wants(d usbtrust.Decision) bool {
 func (r *usbReviewState) done(d usbtrust.Decision, outcome usbReviewOutcome) {
 	switch outcome {
 	case usbReviewAnswered:
+		r.mu.Lock()
 		r.answered[usbReviewKey(d)] = true
+		r.dirty = true
+		r.mu.Unlock()
 	case usbReviewRetry:
 		delete(r.seen, d.Connection)
 	}
@@ -236,12 +353,24 @@ func (r *usbReviewState) done(d usbtrust.Decision, outcome usbReviewOutcome) {
 // wantsMedia reports whether m should be announced now, and marks it as
 // asked.
 func (r *usbReviewState) wantsMedia(m usbtrust.MediaDecision) bool {
-	r.active[m.Connection] = true
-	if m.Allowed || r.seen[m.Connection] {
+	r.mediaActive[m.Connection] = true
+	r.mu.Lock()
+	r.mediaPresent[usbMediaKey(m)] = true
+	closed := r.closed[usbMediaKey(m)]
+	r.mu.Unlock()
+	if m.Allowed || closed || r.mediaSeen[m.Connection] {
 		return false
 	}
-	r.seen[m.Connection] = true
+	r.mediaSeen[m.Connection] = true
 	return true
+}
+
+// mediaDone records that the user kept m closed.
+func (r *usbReviewState) mediaDone(m usbtrust.MediaDecision) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.closed[usbMediaKey(m)] = true
+	r.dirty = true
 }
 
 // wantsRenewal reports whether the lapse warning for l should be shown now,
@@ -255,16 +384,34 @@ func (r *usbReviewState) wantsRenewal(l broker.TrustLapse) bool {
 	return true
 }
 
-// prune forgets connections and devices the current poll no longer listed.
-func (r *usbReviewState) prune() {
+// prune forgets connections, devices and media the current poll no longer
+// listed. Media are kept while the broker has not listed them yet.
+func (r *usbReviewState) prune(mediaListed bool) {
 	for token := range r.seen {
 		if !r.active[token] {
 			delete(r.seen, token)
 		}
 	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	for key := range r.answered {
 		if !r.present[key] {
 			delete(r.answered, key)
+			r.dirty = true
+		}
+	}
+	if !mediaListed {
+		return
+	}
+	for token := range r.mediaSeen {
+		if !r.mediaActive[token] {
+			delete(r.mediaSeen, token)
+		}
+	}
+	for key := range r.closed {
+		if !r.mediaPresent[key] {
+			delete(r.closed, key)
+			r.dirty = true
 		}
 	}
 }
@@ -335,24 +482,27 @@ func usbReviewDecision(ctx context.Context, executable string, d usbtrust.Decisi
 
 // usbReviewMedia announces a medium that stays closed in an allowed reader
 // and opens it after authentication. The notice closes when the medium is
-// removed or swapped.
-func usbReviewMedia(ctx context.Context, executable string, m usbtrust.MediaDecision) {
+// removed or swapped. It reports whether the user chose to keep the medium
+// closed; an opened medium that a broker restart closes again is announced
+// again.
+func usbReviewMedia(ctx context.Context, executable string, m usbtrust.MediaDecision) (keptClosed bool) {
 	ctx, cancel := usbWhileMediaPresent(ctx, m.Connection)
 	defer cancel()
 	picked, err := showNotice(ctx, usbMediaNotice(m))
 	if err != nil || ctx.Err() != nil {
-		return
+		return false
 	}
 	switch picked {
 	case "open", "default":
 	default:
-		return
+		return true
 	}
 	output, err := usbAuthorize(ctx, "the storage in "+usbMediaReader(m), []string{executable, "usb", "allow-media", "--media", m.ID, "--connection", m.Connection})
 	if err == nil || ctx.Err() != nil {
-		return
+		return false
 	}
 	_, _ = exec.Command("zenity", "--error", "--title=Storage stays closed", "--text="+html.EscapeString(string(output))).Output()
+	return false
 }
 
 // usbReviewRenewal warns that a device's trust lapses soon and renews it on
@@ -438,7 +588,7 @@ func usbWhileMediaPresent(ctx context.Context, connection string) (context.Conte
 			callCtx, done := context.WithTimeout(ctx, 2*time.Second)
 			response, err := broker.Call(callCtx, broker.DefaultSocket, broker.Request{Action: broker.ActionPolicy})
 			done()
-			if err == nil && !usbMediaActive(response.Media, connection) {
+			if err == nil && !response.MediaPending && !usbMediaActive(response.Media, connection) {
 				cancel()
 				return
 			}
