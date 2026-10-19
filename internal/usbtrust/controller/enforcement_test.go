@@ -114,3 +114,81 @@ func TestDisarmRejectsExtraArguments(t *testing.T) {
 		t.Fatal("passphrase accepted by unrelated action")
 	}
 }
+
+type mountedMedia map[string]bool
+
+func (mountedMedia) MediaPolicy() []usbtrust.MediaDecision { return nil }
+func (mountedMedia) AllowMedia(string, string) error       { return nil }
+func (m mountedMedia) MountedPorts() map[string]bool       { return m }
+
+func targets(t *testing.T, c *Controller) map[string]usbtrust.Target {
+	t.Helper()
+	policy, _, err := c.Policy(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := map[string]usbtrust.Target{}
+	for _, d := range policy {
+		result[d.RuntimeID] = d.Target
+	}
+	return result
+}
+
+func TestArmingKeepsOnlyMountedMassStorage(t *testing.T) {
+	c, s := fixture()
+	s.observed = []usbtrust.ObservedDevice{
+		{RuntimeID: "13", Identity: usbtrust.Identity{VIDPID: "dead:0001", Hash: "mounted-reader", Port: "1-3", ConnectType: "hotplug", Interfaces: []string{"08:06:50"}}},
+		{RuntimeID: "14", Identity: usbtrust.Identity{VIDPID: "dead:0002", Hash: "storage-and-keys", Port: "1-4", ConnectType: "hotplug", Interfaces: []string{"08:06:50", "03:01:01"}}},
+		{RuntimeID: "15", Identity: usbtrust.Identity{VIDPID: "dead:0003", Hash: "keyboard", Port: "1-5", ConnectType: "hotplug", Interfaces: []string{"03:01:01"}}},
+		{RuntimeID: "16", Identity: usbtrust.Identity{VIDPID: "dead:0004", Hash: "idle-stick", Port: "1-6", ConnectType: "hotplug", Interfaces: []string{"08:06:50"}}},
+	}
+	c.ArmOnStart = true
+	c.Apply = func(context.Context, []usbtrust.Decision) error { return nil }
+	c.Media = mountedMedia{"1-3": true, "1-4": true, "1-5": true}
+	if c.Ready() {
+		t.Fatal("ready before the first reconcile")
+	}
+	if err := c.Reconcile(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if !c.Ready() {
+		t.Fatal("not ready after the first reconcile")
+	}
+	got := targets(t, c)
+	if got["13"] != usbtrust.TargetAllow {
+		t.Fatal("arming blocked a mounted reader")
+	}
+	for _, id := range []string{"14", "15", "16"} {
+		if got[id] != usbtrust.TargetBlock {
+			t.Fatalf("arming kept device %s open", id)
+		}
+	}
+	if kept := c.KeptAtArming(); len(kept) != 1 || !kept["1-3"] {
+		t.Fatalf("kept ports: %v", kept)
+	}
+
+	// A restarted broker finds the state armed and keeps nothing.
+	restarted := &Controller{Reader: c.Reader, MachineID: c.MachineID, ModelID: c.ModelID, Commit: c.Commit, ArmOnStart: true, Apply: c.Apply, Media: c.Media}
+	restarted.SetPersistenceReady(true)
+	if err := restarted.Reconcile(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if restarted.KeptAtArming() != nil || targets(t, restarted)["13"] != usbtrust.TargetBlock {
+		t.Fatal("broker restart kept the mounted reader open")
+	}
+}
+
+func TestFailedArmingKeepsNothing(t *testing.T) {
+	c, s := fixture()
+	s.observed[0].Identity.ConnectType = "hotplug"
+	c.ArmOnStart = true
+	c.Apply = func(context.Context, []usbtrust.Decision) error { return nil }
+	c.Commit = func(context.Context, usbtrust.Document) error { return errors.New("store unavailable") }
+	c.Media = mountedMedia{"1-2": true}
+	if err := c.Reconcile(context.Background()); err == nil {
+		t.Fatal("arming succeeded without a commit")
+	}
+	if !c.Ready() || c.KeptAtArming() != nil || targets(t, c)["12"] != usbtrust.TargetBlock {
+		t.Fatal("failed arming kept a device open")
+	}
+}

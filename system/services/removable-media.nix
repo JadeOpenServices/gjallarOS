@@ -11,6 +11,24 @@ let
   usbtrustd = pkgs.callPackage ../../pkgs/gjallar-usbtrustd { };
   resolved = pkgs.writeText "gjallar-usbtrust-oddc.json" (builtins.toJSON config.oddc.resolved);
 
+  # The same settings the nixpkgs module writes, with the fallback target
+  # passed in. See the usbguard unit below for why.
+  usbguard = config.services.usbguard;
+  usbguardConf = fallback: ''
+    RuleFile=${pkgs.writeText "usbguard-rules" usbguard.rules}
+    ImplicitPolicyTarget=${fallback}
+    PresentDevicePolicy=${usbguard.presentDevicePolicy}
+    PresentControllerPolicy=${usbguard.presentControllerPolicy}
+    InsertedDevicePolicy=${usbguard.insertedDevicePolicy}
+    RestoreControllerDeviceState=${lib.boolToString usbguard.restoreControllerDeviceState}
+    DeviceManagerBackend=uevent
+    IPCAllowedUsers=${lib.concatStringsSep " " usbguard.IPCAllowedUsers}
+    IPCAllowedGroups=${lib.concatStringsSep " " usbguard.IPCAllowedGroups}
+    IPCAccessControlFiles=/var/lib/usbguard/IPCAccessControl.d/
+    DeviceRulesWithPort=${lib.boolToString usbguard.deviceRulesWithPort}
+    AuditFilePath=/dev/null
+  '';
+
   # zenity --password has no --text option and silently drops it, so the
   # reason line needs --entry --hide-text. Output is the same: text + newline.
   usbTrustAskpass = pkgs.writeShellScript "gjallar-usbtrust-askpass" ''
@@ -105,6 +123,20 @@ in
       systemd.services.usbguard.preStart = lib.mkBefore ''
         rm -f -- /var/lib/usbguard/IPCAccessControl.d/${lib.escapeShellArg settings.username}
       '';
+
+      # nixpkgs passes a store copy of the settings on the command line, so
+      # switching between audit and enforce changed the unit and restarted
+      # USBGuard. On start it applies PresentDevicePolicy with the new
+      # blocking fallback and pulled a mounted card before the broker could
+      # keep it (REGRESSION 734). Reading the settings from /etc keeps the
+      # unit the same across that switch; the broker sets the fallback at
+      # runtime. Any other settings change still restarts USBGuard.
+      environment.etc."usbguard/usbguard-daemon.conf".text = usbguardConf usbguard.implicitPolicyTarget;
+      systemd.services.usbguard.restartTriggers = [
+        (pkgs.writeText "usbguard-daemon-conf" (usbguardConf "set-by-broker"))
+      ];
+      systemd.services.usbguard.serviceConfig.ExecStart =
+        lib.mkForce "${usbguard.package}/bin/usbguard-daemon -P -k -c /etc/usbguard/usbguard-daemon.conf";
 
       systemd.services.usbguard.serviceConfig.ReadWritePaths = lib.mkForce [
         "-/dev/shm"

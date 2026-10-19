@@ -134,6 +134,7 @@ func run(
 		MountInfo: "/proc/self/mountinfo",
 		Probe:     mediagate.BSG{Dir: "/dev/bsg"},
 		Event:     func(event map[string]any) { _ = json.NewEncoder(stderr).Encode(event) },
+		Kept:      control.KeptAtArming,
 	}
 	control.Media = media
 	loopCtx, stopLoop := context.WithCancel(ctx)
@@ -143,7 +144,12 @@ func run(
 		// as gone before a new one can be pushed in.
 		var last string
 		for loopCtx.Err() == nil {
-			err := media.Sync(control.EnforcementEnabled())
+			// Wait for the first reconcile: an arming it runs decides which
+			// mounted media stay open.
+			var err error
+			if control.Ready() {
+				err = media.Sync(control.EnforcementEnabled())
+			}
 			if text := fmt.Sprint(err); err != nil && text != last {
 				fmt.Fprintf(stderr, "WARN: USB storage media gate: %v\n", err)
 				last = text

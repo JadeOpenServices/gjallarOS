@@ -239,6 +239,7 @@ func TestArmingKeepsMountedMediaAndClosesTheRest(t *testing.T) {
 	k.setBound("7:0:0:0", true)
 	probe["6:0:0:0"] = MediumPresent
 	probe["7:0:0:0"] = MediumPresent
+	g.Kept = func() map[string]bool { return map[string]bool{"1-1": true} }
 
 	g.Sync(true)
 	if !k.bound("6:0:0:0") {
@@ -252,6 +253,32 @@ func TestArmingKeepsMountedMediaAndClosesTheRest(t *testing.T) {
 	g.Sync(true)
 	if k.bound("7:0:0:0") {
 		t.Fatal("card bound behind the gate's back stayed open")
+	}
+}
+
+func TestRestartKeepsNothingOpen(t *testing.T) {
+	g, k, probe := newGate(t)
+	mounted := k.add("6:0:0:0", true, true, 0, "5")
+	mustWrite(t, filepath.Join(mounted, "block/sdb/dev"), "8:16")
+	mustWrite(t, filepath.Join(mounted, "block/sdb/sdb1/dev"), "8:17")
+	mustWrite(t, g.MountInfo, "40 1 8:17 / /run/media/user/card rw - vfat /dev/sdb1 rw")
+	k.setBound("6:0:0:0", true)
+	probe["6:0:0:0"] = MediumPresent
+	if ports := g.MountedPorts(); len(ports) != 1 || !ports["1-1"] {
+		t.Fatalf("mounted ports: %v", ports)
+	}
+	var events []string
+	g.Event = func(e map[string]any) { events = append(events, e["change"].(string)) }
+	// No arming in this process: Kept is nil, so the mounted card closes.
+	g.Kept = func() map[string]bool { return nil }
+	g.Sync(true)
+	if k.bound("6:0:0:0") {
+		t.Fatal("restart left a mounted, unapproved card open")
+	}
+	for _, e := range events {
+		if e == "kept-open" {
+			t.Fatal("restart logged kept-open")
+		}
 	}
 }
 

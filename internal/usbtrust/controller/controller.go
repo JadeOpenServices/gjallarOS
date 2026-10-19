@@ -7,6 +7,8 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -39,6 +41,8 @@ type Controller struct {
 	Media interface {
 		MediaPolicy() []usbtrust.MediaDecision
 		AllowMedia(id, connection string) error
+		// MountedPorts lists USB devices, by port, with a mounted medium.
+		MountedPorts() map[string]bool
 	}
 	mu               sync.Mutex
 	sessions         usbtrust.Sessions
@@ -51,6 +55,24 @@ type Controller struct {
 	// armed mirrors the last verified document; disarmed withdraws ArmOnStart
 	// until the daemon restarts.
 	armed, disarmed atomic.Bool
+	// kept holds the ports the arming in this process kept open; it stays
+	// nil when this process did not arm. ready is set once the first
+	// Reconcile has run, so the arming decision is known.
+	kept  atomic.Pointer[map[string]bool]
+	ready atomic.Bool
+}
+
+// Ready reports whether the first Reconcile has run. The media gate waits for
+// it so it never closes a medium the arming is about to keep.
+func (c *Controller) Ready() bool { return c.ready.Load() }
+
+// KeptAtArming lists the USB ports whose mounted storage the arming in this
+// process kept open. It is nil after a boot or a broker restart.
+func (c *Controller) KeptAtArming() map[string]bool {
+	if kept := c.kept.Load(); kept != nil {
+		return *kept
+	}
+	return nil
 }
 
 func (c *Controller) EnforcementEnabled() bool {
@@ -127,6 +149,15 @@ func (c *Controller) Policy(ctx context.Context) ([]usbtrust.Decision, uint64, e
 func (c *Controller) Reconcile(ctx context.Context) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	defer c.ready.Store(true)
+	if c.EnforcementEnabled() {
+		// USBGuard keeps its fallback across a broker restart and does not
+		// restart when only the mode changes, so a new broker may find it
+		// still allowing new devices.
+		if err := c.syncImplicit(ctx); err != nil {
+			return err
+		}
+	}
 	input, err := c.snapshot(ctx)
 	if err != nil {
 		return err
@@ -280,7 +311,52 @@ func (c *Controller) arm(ctx context.Context, input *usbtrust.AuditInput) error 
 	}
 	input.Trusted = &doc
 	c.armed.Store(true)
-	return c.sessions.Observe(input.Observed)
+	if err := c.sessions.Observe(input.Observed); err != nil {
+		return err
+	}
+	return c.keepMounted(*input)
+}
+
+// keepMounted allows, for this connection only, USB storage whose medium is
+// mounted while blocking is switched on, so arming does not pull a filesystem
+// away. Only devices with nothing but mass-storage interfaces qualify, and
+// only when the owner would be offered allow-once for them anyway.
+func (c *Controller) keepMounted(input usbtrust.AuditInput) error {
+	if c.Media == nil {
+		return nil
+	}
+	mounted := c.Media.MountedPorts()
+	policy, err := c.sessions.Derive(input)
+	if err != nil {
+		return err
+	}
+	kept := map[string]bool{}
+	for _, decision := range policy {
+		if decision.Target != usbtrust.TargetBlock || decision.Identity.Port == "" ||
+			!mounted[decision.Identity.Port] || !massStorageOnly(decision.Identity.Interfaces) ||
+			!slices.Contains(decision.Actions, usbtrust.ActionAllowOnce) {
+			continue
+		}
+		if err := c.sessions.Choose(decision.RuntimeID, decision.Connection, usbtrust.TargetAllow); err != nil {
+			return err
+		}
+		kept[decision.Identity.Port] = true
+	}
+	c.kept.Store(&kept)
+	return nil
+}
+
+// massStorageOnly reports whether every interface is USB mass storage (08).
+func massStorageOnly(interfaces []string) bool {
+	if len(interfaces) == 0 {
+		return false
+	}
+	for _, iface := range interfaces {
+		if !strings.HasPrefix(iface, "08:") {
+			return false
+		}
+	}
+	return true
 }
 
 // disarm needs the disk encryption passphrase, so a stolen sudo session alone

@@ -53,6 +53,77 @@ and only the disk encryption passphrase can turn blocking off again.
     (i8042/i2c, not USB) in mind, and test in a VM before flipping on new
     hardware.
 
+### A mounted card at the first arming
+
+Found in the fw13 VM on 2026-10-19: the rebuild that switches
+from audit to blocking pulled a mounted card (SYNTHETIC image). Jade's rule
+(2026-10-19): the first arming keeps only a device that has nothing but
+mass-storage interfaces and whose medium is mounted. Everything else asks.
+Boot and a broker restart still block everything.
+
+**Why it broke.** The nixpkgs module writes `ImplicitPolicyTarget` into the
+daemon config in the store, so switching `enforce` changes usbguard's
+`ExecStart`, and the rebuild restarts usbguard. On start, usbguard applies
+`PresentDevicePolicy=apply-policy` to every device already plugged in
+([RHEL 7 Security Guide](https://docs.redhat.com/en/documentation/Red_Hat_Enterprise_Linux/7/html/Security_Guide/sec-Using-USBGuard.html)).
+With no rules and the block fallback, that blocks the reader before the
+broker or the media gate get a say. The gate's own keep never ran on a live
+reader. It also logs `kept-open` after every broker restart, because it
+treats the first poll of a process as an arming.
+
+**How others do it.** RHEL tells admins to run `usbguard generate-policy`
+before enforcing, which allows every present device for good, keyboards
+included ([RHEL 7](https://docs.redhat.com/en/documentation/Red_Hat_Enterprise_Linux/7/html/Security_Guide/sec-Using-USBGuard.html),
+[Red Hat blog](https://www.redhat.com/en/blog/usbguard-improvements-red-hat-enterprise-linux-83)).
+GNOME's USB protection only blocks devices plugged in later
+([gsd MR 75](https://gitlab.gnome.org/GNOME/gnome-settings-daemon/-/merge_requests/75),
+[Arch wiki](https://wiki.archlinux.org/title/USBGuard)). Jade's rule is
+narrower than both: one mounted storage device, for this connection only.
+
+**Security pass.**
+- What a kept device can do: it has only class 08 interfaces, so it cannot
+  type or act as a network card. Its contents were already mounted and
+  read during audit, so keeping it adds no new exposure.
+- How storage turned hostile in practice: BadUSB firmware made a stick
+  pose as a keyboard ([SR Labs, Black Hat 2014](https://techxplore.com/news/2014-07-sr-labs-expose-badusb-week.html)).
+  A device that adds interfaces has to enumerate again, and usbguard then
+  treats it as a new insertion, which is blocked once armed. Composite
+  devices with storage plus anything else are never kept.
+- The keep grants nothing the owner could not grant by hand: only devices
+  whose review offers "Allow until unplugged" qualify, never debug-class
+  parts. The allow lives in broker memory. Unplug, reboot or broker restart
+  ends it.
+- Fail closed: the keep is part of the signed arm step. If arming fails
+  (no TPM key, a failed check) nothing is kept and everything is blocked
+  as before. If the gate cannot list mounts, nothing is kept.
+- A new gap from not restarting usbguard: until the new broker's first
+  pass, usbguard still runs with the audit fallback. The broker therefore
+  sets the block fallback before it does anything else, and present devices
+  keep their audit state only until the same pass applies the policy.
+- A medium swapped in a kept reader is closed and asks, as before.
+
+**Decision.**
+- [x] usbguard reads its daemon config from `/etc/usbguard`, and only the
+      fallback line depends on `enforce`. Every other line is a restart
+      trigger, so real config changes still restart usbguard. The mode
+      switch no longer does: the broker already sets the fallback at runtime.
+- [x] The arm step keeps a present device when all its interfaces are
+      class 08, the gate reports one of its LUNs mounted, and its review
+      offers "Allow until unplugged". It gets that choice for this
+      connection.
+- [x] The media gate keeps open only on the controller's real arm in this
+      process, never on its first poll after a restart.
+- [x] fw13 VM: disarm, audit rebuild, mount a SYNTHETIC card, enforce
+      rebuild → card stays mounted; reinsert asks; broker restart blocks it
+      with no `kept-open`; a keyboard present at arming is blocked.
+      PASS fw13 VM 2026-10-19: rebuild arm 16:38 and the delayed
+      `gjallarctl settings apply` arm 19:10 both kept the SYNTHA card mounted
+      (`kept-open`), usbguard not restarted; the keyboard was blocked; a
+      broker restart and a reinsert both blocked the card and asked.
+- Open: booting with `enforce` off while the signed state is still armed
+  starts usbguard with the allow fallback until the broker blocks
+  (loophole 23).
+
 ## 2. USB review UX
 
 - [x] Plain verdict with colour dots, and an optional technical view.
