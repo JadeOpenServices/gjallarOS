@@ -17,87 +17,90 @@ import (
 	"github.com/JadeOpenServices/gjallarOS/apps"
 )
 
+// User is user.config.json. Every field carries a tier tag that says how the
+// settings service confirms a change after install (ROADMAP §14); see
+// TierOf.
 type User struct {
-	Hostname               string                 `json:"hostname"`
-	Username               string                 `json:"username"`
-	Timezone               string                 `json:"timezone"`
-	Locale                 string                 `json:"locale"`
-	KeyboardLayout         string                 `json:"keyboardLayout"`
-	KeyboardVariant        string                 `json:"keyboardVariant"`
-	WeatherCity            string                 `json:"weatherCity"`
-	WeatherCountry         string                 `json:"weatherCountry"`
-	TouchpadWorkspaceSwipe bool                   `json:"touchpadWorkspaceSwipe"`
-	ClamshellEnable        bool                   `json:"clamshellEnable"`
-	ConsoleLoginEnable     bool                   `json:"consoleLoginEnable"`
-	USBGuardEnable         bool                   `json:"usbguardEnable"`
-	USBTrustEnforce        bool                   `json:"usbTrustEnforce"`
-	USBTrustTPMHandle      string                 `json:"usbTrustTpmHandle"`
-	USBReviewTechnical     bool                   `json:"usbReviewTechnicalView"`
-	PrintingEnable         bool                   `json:"printingEnable"`
-	NetworkPrintingEnable  bool                   `json:"networkPrintingEnable"`
-	DolphinDriveUsage      bool                   `json:"dolphinDriveUsage"`
-	FirmwareFlashReadEntry bool                   `json:"firmwareFlashReadEntry"`
-	Name                   string                 `json:"name"`
-	Email                  string                 `json:"email"`
-	GitHubUsername         string                 `json:"githubUsername"`
-	DotfilesDir            string                 `json:"dotfilesDir"`
-	Shell                  string                 `json:"shell"`
-	Editors                []string               `json:"editors"`
-	Browsers               []string               `json:"browsers"`
-	PreferredEditor        string                 `json:"preferredEditor"`
-	PreferredBrowser       string                 `json:"preferredBrowser"`
-	WebApplications        []WebApplicationIntent `json:"webApplications"`
-	Tailscale              *TailscaleIntent       `json:"tailscale,omitempty"`
+	Hostname               string                 `json:"hostname" tier:"security"`
+	Username               string                 `json:"username" tier:"security"`
+	Timezone               string                 `json:"timezone" tier:"everyday"`
+	Locale                 string                 `json:"locale" tier:"everyday"`
+	KeyboardLayout         string                 `json:"keyboardLayout" tier:"everyday"`
+	KeyboardVariant        string                 `json:"keyboardVariant" tier:"everyday"`
+	WeatherCity            string                 `json:"weatherCity" tier:"everyday"`
+	WeatherCountry         string                 `json:"weatherCountry" tier:"everyday"`
+	TouchpadWorkspaceSwipe bool                   `json:"touchpadWorkspaceSwipe" tier:"everyday"`
+	ClamshellEnable        bool                   `json:"clamshellEnable" tier:"everyday"`
+	ConsoleLoginEnable     bool                   `json:"consoleLoginEnable" tier:"security"`
+	USBGuardEnable         bool                   `json:"usbguardEnable" tier:"security"`
+	USBTrustEnforce        bool                   `json:"usbTrustEnforce" tier:"security"`
+	USBTrustTPMHandle      string                 `json:"usbTrustTpmHandle" tier:"security"`
+	USBReviewTechnical     bool                   `json:"usbReviewTechnicalView" tier:"everyday"`
+	PrintingEnable         bool                   `json:"printingEnable" tier:"everyday"`
+	NetworkPrintingEnable  bool                   `json:"networkPrintingEnable" tier:"security"`
+	DolphinDriveUsage      bool                   `json:"dolphinDriveUsage" tier:"everyday"`
+	FirmwareFlashReadEntry bool                   `json:"firmwareFlashReadEntry" tier:"critical"`
+	Name                   string                 `json:"name" tier:"everyday"`
+	Email                  string                 `json:"email" tier:"everyday"`
+	GitHubUsername         string                 `json:"githubUsername" tier:"everyday"`
+	DotfilesDir            string                 `json:"dotfilesDir" tier:"security"`
+	Shell                  string                 `json:"shell" tier:"everyday"`
+	Editors                []string               `json:"editors" tier:"everyday"`
+	Browsers               []string               `json:"browsers" tier:"everyday"`
+	PreferredEditor        string                 `json:"preferredEditor" tier:"everyday"`
+	PreferredBrowser       string                 `json:"preferredBrowser" tier:"everyday"`
+	WebApplications        []WebApplicationIntent `json:"webApplications" tier:"security"`
+	Tailscale              *TailscaleIntent       `json:"tailscale,omitempty" tier:"security"`
 	// Apps are the selected catalogue app IDs (apps/<id>/meta.json).
-	Apps []string `json:"apps"`
+	Apps []string `json:"apps" tier:"everyday"`
 	// FirefoxAddons holds the add-on collections (apps/firefox-addons.json)
 	// and each add-on's mode; an add-on only counts while its collection is on.
-	FirefoxAddons map[string]apps.FirefoxCollectionChoice `json:"firefoxAddons"`
+	FirefoxAddons map[string]apps.FirefoxCollectionChoice `json:"firefoxAddons" tier:"security"`
 	// FirefoxStoreAddons are extra add-ons from addons.mozilla.org, each
 	// pinned to one file.
-	FirefoxStoreAddons []apps.FirefoxStoreAddon `json:"firefoxStoreAddons"`
+	FirefoxStoreAddons []apps.FirefoxStoreAddon `json:"firefoxStoreAddons" tier:"security"`
 
 	// Compatibility fields retained while the installer prompt and generated
 	// Nix settings migrate to the generic webApplications contract.
-	PlaneEnable               bool   `json:"planeEnable"`
-	PlaneHost                 string `json:"planeHost"`
-	DrawioEnable              bool   `json:"drawioEnable"`
-	DrawioSelfHosted          bool   `json:"drawioSelfHosted"`
-	DrawioHost                string `json:"drawioHost"`
-	NextcloudEnable           bool   `json:"nextcloudEnable"`
-	NextcloudHost             string `json:"nextcloudHost"`
-	Theme                     string `json:"theme"`
-	DebugFunctions            bool   `json:"debugFunctions"`
-	OverrideAISelection       bool   `json:"overrideAiSelection"`
-	OverrideModelWith         string `json:"overrideModelWith"`
-	AIAgentMode               string `json:"aiAgentMode"`
-	AIEndpoint                string `json:"aiEndpoint"`
-	AIRemoteModel             string `json:"aiRemoteModel"`
-	AIRemoteContextTokens     int    `json:"aiRemoteContextTokens"`
-	LUKSTPM2Enable            bool   `json:"luksTpm2Enable"`
-	LUKSTPM2PIN               bool   `json:"luksTpm2Pin"`
-	RecoveryEnable            bool   `json:"recoveryEnable"`
-	RecoveryPartitionEnable   bool   `json:"recoveryPartitionEnable"`
-	JODSPrebootLockEnable     bool   `json:"jodsPrebootLockEnable"`
-	SecureBootEnable          bool   `json:"secureBootEnable"`
-	SecureBootPrompt          bool   `json:"secureBootPrompt"`
-	FirmwarePasswordLock      bool   `json:"firmwarePasswordLock"`
-	EndpointManagedDevice     bool   `json:"endpointManagedDevice"`
-	JODSEndpoint              string `json:"jodsEndpoint"`
-	JODSPolicySigningKey      string `json:"jodsPolicySigningPublicKey"`
-	JODSRecoverySigningKey    string `json:"jodsRecoveryCommandSigningPublicKey"`
-	JODSEnrollmentMode        string `json:"jodsEnrollmentMode"`
-	JODSAllowInsecureTLS      bool   `json:"jodsAllowInsecureTls"`
-	JODSDeviceClass           string `json:"jodsDeviceClass"`
-	JODSDesktopProfile        string `json:"jodsDesktopProfile"`
-	JODSFingerprintEnroll     bool   `json:"jodsFingerprintEnrollmentAllowed"`
-	AllowUnvalidatedODDCModel bool   `json:"allowUnvalidatedODDCModel"`
-	UnattendedInstall         bool   `json:"unattendedInstall"`
-	AutoReboot                bool   `json:"autoReboot"`
-	RunUpdateChecks           bool   `json:"runUpdateChecks"`
-	WriteConfig               bool   `json:"writeConfig"`
-	RunRebuild                bool   `json:"runRebuild"`
-	ForceRedeploy             bool   `json:"forceRedeploy"`
+	PlaneEnable               bool   `json:"planeEnable" tier:"security"`
+	PlaneHost                 string `json:"planeHost" tier:"security"`
+	DrawioEnable              bool   `json:"drawioEnable" tier:"security"`
+	DrawioSelfHosted          bool   `json:"drawioSelfHosted" tier:"security"`
+	DrawioHost                string `json:"drawioHost" tier:"security"`
+	NextcloudEnable           bool   `json:"nextcloudEnable" tier:"security"`
+	NextcloudHost             string `json:"nextcloudHost" tier:"security"`
+	Theme                     string `json:"theme" tier:"everyday"`
+	DebugFunctions            bool   `json:"debugFunctions" tier:"security"`
+	OverrideAISelection       bool   `json:"overrideAiSelection" tier:"everyday"`
+	OverrideModelWith         string `json:"overrideModelWith" tier:"everyday"`
+	AIAgentMode               string `json:"aiAgentMode" tier:"security"`
+	AIEndpoint                string `json:"aiEndpoint" tier:"security"`
+	AIRemoteModel             string `json:"aiRemoteModel" tier:"everyday"`
+	AIRemoteContextTokens     int    `json:"aiRemoteContextTokens" tier:"everyday"`
+	LUKSTPM2Enable            bool   `json:"luksTpm2Enable" tier:"critical"`
+	LUKSTPM2PIN               bool   `json:"luksTpm2Pin" tier:"critical"`
+	RecoveryEnable            bool   `json:"recoveryEnable" tier:"critical"`
+	RecoveryPartitionEnable   bool   `json:"recoveryPartitionEnable" tier:"critical"`
+	JODSPrebootLockEnable     bool   `json:"jodsPrebootLockEnable" tier:"critical"`
+	SecureBootEnable          bool   `json:"secureBootEnable" tier:"critical"`
+	SecureBootPrompt          bool   `json:"secureBootPrompt" tier:"critical"`
+	FirmwarePasswordLock      bool   `json:"firmwarePasswordLock" tier:"critical"`
+	EndpointManagedDevice     bool   `json:"endpointManagedDevice" tier:"critical"`
+	JODSEndpoint              string `json:"jodsEndpoint" tier:"critical"`
+	JODSPolicySigningKey      string `json:"jodsPolicySigningPublicKey" tier:"critical"`
+	JODSRecoverySigningKey    string `json:"jodsRecoveryCommandSigningPublicKey" tier:"critical"`
+	JODSEnrollmentMode        string `json:"jodsEnrollmentMode" tier:"critical"`
+	JODSAllowInsecureTLS      bool   `json:"jodsAllowInsecureTls" tier:"critical"`
+	JODSDeviceClass           string `json:"jodsDeviceClass" tier:"critical"`
+	JODSDesktopProfile        string `json:"jodsDesktopProfile" tier:"critical"`
+	JODSFingerprintEnroll     bool   `json:"jodsFingerprintEnrollmentAllowed" tier:"critical"`
+	AllowUnvalidatedODDCModel bool   `json:"allowUnvalidatedODDCModel" tier:"critical"`
+	UnattendedInstall         bool   `json:"unattendedInstall" tier:"installer"`
+	AutoReboot                bool   `json:"autoReboot" tier:"installer"`
+	RunUpdateChecks           bool   `json:"runUpdateChecks" tier:"installer"`
+	WriteConfig               bool   `json:"writeConfig" tier:"installer"`
+	RunRebuild                bool   `json:"runRebuild" tier:"installer"`
+	ForceRedeploy             bool   `json:"forceRedeploy" tier:"installer"`
 }
 
 // Defaults is the starting point of every interactive install and the content
