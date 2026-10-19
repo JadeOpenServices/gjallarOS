@@ -133,6 +133,7 @@
         inherit (pkgs.kdePackages) dolphin;
         inherit (pkgs)
           _nemu
+          _wine
           ghostty
           hyprland
           udiskie
@@ -153,6 +154,7 @@
           gjallar-opencode
           qt6ct
           _nemu
+          _wine
           # pkgs/overlays patches these, so cache.nixos.org has other builds.
           dolphin
           ghostty

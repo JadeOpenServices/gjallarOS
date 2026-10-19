@@ -7,27 +7,7 @@
 }:
 
 let
-  # The Full build embeds the Mono and Gecko installers. Without them
-  # wineboot -u stops at a download prompt and an offline setup never ends.
-  stagingFull = pkgs.wineWow64Packages.stagingFull;
-
-  # nixpkgs 26.05 pairs Wine 11.8 with wine-mono 11.0.0, but appwiz.cpl in
-  # 11.8 only takes 11.1.0 and asks to download it. Tied to 11.8, so a
-  # nixpkgs bump falls back to the stock pairing.
-  wineMono = pkgs.fetchurl {
-    url = "https://dl.winehq.org/wine/wine-mono/11.1.0/wine-mono-11.1.0-x86.msi";
-    hash = "sha256-3rA0FDH4Jgsgn/9rx53cxUFLl/jpI2q5+9ykzlngqbk=";
-  };
-  winePackage =
-    if stagingFull.version == "11.8" then
-      stagingFull.overrideAttrs (old: {
-        postInstall = old.postInstall + ''
-          rm $out/share/wine/mono/wine-mono-11.0.0-x86.msi
-          ln -s ${wineMono} $out/share/wine/mono/wine-mono-11.1.0-x86.msi
-        '';
-      })
-    else
-      stagingFull;
+  winePackage = pkgs._wine;
 
   wineInit = pkgs.writeShellScriptBin "wine-win11-init" ''
     set -euo pipefail
