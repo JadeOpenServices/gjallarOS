@@ -264,3 +264,49 @@ func TestUSBMediaNotice(t *testing.T) {
 		t.Fatal("closed medium not active")
 	}
 }
+
+// poll runs one broker poll through r and returns the connections it would
+// announce.
+func poll(r *usbReviewState, policy ...usbtrust.Decision) []string {
+	r.begin()
+	var asked []string
+	for _, d := range policy {
+		if r.wants(d) {
+			asked = append(asked, d.Connection)
+		}
+	}
+	r.prune()
+	return asked
+}
+
+func TestUSBReviewAfterBrokerRestart(t *testing.T) {
+	device := func(connection string, target usbtrust.Target) usbtrust.Decision {
+		return usbtrust.Decision{
+			Connection:     connection,
+			Target:         target,
+			ObservedDevice: usbtrust.ObservedDevice{Identity: usbtrust.Identity{Hash: "SYNTHETIC-hash", Port: "2-2"}},
+		}
+	}
+	r := newUSBReviewState()
+	if got := poll(r, device("a", usbtrust.TargetBlock)); !reflect.DeepEqual(got, []string{"a"}) {
+		t.Fatalf("new device announced %v, want [a]", got)
+	}
+	r.done(device("a", usbtrust.TargetBlock), usbReviewAllowed)
+	if got := poll(r, device("a", usbtrust.TargetAllow)); got != nil {
+		t.Fatalf("allowed device announced %v", got)
+	}
+	// The restarted broker blocks it again under a new token: the allow
+	// is gone, so ask again.
+	if got := poll(r, device("b", usbtrust.TargetBlock)); !reflect.DeepEqual(got, []string{"b"}) {
+		t.Fatalf("device blocked again after restart announced %v, want [b]", got)
+	}
+	r.done(device("b", usbtrust.TargetBlock), usbReviewAnswered)
+	if got := poll(r, device("c", usbtrust.TargetBlock)); got != nil {
+		t.Fatalf("device kept blocked announced again after restart: %v", got)
+	}
+	// Unplugged and back: ask again.
+	poll(r)
+	if got := poll(r, device("d", usbtrust.TargetBlock)); !reflect.DeepEqual(got, []string{"d"}) {
+		t.Fatalf("replugged device announced %v, want [d]", got)
+	}
+}

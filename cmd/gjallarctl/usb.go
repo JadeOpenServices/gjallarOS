@@ -99,11 +99,7 @@ func runUSBReview(args []string, stderr io.Writer) int {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
-	seen := map[string]bool{}
-	// Devices the user already answered, by identity and port. A restarted
-	// broker hands out new connection tokens; that alone must not announce a
-	// device again that never left.
-	answered := map[string]bool{}
+	review := newUSBReviewState()
 	// Media notices close their cards when ctx ends; wait for that on exit.
 	var media sync.WaitGroup
 	defer media.Wait()
@@ -124,51 +120,26 @@ func runUSBReview(args []string, stderr io.Writer) int {
 				fmt.Fprintln(stderr, "USB review: broker answers again")
 				lastErr = ""
 			}
-			active := map[string]bool{}
-			present := map[string]bool{}
+			review.begin()
 			for _, d := range response.Policy {
-				active[d.Connection] = true
-				present[usbReviewKey(d)] = true
-				if seen[d.Connection] || answered[usbReviewKey(d)] || d.Target != usbtrust.TargetBlock {
+				if !review.wants(d) {
 					continue
 				}
-				// Unsupported built-in parts stay blocked; asking would offer
-				// nothing but "keep blocked".
-				if usbtrust.AuditCode(d.Reason) == usbtrust.CodeInternalDebug {
-					continue
-				}
-				seen[d.Connection] = true
-				switch usbReviewDecision(ctx, executable, d, response.Enforcing) {
-				case usbReviewAnswered:
-					answered[usbReviewKey(d)] = true
-				case usbReviewRetry:
-					delete(seen, d.Connection)
-				}
+				review.done(d, usbReviewDecision(ctx, executable, d, response.Enforcing))
 			}
 			// Media notices run on their own: a card left closed must not hold
 			// back the review of the next USB device.
 			for _, m := range response.Media {
-				active[m.Connection] = true
-				if m.Allowed || seen[m.Connection] {
+				if !review.wantsMedia(m) {
 					continue
 				}
-				seen[m.Connection] = true
 				media.Add(1)
 				go func() {
 					defer media.Done()
 					usbReviewMedia(ctx, executable, m)
 				}()
 			}
-			for token := range seen {
-				if !active[token] {
-					delete(seen, token)
-				}
-			}
-			for key := range answered {
-				if !present[key] {
-					delete(answered, key)
-				}
-			}
+			review.prune()
 		}
 		select {
 		case <-ctx.Done():
@@ -181,8 +152,13 @@ func runUSBReview(args []string, stderr io.Writer) int {
 type usbReviewOutcome int
 
 const (
-	// The user answered; the device is not announced again while it stays.
+	// The user kept the device blocked; it is not announced again while it
+	// stays.
 	usbReviewAnswered usbReviewOutcome = iota
+	// The user allowed the device. Allowing once lasts only while the broker
+	// runs, so if it comes back blocked after a broker restart it is asked
+	// again.
+	usbReviewAllowed
 	// Nobody answered: the device left, its token changed or the review stops.
 	usbReviewInterrupted
 	// The decision failed and should be offered again.
@@ -193,6 +169,79 @@ const (
 // it is plugged in, without the per-connection token.
 func usbReviewKey(d usbtrust.Decision) string {
 	return d.Identity.Hash + "\x00" + d.Identity.Port
+}
+
+// usbReviewState remembers what the review loop already asked, from one
+// broker poll to the next.
+type usbReviewState struct {
+	// Connections with an open or finished notice.
+	seen map[string]bool
+	// Devices the user kept blocked, by identity and port. A restarted
+	// broker hands out new connection tokens; that alone must not announce a
+	// device again that never left.
+	answered map[string]bool
+	// What the current poll listed.
+	active, present map[string]bool
+}
+
+func newUSBReviewState() *usbReviewState {
+	return &usbReviewState{seen: map[string]bool{}, answered: map[string]bool{}}
+}
+
+// begin starts a poll.
+func (r *usbReviewState) begin() {
+	r.active, r.present = map[string]bool{}, map[string]bool{}
+}
+
+// wants reports whether d should be announced now, and marks it as asked.
+func (r *usbReviewState) wants(d usbtrust.Decision) bool {
+	r.active[d.Connection] = true
+	r.present[usbReviewKey(d)] = true
+	if r.seen[d.Connection] || r.answered[usbReviewKey(d)] || d.Target != usbtrust.TargetBlock {
+		return false
+	}
+	// Unsupported built-in parts stay blocked; asking would offer nothing
+	// but "keep blocked".
+	if usbtrust.AuditCode(d.Reason) == usbtrust.CodeInternalDebug {
+		return false
+	}
+	r.seen[d.Connection] = true
+	return true
+}
+
+// done records how the review of d ended.
+func (r *usbReviewState) done(d usbtrust.Decision, outcome usbReviewOutcome) {
+	switch outcome {
+	case usbReviewAnswered:
+		r.answered[usbReviewKey(d)] = true
+	case usbReviewRetry:
+		delete(r.seen, d.Connection)
+	}
+}
+
+// wantsMedia reports whether m should be announced now, and marks it as
+// asked.
+func (r *usbReviewState) wantsMedia(m usbtrust.MediaDecision) bool {
+	r.active[m.Connection] = true
+	if m.Allowed || r.seen[m.Connection] {
+		return false
+	}
+	r.seen[m.Connection] = true
+	return true
+}
+
+// prune forgets connections and devices the current poll no longer listed.
+func (r *usbReviewState) prune() {
+	for token := range r.seen {
+		if !r.active[token] {
+			delete(r.seen, token)
+		}
+	}
+	for key := range r.answered {
+		if !r.present[key] {
+			delete(r.answered, key)
+		}
+	}
 }
 
 // usbReviewDecision announces one blocked device and carries out the chosen
@@ -253,7 +302,7 @@ func usbReviewDecision(ctx context.Context, executable string, d usbtrust.Decisi
 		return usbReviewInterrupted
 	}
 	if err == nil {
-		return usbReviewAnswered
+		return usbReviewAllowed
 	}
 	_, _ = exec.Command("zenity", "--error", "--title=USB decision failed", "--text="+html.EscapeString(string(output))).Output()
 	return usbReviewRetry
