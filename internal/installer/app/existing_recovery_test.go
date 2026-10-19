@@ -402,3 +402,37 @@ func TestRecoveryAfterMaintenanceNeedsNoAnswers(t *testing.T) {
 		})
 	}
 }
+
+func TestRecoveryPartitionUnusedWithoutSecureBoot(t *testing.T) {
+	original := findRecoveryPartition
+	t.Cleanup(func() { findRecoveryPartition = original })
+	findRecoveryPartition = func(context.Context) string { return "/dev/vda3" }
+
+	for _, resume := range []string{"", installerresume.StateMaintenanceReboot} {
+		t.Setenv("GJALLAR_INSTALLER_RESUME_STATE", resume)
+		s := state{
+			existing: true,
+			user: config.User{
+				RecoveryEnable:          true,
+				RecoveryPartitionEnable: true,
+			},
+		}
+		var out bytes.Buffer
+		// No input: any question would fail on EOF.
+		err := configureRecoveryProvisioning(
+			context.Background(),
+			prompt.New(strings.NewReader(""), &out),
+			options{},
+			&s,
+		)
+		if err != nil {
+			t.Fatalf("resume %q: %v", resume, err)
+		}
+		if s.recoveryPartition != "" {
+			t.Fatalf("resume %q: recovery partition %q kept without Secure Boot", resume, s.recoveryPartition)
+		}
+		if !strings.Contains(out.String(), "/dev/vda3 stays unused") {
+			t.Fatalf("resume %q: no notice:\n%s", resume, out.String())
+		}
+	}
+}

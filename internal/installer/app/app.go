@@ -2549,6 +2549,17 @@ func configureRecoveryProvisioning(ctx context.Context, ui prompt.UI, opt option
 	if s.recoveryPartition == "" {
 		s.recoveryPartition = findRecoveryPartition(ctx)
 	}
+	// Without GjallarOS Secure Boot there is no recovery partition, even
+	// one an older installer already made (e2e-genluks 2026-10-19: the
+	// notice said no recovery partition, then the run offered to format
+	// the leftover one).
+	if !s.user.SecureBootEnable && !explicitTarget {
+		if s.recoveryPartition != "" {
+			fmt.Fprintf(ui.Out, "The recovery partition %s stays unused: it needs GjallarOS Secure Boot.\n", s.recoveryPartition)
+		}
+		s.recoveryPartition = ""
+		return nil
+	}
 
 	// Existing encrypted-Btrfs installations may provision recovery storage,
 	// but the running root is never resized in place. GJAL-67 discovery and
