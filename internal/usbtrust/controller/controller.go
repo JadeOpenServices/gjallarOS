@@ -115,6 +115,20 @@ func (c *Controller) Status(ctx context.Context) (broker.Status, error) {
 		s.Revision = input.Trusted.Revision
 		s.TrustedDevices = len(input.Trusted.Devices)
 		s.Devices = append([]usbtrust.Device(nil), input.Trusted.Devices...)
+		if input.Lapse.Enabled() {
+			s.LapseDays = int(input.Lapse.After / (24 * time.Hour))
+			for _, device := range input.Trusted.Devices {
+				at, ok := input.Lapse.LapsesAt(device)
+				if !ok {
+					continue
+				}
+				lapse := broker.TrustLapse{TrustedID: device.ID, Lapsed: input.Lapse.Lapsed(device)}
+				if !at.IsZero() {
+					lapse.LapsesAt = at.UTC().Format(time.RFC3339)
+				}
+				s.Lapses = append(s.Lapses, lapse)
+			}
+		}
 	}
 	return s, nil
 }

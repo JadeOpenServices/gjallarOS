@@ -203,7 +203,7 @@ Plan:
       (`trusted-external-lapsed`, offers renew), lapse ignored for a
       connection that was trusted when it started, broker refreshes
       `lastUsed` once a day.
-- [ ] C2: `--lapse-days N`, Nix
+- [x] C2: `--lapse-days N`, Nix
       option `services.gjallar-usbtrust.lapseDays` (null = off), status
       shows when each device lapses.
 - [ ] C3: warning three days ahead with a Renew button.

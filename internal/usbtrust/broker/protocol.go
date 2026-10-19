@@ -54,6 +54,16 @@ type Status struct {
 	TrustedDevices      int               `json:"trustedDevices"`
 	ExpectedDevices     int               `json:"expectedDevices"`
 	ObservedDevices     int               `json:"observedDevices"`
+	LapseDays           int               `json:"lapseDays,omitempty"`
+	Lapses              []TrustLapse      `json:"lapses,omitempty"`
+}
+
+// TrustLapse says when an external device's permanent trust runs out.
+// LapsesAt is empty when its stored time is unusable, which counts as lapsed.
+type TrustLapse struct {
+	TrustedID string `json:"trustedId"`
+	LapsesAt  string `json:"lapsesAt,omitempty"`
+	Lapsed    bool   `json:"lapsed"`
 }
 
 type Response struct {

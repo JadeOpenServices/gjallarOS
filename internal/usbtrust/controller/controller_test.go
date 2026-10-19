@@ -382,3 +382,26 @@ func TestLapsedTrustAsksOnReconnectAndRenewKeepsRecord(t *testing.T) {
 		t.Fatal("renewed device still blocked")
 	}
 }
+
+func TestStatusListsWhenTrustLapses(t *testing.T) {
+	c, s := fixture()
+	ctx := context.Background()
+	policy, _, _ := c.Policy(ctx)
+	portable := false
+	if _, err := c.Mutate(ctx, broker.Request{Action: broker.ActionTrustPermanent, RuntimeID: "12", Connection: policy[0].Connection, Portable: &portable}); err != nil {
+		t.Fatal(err)
+	}
+	status, _ := c.Status(ctx)
+	if status.LapseDays != 0 || status.Lapses != nil {
+		t.Fatalf("lapse shown while off: %+v", status)
+	}
+	c.Reader.LapseAfter = 30 * 24 * time.Hour
+	status, err := c.Status(ctx)
+	if err != nil || status.LapseDays != 30 || len(status.Lapses) != 1 || status.Lapses[0].TrustedID != s.doc.Devices[0].ID || status.Lapses[0].Lapsed {
+		t.Fatalf("status lapse: %+v %v", status, err)
+	}
+	at, err := time.Parse(time.RFC3339, status.Lapses[0].LapsesAt)
+	if err != nil || time.Until(at) < 29*24*time.Hour {
+		t.Fatalf("lapses at %q", status.Lapses[0].LapsesAt)
+	}
+}

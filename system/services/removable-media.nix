@@ -52,6 +52,7 @@ let
       --request-timeout 30s \
       ${lib.optionalString (cfg.tpmHandle != null) "--tpm-handle ${lib.escapeShellArg cfg.tpmHandle}"} \
       ${lib.optionalString cfg.enforce "--enforce"} \
+      ${lib.optionalString (cfg.lapseDays != null) "--lapse-days ${toString cfg.lapseDays}"} \
       --cryptsetup-binary ${pkgs.cryptsetup}/bin/cryptsetup \
       ${lib.concatMapStringsSep " " (
         luks: "--luks-device ${lib.escapeShellArg luks.device}"
@@ -80,6 +81,12 @@ in
       type = lib.types.nullOr lib.types.path;
       default = null;
       description = "Output of `oddc devices --json` for the selected model. Built-in parts it lists with a usbPort are then judged by their root port.";
+    };
+    lapseDays = lib.mkOption {
+      type = lib.types.nullOr (lib.types.ints.between 1 36500);
+      default = settings.usbTrustLapseDays or null;
+      example = 30;
+      description = "Days an external USB device may stay unconnected before its permanent trust lapses and it asks again. null never lapses. Built-in parts never lapse.";
     };
     tpmHandle = lib.mkOption {
       type = lib.types.nullOr lib.types.str;

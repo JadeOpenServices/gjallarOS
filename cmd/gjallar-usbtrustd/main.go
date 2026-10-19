@@ -41,6 +41,7 @@ type config struct {
 	cryptsetup     string
 	luksDevices    []string
 	requestTimeout time.Duration
+	lapseDays      int
 }
 
 func main() {
@@ -241,6 +242,7 @@ func parseConfig(
 	flags.SetOutput(stderr)
 	flags.StringVar(&cfg.resolvedFile, "oddc-resolved", "", "absolute JSON path of the resolved NixOS ODDC view")
 	flags.StringVar(&cfg.devicesFile, "oddc-devices", "", "absolute JSON path of `oddc devices --json` for this model; parts with a usbPort are judged by their root port")
+	flags.IntVar(&cfg.lapseDays, "lapse-days", 0, "days an external device may stay unconnected before its permanent trust lapses; 0 never lapses")
 	flags.BoolVar(&cfg.enforce, "enforce", false, "arm USB enforcement; the first arming enrolls internal devices")
 	flags.StringVar(&cfg.cryptsetup, "cryptsetup-binary", "cryptsetup", "cryptsetup CLI binary")
 	flags.Func("luks-device", "LUKS device whose passphrase may disarm enforcement (repeatable)", func(value string) error {
@@ -368,6 +370,9 @@ func parseConfig(
 	if cfg.devicesFile != "" && !filepath.IsAbs(cfg.devicesFile) {
 		return config{}, fmt.Errorf("--oddc-devices must be absolute")
 	}
+	if cfg.lapseDays < 0 || cfg.lapseDays > 36500 {
+		return config{}, fmt.Errorf("--lapse-days must be between 0 and 36500")
+	}
 
 	if strings.TrimSpace(cfg.oddcModel) == "" {
 		return config{}, fmt.Errorf(
@@ -431,6 +436,7 @@ func buildReader(
 			cfg.stateDir,
 			signer,
 		),
+		LapseAfter: time.Duration(cfg.lapseDays) * 24 * time.Hour,
 	}
 	if cfg.resolvedFile != "" {
 		reader.Resolved = readmodel.ResolvedFile(cfg.resolvedFile)
