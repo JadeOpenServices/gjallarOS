@@ -82,8 +82,9 @@ func TestReadNoctaliaPaletteRefusesLinks(t *testing.T) {
 	if err := os.Symlink(target, path); err != nil {
 		t.Fatal(err)
 	}
-	if colors, err := readNoctaliaPalette(home); err == nil {
-		t.Fatalf("colors = %q through a link, want an error", colors)
+	colors, err := readNoctaliaPalette(home)
+	if err == nil || !strings.Contains(err.Error(), "is a link") {
+		t.Fatalf("colors = %q, err = %v through a link, want the link refused", colors, err)
 	}
 }
 

@@ -59,6 +59,9 @@ func readNoctaliaPalette(home string) (string, error) {
 	if errors.Is(err, fs.ErrNotExist) {
 		return "", nil
 	}
+	if errors.Is(err, syscall.ELOOP) {
+		return "", fmt.Errorf("%s is a link; only a plain file is read", path)
+	}
 	if err != nil {
 		return "", err
 	}
