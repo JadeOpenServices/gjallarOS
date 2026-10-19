@@ -2288,15 +2288,7 @@ func collectTailscale(ctx context.Context, ui prompt.UI, u *config.User) error {
 }
 
 func collectProjectTools(ctx context.Context, ui prompt.UI, u *config.User) error {
-	// Canonical installer intent is the generic webApplications list.
-	// Legacy Plane/Draw.io fields are populated by normalization only as a
-	// temporary compatibility bridge for older generated-state consumers.
 	u.WebApplications = nil
-	u.PlaneEnable = false
-	u.PlaneHost = ""
-	u.DrawioEnable = false
-	u.DrawioSelfHosted = false
-	u.DrawioHost = ""
 
 	for _, id := range config.SupportedWebApplicationIDs() {
 		label := id

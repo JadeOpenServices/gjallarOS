@@ -22,28 +22,6 @@ type WebApplicationIntent struct {
 	Endpoint string `json:"endpoint,omitempty"`
 }
 
-// MarshalJSON writes only the canonical web-application contract.
-//
-// PlaneEnable, PlaneHost, DrawioEnable, DrawioSelfHosted and DrawioHost remain
-// on User solely so pre-GJAL-95 JSON can still be decoded and normalized. The
-// shadow fields below suppress those migration-only values from every new
-// user.config.json write.
-func (user User) MarshalJSON() ([]byte, error) {
-	type CanonicalUser User
-
-	return json.Marshal(struct {
-		CanonicalUser
-
-		PlaneEnable      *bool   `json:"planeEnable,omitempty"`
-		PlaneHost        *string `json:"planeHost,omitempty"`
-		DrawioEnable     *bool   `json:"drawioEnable,omitempty"`
-		DrawioSelfHosted *bool   `json:"drawioSelfHosted,omitempty"`
-		DrawioHost       *string `json:"drawioHost,omitempty"`
-	}{
-		CanonicalUser: CanonicalUser(user),
-	})
-}
-
 // SupportedWebApplicationIDs returns the stable integration identifiers exposed
 // by the installer contract.
 func SupportedWebApplicationIDs() []string {
@@ -64,15 +42,7 @@ func supportedWebApplication(id string) bool {
 }
 
 // NormalizeWebApplications canonicalizes the generic integration contract.
-//
-// During the migration, legacy Plane/Draw.io fields remain as a compatibility
-// bridge for configurations that predate webApplications. Generic intent is
-// canonical whenever the webApplications field is present, including an empty list.
 func NormalizeWebApplications(user *User) error {
-	if user.WebApplications == nil {
-		return webApplicationsFromLegacy(user)
-	}
-
 	normalized := make([]WebApplicationIntent, 0, len(user.WebApplications))
 	seen := make(map[string]bool, len(user.WebApplications))
 
@@ -121,77 +91,78 @@ func NormalizeWebApplications(user *User) error {
 	}
 
 	user.WebApplications = normalized
-	applyLegacyWebApplicationCompatibility(user)
-
 	return nil
 }
 
-func webApplicationsFromLegacy(user *User) error {
-	// Teams was an unconditional desktop integration before webApplications
-	// became canonical. Preserve that behavior only while migrating a config
-	// where the canonical field is genuinely absent.
-	applications := []WebApplicationIntent{
-		{ID: WebApplicationTeams},
-	}
+// legacyWebApplicationKeys held Plane and Draw.io before GJAL-95 moved them
+// into webApplications.
+var legacyWebApplicationKeys = []string{"planeEnable", "planeHost", "drawioEnable", "drawioSelfHosted", "drawioHost"}
 
-	if user.PlaneEnable {
-		endpoint, err := NormalizeExternalServiceEndpoint(user.PlaneHost)
+// HasLegacyWebApplications reports whether configuration text still needs the
+// one-time move into webApplications, so rebuild can write the result back.
+func HasLegacyWebApplications(contents []byte) bool {
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(contents, &fields) != nil {
+		return false
+	}
+	return legacyWebApplications(fields)
+}
+
+func legacyWebApplications(fields map[string]json.RawMessage) bool {
+	if value, ok := fields["webApplications"]; !ok || string(value) == "null" {
+		return true
+	}
+	for _, key := range legacyWebApplicationKeys {
+		if _, ok := fields[key]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+// migrateLegacyWebApplications moves pre-GJAL-95 Plane/Draw.io fields into
+// webApplications and drops them. A webApplications list that is already
+// there wins. Teams was always on back then, so it stays on.
+func migrateLegacyWebApplications(fields map[string]json.RawMessage) error {
+	if value, ok := fields["webApplications"]; !ok || string(value) == "null" {
+		var legacy struct {
+			PlaneEnable      bool   `json:"planeEnable"`
+			PlaneHost        string `json:"planeHost"`
+			DrawioEnable     bool   `json:"drawioEnable"`
+			DrawioSelfHosted bool   `json:"drawioSelfHosted"`
+			DrawioHost       string `json:"drawioHost"`
+		}
+		raw, err := json.Marshal(fields)
 		if err != nil {
-			return fmt.Errorf("planeHost: %w", err)
+			return err
 		}
-
-		user.PlaneHost = endpoint
-		applications = append(applications, WebApplicationIntent{
-			ID:       WebApplicationPlane,
-			Endpoint: endpoint,
-		})
-	}
-
-	if user.DrawioEnable {
-		endpoint := ""
-
-		if user.DrawioSelfHosted {
-			value, err := NormalizeExternalServiceEndpoint(user.DrawioHost)
+		if err := json.Unmarshal(raw, &legacy); err != nil {
+			return fmt.Errorf("legacy web application fields: %w", err)
+		}
+		applications := []WebApplicationIntent{{ID: WebApplicationTeams}}
+		if legacy.PlaneEnable {
+			endpoint, err := NormalizeExternalServiceEndpoint(legacy.PlaneHost)
 			if err != nil {
-				return fmt.Errorf("drawioHost: %w", err)
+				return fmt.Errorf("planeHost: %w", err)
 			}
-
-			endpoint = value
-			user.DrawioHost = value
-		} else {
-			// Public diagrams.net mode does not require a custom endpoint.
-			user.DrawioHost = ""
+			applications = append(applications, WebApplicationIntent{ID: WebApplicationPlane, Endpoint: endpoint})
 		}
-
-		applications = append(applications, WebApplicationIntent{
-			ID:       WebApplicationDrawio,
-			Endpoint: endpoint,
-		})
+		if legacy.DrawioEnable {
+			endpoint := ""
+			// Public diagrams.net mode does not need an endpoint.
+			if legacy.DrawioSelfHosted {
+				if endpoint, err = NormalizeExternalServiceEndpoint(legacy.DrawioHost); err != nil {
+					return fmt.Errorf("drawioHost: %w", err)
+				}
+			}
+			applications = append(applications, WebApplicationIntent{ID: WebApplicationDrawio, Endpoint: endpoint})
+		}
+		if fields["webApplications"], err = json.Marshal(applications); err != nil {
+			return err
+		}
 	}
-
-	user.WebApplications = applications
+	for _, key := range legacyWebApplicationKeys {
+		delete(fields, key)
+	}
 	return nil
-}
-
-func applyLegacyWebApplicationCompatibility(user *User) {
-	user.PlaneEnable = false
-	user.PlaneHost = ""
-	user.DrawioEnable = false
-	user.DrawioSelfHosted = false
-	user.DrawioHost = ""
-
-	for _, application := range user.WebApplications {
-		switch application.ID {
-		case WebApplicationPlane:
-			user.PlaneEnable = true
-			user.PlaneHost = application.Endpoint
-
-		case WebApplicationDrawio:
-			user.DrawioEnable = true
-			if application.Endpoint != "" {
-				user.DrawioSelfHosted = true
-				user.DrawioHost = application.Endpoint
-			}
-		}
-	}
 }

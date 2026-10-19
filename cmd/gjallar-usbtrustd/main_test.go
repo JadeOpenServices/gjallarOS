@@ -18,7 +18,7 @@ func TestParseConfigAllowsUnenrolledWithoutTPMHandle(
 		[]string{
 			"--socket", filepath.Join(root, "control.sock"),
 			"--owner-uid", "1000",
-			"--oddc-root", root,
+			"--oddc-resolved", filepath.Join(root, "resolved.json"),
 			"--oddc-model", "model/synthetic",
 			"--state-dir", filepath.Join(root, "state"),
 		},
@@ -49,7 +49,7 @@ func TestParseConfigRequiresOwnerUID(t *testing.T) {
 	_, err := parseConfig(
 		[]string{
 			"--socket", filepath.Join(root, "control.sock"),
-			"--oddc-root", root,
+			"--oddc-resolved", filepath.Join(root, "resolved.json"),
 			"--oddc-model", "model/synthetic",
 			"--state-dir", filepath.Join(root, "state"),
 		},
@@ -68,7 +68,7 @@ func TestParseConfigRejectsRelativeSecurityPaths(
 		[]string{
 			"--socket", "control.sock",
 			"--owner-uid", "1000",
-			"--oddc-root", "oddc",
+			"--oddc-resolved", "resolved.json",
 			"--oddc-model", "model/synthetic",
 			"--state-dir", "state",
 		},
@@ -84,7 +84,7 @@ func TestBuildReaderRejectsInvalidTPMHandle(
 	t *testing.T,
 ) {
 	_, err := buildReader(config{
-		oddcRoot:       "/synthetic/oddc",
+		resolvedFile:   "/synthetic/resolved.json",
 		oddcModel:      "model/synthetic",
 		stateDir:       "/synthetic/state",
 		tpmHandle:      "not-a-handle",
@@ -105,7 +105,7 @@ func TestUnenrolledTrustSourceNeedsNoTPMHandle(
 	)
 
 	reader, err := buildReader(config{
-		oddcRoot:       "/synthetic/oddc",
+		resolvedFile:   "/synthetic/resolved.json",
 		oddcModel:      "model/synthetic",
 		stateDir:       stateDir,
 		usbguardBinary: "usbguard",
@@ -154,7 +154,7 @@ func TestExistingStateWithoutTPMHandleFailsClosed(
 	}
 
 	reader, err := buildReader(config{
-		oddcRoot:       "/synthetic/oddc",
+		resolvedFile:   "/synthetic/resolved.json",
 		oddcModel:      "model/synthetic",
 		stateDir:       stateDir,
 		usbguardBinary: "usbguard",
@@ -177,7 +177,7 @@ func TestParseConfigLapseDays(t *testing.T) {
 	args := []string{
 		"--socket", filepath.Join(root, "control.sock"),
 		"--owner-uid", "1000",
-		"--oddc-root", root,
+		"--oddc-resolved", filepath.Join(root, "resolved.json"),
 		"--oddc-model", "model/synthetic",
 		"--state-dir", filepath.Join(root, "state"),
 	}

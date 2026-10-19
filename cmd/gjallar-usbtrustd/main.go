@@ -33,7 +33,6 @@ type config struct {
 	enforce        bool
 	socketPath     string
 	ownerUID       uint32
-	oddcRoot       string
 	oddcModel      string
 	stateDir       string
 	tpmHandle      string
@@ -268,13 +267,6 @@ func parseConfig(
 	)
 
 	flags.StringVar(
-		&cfg.oddcRoot,
-		"oddc-root",
-		"",
-		"absolute ODDC catalog root",
-	)
-
-	flags.StringVar(
 		&cfg.oddcModel,
 		"oddc-model",
 		"",
@@ -353,18 +345,10 @@ func parseConfig(
 
 	cfg.ownerUID = uint32(ownerUID)
 
-	if strings.TrimSpace(cfg.oddcRoot) == "" && cfg.resolvedFile == "" {
-		return config{}, fmt.Errorf(
-			"--oddc-root is required",
-		)
+	if cfg.resolvedFile == "" {
+		return config{}, fmt.Errorf("--oddc-resolved is required")
 	}
-
-	if cfg.oddcRoot != "" && !filepath.IsAbs(cfg.oddcRoot) {
-		return config{}, fmt.Errorf(
-			"--oddc-root must be absolute",
-		)
-	}
-	if cfg.resolvedFile != "" && !filepath.IsAbs(cfg.resolvedFile) {
+	if !filepath.IsAbs(cfg.resolvedFile) {
 		return config{}, fmt.Errorf("--oddc-resolved must be absolute")
 	}
 	if cfg.devicesFile != "" && !filepath.IsAbs(cfg.devicesFile) {
@@ -424,10 +408,7 @@ func buildReader(
 	}
 
 	reader := readmodel.Reader{
-		Resolved: readmodel.NewCatalogResolvedSource(
-			cfg.oddcRoot,
-			cfg.oddcModel,
-		),
+		Resolved: readmodel.ResolvedFile(cfg.resolvedFile),
 		Observations: usbguardsource.LiveSource{
 			Runner: usbguardsource.ExecRunner{},
 			Binary: cfg.usbguardBinary,
@@ -437,9 +418,6 @@ func buildReader(
 			signer,
 		),
 		LapseAfter: time.Duration(cfg.lapseDays) * 24 * time.Hour,
-	}
-	if cfg.resolvedFile != "" {
-		reader.Resolved = readmodel.ResolvedFile(cfg.resolvedFile)
 	}
 	if cfg.devicesFile != "" {
 		reader.Devices = readmodel.DevicesFile{Path: cfg.devicesFile, Model: cfg.oddcModel}

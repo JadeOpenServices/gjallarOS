@@ -184,14 +184,21 @@ func TestCollectProjectToolsDefaultsDisabled(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if u.PlaneEnable || u.DrawioEnable || u.NextcloudEnable {
+	if len(u.WebApplications) != 0 || u.NextcloudEnable {
 		t.Fatalf("project tools should default disabled: %+v", u)
 	}
-	if u.PlaneHost != "" ||
-		u.DrawioHost != "" ||
-		u.NextcloudHost != "" {
-		t.Fatalf("disabled project tools unexpectedly received hosts: %+v", u)
+	if u.NextcloudHost != "" {
+		t.Fatalf("disabled Nextcloud unexpectedly received a host: %q", u.NextcloudHost)
 	}
+}
+
+func webApplication(u config.User, id string) (config.WebApplicationIntent, bool) {
+	for _, application := range u.WebApplications {
+		if application.ID == id {
+			return application, true
+		}
+	}
+	return config.WebApplicationIntent{}, false
 }
 
 func TestCollectProjectToolsSupportsIndependentSelection(t *testing.T) {
@@ -199,7 +206,6 @@ func TestCollectProjectToolsSupportsIndependentSelection(t *testing.T) {
 		name                      string
 		input                     string
 		planeEnable, drawioEnable bool
-		drawioSelfHosted          bool
 		planeHost, drawioHost     string
 	}{
 		{
@@ -209,20 +215,18 @@ func TestCollectProjectToolsSupportsIndependentSelection(t *testing.T) {
 			planeHost:   "https://plane.example.test",
 		},
 		{
-			name:             "drawio only",
-			input:            "no\nyes\nyes\nhttps://drawio.example.test\nno\nno\n",
-			drawioEnable:     true,
-			drawioSelfHosted: true,
-			drawioHost:       "https://drawio.example.test",
+			name:         "drawio only",
+			input:        "no\nyes\nyes\nhttps://drawio.example.test\nno\nno\n",
+			drawioEnable: true,
+			drawioHost:   "https://drawio.example.test",
 		},
 		{
-			name:             "both",
-			input:            "yes\nplane.internal:3000\nyes\nyes\ndrawio.internal:8080\nno\nno\n",
-			planeEnable:      true,
-			drawioEnable:     true,
-			drawioSelfHosted: true,
-			planeHost:        "http://plane.internal:3000",
-			drawioHost:       "http://drawio.internal:8080",
+			name:         "both",
+			input:        "yes\nplane.internal:3000\nyes\nyes\ndrawio.internal:8080\nno\nno\n",
+			planeEnable:  true,
+			drawioEnable: true,
+			planeHost:    "http://plane.internal:3000",
+			drawioHost:   "http://drawio.internal:8080",
 		},
 	}
 
@@ -240,19 +244,13 @@ func TestCollectProjectToolsSupportsIndependentSelection(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			if u.PlaneEnable != tt.planeEnable ||
-				u.DrawioEnable != tt.drawioEnable ||
-				u.DrawioSelfHosted != tt.drawioSelfHosted ||
-				u.PlaneHost != tt.planeHost ||
-				u.DrawioHost != tt.drawioHost {
-				t.Fatalf(
-					"unexpected project-tool selection: plane=%t host=%q drawio=%t selfHosted=%t host=%q",
-					u.PlaneEnable,
-					u.PlaneHost,
-					u.DrawioEnable,
-					u.DrawioSelfHosted,
-					u.DrawioHost,
-				)
+			plane, planeEnable := webApplication(u, config.WebApplicationPlane)
+			drawio, drawioEnable := webApplication(u, config.WebApplicationDrawio)
+			if planeEnable != tt.planeEnable ||
+				drawioEnable != tt.drawioEnable ||
+				plane.Endpoint != tt.planeHost ||
+				drawio.Endpoint != tt.drawioHost {
+				t.Fatalf("unexpected project-tool selection: %#v", u.WebApplications)
 			}
 		})
 	}
@@ -310,8 +308,9 @@ func TestCollectProjectToolsReasksInvalidEndpoints(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if u.PlaneHost != "https://plane.example.test" || u.NextcloudHost != "https://cloud.example.test" {
-		t.Fatalf("plane=%q nextcloud=%q", u.PlaneHost, u.NextcloudHost)
+	plane, _ := webApplication(u, config.WebApplicationPlane)
+	if plane.Endpoint != "https://plane.example.test" || u.NextcloudHost != "https://cloud.example.test" {
+		t.Fatalf("plane=%q nextcloud=%q", plane.Endpoint, u.NextcloudHost)
 	}
 	for _, want := range []string{"unsupported external service endpoint scheme", "HTTPS is required"} {
 		if !strings.Contains(output.String(), want) {
@@ -337,11 +336,11 @@ func TestCollectProjectToolsBlankEndpointSkips(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if u.PlaneEnable || u.PlaneHost != "" {
-		t.Fatalf("plane enabled=%t host=%q", u.PlaneEnable, u.PlaneHost)
+	if plane, ok := webApplication(u, config.WebApplicationPlane); ok {
+		t.Fatalf("plane enabled with host %q", plane.Endpoint)
 	}
-	if !u.DrawioEnable || u.DrawioSelfHosted || u.DrawioHost != "" {
-		t.Fatalf("drawio enabled=%t selfHosted=%t host=%q", u.DrawioEnable, u.DrawioSelfHosted, u.DrawioHost)
+	if drawio, ok := webApplication(u, config.WebApplicationDrawio); !ok || drawio.Endpoint != "" {
+		t.Fatalf("drawio enabled=%t host=%q", ok, drawio.Endpoint)
 	}
 	if u.NextcloudEnable || u.NextcloudHost != "" {
 		t.Fatalf("nextcloud enabled=%t host=%q", u.NextcloudEnable, u.NextcloudHost)

@@ -1982,23 +1982,34 @@ func rebuildCheckout(repo string, opts rebuildOptions, system bool, stdout, stde
 	// refreshes direct user-owned generated-state assignments. Hardware, AI
 	// discovery and installer-owned facts remain untouched.
 	configPath := filepath.Join(repo, "user.config.json")
-	userConfig, err := config.Load(configPath)
+	rawConfig, err := os.ReadFile(configPath)
 	if err != nil {
 		fmt.Fprintf(stderr, "[GjallarOS] Error: load user configuration: %v\n", err)
 		return 1
 	}
+	userConfig, err := config.Parse(rawConfig)
+	if err != nil {
+		fmt.Fprintf(stderr, "[GjallarOS] Error: load user configuration: %v\n", err)
+		return 1
+	}
+	legacyWebApplications := config.HasLegacyWebApplications(rawConfig)
 
 	intentChanged, err := normalizeRebuildUserIntent(&userConfig, repo)
 	if err != nil {
 		fmt.Fprintf(stderr, "[GjallarOS] Error: normalize user configuration: %v\n", err)
 		return 1
 	}
-	if intentChanged {
+	if intentChanged || legacyWebApplications {
 		if err := config.WriteAtomic(configPath, userConfig); err != nil {
 			fmt.Fprintf(stderr, "[GjallarOS] Error: persist normalized user configuration: %v\n", err)
 			return 1
 		}
+	}
+	if intentChanged {
 		fmt.Fprintln(stdout, "[GjallarOS] Migrated missing dotfilesDir to the discovered repository path.")
+	}
+	if legacyWebApplications {
+		fmt.Fprintln(stdout, "[GjallarOS] Migrated planeEnable/planeHost/drawio* in user.config.json into webApplications (one-time).")
 	}
 
 	if host == "" {

@@ -177,8 +177,8 @@ development shell intentionally uses unstable.
 
 Web apps are listed in `webApplications`, for example
 `[{"id": "teams"}, {"id": "plane", "endpoint": "https://plane.example"}]`.
-The older `planeEnable`/`planeHost`/`drawio*` fields are still read when
-`webApplications` is absent, but new configs should use the list.
+An older config with `planeEnable`/`planeHost`/`drawio*` is moved into the
+list once on the next rebuild, and the rebuild says so.
 
 `"dolphinDriveUsage": true` shows used and total space next to each drive in
 the Dolphin places panel. It patches KIO, so KIO, Dolphin and the file dialogs

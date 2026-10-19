@@ -1,90 +1,47 @@
 package config
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
 
-func TestNormalizeWebApplicationsExplicitEmptyOverridesLegacyState(t *testing.T) {
-	user := User{
-		WebApplications:  []WebApplicationIntent{},
-		PlaneEnable:      true,
-		PlaneHost:        "https://stale-plane.example.test",
-		DrawioEnable:     true,
-		DrawioSelfHosted: true,
-		DrawioHost:       "https://stale-drawio.example.test",
-	}
-
-	if err := NormalizeWebApplications(&user); err != nil {
+func TestParseExplicitEmptyWebApplicationsDropsLegacyKeys(t *testing.T) {
+	user, err := parsePresetWith(t, `{
+		"webApplications": [],
+		"planeEnable": true,
+		"planeHost": "https://stale-plane.example.test",
+		"drawioEnable": true,
+		"drawioSelfHosted": true,
+		"drawioHost": "https://stale-drawio.example.test"
+	}`)
+	if err != nil {
 		t.Fatal(err)
 	}
 
-	if user.WebApplications == nil {
-		t.Fatal("explicit canonical empty list became absent")
-	}
-
-	if len(user.WebApplications) != 0 {
-		t.Fatalf(
-			"webApplications = %#v, want explicit empty list",
-			user.WebApplications,
-		)
-	}
-
-	if user.PlaneEnable ||
-		user.PlaneHost != "" ||
-		user.DrawioEnable ||
-		user.DrawioSelfHosted ||
-		user.DrawioHost != "" {
-		t.Fatalf(
-			"stale legacy state survived canonical empty intent: %+v",
-			user,
-		)
+	if user.WebApplications == nil || len(user.WebApplications) != 0 {
+		t.Fatalf("webApplications = %#v, want explicit empty list", user.WebApplications)
 	}
 }
 
-func TestNormalizeWebApplicationsAbsentFieldStillMigratesLegacyState(t *testing.T) {
-	user := User{
-		PlaneEnable: true,
-		PlaneHost:   "plane.example.test",
-	}
-
-	if user.WebApplications != nil {
-		t.Fatal("test requires absent webApplications state")
-	}
-
-	if err := NormalizeWebApplications(&user); err != nil {
+func TestParseMissingWebApplicationsMigratesLegacyKeys(t *testing.T) {
+	user, err := parsePresetWith(t, `{"planeEnable": true, "planeHost": "plane.example.test"}`)
+	if err != nil {
 		t.Fatal(err)
 	}
 
-	want := []WebApplicationIntent{
-		{
-			ID: WebApplicationTeams,
-		},
-		{
-			ID:       WebApplicationPlane,
-			Endpoint: "http://plane.example.test",
-		},
-	}
+	assertWebApplications(t, user.WebApplications, []WebApplicationIntent{
+		{ID: WebApplicationTeams},
+		{ID: WebApplicationPlane, Endpoint: "http://plane.example.test"},
+	})
+}
 
-	if len(user.WebApplications) != len(want) {
-		t.Fatalf(
-			"legacy migration produced %#v, want %#v",
-			user.WebApplications,
-			want,
-		)
-	}
-
-	for index := range want {
-		if user.WebApplications[index] != want[index] {
-			t.Fatalf(
-				"legacy migration[%d] = %#v, want %#v",
-				index,
-				user.WebApplications[index],
-				want[index],
-			)
-		}
+func TestParseRejectsBadLegacyPlaneHost(t *testing.T) {
+	_, err := parsePresetWith(t, `{"planeEnable": true, "planeHost": ""}`)
+	if err == nil || !strings.Contains(err.Error(), "planeHost") {
+		t.Fatalf("expected planeHost error, got %v", err)
 	}
 }
 
@@ -128,4 +85,43 @@ func TestWriteAtomicPersistsCanonicalEmptyWebApplications(t *testing.T) {
 			text,
 		)
 	}
+}
+
+func assertWebApplications(t *testing.T, got, want []WebApplicationIntent) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("webApplications = %#v, want %#v", got, want)
+	}
+	for index := range want {
+		if got[index] != want[index] {
+			t.Fatalf("webApplications[%d] = %#v, want %#v", index, got[index], want[index])
+		}
+	}
+}
+
+// parsePresetWith parses the shipped preset without its webApplications list,
+// with the given JSON fields laid over it.
+func parsePresetWith(t *testing.T, overlay string) (User, error) {
+	t.Helper()
+	preset, err := os.ReadFile("../../../scripts/installation/user_PresetJSON/default.user.config.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(preset, &fields); err != nil {
+		t.Fatal(err)
+	}
+	delete(fields, "webApplications")
+	var extra map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(overlay), &extra); err != nil {
+		t.Fatal(err)
+	}
+	for key, value := range extra {
+		fields[key] = value
+	}
+	contents, err := json.Marshal(fields)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return Parse(contents)
 }

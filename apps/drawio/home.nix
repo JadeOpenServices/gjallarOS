@@ -8,26 +8,14 @@
 let
   webApplication = import ../lib/web-application.nix { inherit lib pkgs; };
 
-  canonicalWebApplications = settings ? webApplications;
   webApplications = settings.webApplications or [ ];
   drawioApplication = lib.findFirst (
     application: (application.id or "") == "drawio"
   ) null webApplications;
 
-  drawioEnable =
-    if canonicalWebApplications
-    then drawioApplication != null
-    else settings.drawioEnable or false;
-
-  drawioHost =
-    if drawioApplication != null
-    then drawioApplication.endpoint or ""
-    else settings.drawioHost or "";
-
-  drawioSelfHosted =
-    if canonicalWebApplications
-    then drawioEnable && drawioHost != ""
-    else settings.drawioSelfHosted or false;
+  drawioEnable = drawioApplication != null;
+  drawioHost = if drawioEnable then drawioApplication.endpoint or "" else "";
+  drawioSelfHosted = drawioHost != "";
 
   publicEndpoint = "https://app.diagrams.net/";
   endpoint =

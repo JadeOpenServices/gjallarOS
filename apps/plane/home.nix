@@ -8,21 +8,13 @@
 let
   webApplication = import ../lib/web-application.nix { inherit lib pkgs; };
 
-  canonicalWebApplications = settings ? webApplications;
   webApplications = settings.webApplications or [ ];
   planeApplication = lib.findFirst (
     application: (application.id or "") == "plane"
   ) null webApplications;
 
-  planeEnable =
-    if canonicalWebApplications
-    then planeApplication != null
-    else settings.planeEnable or false;
-
-  planeHost =
-    if planeApplication != null
-    then planeApplication.endpoint or ""
-    else settings.planeHost or "";
+  planeEnable = planeApplication != null;
+  planeHost = if planeEnable then planeApplication.endpoint or "" else "";
 
   planeLauncher = webApplication.mkIsolatedWebApplication {
     name = "plane";

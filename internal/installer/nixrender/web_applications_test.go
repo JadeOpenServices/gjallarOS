@@ -63,14 +63,6 @@ func TestFromUserMapsCanonicalWebApplications(t *testing.T) {
 				ID: config.WebApplicationTeams,
 			},
 		},
-
-		// These compatibility values may still exist while an old JSON file is
-		// being migrated, but nixrender must not mirror them anymore.
-		PlaneEnable:      true,
-		PlaneHost:        "https://legacy-plane.example.test",
-		DrawioEnable:     true,
-		DrawioSelfHosted: true,
-		DrawioHost:       "https://legacy-drawio.example.test",
 	}
 
 	got := FromUser(user)
@@ -108,14 +100,6 @@ func TestRenderEmitsOnlyCanonicalWebApplicationSettings(t *testing.T) {
 				ID: config.WebApplicationTeams,
 			},
 		},
-
-		// Compatibility fields may still exist in memory while old JSON is
-		// migrated, but they must never reach new generated state.
-		PlaneEnable:      true,
-		PlaneHost:        "https://legacy-plane.example.test",
-		DrawioEnable:     true,
-		DrawioSelfHosted: true,
-		DrawioHost:       "https://legacy-drawio.example.test",
 	}
 
 	rendered := string(Render(FromUser(user)))

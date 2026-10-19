@@ -61,13 +61,6 @@ type User struct {
 	// pinned to one file.
 	FirefoxStoreAddons []apps.FirefoxStoreAddon `json:"firefoxStoreAddons" tier:"security"`
 
-	// Compatibility fields retained while the installer prompt and generated
-	// Nix settings migrate to the generic webApplications contract.
-	PlaneEnable               bool   `json:"planeEnable" tier:"security"`
-	PlaneHost                 string `json:"planeHost" tier:"security"`
-	DrawioEnable              bool   `json:"drawioEnable" tier:"security"`
-	DrawioSelfHosted          bool   `json:"drawioSelfHosted" tier:"security"`
-	DrawioHost                string `json:"drawioHost" tier:"security"`
 	NextcloudEnable           bool   `json:"nextcloudEnable" tier:"security"`
 	NextcloudHost             string `json:"nextcloudHost" tier:"security"`
 	Theme                     string `json:"theme" tier:"everyday"`
@@ -237,8 +230,15 @@ func Parse(contents []byte) (User, error) {
 			}
 		}
 		// Noctalia owns the wallpaper now; older configs still carry the key.
-		if _, old := fields["backgroundNormal"]; old {
-			delete(fields, "backgroundNormal")
+		_, oldBackground := fields["backgroundNormal"]
+		delete(fields, "backgroundNormal")
+		oldWebApplications := legacyWebApplications(fields)
+		if oldWebApplications {
+			if err := migrateLegacyWebApplications(fields); err != nil {
+				return User{}, fmt.Errorf("user configuration: %w", err)
+			}
+		}
+		if oldBackground || oldWebApplications {
 			if contents, err = json.Marshal(fields); err != nil {
 				return User{}, fmt.Errorf("parse user configuration: %w", err)
 			}
