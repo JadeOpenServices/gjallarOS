@@ -26,6 +26,13 @@ const (
 	// SecurityDelay is the wait for a security change away from home and
 	// for every critical change.
 	SecurityDelay = time.Hour
+
+	// BusName, ObjectPath and Interface name the service on the system bus.
+	BusName    = "org.gjallaros.Settings1"
+	ObjectPath = "/org/gjallaros/Settings1"
+	Interface  = "org.gjallaros.Settings1"
+	// RebuildUnit is the unit Apply starts.
+	RebuildUnit = "gjallar-settings-rebuild.service"
 )
 
 // KeyChange is one key with its value before and after, as compact JSON.
@@ -45,6 +52,20 @@ type Change struct {
 	Tier    config.Tier `json:"tier"`
 	Keys    []KeyChange `json:"keys"`
 	Asked   time.Time   `json:"asked"`
+}
+
+// KeyValue is one key of the service's List and Get answers.
+type KeyValue struct {
+	Key   string          `json:"key"`
+	Tier  config.Tier     `json:"tier"`
+	Value json.RawMessage `json:"value,omitempty"`
+}
+
+// Pending is a change with the earliest time it may be applied, as the
+// service's Request and Pending answer it.
+type Pending struct {
+	Change
+	ReadyAt time.Time `json:"readyAt"`
 }
 
 var tierRank = map[config.Tier]int{
@@ -167,8 +188,8 @@ func (c Change) Apply(data []byte) ([]byte, error) {
 	return updated, err
 }
 
-// maxShownValue is how much of one value the password dialog shows.
-const maxShownValue = 120
+// MaxShownValue is how much of one value the password dialog shows.
+const MaxShownValue = 120
 
 // Message is the text of the password dialog: every key with its old and
 // new value. Characters that do not print, including those that turn text
@@ -180,9 +201,9 @@ func (c Change) Message() string {
 	for _, key := range c.Keys {
 		old := "(not set)"
 		if key.Old != nil {
-			old = shown(key.Old)
+			old = Shown(key.Old, MaxShownValue)
 		}
-		fmt.Fprintf(&b, "\n%s: %s -> %s", key.Key, old, shown(key.New))
+		fmt.Fprintf(&b, "\n%s: %s -> %s", key.Key, old, Shown(key.New, MaxShownValue))
 	}
 	return b.String()
 }
@@ -196,11 +217,13 @@ func (c Change) KeyNames() string {
 	return strings.Join(names, ",")
 }
 
-func shown(value json.RawMessage) string {
+// Shown is a value as a person may see it: characters that do not print
+// become escapes, and after limit characters (0 for no limit) it is cut.
+func Shown(value json.RawMessage, limit int) string {
 	var b strings.Builder
 	runes := 0
 	for _, r := range string(value) {
-		if runes == maxShownValue {
+		if runes == limit && limit > 0 {
 			b.WriteString("...")
 			break
 		}

@@ -15,14 +15,15 @@ import (
 	"github.com/godbus/dbus/v5"
 
 	"github.com/JadeOpenServices/gjallarOS/internal/nettrust"
+	"github.com/JadeOpenServices/gjallarOS/internal/settings"
 )
 
 const (
-	busName       = "org.gjallaros.Settings1"
-	objectPath    = dbus.ObjectPath("/org/gjallaros/Settings1")
-	interfaceName = "org.gjallaros.Settings1"
+	busName       = settings.BusName
+	objectPath    = dbus.ObjectPath(settings.ObjectPath)
+	interfaceName = settings.Interface
 
-	rebuildUnit = "gjallar-settings-rebuild.service"
+	rebuildUnit = settings.RebuildUnit
 	rebuildEnv  = "/run/gjallar/settings/rebuild.env"
 
 	// passwordTimeout is how long a password dialog may stay open.
@@ -255,7 +256,7 @@ func (o object) Apply(sender dbus.Sender, id, colors string) *dbus.Error {
 func (o object) Pending(sender dbus.Sender) (string, *dbus.Error) {
 	list, err := o.svc.Pending(context.Background(), string(sender))
 	if list == nil {
-		list = []pendingChange{}
+		list = []settings.Pending{}
 	}
 	return answer(list, err)
 }

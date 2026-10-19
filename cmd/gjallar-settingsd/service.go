@@ -71,19 +71,6 @@ func newService(sys system, checkoutPath string, checkout func(string) error) *s
 	}
 }
 
-// keyValue is one entry of List.
-type keyValue struct {
-	Key   string          `json:"key"`
-	Tier  config.Tier     `json:"tier"`
-	Value json.RawMessage `json:"value,omitempty"`
-}
-
-// pendingChange is one entry of Pending.
-type pendingChange struct {
-	settings.Change
-	ReadyAt time.Time `json:"readyAt"`
-}
-
 func (s *service) readConfig() ([]byte, map[string]json.RawMessage, error) {
 	data, err := os.ReadFile(s.configPath)
 	if err != nil {
@@ -97,7 +84,7 @@ func (s *service) readConfig() ([]byte, map[string]json.RawMessage, error) {
 }
 
 // List returns every key with its tier and current value, sorted by key.
-func (s *service) List() ([]keyValue, error) {
+func (s *service) List() ([]settings.KeyValue, error) {
 	_, fields, err := s.readConfig()
 	if err != nil {
 		return nil, err
@@ -106,48 +93,48 @@ func (s *service) List() ([]keyValue, error) {
 	if err != nil {
 		return nil, err
 	}
-	list := make([]keyValue, 0, len(tiers))
+	list := make([]settings.KeyValue, 0, len(tiers))
 	for key, tier := range tiers {
-		list = append(list, keyValue{Key: key, Tier: tier, Value: fields[key]})
+		list = append(list, settings.KeyValue{Key: key, Tier: tier, Value: fields[key]})
 	}
-	slices.SortFunc(list, func(a, b keyValue) int { return strings.Compare(a.Key, b.Key) })
+	slices.SortFunc(list, func(a, b settings.KeyValue) int { return strings.Compare(a.Key, b.Key) })
 	return list, nil
 }
 
 // Get returns one key's tier and value.
-func (s *service) Get(key string) (keyValue, error) {
+func (s *service) Get(key string) (settings.KeyValue, error) {
 	tier, err := config.TierOf(key)
 	if err != nil {
-		return keyValue{}, fmt.Errorf("%w: %v", errRefused, err)
+		return settings.KeyValue{}, fmt.Errorf("%w: %v", errRefused, err)
 	}
 	_, fields, err := s.readConfig()
 	if err != nil {
-		return keyValue{}, err
+		return settings.KeyValue{}, err
 	}
-	return keyValue{Key: key, Tier: tier, Value: fields[key]}, nil
+	return settings.KeyValue{Key: key, Tier: tier, Value: fields[key]}, nil
 }
 
 // Request checks a change and keeps it until it is applied, cancelled, or
 // its session ends. A critical change needs the password already here.
-func (s *service) Request(ctx context.Context, sender, values string) (pendingChange, error) {
+func (s *service) Request(ctx context.Context, sender, values string) (settings.Pending, error) {
 	who, err := s.sys.Caller(ctx, sender)
 	if err != nil {
-		return pendingChange{}, err
+		return settings.Pending{}, err
 	}
 	if len(values) > settings.MaxRequestBytes {
-		return pendingChange{}, fmt.Errorf("%w: the request is larger than %d bytes", errRefused, settings.MaxRequestBytes)
+		return settings.Pending{}, fmt.Errorf("%w: the request is larger than %d bytes", errRefused, settings.MaxRequestBytes)
 	}
 	var wanted map[string]json.RawMessage
 	if err := json.Unmarshal([]byte(values), &wanted); err != nil {
-		return pendingChange{}, fmt.Errorf("%w: the request is not a JSON object of keys and values", errRefused)
+		return settings.Pending{}, fmt.Errorf("%w: the request is not a JSON object of keys and values", errRefused)
 	}
 	data, _, err := s.readConfig()
 	if err != nil {
-		return pendingChange{}, err
+		return settings.Pending{}, err
 	}
 	change, err := settings.Plan(data, wanted)
 	if err != nil {
-		return pendingChange{}, fmt.Errorf("%w: %v", errRefused, err)
+		return settings.Pending{}, fmt.Errorf("%w: %v", errRefused, err)
 	}
 	change.UID, change.Session = who.UID, who.Session
 
@@ -160,12 +147,12 @@ func (s *service) Request(ctx context.Context, sender, values string) (pendingCh
 	}
 	s.mu.Unlock()
 	if count >= maxPendingPerUser {
-		return pendingChange{}, fmt.Errorf("%w: %d changes already wait; apply or cancel one first", errRefused, count)
+		return settings.Pending{}, fmt.Errorf("%w: %d changes already wait; apply or cancel one first", errRefused, count)
 	}
 
 	if change.Tier == config.TierCritical {
 		if err := s.authorize(ctx, sender, change); err != nil {
-			return pendingChange{}, err
+			return settings.Pending{}, err
 		}
 	}
 	change.Asked = s.now()
@@ -173,11 +160,11 @@ func (s *service) Request(ctx context.Context, sender, values string) (pendingCh
 	s.pending[change.ID] = change
 	s.mu.Unlock()
 	log.Printf("uid %d session %s asked %s change %s: %s", who.UID, who.Session, change.Tier, change.ID, change.KeyNames())
-	return pendingChange{Change: change, ReadyAt: change.ReadyAt(s.sys.Home())}, nil
+	return settings.Pending{Change: change, ReadyAt: change.ReadyAt(s.sys.Home())}, nil
 }
 
 // Pending lists the caller's own changes.
-func (s *service) Pending(ctx context.Context, sender string) ([]pendingChange, error) {
+func (s *service) Pending(ctx context.Context, sender string) ([]settings.Pending, error) {
 	who, err := s.sys.Caller(ctx, sender)
 	if err != nil {
 		return nil, err
@@ -185,13 +172,13 @@ func (s *service) Pending(ctx context.Context, sender string) ([]pendingChange, 
 	home := s.sys.Home()
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	var list []pendingChange
+	var list []settings.Pending
 	for _, change := range s.pending {
 		if change.UID == who.UID && change.Session == who.Session {
-			list = append(list, pendingChange{Change: change, ReadyAt: change.ReadyAt(home)})
+			list = append(list, settings.Pending{Change: change, ReadyAt: change.ReadyAt(home)})
 		}
 	}
-	slices.SortFunc(list, func(a, b pendingChange) int { return a.Asked.Compare(b.Asked) })
+	slices.SortFunc(list, func(a, b settings.Pending) int { return a.Asked.Compare(b.Asked) })
 	return list, nil
 }
 

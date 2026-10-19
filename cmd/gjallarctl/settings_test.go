@@ -1,0 +1,297 @@
+package main
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/config"
+	"github.com/JadeOpenServices/gjallarOS/internal/settings"
+)
+
+// fakeSettingsBus answers like gjallar-settingsd. Its keys, ids and times
+// are SYNTHETIC.
+type fakeSettingsBus struct {
+	values   map[string]settings.KeyValue
+	pending  []settings.Pending
+	readyIn  time.Duration
+	missing  bool
+	requests []string
+	applied  []string
+	rebuilds int
+	result   string
+}
+
+var settingsTestNow = time.Date(2026, 10, 19, 12, 0, 0, 0, time.UTC)
+
+func (b *fakeSettingsBus) Close() error { return nil }
+
+func (b *fakeSettingsBus) Call(_ context.Context, method string, args ...any) (string, error) {
+	if b.missing {
+		return "", errSettingsMissing
+	}
+	answer := func(v any) (string, error) {
+		data, err := json.Marshal(v)
+		return string(data), err
+	}
+	switch method {
+	case "Get":
+		return answer(b.values[args[0].(string)])
+	case "List":
+		var list []settings.KeyValue
+		for _, v := range b.values {
+			list = append(list, v)
+		}
+		return answer(list)
+	case "Request":
+		request := args[0].(string)
+		b.requests = append(b.requests, request)
+		var values map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(request), &values); err != nil {
+			return "", err
+		}
+		change := settings.Pending{
+			Change: settings.Change{
+				ID: "c0ffee00" + strings.Repeat("0", 24), Tier: config.TierEveryday,
+				Asked: settingsTestNow,
+			},
+			ReadyAt: settingsTestNow.Add(b.readyIn),
+		}
+		for key, value := range values {
+			kv := b.values[key]
+			if kv.Tier == config.TierSecurity {
+				change.Tier = kv.Tier
+			}
+			change.Keys = append(change.Keys, settings.KeyChange{Key: key, Old: kv.Value, New: value})
+		}
+		b.pending = append(b.pending, change)
+		return answer(change)
+	case "Pending":
+		return answer(b.pending)
+	case "Apply":
+		b.applied = append(b.applied, args[0].(string))
+		return "", nil
+	case "Cancel":
+		b.pending = nil
+		return "", nil
+	}
+	return "", nil
+}
+
+func (b *fakeSettingsBus) Rebuild(context.Context) (bool, string, error) {
+	b.rebuilds++
+	return b.rebuilds < 3, b.result, nil
+}
+
+func useFakeSettings(t *testing.T, bus *fakeSettingsBus) {
+	t.Helper()
+	t.Setenv("HOME", t.TempDir())
+	oldConnect, oldNow, oldSleep, oldEUID := settingsConnect, settingsNow, settingsSleep, settingsEUID
+	t.Cleanup(func() {
+		settingsConnect, settingsNow, settingsSleep, settingsEUID = oldConnect, oldNow, oldSleep, oldEUID
+	})
+	settingsConnect = func() (settingsBus, error) { return bus, nil }
+	settingsNow = func() time.Time { return settingsTestNow }
+	settingsSleep = func(context.Context, time.Duration) error { return nil }
+	settingsEUID = func() int { return 1000 }
+	if bus.values == nil {
+		bus.values = map[string]settings.KeyValue{
+			"touchpadWorkspaceSwipe": {Key: "touchpadWorkspaceSwipe", Tier: config.TierEveryday, Value: json.RawMessage(`true`)},
+			"timezone":               {Key: "timezone", Tier: config.TierEveryday, Value: json.RawMessage(`"UTC"`)},
+			"networkPrintingEnable":  {Key: "networkPrintingEnable", Tier: config.TierSecurity, Value: json.RawMessage(`false`)},
+		}
+	}
+	if bus.result == "" {
+		bus.result = "success"
+	}
+}
+
+func TestSettingsSetEverydayAppliesAndWatches(t *testing.T) {
+	bus := &fakeSettingsBus{}
+	useFakeSettings(t, bus)
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"settings", "set", "touchpadWorkspaceSwipe=false"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("code %d, stderr %s", code, stderr.String())
+	}
+	if len(bus.requests) != 1 || bus.requests[0] != `{"touchpadWorkspaceSwipe":false}` {
+		t.Fatalf("requests %q", bus.requests)
+	}
+	if len(bus.applied) != 1 || bus.rebuilds != 3 {
+		t.Fatalf("applied %q, rebuild polls %d", bus.applied, bus.rebuilds)
+	}
+	for _, want := range []string{"touchpadWorkspaceSwipe: true -> false", "the change is live"} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Errorf("stdout lacks %q:\n%s", want, stdout.String())
+		}
+	}
+}
+
+func TestSettingsSetFailedRebuild(t *testing.T) {
+	bus := &fakeSettingsBus{result: "exit-code"}
+	useFakeSettings(t, bus)
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"settings", "set", "touchpadWorkspaceSwipe=false"}, &stdout, &stderr); code != 1 {
+		t.Fatalf("code %d", code)
+	}
+	if !strings.Contains(stderr.String(), "the rebuild failed (exit-code)") {
+		t.Fatalf("stderr %s", stderr.String())
+	}
+}
+
+func TestSettingsSetLongWaitLeavesItPending(t *testing.T) {
+	bus := &fakeSettingsBus{readyIn: settings.SecurityDelay}
+	useFakeSettings(t, bus)
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"settings", "set", "networkPrintingEnable=true"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("code %d, stderr %s", code, stderr.String())
+	}
+	if len(bus.applied) != 0 {
+		t.Fatalf("applied %q before the wait", bus.applied)
+	}
+	for _, want := range []string{"(security)", "not on its home network", "gjallarctl settings apply c0ffee00"} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Errorf("stdout lacks %q:\n%s", want, stdout.String())
+		}
+	}
+}
+
+func TestSettingsSetShortWaitApplies(t *testing.T) {
+	bus := &fakeSettingsBus{readyIn: 10 * time.Second}
+	useFakeSettings(t, bus)
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"settings", "set", "networkPrintingEnable=true"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("code %d, stderr %s", code, stderr.String())
+	}
+	if len(bus.applied) != 1 || !strings.Contains(stdout.String(), "applied in 10 s") {
+		t.Fatalf("applied %q, stdout %s", bus.applied, stdout.String())
+	}
+}
+
+func TestSettingsSetTextValue(t *testing.T) {
+	for _, tc := range []struct{ arg, want string }{
+		{"timezone=Europe/Berlin", `{"timezone":"Europe/Berlin"}`},
+		{"timezone=123", `{"timezone":"123"}`},
+		{"timezone=true", `{"timezone":"true"}`},
+	} {
+		bus := &fakeSettingsBus{}
+		useFakeSettings(t, bus)
+		var stdout, stderr bytes.Buffer
+		run([]string{"settings", "set", tc.arg}, &stdout, &stderr)
+		if len(bus.requests) != 1 || bus.requests[0] != tc.want {
+			t.Errorf("%s: requests %q", tc.arg, bus.requests)
+		}
+	}
+}
+
+func TestSettingsSetRejectsBadArguments(t *testing.T) {
+	for _, args := range [][]string{
+		{"settings", "set"},
+		{"settings", "set", "timezone"},
+		{"settings", "set", "timezone=UTC", "timezone=UTC"},
+	} {
+		bus := &fakeSettingsBus{}
+		useFakeSettings(t, bus)
+		var stdout, stderr bytes.Buffer
+		if code := run(args, &stdout, &stderr); code == 0 || len(bus.requests) != 0 {
+			t.Errorf("%q: code %d, requests %q", args, code, bus.requests)
+		}
+	}
+}
+
+func TestSettingsPick(t *testing.T) {
+	bus := &fakeSettingsBus{pending: []settings.Pending{
+		{Change: settings.Change{ID: "abcd1111", Tier: config.TierEveryday}},
+		{Change: settings.Change{ID: "abcd2222", Tier: config.TierEveryday}},
+	}}
+	useFakeSettings(t, bus)
+	for _, tc := range []struct {
+		args []string
+		want string
+		err  string
+	}{
+		{nil, "", "2 changes wait"},
+		{[]string{"abcd"}, "", "fits 2 changes"},
+		{[]string{"abcd2"}, "abcd2222", ""},
+		{[]string{"ffff"}, "", "no change ffff"},
+		{[]string{""}, "", "no change"},
+	} {
+		got, err := settingsPick(context.Background(), bus, tc.args)
+		if tc.err != "" {
+			if err == nil || !strings.Contains(err.Error(), tc.err) {
+				t.Errorf("%q: error %v, want %q", tc.args, err, tc.err)
+			}
+			continue
+		}
+		if err != nil || got.ID != tc.want {
+			t.Errorf("%q: got %q, %v", tc.args, got.ID, err)
+		}
+	}
+	bus.pending = bus.pending[:1]
+	if got, err := settingsPick(context.Background(), bus, nil); err != nil || got.ID != "abcd1111" {
+		t.Errorf("only change: got %q, %v", got.ID, err)
+	}
+}
+
+func TestSettingsServiceMissing(t *testing.T) {
+	bus := &fakeSettingsBus{missing: true}
+	useFakeSettings(t, bus)
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"settings", "list"}, &stdout, &stderr); code != 1 {
+		t.Fatalf("code %d", code)
+	}
+	if !strings.Contains(stderr.String(), "/etc/gjallar/system") {
+		t.Fatalf("stderr %s", stderr.String())
+	}
+}
+
+func TestSettingsRefusesRoot(t *testing.T) {
+	bus := &fakeSettingsBus{}
+	useFakeSettings(t, bus)
+	settingsEUID = func() int { return 0 }
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"settings", "pending"}, &stdout, &stderr); code != 1 {
+		t.Fatalf("code %d", code)
+	}
+	if !strings.Contains(stderr.String(), "as your own user") {
+		t.Fatalf("stderr %s", stderr.String())
+	}
+}
+
+func TestSettingsNamesSkipInstallerKeys(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"settings", "list", "--names"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("code %d, stderr %s", code, stderr.String())
+	}
+	names := strings.Fields(stdout.String())
+	tiers, err := config.Tiers()
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]bool{}
+	for _, name := range names {
+		seen[name] = true
+		if tiers[name] == config.TierInstaller {
+			t.Errorf("installer key %s listed", name)
+		}
+	}
+	if !seen["timezone"] || !seen["luksTpm2Pin"] || seen["unattendedInstall"] {
+		t.Errorf("names %q", names)
+	}
+}
+
+func TestSettingsGetShowsControlCharacters(t *testing.T) {
+	bus := &fakeSettingsBus{values: map[string]settings.KeyValue{
+		"timezone": {Key: "timezone", Tier: config.TierEveryday, Value: json.RawMessage("\"a\u202eb\"")},
+	}}
+	useFakeSettings(t, bus)
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"settings", "get", "timezone"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("code %d, stderr %s", code, stderr.String())
+	}
+	if strings.ContainsRune(stdout.String(), 0x202e) {
+		t.Fatalf("raw escape in %q", stdout.String())
+	}
+}

@@ -185,6 +185,33 @@ the Dolphin places panel. It patches KIO, so KIO, Dolphin and the file dialogs
 are compiled on the machine instead of downloaded. That adds a lot of time to
 a rebuild, so it is off by default.
 
+### Changing settings
+
+On a system that builds from `/etc/gjallar/system`, root owns
+`user.config.json`. Change it with `gjallarctl settings`, as your own user:
+
+```sh
+gjallarctl settings list
+gjallarctl settings set touchpadWorkspaceSwipe=false timezone=Europe/Berlin
+gjallarctl settings pending
+gjallarctl settings apply
+```
+
+VALUE is JSON; a key that holds text takes plain text. Each key has a tier,
+and the tier decides how long a change waits before it can be written:
+
+- **everyday** (looks, input, apps): no wait.
+- **security** (network, services, add-ons, hostname, user name): one hour,
+  or 10 s while a router of your tailnet proves this is your home network.
+- **critical** (disk unlock, recovery, firmware): one hour always, and the
+  password is asked when you ask for the change and again when you apply it.
+- **installer**: changes only with a new install.
+
+The password dialog lists every key with its old and new value. Apply
+writes the file and starts the rebuild, and `set` follows it until the
+change is live. A waiting change lives only in your login session, so
+logging out or rebooting drops it.
+
 ### App catalogue
 
 Optional applications live in `apps/<id>/`: `meta.json` (name, description,
