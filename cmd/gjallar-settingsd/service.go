@@ -278,12 +278,27 @@ func (s *service) Import(ctx context.Context, sender string, data []byte) (setti
 	if who.UID != file.UID {
 		return settings.Pending{}, fmt.Errorf("%w: %s made this file; only that account can import it", errRefused, file.User)
 	}
-	note := fmt.Sprintf("from a file %s made on this device on %s", file.User, file.Created.Local().Format(time.DateTime))
+	note := fmt.Sprintf("from a file %s made on this device on %s", file.User, file.Created.In(currentZone()).Format("2006-01-02 15:04:05 MST"))
 	if days := int(s.now().Sub(file.Created).Hours() / 24); days > 0 {
 		note += fmt.Sprintf(", %d days ago", days)
 	}
 	log.Printf("uid %d imports a file of uid %d made %s", who.UID, file.UID, file.Created.Format(time.RFC3339))
 	return s.request(ctx, sender, who, file.Settings, []string{note})
+}
+
+// currentZone is the device's time zone as it is now. time.Local is read
+// once when the service starts, so after a timezone change it would show
+// times in the old zone.
+func currentZone() *time.Location {
+	data, err := os.ReadFile("/etc/localtime")
+	if err != nil {
+		return time.Local
+	}
+	zone, err := time.LoadLocationFromTZData("", data)
+	if err != nil {
+		return time.Local
+	}
+	return zone
 }
 
 // Pending lists the caller's own changes.
