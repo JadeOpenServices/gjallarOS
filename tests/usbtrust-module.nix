@@ -46,8 +46,9 @@ let
       usbguardReadWritePaths =
         if enabled then c.systemd.services.usbguard.serviceConfig.ReadWritePaths else [ ];
       start = if enabled then c.systemd.services.usb-trust-broker.serviceConfig.ExecStart else null;
-      desktopGroups = if enabled then c.users.users.testuser.extraGroups else [ ];
-      brokerGroup = if enabled then c.systemd.services.usb-trust-broker.serviceConfig.Group else null;
+      desktopGroups = if enabled then (c.users.users.testuser or { extraGroups = [ ]; }).extraGroups else [ ];
+      brokerGroup = if enabled then c.systemd.services.usb-trust-broker.serviceConfig.Group or null else null;
+      runtimeMode = if enabled then c.systemd.services.usb-trust-broker.serviceConfig.RuntimeDirectoryMode else null;
       stateDirectory = if enabled then c.systemd.services.usb-trust-broker.serviceConfig.StateDirectory else null;
       # The broker needs /sys/bus/scsi at start (mount namespace and autoprobe).
       scsiAtBoot =
@@ -83,8 +84,8 @@ assert !dormant.backend;
 assert audit.backend && !audit.enforce && audit.policy == "allow";
 assert enforcing.policy == "block" && enforcing.rules == "";
 assert enforcing.groups == [ ] && enforcing.users == [ "root" ];
-assert builtins.elem "usb-trust-access" enforcing.desktopGroups;
-assert enforcing.brokerGroup == "usb-trust-access";
+assert !builtins.elem "usb-trust-access" enforcing.desktopGroups;
+assert enforcing.brokerGroup == null && enforcing.runtimeMode == "0711";
 assert enforcing.stateDirectory == "gjallar-usbtrust";
 assert builtins.elem "-/sys" enforcing.usbguardReadWritePaths;
 assert enforcing.usbAssertions;

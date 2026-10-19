@@ -183,6 +183,8 @@ func run(
 
 	server := daemon.Server{
 		SocketPath:     cfg.socketPath,
+		SocketMode:     0600,
+		SocketOwner:    &cfg.ownerUID,
 		RequestTimeout: cfg.requestTimeout,
 		Handler: broker.Handler{
 			OwnerUID: cfg.ownerUID,

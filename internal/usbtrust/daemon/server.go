@@ -19,8 +19,11 @@ const (
 )
 
 type Server struct {
-	SocketPath     string
-	SocketMode     os.FileMode
+	SocketPath string
+	SocketMode os.FileMode
+	// SocketOwner, when set, owns the socket, so the owner can connect
+	// without a group that only applies at the next login.
+	SocketOwner    *uint32
 	RequestTimeout time.Duration
 	Handler        broker.Handler
 
@@ -64,6 +67,19 @@ func (s Server) Serve(ctx context.Context) error {
 		_ = listener.Close()
 		removeSocket(s.SocketPath)
 	}()
+
+	if s.SocketOwner != nil {
+		if err := os.Chown(
+			s.SocketPath,
+			int(*s.SocketOwner),
+			-1,
+		); err != nil {
+			return fmt.Errorf(
+				"set USB trust socket owner: %w",
+				err,
+			)
+		}
+	}
 
 	if err := os.Chmod(
 		s.SocketPath,

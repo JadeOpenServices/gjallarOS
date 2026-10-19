@@ -88,9 +88,6 @@ in
           message = "USB trust enforcement requires a configured TPM signing handle; enroll and audit machine identities before enabling enforcement.";
         }
       ];
-      users.groups.usb-trust-access = { };
-      users.users.${settings.username}.extraGroups = [ "usb-trust-access" ];
-
       services.usbguard = {
         enable = true;
         dbus.enable = false;
@@ -148,10 +145,12 @@ in
           Type = "simple";
           Environment = [ "TPM2TOOLS_TCTI=device:/dev/tpmrm0" ];
           User = "root";
-          Group = "usb-trust-access";
           ExecStart = start;
           RuntimeDirectory = "gjallar-usbtrust";
-          RuntimeDirectoryMode = "0750";
+          # The broker hands the socket to the owner UID (mode 600), so the
+          # review works right after the rebuild that turns usbguard on; a
+          # group would only apply at the next login.
+          RuntimeDirectoryMode = "0711";
           StateDirectory = "gjallar-usbtrust";
           StateDirectoryMode = "0700";
           UMask = "0077";

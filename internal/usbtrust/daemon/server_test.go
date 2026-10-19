@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -59,12 +60,14 @@ func TestServerRoundTripUsesUnixPeerCredentials(
 	)
 	defer cancel()
 
+	owner := uint32(os.Geteuid())
 	server := Server{
 		SocketPath:     socket,
 		SocketMode:     0600,
+		SocketOwner:    &owner,
 		RequestTimeout: time.Second,
 		Handler: broker.Handler{
-			OwnerUID: uint32(os.Geteuid()),
+			OwnerUID: owner,
 			Reader:   fakeReader{},
 		},
 	}
@@ -108,6 +111,18 @@ func TestServerRoundTripUsesUnixPeerCredentials(
 	}
 
 	_ = conn.Close()
+
+	// The answer came after Serve set owner and mode.
+	info, err := os.Stat(socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if uid := info.Sys().(*syscall.Stat_t).Uid; uid != owner {
+		t.Fatalf("socket owner = %d, want %d", uid, owner)
+	}
+	if mode := info.Mode().Perm(); mode != 0600 {
+		t.Fatalf("socket mode = %o, want 600", mode)
+	}
 
 	if !response.OK {
 		t.Fatalf(
