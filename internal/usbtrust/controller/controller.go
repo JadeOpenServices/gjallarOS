@@ -127,7 +127,7 @@ func (c *Controller) Status(ctx context.Context) (broker.Status, error) {
 	return s, nil
 }
 
-// Renewals lists the trusted devices whose trust lapses within
+// Renewals lists the unconnected trusted devices whose trust lapses within
 // usbtrust.LapseWarning, for the renewal notice.
 func (c *Controller) Renewals(ctx context.Context) ([]broker.TrustLapse, error) {
 	c.mu.Lock()
@@ -139,9 +139,21 @@ func (c *Controller) Renewals(ctx context.Context) ([]broker.TrustLapse, error) 
 	if err != nil || input.Trusted == nil {
 		return nil, err
 	}
+	// A device connected under live trust renews itself; asking about it
+	// would also claim it has not been connected.
+	audit, err := usbtrust.Audit(input)
+	if err != nil {
+		return nil, err
+	}
+	connected := map[string]bool{}
+	for _, finding := range audit.Findings {
+		if finding.Code == usbtrust.CodeTrustedExternal {
+			connected[finding.TrustedID] = true
+		}
+	}
 	var renewals []broker.TrustLapse
 	for _, device := range input.Trusted.Devices {
-		if !input.Lapse.Renewable(device) {
+		if connected[device.ID] || !input.Lapse.Renewable(device) {
 			continue
 		}
 		lapse, _ := trustLapse(input.Lapse, device)

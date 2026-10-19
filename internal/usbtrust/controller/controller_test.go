@@ -450,8 +450,14 @@ func TestRenewOnlyBeforeTrustLapses(t *testing.T) {
 		t.Fatal(err)
 	}
 	id := s.doc.Devices[0].ID
-	s.observed = nil
 	c.Reader.LapseAfter = 30 * 24 * time.Hour
+	// SYNTHETIC: last used 28 days ago but plugged in now; it renews itself.
+	s.doc.Devices[0].LastUsed = time.Now().UTC().Add(-28 * 24 * time.Hour).Format(time.RFC3339)
+	if renewals, _ := c.Renewals(ctx); len(renewals) != 0 {
+		t.Fatalf("connected device offered for renewal: %+v", renewals)
+	}
+	s.doc.Devices[0].LastUsed = time.Now().UTC().Format(time.RFC3339)
+	s.observed = nil
 	renew := broker.Request{Action: broker.ActionRenew, TrustedID: id}
 	if renewals, _ := c.Renewals(ctx); len(renewals) != 0 {
 		t.Fatalf("fresh trust offered for renewal: %+v", renewals)
