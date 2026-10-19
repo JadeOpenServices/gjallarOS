@@ -85,7 +85,7 @@ func readNoctaliaPalette(home string) (string, error) {
 		return "", fmt.Errorf("%s: %w", path, err)
 	}
 	if len(palette) != len(noctaliaPaletteKeys) {
-		return "", fmt.Errorf("%s has %d entries, want base00 to base0F", path, len(palette))
+		return "", fmt.Errorf("%s must hold 16 entries, base00 to base0F; it holds %d", path, len(palette))
 	}
 	fields := make([]string, 0, len(noctaliaPaletteKeys))
 	for _, key := range noctaliaPaletteKeys {
@@ -103,7 +103,7 @@ func readNoctaliaPalette(home string) (string, error) {
 func checkNoctaliaColors(colors string) error {
 	fields := strings.Split(colors, ",")
 	if len(fields) != len(noctaliaPaletteKeys) {
-		return fmt.Errorf("%s has %d colors, want 16", noctaliaColorsEnv, len(fields))
+		return fmt.Errorf("%s must hold 16 colors, base00 to base0F; it holds %d", noctaliaColorsEnv, len(fields))
 	}
 	for i, field := range fields {
 		key, value, ok := strings.Cut(field, "=")
