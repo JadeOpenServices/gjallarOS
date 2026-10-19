@@ -137,6 +137,20 @@ func TestRenewableOnlyInTheWarningWindow(t *testing.T) {
 	if (Lapse{Now: lapseNow}).Renewable(dock) {
 		t.Fatal("renewable while lapse is off")
 	}
+	// A one-day lapse warns half a day ahead, so a fresh renewal is quiet.
+	oneDay := Lapse{After: 24 * time.Hour, Now: lapseNow}
+	for lastUsed, renewable := range map[string]bool{
+		"2026-10-19T11:00:00Z": false,
+		"2026-10-19T00:00:01Z": false,
+		"2026-10-19T00:00:00Z": true,
+		"2026-10-18T12:00:01Z": true,
+		"2026-10-18T12:00:00Z": false,
+	} {
+		dock.LastUsed = lastUsed
+		if got := oneDay.Renewable(dock); got != renewable {
+			t.Errorf("one-day lapse, lastUsed %s: renewable %v, want %v", lastUsed, got, renewable)
+		}
+	}
 }
 
 func TestLapseClockStartsWhenSwitchedOn(t *testing.T) {

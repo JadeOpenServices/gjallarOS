@@ -223,12 +223,13 @@ Plan:
 - [x] C1: `lastUsed` in the trust record, lapse check in the audit
       (`trusted-external-lapsed`, offers renew), lapse ignored for a
       connection that was trusted when it started, broker refreshes
-      `lastUsed` once a day.
+      `lastUsed` once a day (twice per lapse when shorter).
 - [x] C2: `--lapse-days N`, Nix
       option `services.gjallar-usbtrust.lapseDays` (null = off), status
       shows when each device lapses.
-- [x] C3: warning three days ahead with a Renew button (`gjallarctl usb
-      renew`, accepted only in that window).
+- [x] C3: warning three days ahead (half the lapse when shorter) with a
+      Renew button (`gjallarctl usb renew`, accepted only in that window);
+      no warning while the device is plugged in.
 - [x] C4: `usbTrustLapseDays` setting (held when it lowers protection),
       installer question (default off, 30 when on, any N from 1), clock
       starts at turn-on, last-used keyboard and mouse kept.

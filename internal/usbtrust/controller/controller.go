@@ -127,8 +127,8 @@ func (c *Controller) Status(ctx context.Context) (broker.Status, error) {
 	return s, nil
 }
 
-// Renewals lists the unconnected trusted devices whose trust lapses within
-// usbtrust.LapseWarning, for the renewal notice.
+// Renewals lists the unconnected trusted devices whose trust lapses soon,
+// for the renewal notice.
 func (c *Controller) Renewals(ctx context.Context) ([]broker.TrustLapse, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()

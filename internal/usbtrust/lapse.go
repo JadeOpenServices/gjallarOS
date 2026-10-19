@@ -112,12 +112,18 @@ func (l Lapse) Lapsed(device Device) bool {
 // LapseWarning is how long before a lapse the owner is offered a renewal.
 const LapseWarning = 72 * time.Hour
 
-// Renewable reports whether the device's trust runs out within LapseWarning
-// and has not run out yet. Once it has, the device must be connected and
-// reviewed again.
+// warning is LapseWarning, or half the lapse when that is shorter. A
+// warning longer than the lapse would ask again right after each renewal.
+func (l Lapse) warning() time.Duration {
+	return min(LapseWarning, l.After/2)
+}
+
+// Renewable reports whether the device's trust runs out within its warning
+// time and has not run out yet. Once it has, the device must be connected
+// and reviewed again.
 func (l Lapse) Renewable(device Device) bool {
 	at, ok := l.LapsesAt(device)
-	return ok && !at.IsZero() && l.Now.Before(at) && !l.Now.Before(at.Add(-LapseWarning))
+	return ok && !at.IsZero() && l.Now.Before(at) && !l.Now.Before(at.Add(-l.warning()))
 }
 
 // refreshEvery is how often lastUsed moves while a device stays connected:
