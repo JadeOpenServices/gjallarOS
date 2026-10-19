@@ -39,14 +39,14 @@ let
   };
 
   # unl0kr and Plymouth both want the display. Hand it over only when a
-  # password is actually asked.
+  # password is actually asked. --wait returns once plymouthd has exited.
+  # On failure the prompt still starts: no prompt at all would leave the
+  # disk locked.
   quitPlymouth = pkgs.writeShellScript "unl0kr-quit-plymouth" ''
     ${plymouth}/bin/plymouth --ping || exit 0
-    ${plymouth}/bin/plymouth quit --retain-splash
-    for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
-      ${plymouth}/bin/plymouth --ping || exit 0
-      ${pkgs.coreutils}/bin/sleep 0.1
-    done
+    if ! ${plymouth}/bin/plymouth quit --retain-splash --wait; then
+      echo "unl0kr-quit-plymouth: plymouth quit failed, starting unl0kr anyway" >&2
+    fi
   '';
 
   # Upstream units skip themselves while Plymouth runs.
