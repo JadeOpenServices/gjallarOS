@@ -8,12 +8,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/netip"
 	"os"
 	"syscall"
 	"time"
 
 	"github.com/godbus/dbus/v5"
 
+	"github.com/JadeOpenServices/gjallarOS/internal/namecheck"
 	"github.com/JadeOpenServices/gjallarOS/internal/nettrust"
 	"github.com/JadeOpenServices/gjallarOS/internal/settings"
 )
@@ -141,37 +143,55 @@ func (b busSystem) Authorize(ctx context.Context, sender, action string, details
 	return nil
 }
 
-// Home reads root's own network verdict. Only a fresh verdict in a file
-// root wrote counts; anything else is not home.
+// Home reads root's own network verdict.
 func (busSystem) Home() bool {
-	return readHome(vpnTrustPath, time.Now())
+	verdict, ok := readVerdict(vpnTrustPath, time.Now())
+	return ok && verdict.Trust == nettrust.TrustHome
 }
 
-func readHome(path string, now time.Time) bool {
+func (busSystem) Network() (string, bool) {
+	verdict, ok := readVerdict(vpnTrustPath, time.Now())
+	if !ok || !verdict.Trusted() || verdict.Device == "" {
+		return "", false
+	}
+	return verdict.Device, true
+}
+
+func (busSystem) Tailnet(ctx context.Context) (nettrust.Tailnet, error) {
+	return nettrust.NewSystem().Tailnet(ctx)
+}
+
+func (busSystem) NameTaken(ctx context.Context, device, name string) (netip.Addr, error) {
+	return namecheck.Ask(ctx, namecheck.SocketPath, device, name)
+}
+
+// readVerdict reads root's network verdict. Only a fresh verdict in a file
+// root wrote counts; anything else is not ok.
+func readVerdict(path string, now time.Time) (nettrust.Verdict, bool) {
 	file, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
 	if err != nil {
-		return false
+		return nettrust.Verdict{}, false
 	}
 	defer file.Close()
 	info, err := file.Stat()
 	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0o022 != 0 {
-		return false
+		return nettrust.Verdict{}, false
 	}
 	if stat, ok := info.Sys().(*syscall.Stat_t); !ok || stat.Uid != 0 {
-		return false
+		return nettrust.Verdict{}, false
 	}
 	if now.Sub(info.ModTime()) > verdictMaxAge {
-		return false
+		return nettrust.Verdict{}, false
 	}
 	data, err := io.ReadAll(io.LimitReader(file, 64<<10))
 	if err != nil {
-		return false
+		return nettrust.Verdict{}, false
 	}
 	var verdict nettrust.Verdict
 	if err := json.Unmarshal(data, &verdict); err != nil {
-		return false
+		return nettrust.Verdict{}, false
 	}
-	return verdict.Trust == nettrust.TrustHome
+	return verdict, true
 }
 
 func (b busSystem) unit(ctx context.Context) (dbus.BusObject, error) {

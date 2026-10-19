@@ -277,6 +277,9 @@ func settingsSet(ctx context.Context, bus settingsBus, args []string, stdout, st
 	}
 	fmt.Fprintf(stdout, "Asked for change %s (%s):\n", shortID(change.ID), change.Tier)
 	printKeyChanges(stdout, change.Change)
+	for _, note := range change.Notes {
+		fmt.Fprintf(stdout, "Note: %s\n", note)
+	}
 
 	wait := change.ReadyAt.Sub(settingsNow())
 	if wait > settingsReadingWait {

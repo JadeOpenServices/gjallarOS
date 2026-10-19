@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net/netip"
 	"os"
 	"slices"
 	"strings"
@@ -13,12 +14,19 @@ import (
 	"time"
 
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/config"
+	"github.com/JadeOpenServices/gjallarOS/internal/namecheck"
+	"github.com/JadeOpenServices/gjallarOS/internal/nettrust"
 	"github.com/JadeOpenServices/gjallarOS/internal/noctalia"
 	"github.com/JadeOpenServices/gjallarOS/internal/settings"
 )
 
-// maxPendingPerUser bounds what one user can keep root holding.
-const maxPendingPerUser = 4
+const (
+	// maxPendingPerUser bounds what one user can keep root holding.
+	maxPendingPerUser = 4
+	// nameCheckTimeout bounds the tailnet and network checks of a new
+	// hostname.
+	nameCheckTimeout = 15 * time.Second
+)
 
 // errRefused is a request root will not take; errDenied is a failed or
 // dismissed password check.
@@ -43,6 +51,15 @@ type system interface {
 	Authorize(ctx context.Context, sender, action string, details map[string]string) error
 	// Home reports whether root's network verdict is a proven home now.
 	Home() bool
+	// Network returns the device of the current network and whether root's
+	// verdict trusts it now.
+	Network() (device string, trusted bool)
+	// Tailnet lists the tailnet peers; it is empty when Tailscale is not
+	// running.
+	Tailnet(ctx context.Context) (nettrust.Tailnet, error)
+	// NameTaken asks the unprivileged helper who answers for name.local on
+	// device. It returns an invalid address when no one does.
+	NameTaken(ctx context.Context, device, name string) (netip.Addr, error)
 	// Rebuilding reports whether the rebuild unit is still running.
 	Rebuilding(ctx context.Context) (bool, error)
 	// StartRebuild starts the rebuild unit with the checked colors.
@@ -150,6 +167,10 @@ func (s *service) Request(ctx context.Context, sender, values string) (settings.
 		return settings.Pending{}, fmt.Errorf("%w: %d changes already wait; apply or cancel one first", errRefused, count)
 	}
 
+	notes, err := s.checkHostname(ctx, change)
+	if err != nil {
+		return settings.Pending{}, err
+	}
 	if change.Tier == config.TierCritical {
 		if err := s.authorize(ctx, sender, change); err != nil {
 			return settings.Pending{}, err
@@ -160,7 +181,7 @@ func (s *service) Request(ctx context.Context, sender, values string) (settings.
 	s.pending[change.ID] = change
 	s.mu.Unlock()
 	log.Printf("uid %d session %s asked %s change %s: %s", who.UID, who.Session, change.Tier, change.ID, change.KeyNames())
-	return settings.Pending{Change: change, ReadyAt: change.ReadyAt(s.sys.Home())}, nil
+	return settings.Pending{Change: change, ReadyAt: change.ReadyAt(s.sys.Home()), Notes: notes}, nil
 }
 
 // Pending lists the caller's own changes.
@@ -224,6 +245,10 @@ func (s *service) Apply(ctx context.Context, sender, id, colors string) error {
 	} else if running {
 		return fmt.Errorf("%w: a rebuild is running; apply when it has finished", errRefused)
 	}
+	// Asked again: the wait gives another machine time to take the name.
+	if _, err := s.checkHostname(ctx, change); err != nil {
+		return err
+	}
 	if err := s.authorize(ctx, sender, change); err != nil {
 		return err
 	}
@@ -283,6 +308,63 @@ func (s *service) own(who caller, id string) (settings.Change, bool) {
 		return settings.Change{}, false
 	}
 	return change, true
+}
+
+// checkHostname refuses a new hostname that a tailnet peer or a machine on
+// the current network already uses, ignoring letter case. The network is
+// asked only when root trusts it; the notes say what was not checked. A
+// check that fails refuses the change too.
+func (s *service) checkHostname(ctx context.Context, change settings.Change) ([]string, error) {
+	var name, old string
+	found := false
+	for _, key := range change.Keys {
+		if key.Key == "hostname" {
+			found = json.Unmarshal(key.New, &name) == nil
+			if key.Old != nil {
+				json.Unmarshal(key.Old, &old)
+			}
+		}
+	}
+	if !found || strings.EqualFold(name, old) {
+		return nil, nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, nameCheckTimeout)
+	defer cancel()
+
+	var notes []string
+	tailnet, err := s.sys.Tailnet(ctx)
+	if err == nil && ctx.Err() != nil {
+		err = ctx.Err()
+	}
+	if err != nil {
+		return nil, fmt.Errorf("%w: could not check the tailnet for hostname %q: %v", errRefused, name, err)
+	}
+	if peer, ok := namecheck.Clash(tailnet, name); ok {
+		return nil, fmt.Errorf("%w: hostname %q is taken on the tailnet by %s; pick another one", errRefused, name, peerName(peer))
+	}
+	if !tailnet.Running {
+		notes = append(notes, "hostname not checked on the tailnet: Tailscale is not running")
+	}
+
+	device, trusted := s.sys.Network()
+	if !trusted {
+		return append(notes, "hostname not checked on this network: it is not trusted"), nil
+	}
+	addr, err := s.sys.NameTaken(ctx, device, name)
+	if err != nil {
+		return nil, fmt.Errorf("%w: could not check this network for hostname %q: %v", errRefused, name, err)
+	}
+	if addr.IsValid() {
+		return nil, fmt.Errorf("%w: hostname %q is taken on this network by %s; pick another one", errRefused, name, addr)
+	}
+	return notes, nil
+}
+
+func peerName(peer nettrust.Peer) string {
+	if name := strings.TrimSuffix(peer.DNSName, "."); name != "" {
+		return name
+	}
+	return peer.HostName
 }
 
 func (s *service) authorize(ctx context.Context, sender string, change settings.Change) error {

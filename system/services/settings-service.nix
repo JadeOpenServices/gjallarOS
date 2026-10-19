@@ -1,7 +1,13 @@
 # The root settings service (ROADMAP section 14, step 3.3). It runs only
 # where the system builds from the root-owned checkout, because only there
 # does a user need root to change user.config.json.
-{ pkgs, lib, settings, ... }:
+{
+  config,
+  pkgs,
+  lib,
+  settings,
+  ...
+}:
 let
   settingsd = pkgs.callPackage ../../pkgs/gjallar-settingsd { };
   busName = "org.gjallaros.Settings1";
@@ -62,6 +68,8 @@ lib.mkIf (settings.dotfilesDir == "/etc/gjallar/system") {
 
   systemd.services.gjallar-settingsd = {
     description = "GjallarOS settings service";
+    # tailscale status lists the tailnet a new hostname must not clash with.
+    path = lib.optional config.services.tailscale.enable config.services.tailscale.package;
     serviceConfig = {
       Type = "dbus";
       BusName = busName;
@@ -97,6 +105,76 @@ lib.mkIf (settings.dotfilesDir == "/etc/gjallar/system") {
       MemoryDenyWriteExecute = true;
       SystemCallArchitectures = "native";
       SystemCallFilter = [ "@system-service" "~@privileged" ];
+    };
+  };
+
+  # The service asks this helper who answers for <name>.local before it
+  # takes a new hostname. The answers come from the network, so they are
+  # read by a throwaway user that can only send to the mDNS groups and
+  # receive from local addresses, never by root.
+  systemd.sockets.gjallar-namecheck = {
+    description = "GjallarOS hostname check socket";
+    wantedBy = [ "sockets.target" ];
+    socketConfig = {
+      ListenStream = "/run/gjallar/namecheck.sock";
+      SocketUser = "root";
+      SocketMode = "0600";
+      Accept = true;
+      MaxConnections = 4;
+    };
+  };
+
+  systemd.services."gjallar-namecheck@" = {
+    description = "GjallarOS hostname check";
+    serviceConfig = {
+      ExecStart = "${settingsd}/bin/gjallar-namecheck";
+      StandardInput = "socket";
+      StandardOutput = "socket";
+      StandardError = "journal";
+      RuntimeMaxSec = 15;
+      DynamicUser = true;
+      UMask = "0077";
+      ProtectSystem = "strict";
+      ProtectHome = true;
+      PrivateTmp = true;
+      PrivateDevices = true;
+      PrivateIPC = true;
+      PrivateUsers = true;
+      RestrictAddressFamilies = [
+        "AF_INET"
+        "AF_INET6"
+        "AF_NETLINK"
+      ];
+      IPAddressDeny = "any";
+      IPAddressAllow = [
+        "multicast"
+        "link-local"
+        "10.0.0.0/8"
+        "172.16.0.0/12"
+        "192.168.0.0/16"
+        "fc00::/7"
+      ];
+      CapabilityBoundingSet = "";
+      NoNewPrivileges = true;
+      ProtectKernelTunables = true;
+      ProtectKernelModules = true;
+      ProtectKernelLogs = true;
+      ProtectControlGroups = true;
+      ProtectClock = true;
+      ProtectHostname = true;
+      ProtectProc = "invisible";
+      ProcSubset = "pid";
+      RestrictNamespaces = true;
+      RestrictRealtime = true;
+      RestrictSUIDSGID = true;
+      LockPersonality = true;
+      MemoryDenyWriteExecute = true;
+      SystemCallArchitectures = "native";
+      SystemCallFilter = [
+        "@system-service"
+        "~@privileged"
+        "~@resources"
+      ];
     };
   };
 

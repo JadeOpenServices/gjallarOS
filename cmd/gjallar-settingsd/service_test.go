@@ -4,13 +4,16 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/netip"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/config"
+	"github.com/JadeOpenServices/gjallarOS/internal/nettrust"
 	"github.com/JadeOpenServices/gjallarOS/internal/settings"
 )
 
@@ -27,6 +30,13 @@ type fakeSystem struct {
 	rebuilding bool
 	asked      []string
 	rebuilt    []string
+
+	device     string
+	trusted    bool
+	tailnet    nettrust.Tailnet
+	tailnetErr error
+	taken      map[string]netip.Addr
+	probed     []string
 }
 
 func (f *fakeSystem) Caller(_ context.Context, sender string) (caller, error) {
@@ -45,7 +55,15 @@ func (f *fakeSystem) Authorize(_ context.Context, _, action string, details map[
 	return nil
 }
 
-func (f *fakeSystem) Home() bool                               { return f.home }
+func (f *fakeSystem) Home() bool              { return f.home }
+func (f *fakeSystem) Network() (string, bool) { return f.device, f.trusted }
+func (f *fakeSystem) Tailnet(context.Context) (nettrust.Tailnet, error) {
+	return f.tailnet, f.tailnetErr
+}
+func (f *fakeSystem) NameTaken(_ context.Context, device, name string) (netip.Addr, error) {
+	f.probed = append(f.probed, device+" "+name)
+	return f.taken[name], nil
+}
 func (f *fakeSystem) Rebuilding(context.Context) (bool, error) { return f.rebuilding, nil }
 func (f *fakeSystem) StartRebuild(_ context.Context, colors string) error {
 	f.rebuilt = append(f.rebuilt, colors)
@@ -262,27 +280,95 @@ func TestRequestLimits(t *testing.T) {
 	}
 }
 
-func TestReadHomeTrustsOnlyFreshRootVerdict(t *testing.T) {
+func TestReadVerdictTrustsOnlyFreshRootVerdict(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "vpn-trust.json")
 	if err := os.WriteFile(path, []byte(`{"trust":"home","reason":"r","bypass":[],"exitNode":""}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	now := time.Now()
-	if os.Geteuid() == 0 && !readHome(path, now) {
+	if verdict, ok := readVerdict(path, now); os.Geteuid() == 0 && (!ok || verdict.Trust != nettrust.TrustHome) {
 		t.Fatal("a fresh root verdict is not home")
 	}
-	if os.Geteuid() != 0 && readHome(path, now) {
+	if _, ok := readVerdict(path, now); os.Geteuid() != 0 && ok {
 		t.Fatal("a verdict not owned by root counts as home")
 	}
-	if readHome(path, now.Add(verdictMaxAge+time.Minute)) {
+	if _, ok := readVerdict(path, now.Add(verdictMaxAge+time.Minute)); ok {
 		t.Fatal("a stale verdict counts as home")
 	}
 	link := filepath.Join(dir, "link.json")
 	if err := os.Symlink(path, link); err != nil {
 		t.Fatal(err)
 	}
-	if readHome(link, now) {
+	if _, ok := readVerdict(link, now); ok {
 		t.Fatal("a link counts as home")
+	}
+}
+
+// The peer names and addresses are SYNTHETIC.
+func TestHostnameMustBeFree(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	f.sys.tailnet = nettrust.Tailnet{Running: true, Peers: []nettrust.Peer{
+		{HostName: "Desk", DNSName: "desk.example-tailnet.ts.net."},
+	}}
+	f.sys.device, f.sys.trusted = "eth0", true
+	f.sys.taken = map[string]netip.Addr{"printer": netip.MustParseAddr("192.0.2.7")}
+
+	if _, err := f.svc.Request(ctx, ":1.10", `{"hostname":"DESK"}`); !errors.Is(err, errRefused) || !strings.Contains(err.Error(), "desk.example-tailnet.ts.net") {
+		t.Errorf("tailnet clash: %v", err)
+	}
+	if _, err := f.svc.Request(ctx, ":1.10", `{"hostname":"printer"}`); !errors.Is(err, errRefused) || !strings.Contains(err.Error(), "192.0.2.7") {
+		t.Errorf("network clash: %v", err)
+	}
+	change, err := f.svc.Request(ctx, ":1.10", `{"hostname":"lab"}`)
+	if err != nil || len(change.Notes) != 0 {
+		t.Fatalf("free name: %v, notes %q", err, change.Notes)
+	}
+	if want := []string{"eth0 printer", "eth0 lab"}; !slices.Equal(f.sys.probed, want) {
+		t.Errorf("probed %q, want %q", f.sys.probed, want)
+	}
+
+	// Another machine takes the name during the wait.
+	f.sys.taken["lab"] = netip.MustParseAddr("192.0.2.8")
+	f.now = f.now.Add(2 * time.Hour)
+	if err := f.svc.Apply(ctx, ":1.10", change.ID, ""); !errors.Is(err, errRefused) || !strings.Contains(err.Error(), "192.0.2.8") {
+		t.Fatalf("apply after the name was taken: %v", err)
+	}
+	if len(f.sys.rebuilt) != 0 || f.value(t, "hostname") == `"lab"` {
+		t.Fatal("wrote a name that is taken")
+	}
+}
+
+func TestHostnameNotes(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	change, err := f.svc.Request(ctx, ":1.10", `{"hostname":"lab"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"hostname not checked on the tailnet: Tailscale is not running",
+		"hostname not checked on this network: it is not trusted",
+	}
+	if !slices.Equal(change.Notes, want) || len(f.sys.probed) != 0 {
+		t.Errorf("notes %q, probed %q", change.Notes, f.sys.probed)
+	}
+}
+
+func TestHostnameCheckFailsClosed(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	f.sys.tailnetErr = errors.New("tailscaled does not answer")
+	if _, err := f.svc.Request(ctx, ":1.10", `{"hostname":"lab"}`); !errors.Is(err, errRefused) || !strings.Contains(err.Error(), "could not check the tailnet") {
+		t.Errorf("failed check: %v", err)
+	}
+	// A change of letter case only is the same name and asks no one.
+	var old string
+	if err := json.Unmarshal([]byte(f.value(t, "hostname")), &old); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.svc.Request(ctx, ":1.10", `{"hostname":"`+strings.ToUpper(old)+`"}`); err != nil {
+		t.Errorf("case change: %v", err)
 	}
 }

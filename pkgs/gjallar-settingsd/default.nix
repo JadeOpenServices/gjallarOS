@@ -14,9 +14,11 @@ buildGoModule {
       ../../go.sum
       (lib.fileset.fileFilter (f: f.hasExt "go" || f.name == "meta.json") ../../apps)
       ../../apps/firefox-addons.json
+      ../../cmd/gjallar-namecheck
       ../../cmd/gjallar-settingsd
       ../../internal/installer/config
       ../../internal/installer/systemcheckout
+      ../../internal/namecheck
       ../../internal/nettrust
       ../../internal/noctalia
       ../../internal/settings
@@ -27,6 +29,7 @@ buildGoModule {
   proxyVendor = true;
 
   subPackages = [
+    "cmd/gjallar-namecheck"
     "cmd/gjallar-settingsd"
   ];
 

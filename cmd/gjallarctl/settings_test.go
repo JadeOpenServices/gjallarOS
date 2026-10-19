@@ -23,6 +23,7 @@ type fakeSettingsBus struct {
 	applied  []string
 	rebuilds int
 	result   string
+	notes    []string
 }
 
 var settingsTestNow = time.Date(2026, 10, 19, 12, 0, 0, 0, time.UTC)
@@ -59,6 +60,7 @@ func (b *fakeSettingsBus) Call(_ context.Context, method string, args ...any) (s
 				Asked: settingsTestNow,
 			},
 			ReadyAt: settingsTestNow.Add(b.readyIn),
+			Notes:   b.notes,
 		}
 		for key, value := range values {
 			kv := b.values[key]
@@ -142,7 +144,7 @@ func TestSettingsSetFailedRebuild(t *testing.T) {
 }
 
 func TestSettingsSetLongWaitLeavesItPending(t *testing.T) {
-	bus := &fakeSettingsBus{readyIn: settings.SecurityDelay}
+	bus := &fakeSettingsBus{readyIn: settings.SecurityDelay, notes: []string{"not checked here"}}
 	useFakeSettings(t, bus)
 	var stdout, stderr bytes.Buffer
 	if code := run([]string{"settings", "set", "networkPrintingEnable=true"}, &stdout, &stderr); code != 0 {
@@ -151,7 +153,7 @@ func TestSettingsSetLongWaitLeavesItPending(t *testing.T) {
 	if len(bus.applied) != 0 {
 		t.Fatalf("applied %q before the wait", bus.applied)
 	}
-	for _, want := range []string{"(security)", "not on its home network", "gjallarctl settings apply c0ffee00"} {
+	for _, want := range []string{"(security)", "Note: not checked here", "not on its home network", "gjallarctl settings apply c0ffee00"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Errorf("stdout lacks %q:\n%s", want, stdout.String())
 		}

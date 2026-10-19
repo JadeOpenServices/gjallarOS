@@ -202,6 +202,10 @@ func WriteAtomic(path string, user User) error {
 }
 
 var usernamePattern = regexp.MustCompile(`^[a-z_][a-z0-9_-]*$`)
+
+// hostnamePattern is the networking.hostName rule of NixOS: one DNS label of
+// at most 63 characters, underscores allowed as NixOS does.
+var hostnamePattern = regexp.MustCompile(`^[A-Za-z0-9]([A-Za-z0-9_-]{0,61}[A-Za-z0-9])?$`)
 var usbTrustTPMHandlePattern = regexp.MustCompile(`^0x810[0-9a-fA-F]{5}$`)
 
 // DefaultUSBTrustTPMHandle is where the USB trust broker creates its signing
@@ -267,6 +271,9 @@ func Validate(user User) error {
 	}
 	if user.Hostname == "" || user.Theme == "" || user.Shell == "" {
 		return fmt.Errorf("hostname, shell, and theme are required")
+	}
+	if !hostnamePattern.MatchString(user.Hostname) {
+		return fmt.Errorf("invalid hostname: %q; use letters, digits and - (at most 63), starting and ending with a letter or digit", user.Hostname)
 	}
 	if len(user.Editors) == 0 || len(user.Browsers) == 0 {
 		return fmt.Errorf("at least one editor and browser are required")

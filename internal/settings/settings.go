@@ -66,6 +66,9 @@ type KeyValue struct {
 type Pending struct {
 	Change
 	ReadyAt time.Time `json:"readyAt"`
+	// Notes say what the service could not check, such as a hostname on a
+	// network it does not trust.
+	Notes []string `json:"notes,omitempty"`
 }
 
 var tierRank = map[config.Tier]int{
