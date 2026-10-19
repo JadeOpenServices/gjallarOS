@@ -344,3 +344,19 @@ func TestUSBRenewalNotice(t *testing.T) {
 		t.Fatal("new lapse time not warned")
 	}
 }
+
+func TestUSBReviewHeightFitsEveryAction(t *testing.T) {
+	d := usbtrust.Decision{ObservedDevice: usbtrust.ObservedDevice{
+		Identity: usbtrust.Identity{Name: "stick", VIDPID: "dead:beef", Serial: "S1", Interfaces: []string{"08:06:50"}},
+	}, Reason: string(usbtrust.CodeUnknownExternal), Actions: []usbtrust.Action{usbtrust.ActionKeepBlocked, usbtrust.ActionAllowOnce, usbtrust.ActionTrustPermanent}}
+	for _, technical := range []bool{false, true} {
+		summary := usbReviewSummary(d, true, technical)
+		rows, _ := usbReviewChoices(d, technical)
+		// fw13 VM, scale 1: the default height left 88 px of list, room for
+		// the header and two rows only.
+		natural := map[bool]int{false: 578, true: 634}[technical]
+		if got, want := usbReviewHeight(summary, len(rows)/3), natural+30; got < want {
+			t.Errorf("technical=%v: height %d hides the third action, want at least %d", technical, got, want)
+		}
+	}
+}

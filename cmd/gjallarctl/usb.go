@@ -664,7 +664,8 @@ func usbReviewDialog(ctx context.Context, d usbtrust.Decision, enforcing, always
 		if always {
 			box = usbAlwaysTechyOn
 		}
-		dialog := []string{"--list", "--radiolist", "--title=USB device review", "--text=" + usbReviewSummary(d, enforcing, technical), "--extra-button=" + toggle, "--extra-button=" + box, "--column=", "--column=Action", "--column=What to do", "--hide-column=2", "--print-column=2"}
+		summary := usbReviewSummary(d, enforcing, technical)
+		dialog := []string{"--list", "--radiolist", "--title=USB device review", "--text=" + summary, fmt.Sprintf("--height=%d", usbReviewHeight(summary, len(rows)/3)), "--extra-button=" + toggle, "--extra-button=" + box, "--column=", "--column=Action", "--column=What to do", "--hide-column=2", "--print-column=2"}
 		choice, err := exec.CommandContext(ctx, "zenity", append(dialog, rows...)...).Output()
 		picked := strings.TrimSpace(string(choice))
 		if err == nil {
@@ -688,6 +689,15 @@ func usbReviewDialog(ctx context.Context, d usbtrust.Decision, enforcing, always
 			return "", false
 		}
 	}
+}
+
+// usbReviewHeight sizes the review so every action row shows. Zenity gives
+// the list only what the text leaves of its default height, which fit two
+// rows and hid "Always allow" behind a scrollbar. Measured at scale 1: about
+// 380 px of title and buttons, 19 px per text line, 30 px per list row plus
+// the header, and a spare row's worth.
+func usbReviewHeight(summary string, rows int) int {
+	return 380 + 19*strings.Count(summary, "\n") + 30*(rows+2)
 }
 
 // usbReviewConfigKey is the user.config.json switch behind the "always" box.
