@@ -92,6 +92,9 @@ func TestUSBReviewOffersRenewForLapsedTrust(t *testing.T) {
 	if facts := usbReviewFacts(d); !strings.Contains(facts[0].text, "not connected for too long") {
 		t.Fatalf("lapse not explained: %+v", facts)
 	}
+	if _, headline, _ := usbReviewVerdict(d); headline == "New device" {
+		t.Fatalf("simple view calls a lapsed device new: %q", headline)
+	}
 }
 
 func TestUSBReviewNamesBluetoothAddressCheck(t *testing.T) {

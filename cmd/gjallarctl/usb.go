@@ -665,7 +665,7 @@ func usbReviewDialog(ctx context.Context, d usbtrust.Decision, enforcing, always
 			box = usbAlwaysTechyOn
 		}
 		summary := usbReviewSummary(d, enforcing, technical)
-		dialog := []string{"--list", "--radiolist", "--title=USB device review", "--text=" + summary, fmt.Sprintf("--height=%d", usbReviewHeight(summary, len(rows)/3)), "--extra-button=" + toggle, "--extra-button=" + box, "--column=", "--column=Action", "--column=What to do", "--hide-column=2", "--print-column=2"}
+		dialog := []string{"--list", "--radiolist", "--title=USB device review", "--text=" + summary, fmt.Sprintf("--width=%d", usbReviewWidth), fmt.Sprintf("--height=%d", usbReviewHeight(summary, len(rows)/3)), "--extra-button=" + toggle, "--extra-button=" + box, "--column=", "--column=Action", "--column=What to do", "--hide-column=2", "--print-column=2"}
 		choice, err := exec.CommandContext(ctx, "zenity", append(dialog, rows...)...).Output()
 		picked := strings.TrimSpace(string(choice))
 		if err == nil {
@@ -695,10 +695,15 @@ func usbReviewDialog(ctx context.Context, d usbtrust.Decision, enforcing, always
 // the list only what the text leaves of its default height, which fit two
 // rows and hid "Always allow" behind a scrollbar. Measured at scale 1: about
 // 380 px of title and buttons, 19 px per text line, 30 px per list row plus
-// the header, and a spare row's worth.
+// the header, and a spare row's worth. The Hyprland rule for this title sets
+// no size, or it would override this one.
 func usbReviewHeight(summary string, rows int) int {
 	return 380 + 19*strings.Count(summary, "\n") + 30*(rows+2)
 }
+
+// usbReviewWidth keeps the review as wide as the old fixed window rule made
+// it on a 1280 px screen; the text wraps to it.
+const usbReviewWidth = 520
 
 // usbReviewConfigKey is the user.config.json switch behind the "always" box.
 // The box edits the checkout's file directly, so the choice is part of the
@@ -757,8 +762,11 @@ func usbReviewVerdict(d usbtrust.Decision) (colour, headline, advice string) {
 			return usbBad, "This device may be unsafe", "Keep it blocked unless you know exactly what it is."
 		}
 	}
-	if usbtrust.AuditCode(d.Reason) == usbtrust.CodeInternalUnvalidated {
+	switch usbtrust.AuditCode(d.Reason) {
+	case usbtrust.CodeInternalUnvalidated:
 		return usbFine, "Built-in part of this computer", "Trust it once and you will not be asked again."
+	case usbtrust.CodeTrustedExternalLapsed:
+		return usbUnknown, "Allowed before, but not used for a long time", "Allow it again if you just plugged it in yourself."
 	}
 	return usbUnknown, "New device", "Allow it if you just plugged it in yourself."
 }
