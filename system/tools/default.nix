@@ -82,7 +82,12 @@ let
         ${pkgs.hyprland}/bin/hyprctl monitors || true
         ${pkgs.hyprland}/bin/hyprctl clients || true
         ${lib.getExe config.programs.noctalia.package} config validate || true
-        ${lib.getExe config.programs.noctalia.package} msg status >/dev/null 2>&1 || true
+        # Noctalia can start after this unit, so false here is no finding alone.
+        noctalia_ready=false
+        if ${lib.getExe config.programs.noctalia.package} msg status >/dev/null 2>&1; then
+          noctalia_ready=true
+        fi
+        log "noctalia-ipc-ready-at-diagnostics=$noctalia_ready"
         ${pkgs.systemd}/bin/journalctl --user -b --no-pager -u hyprland-session-diagnostics.service || true
         ${pkgs.procps}/bin/pgrep -f -a -u "$USER" 'Hyprland|noctalia|fuzzel|ghostty|swaybg|waybar' || true
         log 'end'

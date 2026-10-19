@@ -181,12 +181,6 @@ let
   gjallarWlCopy = pkgs.writeShellScriptBin "wl-copy" ''
     set -euo pipefail
 
-    ${pkgs.coreutils}/bin/touch \
-      "''${XDG_RUNTIME_DIR:-/tmp}/gjallar-clipboard-write-hit" \
-      2>/dev/null || true
-
-
-
     if [ -z "''${TMUX:-}" ]; then
       echo \
         "gjallarCode clipboard: TMUX unavailable" \

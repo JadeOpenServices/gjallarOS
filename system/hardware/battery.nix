@@ -115,7 +115,8 @@ let
               --title="GjallarOS Battery" \
               --width=520 \
               --text="$message" \
-              >/dev/null 2>&1 || true
+              >/dev/null ||
+          echo "battery: $level warning dialog did not start" >&2
       }
 
       launch_countdown() {
@@ -128,7 +129,8 @@ let
           systemd-run --user --quiet --collect \
             --unit=battery-shutdown-countdown \
             ${batteryCountdown}/bin/gjallar-battery-countdown \
-            >/dev/null 2>&1 || true
+            >/dev/null ||
+          echo "battery: shutdown countdown did not start; poweroff still runs at ${toString shutdownValue}%" >&2
       }
 
       close_warnings() {
@@ -139,7 +141,7 @@ let
           XDG_RUNTIME_DIR="$runtime" \
           DBUS_SESSION_BUS_ADDRESS="unix:path=$runtime/bus" \
           systemctl --user stop 'battery-notification-*' battery-shutdown-countdown \
-            >/dev/null 2>&1 || true
+            >/dev/null 2>&1 || true # fails when the countdown is not running
       }
 
       while :; do
