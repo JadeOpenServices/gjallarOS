@@ -124,6 +124,93 @@ narrower than both: one mounted storage device, for this connection only.
   starts usbguard with the allow fallback until the broker blocks
   (loophole 23).
 
+### Trust lapse after N days unused
+
+Permanently trusted external devices can lapse. A device that has not been
+connected for N days asks again on its next connection. It is off by
+default for standalone machines; the installer asks, and N is 30 when it is
+on. JODS will set it for managed machines later.
+
+How others do it:
+
+- Android revokes a remembered adb host after 7 days without a connection
+  (`DEFAULT_ADB_ALLOWED_CONNECTION_TIME`). The clock restarts on every
+  connection, a daily job removes expired keys, and 0 turns it off.
+  [AdbDebuggingManager.java](https://android.googlesource.com/platform/frameworks/base/+/refs/heads/main/services/core/java/com/android/server/adb/AdbDebuggingManager.java)
+- macOS on Apple silicon asks before a new accessory connects. Approved
+  accessories keep working on a locked Mac for three days after it was last
+  locked; after that the Mac asks to be unlocked first.
+  [Apple deployment guide](https://support.apple.com/guide/deployment/depf8a4cb051/web)
+- GrapheneOS blocks new USB connections once the phone is locked
+  ("Charging-only when locked" is the default); connections that already
+  exist keep working until they end.
+  [GrapheneOS features](https://grapheneos.org/features)
+- USBGuard and bolt keep allow rules until someone removes them. Neither
+  has an expiry, and the USBGuard tracker has no request for one.
+  [usbguard(1)](https://man.archlinux.org/man/usbguard.1.en),
+  [boltctl(1)](https://manpath.be/f39/1/boltctl)
+- NIST SP 800-53 AC-2(3) disables accounts, device identifiers included,
+  after a set time without use. Agencies pick 15 to 35 days.
+  [AC-2(3)](https://csf.tools/reference/nist-sp-800-53/r5/ac/ac-2/ac-2-3/),
+  [DISA STIG V-223584](https://www.stigviewer.com/stigs/ibm_zos_acf2_v9/2025-06-24/finding/V-223584)
+
+Jade decisions (2026-10-19):
+
+- N counts from the last time the device was connected, not from the last
+  approval. Devices in daily use never ask, forgotten ones lapse, and there
+  is no monthly "click Allow" habit to train.
+- A device whose trust lapses while it is plugged in keeps working until it
+  is unplugged or the machine restarts.
+- Three days before a device lapses, a notification offers to renew it.
+- Only external devices lapse. Built-ins enrolled from ODDC never lapse;
+  they are checked against ODDC on every boot.
+
+Security pass:
+
+- **What it protects against.** Stale trust: a stick or dock trusted once
+  and forgotten, then lost, lent out, or copied later. It does not stop a
+  copy of a device that is in daily use; identity strength covers that.
+- **Where the time comes from.** Each record carries a TPM-signed
+  `lastUsed`. The broker refreshes it at most once a day while the device is
+  connected and matches its trust. Old records without it use
+  `lastAccepted`. Nobody can move it without the signing key.
+- **Clock set back.** A `lastUsed` more than a day in the future means the
+  clock went back or the record is wrong. That device lapses and asks; it
+  does not get extra days. Setting the clock back by less than a day buys
+  at most that day. Setting the clock needs root or an admin's polkit
+  approval; a spoofed NTP reply is the remote path, which the VPN-aware NTP
+  work is meant to close.
+- **Clock set forward.** Devices lapse early and ask again. That fails
+  closed. Re-allowing writes the real time, so a bad clock does not poison
+  later records.
+- **Broken signing.** If the TPM key cannot sign, `lastUsed` stops moving
+  and devices lapse. That fails closed, and the broker logs why.
+- **Re-allowing.** A lapsed device gets the same review as a changed one:
+  keep blocked, allow once, or renew. Renewing keeps the record and its
+  first-accepted time and needs the same fingerprint or password as any
+  other trust change. Allowing it once does not renew it.
+- **Turning it off.** Switching lapse off or raising N lowers protection.
+  The settings service holds that change like it holds turning blocking
+  off.
+- **Lockout.** A desktop with only a USB keyboard cannot lose it while it is
+  used every day, and a lapse while plugged in does not cut it off. A
+  keyboard left unplugged for N days asks again at the login screen; the
+  installer question says so.
+
+Plan:
+
+- [x] C1: `lastUsed` in the trust record, lapse check in the audit
+      (`trusted-external-lapsed`, offers renew), lapse ignored for a
+      connection that was trusted when it started, broker refreshes
+      `lastUsed` once a day.
+- [ ] C2: `--lapse-days N`, Nix
+      option `services.gjallar-usbtrust.lapseDays` (null = off), status
+      shows when each device lapses.
+- [ ] C3: warning three days ahead with a Renew button.
+- [ ] C4: `usbTrustLapseDays` setting (held when it lowers protection),
+      installer question (default off, 30 when on, any N from 1).
+- [ ] C5: fw13 VM test.
+
 ## 2. USB review UX
 
 - [x] Plain verdict with colour dots, and an optional technical view.

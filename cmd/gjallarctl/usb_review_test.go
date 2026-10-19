@@ -77,6 +77,21 @@ func TestUSBReviewLabelsReplacementExplicitly(t *testing.T) {
 	}
 }
 
+func TestUSBReviewOffersRenewForLapsedTrust(t *testing.T) {
+	d := usbtrust.Decision{
+		Reason:    string(usbtrust.CodeTrustedExternalLapsed),
+		TrustedID: "device:synthetic-stick",
+		Actions:   []usbtrust.Action{usbtrust.ActionKeepBlocked, usbtrust.ActionAllowOnce, usbtrust.ActionAcceptReplacement},
+	}
+	rows, _ := usbReviewChoices(d, false)
+	if rows[len(rows)-1] != "Always allow again" {
+		t.Fatalf("lapsed renew label: %q", rows)
+	}
+	if facts := usbReviewFacts(d); !strings.Contains(facts[0].text, "not connected for too long") {
+		t.Fatalf("lapse not explained: %+v", facts)
+	}
+}
+
 func TestUSBReviewNamesBluetoothAddressCheck(t *testing.T) {
 	d := usbtrust.Decision{Reason: string(usbtrust.CodeInternalChanged), Role: "Bluetooth"}
 	without := usbReviewFacts(d)

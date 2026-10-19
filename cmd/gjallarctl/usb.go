@@ -504,6 +504,8 @@ func usbReviewFacts(d usbtrust.Decision) []usbFact {
 		}
 	case usbtrust.CodeTrustedExternalChanged:
 		add(usbBad, "Claims to be a trusted device, but its details changed")
+	case usbtrust.CodeTrustedExternalLapsed:
+		add(usbUnknown, "Trusted before, but not connected for too long, so it asks again")
 	case usbtrust.CodeUnexpectedInternal:
 		add(usbBad, "Unexpected device inside this computer")
 	case usbtrust.CodeInternalAmbiguous:
@@ -853,6 +855,12 @@ func usbReviewChoices(d usbtrust.Decision, technical bool) ([]string, map[string
 			label = "Accept as replacement for a trusted device"
 			if technical {
 				label = "Accept replacement for " + d.TrustedID
+			}
+			if usbtrust.AuditCode(d.Reason) == usbtrust.CodeTrustedExternalLapsed {
+				label = "Always allow again"
+				if technical {
+					label = "Renew trust for " + d.TrustedID
+				}
 			}
 		default:
 			continue

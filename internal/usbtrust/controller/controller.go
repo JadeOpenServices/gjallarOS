@@ -174,6 +174,9 @@ func (c *Controller) Reconcile(ctx context.Context) error {
 		if err := c.learnBluetoothAddresses(ctx, &input); err != nil {
 			return fmt.Errorf("store Bluetooth addresses: %w", err)
 		}
+		if err := c.refreshLastUsed(ctx, &input); err != nil {
+			return fmt.Errorf("store USB last use: %w", err)
+		}
 	}
 	return c.apply(ctx, input)
 }
@@ -236,6 +239,30 @@ func (c *Controller) learnBluetoothAddresses(ctx context.Context, input *usbtrus
 		return err
 	}
 	changed, err := usbtrust.LearnBluetoothAddresses(*input, &doc)
+	if err != nil || !changed {
+		return err
+	}
+	if err := doc.Validate(); err != nil {
+		return err
+	}
+	if err := c.commit(ctx, doc); err != nil {
+		return err
+	}
+	input.Trusted = &doc
+	return nil
+}
+
+// refreshLastUsed signs a new lastUsed for trusted external devices that
+// are connected, at most once a day each.
+func (c *Controller) refreshLastUsed(ctx context.Context, input *usbtrust.AuditInput) error {
+	if input.Trusted == nil {
+		return nil
+	}
+	doc, err := c.next(input.Trusted)
+	if err != nil {
+		return err
+	}
+	changed, err := usbtrust.RefreshLastUsed(*input, &doc)
 	if err != nil || !changed {
 		return err
 	}
@@ -467,6 +494,7 @@ func (c *Controller) snapshot(ctx context.Context) (input usbtrust.AuditInput, e
 		}
 	}
 	c.armed.Store(input.Trusted != nil && input.Trusted.Enforcement != nil && input.Trusted.Enforcement.Armed)
+	input.Lapse = usbtrust.Lapse{After: c.Reader.LapseAfter, Now: time.Now().UTC()}
 	input.Observed, err = c.Reader.Observed(ctx)
 	if err != nil {
 		return input, err
@@ -688,7 +716,7 @@ func (c *Controller) change(input usbtrust.AuditInput, request broker.Request) (
 		if old.Class == usbtrust.ClassInternal && (decision.Role != old.Role || decision.TrustedID != old.ID || decision.Reason != string(usbtrust.CodeInternalChanged)) {
 			return doc, fmt.Errorf("replacement must be an unambiguous changed identity for the accepted ODDC role")
 		}
-		if old.Class == usbtrust.ClassExternal && (decision.Role != "" || observed.Identity.ConnectType == "hardwired") {
+		if old.Class == usbtrust.ClassExternal && (decision.Role != "" || decision.TrustedID != old.ID || observed.Identity.ConnectType == "hardwired") {
 			return doc, fmt.Errorf("external replacement cannot enroll internal hardware")
 		}
 		device.ID, device.Class, device.Role, device.Portable, device.ExpectedByODDC, device.FirstAccepted = old.ID, old.Class, old.Role, old.Portable, old.ExpectedByODDC, old.FirstAccepted
@@ -714,7 +742,7 @@ func newDevice(identity usbtrust.Identity, now string) (usbtrust.Device, error) 
 	if _, err := rand.Read(id[:]); err != nil {
 		return usbtrust.Device{}, err
 	}
-	device := usbtrust.Device{ID: "device:" + hex.EncodeToString(id[:]), Class: usbtrust.ClassExternal, Identity: identity, FirstAccepted: now, LastAccepted: now, Strength: usbtrust.StrengthDescriptor}
+	device := usbtrust.Device{ID: "device:" + hex.EncodeToString(id[:]), Class: usbtrust.ClassExternal, Identity: identity, FirstAccepted: now, LastAccepted: now, LastUsed: now, Strength: usbtrust.StrengthDescriptor}
 	if identity.Serial != "" {
 		device.Strength = usbtrust.StrengthSerialDescriptor
 	}

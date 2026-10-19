@@ -91,7 +91,10 @@ const (
 	CodeUnexpectedInternal     AuditCode = "unexpected-internal"
 	CodeTrustedExternal        AuditCode = "trusted-external"
 	CodeTrustedExternalChanged AuditCode = "trusted-external-changed"
-	CodeUnknownExternal        AuditCode = "unknown-external"
+	// CodeTrustedExternalLapsed: the device matches its trust, but was not
+	// connected for longer than the lapse allows.
+	CodeTrustedExternalLapsed AuditCode = "trusted-external-lapsed"
+	CodeUnknownExternal       AuditCode = "unknown-external"
 
 	// CodeInternalPortMatch: the part sits exactly where ODDC says and has
 	// no stored identity yet. It is allowed and stored once the store is
@@ -118,6 +121,8 @@ type AuditInput struct {
 	Expected []ExpectedDevice
 	Trusted  *Document
 	Observed []ObservedDevice
+	// Lapse is off unless the machine sets a number of days.
+	Lapse Lapse
 }
 
 type AuditResult struct {
@@ -297,6 +302,18 @@ func Audit(input AuditInput) (AuditResult, error) {
 		if trustedIndex >= 0 {
 			trusted := trustedExternal[trustedIndex]
 			consumed[i] = true
+
+			if input.Lapse.Lapsed(trusted) {
+				findings = append(findings, Finding{
+					State:     AuditBlock,
+					Code:      CodeTrustedExternalLapsed,
+					TrustedID: trusted.ID,
+					RuntimeID: observed.RuntimeID,
+					Message:   "permanent trust for this external USB device lapsed because it was not connected for too long",
+				})
+
+				continue
+			}
 
 			findings = append(findings, Finding{
 				State:     AuditPass,

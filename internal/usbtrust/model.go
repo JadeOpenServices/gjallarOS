@@ -62,6 +62,9 @@ type Device struct {
 	Attestation    *Attestation     `json:"attestation,omitempty"`
 	FirstAccepted  string           `json:"firstAccepted"`
 	LastAccepted   string           `json:"lastAccepted"`
+	// LastUsed moves at most once a day while the device is connected
+	// under its trust. Trust lapse counts from it.
+	LastUsed string `json:"lastUsed,omitempty"`
 }
 
 // Enforcement is signed with the trust records so that switching blocking off

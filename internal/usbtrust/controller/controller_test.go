@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/JadeOpenServices/gjallarOS/internal/usbtrust"
 	"github.com/JadeOpenServices/gjallarOS/internal/usbtrust/broker"
@@ -331,5 +332,53 @@ func TestReconcileStoresPortMatchOnceStoreIsReady(t *testing.T) {
 	revision := s.doc.Revision
 	if err := c.Reconcile(ctx); err != nil || s.doc.Revision != revision {
 		t.Fatalf("second reconcile wrote again: %v", err)
+	}
+}
+
+func TestLapsedTrustAsksOnReconnectAndRenewKeepsRecord(t *testing.T) {
+	c, s := fixture()
+	ctx := context.Background()
+	policy, _, err := c.Policy(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	portable := false
+	if _, err := c.Mutate(ctx, broker.Request{Action: broker.ActionTrustPermanent, RuntimeID: "12", Connection: policy[0].Connection, Portable: &portable}); err != nil {
+		t.Fatal(err)
+	}
+	accepted := s.doc.Devices[0]
+	if accepted.LastUsed == "" {
+		t.Fatal("new trust has no lastUsed")
+	}
+	// SYNTHETIC: pretend the device was last used 40 days ago.
+	s.doc.Devices[0].LastUsed = time.Now().UTC().Add(-40 * 24 * time.Hour).Format(time.RFC3339)
+	c.Reader.LapseAfter = 30 * 24 * time.Hour
+	policy, _, _ = c.Policy(ctx)
+	if policy[0].Target != usbtrust.TargetAllow {
+		t.Fatal("lapse cut off the connected device")
+	}
+	s.observed[0].RuntimeID = "13"
+	policy, _, err = c.Policy(ctx)
+	if err != nil || policy[0].Target != usbtrust.TargetBlock || policy[0].Reason != string(usbtrust.CodeTrustedExternalLapsed) {
+		t.Fatalf("lapsed device on reconnect: %v %v", policy, err)
+	}
+	renew := broker.Request{Action: broker.ActionAcceptReplacement, RuntimeID: "13", Connection: policy[0].Connection, TrustedID: "synthetic-other"}
+	if _, err := c.Mutate(ctx, renew); err == nil {
+		t.Fatal("renew accepted for another record")
+	}
+	renew.TrustedID = accepted.ID
+	if _, err := c.Mutate(ctx, renew); err != nil {
+		t.Fatal(err)
+	}
+	renewed := s.doc.Devices[0]
+	if len(s.doc.Devices) != 1 || renewed.ID != accepted.ID || renewed.FirstAccepted != accepted.FirstAccepted {
+		t.Fatalf("renew changed the record: %+v", s.doc.Devices)
+	}
+	if used, ok := usbtrust.LastUsed(renewed); !ok || time.Since(used) > time.Hour {
+		t.Fatalf("renew left lastUsed at %q", renewed.LastUsed)
+	}
+	policy, _, _ = c.Policy(ctx)
+	if policy[0].Target != usbtrust.TargetAllow {
+		t.Fatal("renewed device still blocked")
 	}
 }
