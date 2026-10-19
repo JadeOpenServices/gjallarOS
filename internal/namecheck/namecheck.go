@@ -25,9 +25,14 @@ import (
 
 const (
 	mdnsPort = 5353
-	typeA    = 1
-	typeAAAA = 28
-	classIN  = 1
+	// ReplyPort is where the helper asks from and gets its answers. A stateful
+	// firewall cannot tie a unicast answer to a question sent to a multicast
+	// group, so it must let answers to this port in; below 1024, no
+	// unprivileged program can take it. IANA keeps 1011-1020 reserved.
+	ReplyPort = 1015
+	typeA     = 1
+	typeAAAA  = 28
+	classIN   = 1
 
 	// queryGap and window: three questions, then wait for late answers.
 	queryGap = 250 * time.Millisecond
@@ -121,8 +126,8 @@ func Probe(ctx context.Context, device, name string) (netip.Addr, error) {
 }
 
 // listen opens a socket that sends to the mDNS group on iface only, with
-// the hop limit of 255 RFC 6762 section 11 asks for. The port is a random
-// one, so responders answer by unicast (section 6.7).
+// the hop limit of 255 RFC 6762 section 11 asks for. The port is ReplyPort,
+// not 5353, so responders answer it by unicast (section 6.7).
 func listen(ctx context.Context, family string, iface *net.Interface) (*net.UDPConn, *net.UDPAddr, error) {
 	group := &net.UDPAddr{IP: groupV4.AsSlice(), Port: mdnsPort}
 	if family == "udp6" {
@@ -145,9 +150,9 @@ func listen(ctx context.Context, family string, iface *net.Interface) (*net.UDPC
 		}
 		return err
 	}}
-	address := "0.0.0.0:0"
+	address := fmt.Sprintf("0.0.0.0:%d", ReplyPort)
 	if family == "udp6" {
-		address = "[::]:0"
+		address = fmt.Sprintf("[::]:%d", ReplyPort)
 	}
 	pc, err := config.ListenPacket(ctx, family, address)
 	if err != nil {

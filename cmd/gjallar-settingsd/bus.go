@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/netip"
 	"os"
+	"sync"
 	"syscall"
 	"time"
 
@@ -161,7 +162,12 @@ func (busSystem) Tailnet(ctx context.Context) (nettrust.Tailnet, error) {
 	return nettrust.NewSystem().Tailnet(ctx)
 }
 
+// nameCheck lets one check run at a time: the helper has one reply port.
+var nameCheck sync.Mutex
+
 func (busSystem) NameTaken(ctx context.Context, device, name string) (netip.Addr, error) {
+	nameCheck.Lock()
+	defer nameCheck.Unlock()
 	return namecheck.Ask(ctx, namecheck.SocketPath, device, name)
 }
 

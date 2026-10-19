@@ -58,6 +58,22 @@ let
       ${action "critical" "Change a critical GjallarOS setting"}
     </policyconfig>
   '';
+
+  # ReplyPort in internal/namecheck, and the addresses whose answers count:
+  # private and link-local ones, as on a home or site network.
+  nameCheckPort = "1015";
+  nameCheckFrom = {
+    v4 = [
+      "10.0.0.0/8"
+      "172.16.0.0/12"
+      "192.168.0.0/16"
+      "169.254.0.0/16"
+    ];
+    v6 = [
+      "fe80::/10"
+      "fc00::/7"
+    ];
+  };
 in
 lib.mkIf (settings.dotfilesDir == "/etc/gjallar/system") {
   services.dbus.packages = [
@@ -104,14 +120,18 @@ lib.mkIf (settings.dotfilesDir == "/etc/gjallar/system") {
       LockPersonality = true;
       MemoryDenyWriteExecute = true;
       SystemCallArchitectures = "native";
-      SystemCallFilter = [ "@system-service" "~@privileged" ];
+      SystemCallFilter = [
+        "@system-service"
+        "~@privileged"
+      ];
     };
   };
 
   # The service asks this helper who answers for <name>.local before it
   # takes a new hostname. The answers come from the network, so they are
   # read by a throwaway user that can only send to the mDNS groups and
-  # receive from local addresses, never by root.
+  # receive from local addresses, never by root. It asks from port
+  # ReplyPort (internal/namecheck); only it may bind there.
   systemd.sockets.gjallar-namecheck = {
     description = "GjallarOS hostname check socket";
     wantedBy = [ "sockets.target" ];
@@ -120,7 +140,7 @@ lib.mkIf (settings.dotfilesDir == "/etc/gjallar/system") {
       SocketUser = "root";
       SocketMode = "0600";
       Accept = true;
-      MaxConnections = 4;
+      MaxConnections = 1;
     };
   };
 
@@ -139,22 +159,17 @@ lib.mkIf (settings.dotfilesDir == "/etc/gjallar/system") {
       PrivateTmp = true;
       PrivateDevices = true;
       PrivateIPC = true;
-      PrivateUsers = true;
+      # No PrivateUsers: binding the reply port below 1024 needs the
+      # capability in the host's user namespace.
+      AmbientCapabilities = "CAP_NET_BIND_SERVICE";
       RestrictAddressFamilies = [
         "AF_INET"
         "AF_INET6"
         "AF_NETLINK"
       ];
       IPAddressDeny = "any";
-      IPAddressAllow = [
-        "multicast"
-        "link-local"
-        "10.0.0.0/8"
-        "172.16.0.0/12"
-        "192.168.0.0/16"
-        "fc00::/7"
-      ];
-      CapabilityBoundingSet = "";
+      IPAddressAllow = [ "multicast" ] ++ nameCheckFrom.v4 ++ nameCheckFrom.v6;
+      CapabilityBoundingSet = "CAP_NET_BIND_SERVICE";
       NoNewPrivileges = true;
       ProtectKernelTunables = true;
       ProtectKernelModules = true;
@@ -177,6 +192,23 @@ lib.mkIf (settings.dotfilesDir == "/etc/gjallar/system") {
       ];
     };
   };
+
+  # A stateful firewall does not count a unicast answer to a question sent
+  # to a multicast group as part of it, so answers to the helper's port are
+  # let in here: only from mDNS's port and from the local addresses the
+  # helper may hear from. Nothing listens there outside a check.
+  networking.firewall.extraCommands = lib.mkIf (config.networking.firewall.backend == "iptables") ''
+    for net in ${lib.concatStringsSep " " nameCheckFrom.v4}; do
+      iptables -A nixos-fw -p udp --sport 5353 --dport ${nameCheckPort} -s "$net" -j nixos-fw-accept
+    done
+    for net in ${lib.concatStringsSep " " nameCheckFrom.v6}; do
+      ip6tables -A nixos-fw -p udp --sport 5353 --dport ${nameCheckPort} -s "$net" -j nixos-fw-accept
+    done
+  '';
+  networking.firewall.extraInputRules = lib.mkIf (config.networking.firewall.backend == "nftables") ''
+    ip saddr { ${lib.concatStringsSep ", " nameCheckFrom.v4} } udp sport 5353 udp dport ${nameCheckPort} accept
+    ip6 saddr { ${lib.concatStringsSep ", " nameCheckFrom.v6} } udp sport 5353 udp dport ${nameCheckPort} accept
+  '';
 
   # Started by the service after it wrote a change. A switch must not stop
   # the rebuild that runs it, as with nixos-upgrade.
