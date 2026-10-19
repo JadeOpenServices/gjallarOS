@@ -1,7 +1,9 @@
 package config
 
 import (
+	"encoding/json"
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -44,5 +46,38 @@ func TestSetValueRefusesDuplicateKey(t *testing.T) {
 	}
 	if got := readConfigFixture(t, path); got != body {
 		t.Fatalf("file changed: %s", got)
+	}
+}
+
+func TestChangeTextKeepsLayoutAndChecks(t *testing.T) {
+	defaults, err := Defaults()
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := json.MarshalIndent(defaults, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated, user, err := ChangeText(data, map[string]json.RawMessage{
+		"weatherCity": json.RawMessage(`"Example City"`),
+		"hostname":    json.RawMessage(`"desk-07"`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if user.Hostname != "desk-07" || user.WeatherCity != "Example City" {
+		t.Fatalf("ChangeText gave hostname %q weatherCity %q", user.Hostname, user.WeatherCity)
+	}
+	if !strings.Contains(string(updated), "\n  \"hostname\": \"desk-07\",\n") {
+		t.Fatalf("hostname not changed in place:\n%s", updated)
+	}
+	if _, _, err := ChangeText(data, map[string]json.RawMessage{"noSuchKey": json.RawMessage(`true`)}); err == nil {
+		t.Error("ChangeText accepted an unknown key")
+	}
+	if _, _, err := ChangeText(data, map[string]json.RawMessage{"theme": json.RawMessage(`"io`)}); err == nil {
+		t.Error("ChangeText accepted broken JSON")
+	}
+	if _, _, err := ChangeText(data, map[string]json.RawMessage{"theme": json.RawMessage(`12`)}); err == nil {
+		t.Error("ChangeText accepted a number for theme")
 	}
 }

@@ -876,9 +876,10 @@ router is proven during the wait, Apply opens after the 10 s reading delay.
   shows what root will write, and polkit rules can match single keys,
   which is how JODS can lock keys per device later.
 - **Waits** are kept by the service, not by polkit, so a rule that drops
-  the password still keeps the delay. Pending changes live in
-  `/run/gjallar/settings` (gone at reboot); the service drops a change when
-  the logind session that asked for it ends. Locking keeps it. Home is
+  the password still keeps the delay. Pending changes live only in the
+  service's memory, so root never parses a state file and a restart or
+  reboot drops them; the service also drops a change when the logind
+  session that asked for it ends. Locking keeps it. Home is
   root's own verdict in `/run/gjallar/vpn-trust.json`, and only `home`
   counts; a trusted Wi-Fi does not. Critical changes ignore home.
 - **Managed devices** get security and critical keys from JODS only; the

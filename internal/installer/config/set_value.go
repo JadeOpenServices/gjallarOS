@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 )
 
 // SetValue replaces one top-level entry of an existing user.config.json with
@@ -47,6 +48,46 @@ func SetValue(path, key string, value any) error {
 		return fmt.Errorf("cannot change %q in place in %s", key, path)
 	}
 	return replaceFile(path, updated, info.Mode().Perm())
+}
+
+// ChangeText replaces top-level values in user.config.json text, each in the
+// indentation of the file, and parses the result like Load. It refuses a key
+// the file lists twice, a value that is not one JSON value, and a result that
+// fails the configuration checks.
+func ChangeText(data []byte, values map[string]json.RawMessage) ([]byte, User, error) {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	slices.Sort(keys)
+	updated := data
+	for _, key := range keys {
+		if !json.Valid(values[key]) {
+			return nil, User{}, fmt.Errorf("%s: the value is not valid JSON", key)
+		}
+		var err error
+		if updated, err = setValueText(updated, key, values[key]); err != nil {
+			return nil, User{}, fmt.Errorf("cannot change %q: %w", key, err)
+		}
+	}
+	user, err := Parse(updated)
+	if err != nil {
+		return nil, User{}, err
+	}
+	return updated, user, nil
+}
+
+// WriteText replaces the configuration file at path with data and keeps its
+// permissions. It refuses a path that is a link.
+func WriteText(path string, data []byte) error {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return fmt.Errorf("read user configuration: %w", err)
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("%s is not a plain file", path)
+	}
+	return replaceFile(path, data, info.Mode().Perm())
 }
 
 // setValueText swaps the text of the top-level value of key, or inserts the

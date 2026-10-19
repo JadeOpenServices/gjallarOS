@@ -214,6 +214,12 @@ func Load(path string) (User, error) {
 	if err != nil {
 		return User{}, fmt.Errorf("read user configuration: %w", err)
 	}
+	return Parse(contents)
+}
+
+// Parse is Load for configuration text that is already read.
+func Parse(contents []byte) (User, error) {
+	var err error
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(contents, &fields); err == nil {
 		for key, id := range map[string]string{"aiEnable": "ai", "containersEnable": "containers", "nemuEnable": "nemu"} {
