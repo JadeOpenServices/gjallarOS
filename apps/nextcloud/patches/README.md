@@ -6,8 +6,9 @@ only checks that upstream still has the options GjallarOS relies on.
 
 Client behaviour patches:
 
-- `nextcloud-no-autostart.patch`: the client never adds itself to autostart.
-  The session starts it.
+- `nextcloud-no-autostart.patch`: the client never adds itself to autostart,
+  neither after the wizard nor on first start (the "launch on startup"
+  setting now defaults to off). The session starts it.
 - `nextcloud-vfs-folder-wizard.patch`: a folder added in the settings
   becomes a virtual-files folder when VFS is the default, not only when the
   wizard checkbox is set.

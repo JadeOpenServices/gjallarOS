@@ -50,6 +50,10 @@ pkgs.stdenvNoCC.mkDerivation {
     # hooked the mail composer, so mail links did nothing (2026-10-19).
     [ "$(grep -c NEXTCLOUD_BROWSER_OPENER src/gui/guiutility.cpp)" = 1 ]
     grep -A25 'bool Utility::openBrowser' src/gui/guiutility.cpp | grep -Fq NEXTCLOUD_BROWSER_OPENER
+    # The session starts the client. The setting defaulted to on, so the
+    # first start still wrote ~/.config/autostart (2026-10-20).
+    grep -Fq 'settings.value(launchOnSystemStartupC, false)' src/libsync/configfile.cpp
+    ! grep -Fq 'appNameGUI(), true);' src/gui/application.cpp
     touch $out
   '';
 }
