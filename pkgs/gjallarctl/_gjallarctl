@@ -182,6 +182,8 @@ _gjallarctl_settings() {
     'pending:show the changes waiting in this session'
     'apply:write a waiting change and rebuild'
     'cancel:drop a waiting change'
+    'export:save the settings in a file signed with your key'
+    'import:ask for the change a saved settings file makes'
   )
   if (( CURRENT == 2 )); then
     _describe -t commands 'settings command' cmds
@@ -204,6 +206,7 @@ _gjallarctl_settings() {
     apply|cancel)
       ids=(${(f)"$(gjallarctl settings pending --ids 2>/dev/null)"})
       _arguments "1:change id:(${ids[*]})" ;;
+    export|import) _arguments '1:settings file:_files' ;;
   esac
 }
 

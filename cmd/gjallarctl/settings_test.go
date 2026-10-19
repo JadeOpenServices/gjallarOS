@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -24,6 +26,8 @@ type fakeSettingsBus struct {
 	rebuilds int
 	result   string
 	notes    []string
+	exported []byte
+	imported [][]byte
 }
 
 var settingsTestNow = time.Date(2026, 10, 19, 12, 0, 0, 0, time.UTC)
@@ -71,6 +75,18 @@ func (b *fakeSettingsBus) Call(_ context.Context, method string, args ...any) (s
 		}
 		b.pending = append(b.pending, change)
 		return answer(change)
+	case "Import":
+		b.imported = append(b.imported, args[0].([]byte))
+		change := settings.Pending{
+			Change: settings.Change{
+				ID: "f11e0000" + strings.Repeat("0", 24), Tier: config.TierEveryday, Asked: settingsTestNow,
+				Keys: []settings.KeyChange{{Key: "timezone", Old: json.RawMessage(`"Etc/UTC"`), New: json.RawMessage(`"UTC"`)}},
+			},
+			ReadyAt: settingsTestNow,
+			Notes:   b.notes,
+		}
+		b.pending = append(b.pending, change)
+		return answer(change)
 	case "Pending":
 		return answer(b.pending)
 	case "Apply":
@@ -81,6 +97,13 @@ func (b *fakeSettingsBus) Call(_ context.Context, method string, args ...any) (s
 		return "", nil
 	}
 	return "", nil
+}
+
+func (b *fakeSettingsBus) Export(context.Context) ([]byte, error) {
+	if b.missing {
+		return nil, errSettingsMissing
+	}
+	return b.exported, nil
 }
 
 func (b *fakeSettingsBus) Rebuild(context.Context) (bool, string, error) {
@@ -295,5 +318,59 @@ func TestSettingsGetShowsControlCharacters(t *testing.T) {
 	}
 	if strings.ContainsRune(stdout.String(), 0x202e) {
 		t.Fatalf("raw escape in %q", stdout.String())
+	}
+}
+
+func TestSettingsExportWritesNewPrivateFile(t *testing.T) {
+	bus := &fakeSettingsBus{exported: []byte("gjallaros-settings-v1\nSYNTHETIC\n")}
+	useFakeSettings(t, bus)
+	path := filepath.Join(t.TempDir(), "settings.gjs")
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"settings", "export", path}, &stdout, &stderr); code != 0 {
+		t.Fatalf("code %d, stderr %s", code, stderr.String())
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(data, bus.exported) {
+		t.Errorf("file = %q", data)
+	}
+	if info, err := os.Stat(path); err != nil || info.Mode().Perm() != 0o600 {
+		t.Errorf("file mode = %v, %v", info.Mode(), err)
+	}
+	stdout.Reset()
+	if code := run([]string{"settings", "export", path}, &stdout, &stderr); code != 1 {
+		t.Fatalf("export over an existing file: code %d", code)
+	}
+}
+
+func TestSettingsImportSendsFileAndApplies(t *testing.T) {
+	bus := &fakeSettingsBus{notes: []string{"from a file tester made on this device on 2026-10-16 12:00:00, 3 days ago"}}
+	useFakeSettings(t, bus)
+	path := filepath.Join(t.TempDir(), "settings.gjs")
+	content := []byte("gjallaros-settings-v1\nSYNTHETIC\n")
+	if err := os.WriteFile(path, content, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"settings", "import", path}, &stdout, &stderr); code != 0 {
+		t.Fatalf("code %d, stderr %s", code, stderr.String())
+	}
+	if len(bus.imported) != 1 || !bytes.Equal(bus.imported[0], content) {
+		t.Fatalf("imported %q", bus.imported)
+	}
+	for _, want := range []string{`timezone: "Etc/UTC" -> "UTC"`, "Note: from a file tester made", "the change is live"} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Errorf("stdout lacks %q:\n%s", want, stdout.String())
+		}
+	}
+
+	big := filepath.Join(t.TempDir(), "big.gjs")
+	if err := os.WriteFile(big, make([]byte, settings.MaxFileBytes+1), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if code := run([]string{"settings", "import", big}, &stdout, &stderr); code != 1 || len(bus.imported) != 1 {
+		t.Fatalf("import of an oversized file: code %d, sent %d", code, len(bus.imported))
 	}
 }

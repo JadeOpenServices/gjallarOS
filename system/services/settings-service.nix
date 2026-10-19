@@ -33,6 +33,11 @@ let
     SystemdService=gjallar-settingsd.service
   '';
 
+  # The host key settings files are signed with (cmd/gjallar-settingsd
+  # keys.go). systemd looks the name up in /etc/credstore.encrypted.
+  keyCredential = "gjallar-settings-key";
+  keySealed = "/etc/credstore.encrypted/${keyCredential}";
+
   # Every tier asks an administrator each time; the service passes the
   # old -> new text as the message. The installer tier has no action: the
   # service refuses those keys.
@@ -56,6 +61,15 @@ let
       ${action "everyday" "Change an everyday GjallarOS setting"}
       ${action "security" "Change a security GjallarOS setting"}
       ${action "critical" "Change a critical GjallarOS setting"}
+      <action id="org.gjallaros.settings.export">
+        <description>Sign and export your GjallarOS settings</description>
+        <message>Authentication is required to sign and export your GjallarOS settings</message>
+        <defaults>
+          <allow_any>no</allow_any>
+          <allow_inactive>no</allow_inactive>
+          <allow_active>auth_self</allow_active>
+        </defaults>
+      </action>
     </policyconfig>
   '';
 
@@ -82,8 +96,43 @@ lib.mkIf (settings.dotfilesDir == "/etc/gjallar/system") {
   ];
   environment.systemPackages = [ polkitActions ];
 
+  # Makes the host key once. --with-key=auto seals it to the TPM2 when there
+  # is one, else to this host's credential key, without PCR binding, so
+  # turning on Secure Boot keeps it. A key that no longer decrypts (a
+  # cleared TPM) is replaced; the service then gives each user a new key and
+  # keeps the old public key, so earlier files still import.
+  systemd.services.gjallar-settings-key = {
+    description = "Create the GjallarOS settings signing key";
+    wantedBy = [ "multi-user.target" ];
+    before = [ "gjallar-settingsd.service" ];
+    path = [ pkgs.coreutils ];
+    serviceConfig = {
+      Type = "oneshot";
+      RemainAfterExit = true;
+      UMask = "0077";
+      PrivateNetwork = true;
+      ProtectHome = true;
+    };
+    script = ''
+      set -euo pipefail
+      creds=${pkgs.systemd}/bin/systemd-creds
+      if [ -e ${keySealed} ] && "$creds" decrypt --name=${keyCredential} ${keySealed} - >/dev/null; then
+        exit 0
+      fi
+      if [ -e ${keySealed} ]; then
+        echo "the settings signing key no longer decrypts; making a new one"
+      fi
+      mkdir -p -m 0700 ${dirOf keySealed}
+      head -c 32 /dev/urandom | "$creds" encrypt --with-key=auto --name=${keyCredential} - ${keySealed}.tmp
+      "$creds" decrypt --name=${keyCredential} ${keySealed}.tmp - >/dev/null
+      mv -f ${keySealed}.tmp ${keySealed}
+    '';
+  };
+
   systemd.services.gjallar-settingsd = {
     description = "GjallarOS settings service";
+    wants = [ "gjallar-settings-key.service" ];
+    after = [ "gjallar-settings-key.service" ];
     # tailscale status lists the tailnet a new hostname must not clash with.
     path = lib.optional config.services.tailscale.enable config.services.tailscale.package;
     serviceConfig = {
@@ -100,6 +149,12 @@ lib.mkIf (settings.dotfilesDir == "/etc/gjallar/system") {
       # may have stopped.
       RuntimeDirectoryPreserve = true;
       ReadWritePaths = [ "-/etc/gjallar/system" ];
+      # Users' signing key records (keys/<uid>.json).
+      StateDirectory = "gjallarOS/settings";
+      StateDirectoryMode = "0700";
+      # Only the name: a missing key turns export off instead of failing
+      # the service.
+      LoadCredentialEncrypted = keyCredential;
       ProtectSystem = "strict";
       ProtectHome = true;
       PrivateTmp = true;

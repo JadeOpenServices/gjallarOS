@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/ed25519"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -72,6 +73,11 @@ type service struct {
 	checkoutPath string
 	checkout     func(string) error
 	now          func() time.Time
+
+	// keys signs and checks settings files; device is this machine's
+	// app-specific id in them. Without keys, Export and Import refuse.
+	keys   *keyStore
+	device string
 
 	mu      sync.Mutex
 	pending map[string]settings.Change
@@ -145,6 +151,11 @@ func (s *service) Request(ctx context.Context, sender, values string) (settings.
 	if err := json.Unmarshal([]byte(values), &wanted); err != nil {
 		return settings.Pending{}, fmt.Errorf("%w: the request is not a JSON object of keys and values", errRefused)
 	}
+	return s.request(ctx, sender, who, wanted, nil)
+}
+
+// request plans wanted for who and keeps it as a pending change.
+func (s *service) request(ctx context.Context, sender string, who caller, wanted map[string]json.RawMessage, notes []string) (settings.Pending, error) {
 	data, _, err := s.readConfig()
 	if err != nil {
 		return settings.Pending{}, err
@@ -167,10 +178,11 @@ func (s *service) Request(ctx context.Context, sender, values string) (settings.
 		return settings.Pending{}, fmt.Errorf("%w: %d changes already wait; apply or cancel one first", errRefused, count)
 	}
 
-	notes, err := s.checkHostname(ctx, change)
+	nameNotes, err := s.checkHostname(ctx, change)
 	if err != nil {
 		return settings.Pending{}, err
 	}
+	notes = append(notes, nameNotes...)
 	if change.Tier == config.TierCritical {
 		if err := s.authorize(ctx, sender, change); err != nil {
 			return settings.Pending{}, err
@@ -182,6 +194,96 @@ func (s *service) Request(ctx context.Context, sender, values string) (settings.
 	s.mu.Unlock()
 	log.Printf("uid %d session %s asked %s change %s: %s", who.UID, who.Session, change.Tier, change.ID, change.KeyNames())
 	return settings.Pending{Change: change, ReadyAt: change.ReadyAt(s.sys.Home()), Notes: notes}, nil
+}
+
+// exportAction asks for the caller's own password: a signed file is one
+// this device will take back later.
+const exportAction = "org.gjallaros.settings.export"
+
+// Export signs the current settings, as root reads them from the checkout,
+// with the caller's key. It never signs bytes the caller sent, so a session
+// can only ever get a file of the settings the device already has.
+func (s *service) Export(ctx context.Context, sender string) ([]byte, error) {
+	who, err := s.sys.Caller(ctx, sender)
+	if err != nil {
+		return nil, err
+	}
+	if s.keys == nil || s.keys.hostKey == nil {
+		return nil, errNoSigningKey
+	}
+	if err := s.sys.Authorize(ctx, sender, exportAction, map[string]string{
+		"polkit.message": "Authentication is required to sign and export your GjallarOS settings",
+	}); err != nil {
+		return nil, err
+	}
+	_, fields, err := s.readConfig()
+	if err != nil {
+		return nil, err
+	}
+	tiers, err := config.Tiers()
+	if err != nil {
+		return nil, err
+	}
+	exported := map[string]json.RawMessage{}
+	for key, tier := range tiers {
+		if value, ok := fields[key]; ok && tier != config.TierInstaller {
+			exported[key] = value
+		}
+	}
+	key, name, err := s.keys.signer(who.UID)
+	if err != nil {
+		return nil, err
+	}
+	data, err := settings.Seal(key, settings.File{
+		Schema:   settings.FileSchema,
+		Device:   s.device,
+		User:     name,
+		UID:      who.UID,
+		Created:  s.now().UTC().Truncate(time.Second),
+		Settings: exported,
+	})
+	if err != nil {
+		return nil, err
+	}
+	log.Printf("uid %d exported %d settings", who.UID, len(exported))
+	return data, nil
+}
+
+// Import checks a settings file and asks for the change it makes, as
+// Request does: a valid signature says where the file came from, not that
+// the change is wanted now, so the usual tier, wait and password apply.
+func (s *service) Import(ctx context.Context, sender string, data []byte) (settings.Pending, error) {
+	who, err := s.sys.Caller(ctx, sender)
+	if err != nil {
+		return settings.Pending{}, err
+	}
+	if s.keys == nil {
+		return settings.Pending{}, errNoSigningKey
+	}
+	trusted, err := s.keys.trusted()
+	if err != nil {
+		return settings.Pending{}, err
+	}
+	file, public, err := settings.Open(data, func(key ed25519.PublicKey) bool {
+		_, ok := trusted[string(key)]
+		return ok
+	})
+	if err != nil {
+		return settings.Pending{}, fmt.Errorf("%w: %v", errRefused, err)
+	}
+	owner := trusted[string(public)]
+	if file.UID != owner.UID || file.User != owner.User || file.Device != s.device {
+		return settings.Pending{}, fmt.Errorf("%w: the file's contents do not match the key that signed it", errRefused)
+	}
+	if who.UID != file.UID {
+		return settings.Pending{}, fmt.Errorf("%w: %s made this file; only that account can import it", errRefused, file.User)
+	}
+	note := fmt.Sprintf("from a file %s made on this device on %s", file.User, file.Created.Local().Format(time.DateTime))
+	if days := int(s.now().Sub(file.Created).Hours() / 24); days > 0 {
+		note += fmt.Sprintf(", %d days ago", days)
+	}
+	log.Printf("uid %d imports a file of uid %d made %s", who.UID, file.UID, file.Created.Format(time.RFC3339))
+	return s.request(ctx, sender, who, file.Settings, []string{note})
 }
 
 // Pending lists the caller's own changes.

@@ -291,6 +291,19 @@ func (o object) Cancel(sender dbus.Sender, id string) *dbus.Error {
 	return busError(o.svc.Cancel(context.Background(), string(sender), id))
 }
 
+func (o object) Export(sender dbus.Sender) ([]byte, *dbus.Error) {
+	data, err := o.svc.Export(context.Background(), string(sender))
+	if err != nil {
+		return nil, busError(err)
+	}
+	return data, nil
+}
+
+func (o object) Import(sender dbus.Sender, data []byte) (string, *dbus.Error) {
+	change, err := o.svc.Import(context.Background(), string(sender), data)
+	return answer(change, err)
+}
+
 func answer(value any, err error) (string, *dbus.Error) {
 	if err != nil {
 		return "", busError(err)

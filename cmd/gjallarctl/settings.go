@@ -30,7 +30,10 @@ const settingsUsage = `usage: gjallarctl settings list [--names]   every key wit
        gjallarctl settings pending [--ids]     changes that wait in this session
        gjallarctl settings apply [ID]          write a change and rebuild
        gjallarctl settings cancel [ID]
-ID may be the start of the id; without one, the only waiting change is used.`
+       gjallarctl settings export FILE         save the settings, signed with your key
+       gjallarctl settings import FILE         ask for the change a saved file makes
+ID may be the start of the id; without one, the only waiting change is used.
+A saved file imports only on the device and account that made it.`
 
 var (
 	// settingsConnect opens the system bus; tests replace it.
@@ -74,6 +77,8 @@ type settingsBus interface {
 	// Call runs one method of the settings service and returns its JSON
 	// answer, or "" for methods without one.
 	Call(ctx context.Context, method string, args ...any) (string, error)
+	// Export returns a signed settings file of the current settings.
+	Export(ctx context.Context) ([]byte, error)
 	// Rebuild reports whether the rebuild unit is queued or running, and
 	// its last result.
 	Rebuild(ctx context.Context) (running bool, result string, err error)
@@ -90,7 +95,7 @@ func runSettings(args []string, stdout, stderr io.Writer) int {
 		return runSettingsNames(args, stdout, stderr)
 	}
 	switch command {
-	case "list", "get", "set", "pending", "apply", "cancel":
+	case "list", "get", "set", "pending", "apply", "cancel", "export", "import":
 	default:
 		fmt.Fprintf(stderr, "ERROR: unknown settings command %q\n%s\n", command, settingsUsage)
 		return 2
@@ -121,6 +126,10 @@ func runSettings(args []string, stdout, stderr io.Writer) int {
 		return settingsApplyCommand(ctx, bus, args, stdout, stderr)
 	case "cancel":
 		err = settingsCancel(ctx, bus, args, stdout)
+	case "export":
+		err = settingsExport(ctx, bus, args, stdout)
+	case "import":
+		return settingsImport(ctx, bus, args, stdout, stderr)
 	}
 	if err != nil {
 		fmt.Fprintf(stderr, "ERROR: %v\n", err)
@@ -270,6 +279,12 @@ func settingsSet(ctx context.Context, bus settingsBus, args []string, stdout, st
 		fmt.Fprintf(stderr, "ERROR: %v\n", err)
 		return 1
 	}
+	return settingsAsked(ctx, bus, answer, stdout, stderr)
+}
+
+// settingsAsked shows the change the service keeps and applies it once it
+// may be.
+func settingsAsked(ctx context.Context, bus settingsBus, answer string, stdout, stderr io.Writer) int {
 	var change settings.Pending
 	if err := json.Unmarshal([]byte(answer), &change); err != nil {
 		fmt.Fprintf(stderr, "ERROR: read the service's answer: %v\n", err)
@@ -302,6 +317,69 @@ func settingsSet(ctx context.Context, bus settingsBus, args []string, stdout, st
 		}
 	}
 	return settingsApply(ctx, bus, change.ID, stdout, stderr)
+}
+
+// settingsExport saves a signed file of the settings. The service signs
+// what it reads itself; this command only writes the file, as the user, and
+// never over an existing one.
+func settingsExport(ctx context.Context, bus settingsBus, args []string, stdout io.Writer) error {
+	if len(args) != 1 || args[0] == "" {
+		return fmt.Errorf("usage: gjallarctl settings export FILE")
+	}
+	fmt.Fprintln(stdout, "The password dialog asks for your own password.")
+	data, err := bus.Export(ctx)
+	if err != nil {
+		return err
+	}
+	out, err := os.OpenFile(args[0], os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return err
+	}
+	if _, err := out.Write(data); err != nil {
+		out.Close()
+		os.Remove(args[0])
+		return err
+	}
+	if err := out.Close(); err != nil {
+		os.Remove(args[0])
+		return err
+	}
+	fmt.Fprintf(stdout, "Saved to %s. It imports on this device, for this account: gjallarctl settings import %s\n", args[0], args[0])
+	return nil
+}
+
+func settingsImport(ctx context.Context, bus settingsBus, args []string, stdout, stderr io.Writer) int {
+	if len(args) != 1 || args[0] == "" {
+		fmt.Fprintln(stderr, "ERROR: usage: gjallarctl settings import FILE")
+		return 2
+	}
+	data, err := readSettingsFile(args[0])
+	if err != nil {
+		fmt.Fprintf(stderr, "ERROR: %v\n", err)
+		return 1
+	}
+	answer, err := bus.Call(ctx, "Import", data)
+	if err != nil {
+		fmt.Fprintf(stderr, "ERROR: %v\n", err)
+		return 1
+	}
+	return settingsAsked(ctx, bus, answer, stdout, stderr)
+}
+
+func readSettingsFile(path string) ([]byte, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	data, err := io.ReadAll(io.LimitReader(file, settings.MaxFileBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > settings.MaxFileBytes {
+		return nil, fmt.Errorf("%s is larger than a settings file can be (%d bytes)", path, settings.MaxFileBytes)
+	}
+	return data, nil
 }
 
 func printKeyChanges(stdout io.Writer, change settings.Change) {
@@ -479,6 +557,23 @@ func (b systemSettingsBus) Call(ctx context.Context, method string, args ...any)
 		}
 	}
 	return answer, nil
+}
+
+func (b systemSettingsBus) Export(ctx context.Context) ([]byte, error) {
+	call := b.conn.Object(settings.BusName, dbus.ObjectPath(settings.ObjectPath)).
+		CallWithContext(ctx, settings.Interface+".Export", 0)
+	if call.Err != nil {
+		var busErr dbus.Error
+		if errors.As(call.Err, &busErr) && busErr.Name == "org.freedesktop.DBus.Error.ServiceUnknown" {
+			return nil, errSettingsMissing
+		}
+		return nil, call.Err
+	}
+	var data []byte
+	if err := call.Store(&data); err != nil {
+		return nil, err
+	}
+	return data, nil
 }
 
 func (b systemSettingsBus) Rebuild(ctx context.Context) (bool, string, error) {

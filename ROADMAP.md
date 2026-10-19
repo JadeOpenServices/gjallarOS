@@ -699,8 +699,9 @@ way to root.
       Done: the palette as checked colours (d6f94109), a tier on every
       `user.config.json` key (34ea9a04), the service itself with its
       `gjallarctl settings` front end (3.3, 887c1c5b) and the unique
-      hostname check. Next: signed export and import (3.4), then the
-      user-side writers (3.5).
+      hostname check, signed export and import for the device's own users
+      (3.4a). Next: pairing, the installer opt-out and key wipe (rest of
+      3.4), then the user-side writers (3.5).
 - [ ] **Checkpoint 3b: developer mode.** `~/GjallarOS-local/`, the copy
       into `/etc/gjallar/local`, the `local` flake input, notice, boot
       entry name and the recovery exit.
@@ -1003,13 +1004,83 @@ profiles show "not signed" but still install, which is what phishing uses.
   (recommended)". Saying no lets the person add their own public key (for
   example an SSH or hardware key) as the only signer instead.
 - **Nothing is locked behind the key.** Login, disk unlock, applying
-  settings in the editor and recovery never need it. Losing it only makes
-  old exports unimportable.
+  settings in the editor and recovery never need it. Losing it only stops
+  export until a new one is made; old exports still import, because the
+  public keys stay.
 - **Reset and recovery.** Removing a user (editor or recovery) deletes
   that user's key and the pairings made for them. A factory reset from
   recovery deletes all keys, pairings and the `systemd-creds` host secret,
   so a copied key file cannot be unsealed later. A new user always starts
   with a fresh key. Leaving JODS removes the organisation key.
+
+How 3.4a does it (`internal/settings/signed.go`,
+`cmd/gjallar-settingsd/keys.go`):
+
+- **File.** Three header lines, `gjallaros-settings-v1`, `key <public
+  key>` and `sig <signature>`, then the JSON. The signature covers every
+  byte but the sig line. Only Ed25519; the format has no algorithm field.
+  The key line only names which trusted key to check with: a key that is
+  not one of this device's users' keys is refused before the signature is
+  looked at. The payload holds schema, device, user, uid, time and the
+  settings: every `user.config.json` key except installer keys.
+- **Host key.** `gjallar-settings-key.service` makes 32 random bytes once
+  and seals them with `systemd-creds encrypt --with-key=auto` into
+  `/etc/credstore.encrypted/gjallar-settings-key`: TPM2 plus the host
+  secret where there is a TPM, no PCR binding, so turning on Secure Boot
+  keeps it. systemd hands it to the service with `LoadCredentialEncrypted=`;
+  the service never touches the TPM. Without it export is off and import
+  still works.
+- **User keys.** Made on the first export. Each user's Ed25519 seed is
+  HKDF-SHA256 of the host key with a random salt and the uid and name.
+  `/var/lib/gjallarOS/settings/keys/<uid>.json` (root, 0600) holds the salt
+  and public key; without the host key it is only a public key. A key
+  stops counting once its uid has another name, so a new account on an old
+  uid starts fresh. When the host key changes (a cleared TPM) the next
+  export makes a new key and keeps the old public key, so earlier files
+  still import.
+- **Device.** The file names the device by HMAC-SHA256 of the machine id
+  over a fixed app id, as `sd_id128_get_app_specific` does, so it never
+  carries the machine id.
+- **Export.** `gjallarctl settings export FILE`. polkit action
+  `org.gjallaros.settings.export` asks for the user's own password
+  (`auth_self`). The service signs what it reads itself from the checkout,
+  never bytes the caller sends, so it cannot be used to sign anything
+  else. The command writes the file as the user, 0600, never over an
+  existing file.
+- **Import.** `gjallarctl settings import FILE`. Size cap, signature over
+  the raw bytes, then the strict parse. The signer's uid and name must be
+  the ones in the file, the device must be this one, and the caller must be
+  the account that made it. The change then goes the way of `settings set`,
+  with a note saying who made the file and how many days ago.
+
+Security pass (2026-10-19). What went wrong elsewhere, and what this
+design does about it:
+
+- Trusting the algorithm or key a message names:
+  [CVE-2015-9235](https://nvd.nist.gov/vuln/detail/CVE-2015-9235)
+  (jsonwebtoken). Here the algorithm is fixed and the key must already be
+  trusted.
+- Checking one reading of the bytes and acting on another: SAML comment
+  handling, [CVE-2017-11427](https://nvd.nist.gov/vuln/detail/CVE-2017-11427)
+  ([Duo PSA-2017-003](https://duo.com/blog/duo-finds-saml-vulnerabilities-affecting-multiple-implementations),
+  [CERT VU#475445](https://www.kb.cert.org/vuls/id/475445)). Here the
+  signature is checked over the raw bytes, and those same bytes are
+  parsed; nothing is canonicalized.
+- Parsers that disagree on repeated JSON names:
+  [CVE-2017-12635](https://nvd.nist.gov/vuln/detail/CVE-2017-12635)
+  (CouchDB). The parser refuses repeated names, unknown fields, text that
+  is not UTF-8 and anything after the object.
+- Signature checks that accept zero values:
+  [CVE-2022-21449](https://neilmadden.blog/2022/04/19/psychic-signatures-in-java/).
+  Go's `crypto/ed25519` is used as is, and a test checks that an all-zero
+  signature is refused.
+- Rollback: TUF names replaying old signed data as its own attack
+  ([specification](https://theupdateframework.github.io/specification/latest/),
+  [go-tuf CVE-2022-29173](https://nvd.nist.gov/vuln/detail/CVE-2022-29173)).
+  Residual: an old file of the same user on the same device stays valid.
+  It only ever brings back that user's own earlier settings, as a draft
+  with the tier rules and the password, and the note shows its age.
+  Logged on the security review page.
 
 ### Developer mode and the local folder
 

@@ -221,6 +221,19 @@ hear the answers, the firewall lets in UDP from port 5353 to port 1015, only
 from private and link-local addresses; nothing listens there outside a
 check.
 
+To keep your settings, save them to a file and bring them back later:
+
+```sh
+gjallarctl settings export ~/settings.gjallar
+gjallarctl settings import ~/settings.gjallar
+```
+
+Export asks for your own password and signs the file with a key that only
+the settings service holds. Import takes only files made on this device by
+your account, and refuses a file that was changed after it was made. It
+asks for the change the way `set` does, with the same tiers and waits, and
+says how old the file is.
+
 ### App catalogue
 
 Optional applications live in `apps/<id>/`: `meta.json` (name, description,
