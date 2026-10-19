@@ -41,6 +41,10 @@ var appID, _ = hex.DecodeString("60643cd9bce37c0ff1c82f5c6f32b196")
 
 var errNoSigningKey = fmt.Errorf("%w: signing keys are not set up on this device (the sealed host key did not load)", errRefused)
 
+// errNoAccount says a uid has no account. Only this, not a failed lookup,
+// lets the store delete that uid's key.
+var errNoAccount = errors.New("no account has this uid")
+
 // keyRecord is one user's key. Retired holds public keys of earlier host
 // keys, so files signed before a lost TPM or a new host key still import.
 type keyRecord struct {
@@ -88,6 +92,10 @@ func loadKeyStore() *keyStore {
 
 func lookupUserName(uid uint32) (string, error) {
 	account, err := user.LookupId(strconv.FormatUint(uint64(uid), 10))
+	var unknown user.UnknownUserIdError
+	if errors.As(err, &unknown) {
+		return "", fmt.Errorf("uid %d: %w", uid, errNoAccount)
+	}
 	if err != nil {
 		return "", err
 	}
@@ -155,8 +163,9 @@ func (k *keyStore) signer(uid uint32) (ed25519.PrivateKey, string, error) {
 }
 
 // trusted maps every public key of this device's users to its owner. A
-// record whose uid no longer has that name belongs to a removed user and
-// counts for no one.
+// record whose uid no longer has that name belongs to a removed user: it
+// counts for no one and is deleted, so the key cannot come back with a
+// later account of the same name.
 func (k *keyStore) trusted() (map[string]keyOwner, error) {
 	entries, err := os.ReadDir(k.dir)
 	if errors.Is(err, os.ErrNotExist) {
@@ -177,7 +186,13 @@ func (k *keyStore) trusted() (map[string]keyOwner, error) {
 			log.Printf("settings files: %v", err)
 			continue
 		}
-		if name, err := k.userName(record.UID); err != nil || name != record.User {
+		name, err := k.userName(record.UID)
+		if errors.Is(err, errNoAccount) || err == nil && name != record.User {
+			k.remove(record)
+			continue
+		}
+		if err != nil {
+			log.Printf("settings files: %v; keeping its key", err)
 			continue
 		}
 		owner := keyOwner{UID: record.UID, User: record.User}
@@ -203,6 +218,14 @@ func (k *keyStore) read(uid uint32) (keyRecord, error) {
 		return keyRecord{}, fmt.Errorf("%s belongs to uid %d", k.path(uid), record.UID)
 	}
 	return record, nil
+}
+
+func (k *keyStore) remove(record keyRecord) {
+	if err := os.Remove(k.path(record.UID)); err != nil {
+		log.Printf("settings files: delete the key of removed user %s: %v", record.User, err)
+		return
+	}
+	log.Printf("settings files: deleted the key of removed user %s (uid %d)", record.User, record.UID)
 }
 
 func (k *keyStore) write(record keyRecord) error {

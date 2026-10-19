@@ -700,8 +700,9 @@ way to root.
       `user.config.json` key (34ea9a04), the service itself with its
       `gjallarctl settings` front end (3.3, 887c1c5b) and the unique
       hostname check, signed export and import for the device's own users
-      (3.4a). Next: pairing, the installer opt-out and key wipe (rest of
-      3.4), then the user-side writers (3.5).
+      (3.4a) and key wipe on user removal (3.4b). Next: pairing and the
+      installer opt-out (rest of 3.4), then the user-side writers (3.5).
+      Factory reset waits for a recovery mode that does one.
 - [ ] **Checkpoint 3b: developer mode.** `~/GjallarOS-local/`, the copy
       into `/etc/gjallar/local`, the `local` flake input, notice, boot
       entry name and the recovery exit.
@@ -1052,6 +1053,15 @@ How 3.4a does it (`internal/settings/signed.go`,
   the ones in the file, the device must be this one, and the caller must be
   the account that made it. The change then goes the way of `settings set`,
   with a note saying who made the file and how many days ago.
+- **Removed users (3.4b).** Each time the service reads the trusted keys,
+  and once at start, it deletes the record of a uid that has no account
+  or now has another name. Only a clear "no such account" counts: when the
+  lookup itself fails the record stays and is not trusted for that check.
+  A file of a removed user is then refused for good, even when an account
+  of the same name comes back. Recovery has no factory reset yet (modes
+  are repair, reinstall and fresh); one that is added must delete the key
+  records, `/etc/credstore.encrypted/gjallar-settings-key` and the
+  `systemd-creds` host secret.
 
 Security pass (2026-10-19). What went wrong elsewhere, and what this
 design does about it:

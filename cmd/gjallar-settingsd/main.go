@@ -61,6 +61,8 @@ func main() {
 	if svc.device, err = deviceID("/etc/machine-id"); err != nil {
 		log.Printf("settings files: %v; export and import are off", err)
 		svc.keys = nil
+	} else if _, err := svc.keys.trusted(); err != nil {
+		log.Printf("settings files: %v", err)
 	}
 	if err := conn.Export(object{svc}, objectPath, interfaceName); err != nil {
 		log.Fatal(err)

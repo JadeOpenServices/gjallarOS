@@ -6,6 +6,7 @@ import (
 	"crypto/ed25519"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -27,7 +28,7 @@ func withKeys(t *testing.T, f *fixture) map[uint32]string {
 			if name, ok := names[uid]; ok {
 				return name, nil
 			}
-			return "", fmt.Errorf("no user %d", uid)
+			return "", fmt.Errorf("uid %d: %w", uid, errNoAccount)
 		},
 		now: func() time.Time { return f.now },
 	}
@@ -145,18 +146,25 @@ func TestImportRefuses(t *testing.T) {
 	}
 	f.svc.device = testDevice
 
-	names[1000] = "newcomer"
-	if _, err := f.svc.Import(ctx, ":1.10", data); !errors.Is(err, errRefused) ||
-		!strings.Contains(err.Error(), settings.ErrUnknownSigner.Error()) {
-		t.Errorf("file of a removed user: %v", err)
-	}
-	names[1000] = "tester"
 	if _, err := f.svc.Import(ctx, ":1.12", data); !errors.Is(err, errRefused) ||
 		!strings.Contains(err.Error(), "only that account") {
 		t.Errorf("file of another account: %v", err)
 	}
 	if _, err := f.svc.Import(ctx, ":1.99", data); !errors.Is(err, errRefused) {
 		t.Errorf("unknown caller: %v, want refused", err)
+	}
+
+	// Last: the key of a removed user is deleted, so the file stays refused
+	// when the name comes back.
+	names[1000] = "newcomer"
+	if _, err := f.svc.Import(ctx, ":1.10", data); !errors.Is(err, errRefused) ||
+		!strings.Contains(err.Error(), settings.ErrUnknownSigner.Error()) {
+		t.Errorf("file of a removed user: %v", err)
+	}
+	names[1000] = "tester"
+	if _, err := f.svc.Import(ctx, ":1.10", data); err == nil ||
+		!strings.Contains(err.Error(), settings.ErrUnknownSigner.Error()) {
+		t.Errorf("file of a removed user after the name came back: %v", err)
 	}
 }
 
@@ -206,5 +214,42 @@ func TestFileFromEarlierHostKeyStillImports(t *testing.T) {
 	changeTimezone(t, f)
 	if _, err := f.svc.Import(ctx, ":1.10", data); err != nil {
 		t.Errorf("file signed with the retired key: %v", err)
+	}
+}
+
+func TestRemovedUserKeyIsDeleted(t *testing.T) {
+	f := newFixture(t)
+	names := withKeys(t, f)
+	if _, _, err := f.svc.keys.signer(1000); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := f.svc.keys.signer(1001); err != nil {
+		t.Fatal(err)
+	}
+	lookup := f.svc.keys.userName
+	f.svc.keys.userName = func(uid uint32) (string, error) {
+		if uid == 1001 {
+			return "", errors.New("SYNTHETIC lookup failure")
+		}
+		return lookup(uid)
+	}
+	delete(names, 1000)
+	if _, err := f.svc.keys.trusted(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.svc.keys.read(1000); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("key of the removed user: %v, want it deleted", err)
+	}
+	if _, err := f.svc.keys.read(1001); err != nil {
+		t.Errorf("key of a user whose lookup failed: %v, want it kept", err)
+	}
+
+	f.svc.keys.userName = lookup
+	names[1001] = "renamed"
+	if _, err := f.svc.keys.trusted(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.svc.keys.read(1001); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("key after the uid changed hands: %v, want it deleted", err)
 	}
 }
