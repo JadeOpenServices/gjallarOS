@@ -696,6 +696,9 @@ way to root.
       wipe on user removal and factory reset. The settings editor and
       `gjallarctl` use it. A Noctalia palette (loophole 21) becomes checked
       colour values instead of a file path root reads.
+      Done: the palette as checked colours (d6f94109) and a tier on every
+      `user.config.json` key (34ea9a04). Next: the service itself (3.3),
+      signed export and import (3.4), then the user-side writers (3.5).
 - [ ] **Checkpoint 3b: developer mode.** `~/GjallarOS-local/`, the copy
       into `/etc/gjallar/local`, the `local` flake input, notice, boot
       entry name and the recovery exit.
@@ -794,6 +797,27 @@ tier; a new setting without one fails the schema check.
 | Everyday | apps from the catalogue, extra nixpkgs packages, theme, layout, displays, Wi-Fi choices | one password per apply |
 | Security | AI endpoint, VPN and Tailscale, SSH keys and sshd, firewall, USB and Bluetooth policy, browser policies, DNS and NTP servers, extra root certificates, user accounts and admin rights | old -> new with a one-line effect; password every apply, never cached; Apply enabled after a 10 s reading delay at home, after a 1 h security delay elsewhere |
 | Critical | update origin and channel, developer mode on, Secure Boot, LUKS and TPM PIN options, recovery off, leaving JODS | always the 1 h security delay, at home too; password when asking and again when applying |
+
+The tier of each key is a `tier` tag on its field in
+`internal/installer/config/config.go`; `config.TierOf` reads it and a test
+fails when a field has none. Decided with Jade 2026-10-19:
+
+- **Installer-only keys.** `unattendedInstall`, `autoReboot`,
+  `runUpdateChecks`, `writeConfig`, `runRebuild` and `forceRedeploy` steer
+  one installer run. They get the tier `installer`: the editor never shows
+  them and the service refuses to change them.
+- **Identity is security.** `hostname` and `username` show old -> new and
+  wait. A name has to stay unique: the service refuses a new hostname that
+  a peer on the user's tailnet or a device on the current network already
+  uses, and says which one.
+- **Every service address is security**: the AI endpoint, Nextcloud, Plane,
+  draw.io and every web application, with their on/off switches. A changed
+  address can lead to a fake login page, so it shows old -> new and waits.
+- **Firefox add-ons are security**, both the collections and pinned store
+  add-ons, because the browser installs them by policy.
+- `debugFunctions` (boot menu and diagnostics) and `dotfilesDir` are
+  security; `firmwareFlashReadEntry` and `secureBootPrompt` are critical
+  with Secure Boot.
 
 - **Reading delay.** Firefox keeps the Install button of add-on prompts
   disabled for a moment so a click meant for the page cannot land on it
