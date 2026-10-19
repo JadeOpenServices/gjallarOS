@@ -25,7 +25,11 @@ esp=$(findmnt -nro SOURCE --mountpoint "$mountpoint" || true)
 esp_partuuid=$(lsblk -dnro PARTUUID "$esp" | tr '[:upper:]' '[:lower:]')
 
 boot_entries() {
-  efibootmgr -v | tr '[:upper:]' '[:lower:]' |
+  local list
+  # A failed read must not look like a missing entry, or a duplicate gets
+  # created.
+  list=$(efibootmgr -v) || return
+  printf '%s\n' "$list" | tr '[:upper:]' '[:lower:]' |
     grep -F "gpt,$esp_partuuid," |
     grep -F '\efi\systemd\systemd-bootx64.efi' |
     sed -n 's/^boot\([0-9a-f]\{4\}\).*/\1/p'
@@ -52,9 +56,12 @@ for entry in $(efibootmgr | tr '[:upper:]' '[:lower:]' |
   efibootmgr --quiet --bootnum "$entry" --delete-bootnum
   echo "Removed firmware entry Boot$entry (GjallarOS Recovery)"
 done
-rest=$(efibootmgr | sed -n 's/^BootOrder: //p' | tr '[:upper:]' '[:lower:]' | tr , '\n' |
-  grep -vxF -f <(printf '%s\n' "$esp_entries" | tr , '\n') |
-  paste -sd, - || true)
+# A failed read here would write a BootOrder with only our entries. grep exits
+# 1 when every entry is ours, which is fine.
+boot_order=$(efibootmgr | sed -n 's/^BootOrder: //p')
+rest=$(printf '%s\n' "$boot_order" | tr '[:upper:]' '[:lower:]' | tr , '\n' |
+  { grep -vxF -f <(printf '%s\n' "$esp_entries" | tr , '\n') || [ $? = 1 ]; } |
+  paste -sd, -)
 new_order=$(printf '%s\n' "$esp_entries" "$rest" | grep . | paste -sd, -)
 efibootmgr --bootorder "$new_order" >/dev/null
 

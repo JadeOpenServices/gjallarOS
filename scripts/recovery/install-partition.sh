@@ -105,8 +105,22 @@ fi
 echo "Target: $partition ($(numfmt --to=iec "$size"))"
 # The installer creates JODS-RECOVERY empty or as vfat JODSRECOV and asks
 # before it gets here; anything else on the partition needs typed consent.
-fs_type=$(blkid -p -o value -s TYPE "$partition" 2>/dev/null || true)
-fs_label=$(blkid -p -o value -s LABEL "$partition" 2>/dev/null || true)
+# blkid -p exits 2 when it finds no signature. Ambiguous signatures (8) or a
+# failed read are not an empty partition and need consent like any other
+# content.
+probe_rc=0
+probe=$(blkid -p -o export "$partition" 2>/dev/null) || probe_rc=$?
+case $probe_rc in
+  0)
+    fs_type=$(sed -n 's/^TYPE=//p' <<<"$probe")
+    fs_label=$(sed -n 's/^LABEL=//p' <<<"$probe")
+    ;;
+  2) fs_type='' fs_label='' ;;
+  *)
+    echo "Cannot identify the content of $partition (blkid exit $probe_rc)." >&2
+    fs_type=unknown fs_label=''
+    ;;
+esac
 if ! $local_build || { [ -n "$fs_type" ] && [ "$fs_type:$fs_label" != vfat:JODSRECOV ]; }; then
   printf 'Type FORMAT-JODS-RECOVERY to erase that partition: '
   read -r answer
