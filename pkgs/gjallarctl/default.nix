@@ -31,8 +31,10 @@ buildGoModule {
       ../../internal/installer
       ../../internal/managedapps
       ../../internal/nettrust
+      ../../internal/noctalia
       ../../internal/oddccli
       ../../internal/preset
+      ../../internal/settings
       ../../internal/usbtrust
     ];
   };

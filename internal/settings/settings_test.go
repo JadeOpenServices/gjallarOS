@@ -138,3 +138,20 @@ func TestApplyChecksOldValues(t *testing.T) {
 		t.Fatal("applied over a value that changed after the request")
 	}
 }
+
+func TestMessageShowsHiddenCharacters(t *testing.T) {
+	change := Change{Tier: config.TierSecurity, Keys: []KeyChange{
+		{Key: "hostname", Old: json.RawMessage(`"desk-07"`), New: json.RawMessage("\"desk\u202e70-\"")},
+		{Key: "aiEndpoint", New: json.RawMessage(`"` + strings.Repeat("a", 200) + `"`)},
+	}}
+	message := change.Message()
+	if strings.ContainsRune(message, '\u202e') || !strings.Contains(message, `\u202e`) {
+		t.Fatalf("message %q hides a direction mark", message)
+	}
+	if !strings.Contains(message, "aiEndpoint: (not set) -> \"aaa") || !strings.Contains(message, "...") {
+		t.Fatalf("message %q does not mark the unset or shortened value", message)
+	}
+	if change.KeyNames() != "hostname,aiEndpoint" {
+		t.Fatalf("key names = %q", change.KeyNames())
+	}
+}

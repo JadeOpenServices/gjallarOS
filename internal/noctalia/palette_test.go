@@ -1,4 +1,4 @@
-package main
+package noctalia
 
 import (
 	"os"
@@ -35,20 +35,20 @@ func writeTestPalette(t *testing.T, content string) string {
 }
 
 func TestReadNoctaliaPaletteWritesCheckedColors(t *testing.T) {
-	colors, err := readNoctaliaPalette(writeTestPalette(t, testNoctaliaPalette))
+	colors, err := ReadPalette(writeTestPalette(t, testNoctaliaPalette))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if colors != testNoctaliaColors {
 		t.Fatalf("colors = %q, want %q", colors, testNoctaliaColors)
 	}
-	if err := checkNoctaliaColors(colors); err != nil {
+	if err := CheckColors(colors); err != nil {
 		t.Fatalf("root refuses what the user side wrote: %v", err)
 	}
 }
 
 func TestReadNoctaliaPaletteWithoutFileIsNoPalette(t *testing.T) {
-	colors, err := readNoctaliaPalette(t.TempDir())
+	colors, err := ReadPalette(t.TempDir())
 	if err != nil || colors != "" {
 		t.Fatalf("colors = %q, err = %v; want no palette", colors, err)
 	}
@@ -64,9 +64,9 @@ func TestReadNoctaliaPaletteRefusesOtherContent(t *testing.T) {
 		"non-hex value": strings.Replace(testNoctaliaPalette, `"101010"`, `"10101g"`, 1),
 		"number value":  strings.Replace(testNoctaliaPalette, `"101010"`, `101010`, 1),
 		"not json":      "base00=101010\n",
-		"too large":     testNoctaliaPalette + strings.Repeat(" ", noctaliaPaletteMaxSize),
+		"too large":     testNoctaliaPalette + strings.Repeat(" ", MaxPaletteSize),
 	} {
-		if colors, err := readNoctaliaPalette(writeTestPalette(t, content)); err == nil {
+		if colors, err := ReadPalette(writeTestPalette(t, content)); err == nil {
 			t.Errorf("%s: colors = %q, want an error", name, colors)
 		}
 	}
@@ -82,7 +82,7 @@ func TestReadNoctaliaPaletteRefusesLinks(t *testing.T) {
 	if err := os.Symlink(target, path); err != nil {
 		t.Fatal(err)
 	}
-	colors, err := readNoctaliaPalette(home)
+	colors, err := ReadPalette(home)
 	if err == nil || !strings.Contains(err.Error(), "is a link") {
 		t.Fatalf("colors = %q, err = %v through a link, want the link refused", colors, err)
 	}
@@ -97,8 +97,8 @@ func TestCheckNoctaliaColorsRefusesOtherValues(t *testing.T) {
 		strings.Replace(testNoctaliaColors, "101010", "../etc", 1),
 		strings.Replace(testNoctaliaColors, ",", " ", 1),
 	} {
-		if err := checkNoctaliaColors(colors); err == nil {
-			t.Errorf("checkNoctaliaColors(%q) accepted", colors)
+		if err := CheckColors(colors); err == nil {
+			t.Errorf("CheckColors(%q) accepted", colors)
 		}
 	}
 }

@@ -10,8 +10,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/config"
 )
@@ -163,6 +165,53 @@ func (c Change) Apply(data []byte) ([]byte, error) {
 	}
 	updated, _, err := config.ChangeText(data, values)
 	return updated, err
+}
+
+// maxShownValue is how much of one value the password dialog shows.
+const maxShownValue = 120
+
+// Message is the text of the password dialog: every key with its old and
+// new value. Characters that do not print, including those that turn text
+// direction, are shown as escapes, so the dialog cannot be made to show
+// something other than what root writes.
+func (c Change) Message() string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Change %d GjallarOS setting(s) (%s):", len(c.Keys), c.Tier)
+	for _, key := range c.Keys {
+		old := "(not set)"
+		if key.Old != nil {
+			old = shown(key.Old)
+		}
+		fmt.Fprintf(&b, "\n%s: %s -> %s", key.Key, old, shown(key.New))
+	}
+	return b.String()
+}
+
+// KeyNames lists the keys of the change, for polkit rules.
+func (c Change) KeyNames() string {
+	names := make([]string, len(c.Keys))
+	for i, key := range c.Keys {
+		names[i] = key.Key
+	}
+	return strings.Join(names, ",")
+}
+
+func shown(value json.RawMessage) string {
+	var b strings.Builder
+	runes := 0
+	for _, r := range string(value) {
+		if runes == maxShownValue {
+			b.WriteString("...")
+			break
+		}
+		runes++
+		if unicode.IsPrint(r) {
+			b.WriteRune(r)
+			continue
+		}
+		b.WriteString(strings.Trim(strconv.QuoteRuneToASCII(r), "'"))
+	}
+	return b.String()
 }
 
 func compact(value json.RawMessage) (json.RawMessage, error) {

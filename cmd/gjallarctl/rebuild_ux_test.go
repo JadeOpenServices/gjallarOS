@@ -461,3 +461,9 @@ func TestRebuildHardwareUpdateSwitchZeroOnlyMovesPin(t *testing.T) {
 		t.Fatalf("no-switch not reported:\n%s", stdout.String())
 	}
 }
+
+// SYNTHETIC colors, not taken from any session.
+const testNoctaliaColors = "base00=101010,base01=111111,base02=121212,base03=131313," +
+	"base04=141414,base05=151515,base06=161616,base07=171717," +
+	"base08=181818,base09=191919,base0A=1a1a1a,base0B=1b1b1b," +
+	"base0C=1c1c1c,base0D=1d1d1d,base0E=1e1e1e,base0F=1f1f1f"
