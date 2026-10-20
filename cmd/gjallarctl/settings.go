@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -544,12 +545,39 @@ func settingsApply(ctx context.Context, bus settingsBus, change settings.Change,
 				return 1
 			}
 			fmt.Fprintf(stdout, "Rebuild finished after %s; the change is live.\n", settingsNow().Sub(started).Round(time.Second))
+			offerLocalFolder(change, stdout, stderr)
 			return 0
 		}
 		if settingsSleep(watch, settingsPoll) != nil {
 			continue
 		}
 	}
+}
+
+// offerLocalFolder creates ~/GjallarOS-local from the template once
+// developer mode is on, so the owner has a place to start. A folder that
+// already exists is left alone.
+func offerLocalFolder(change settings.Change, stdout, stderr io.Writer) {
+	on := false
+	for _, key := range change.Keys {
+		on = on || (key.Key == "developerMode" && string(key.New) == "true")
+	}
+	if !on {
+		return
+	}
+	dir, err := localFolder()
+	if err != nil {
+		fmt.Fprintf(stderr, "WARNING: %v\n", err)
+		return
+	}
+	if _, err := os.Lstat(dir); !errors.Is(err, fs.ErrNotExist) {
+		return
+	}
+	if err := writeTemplate(dir); err != nil {
+		fmt.Fprintf(stderr, "WARNING: %s not created: %v\n", dir, err)
+		return
+	}
+	fmt.Fprintf(stdout, "Created %s from the template; put modules in system/ and home/, then run gjallarctl system apply.\n", dir)
 }
 
 // onSystemCheckout reports whether configPath is the user.config.json of

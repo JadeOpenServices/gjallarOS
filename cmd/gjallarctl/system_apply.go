@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path"
@@ -26,6 +27,10 @@ var localFolder = func() (string, error) {
 	}
 	return filepath.Join(home, "GjallarOS-local"), nil
 }
+
+// readRootCopy reads root's copy of the folder; tests replace it, since
+// only root owns a real copy.
+var readRootCopy = localchanges.ReadRoot
 
 // binaryExtensions are the folder's file types a diff does not show.
 var binaryExtensions = []string{".png", ".jpg", ".jpeg"}
@@ -63,11 +68,19 @@ func systemApply(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	wanted, err := localchanges.ReadDir(dir)
+	if errors.Is(err, fs.ErrNotExist) {
+		if err := writeTemplate(dir); err != nil {
+			fmt.Fprintf(stderr, "ERROR: %v\n", err)
+			return 1
+		}
+		fmt.Fprintf(stdout, "Created %s from the template; put modules in system/ and home/, then run gjallarctl system apply again.\n", dir)
+		return 0
+	}
 	if err != nil {
 		fmt.Fprintf(stderr, "ERROR: %v\n", err)
 		return 1
 	}
-	current, err := localchanges.ReadRoot(localChangesPath)
+	current, err := readRootCopy(localChangesPath)
 	if err != nil {
 		fmt.Fprintf(stderr, "ERROR: %v\n", err)
 		return 1
@@ -95,6 +108,16 @@ func systemApply(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	return settingsAsked(ctx, bus, answer, stdout, stderr)
+}
+
+// writeTemplate creates the owner's folder with the README and the examples
+// the flake skips, so it builds nothing until a file is renamed.
+func writeTemplate(dir string) error {
+	tree, err := localchanges.Template()
+	if err != nil {
+		return err
+	}
+	return localchanges.Write(dir, tree)
 }
 
 // printLocalDiff shows every changed file of the folder as a unified diff

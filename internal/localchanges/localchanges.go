@@ -120,10 +120,20 @@ func Check(files map[string][]byte) (Tree, error) {
 	return tree, nil
 }
 
-// Empty reports whether the tree holds no Nix file to build.
+// Empty reports whether the tree holds no Nix file to build: none below
+// system/ or home/, or only ones with a component starting with _, which
+// the flake skips.
 func (t Tree) Empty() bool {
 	for _, file := range t.Files {
-		if strings.HasSuffix(file.Path, ".nix") {
+		parts := strings.Split(file.Path, "/")
+		if !strings.HasSuffix(file.Path, ".nix") || len(parts) < 2 {
+			continue
+		}
+		skipped := false
+		for _, part := range parts {
+			skipped = skipped || strings.HasPrefix(part, "_")
+		}
+		if !skipped {
 			return false
 		}
 	}

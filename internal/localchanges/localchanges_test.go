@@ -193,3 +193,40 @@ func TestReplace(t *testing.T) {
 		t.Error("an empty tree left the folder")
 	}
 }
+
+func TestEmptySkipsWhatTheFlakeSkips(t *testing.T) {
+	for files, want := range map[string]bool{
+		"README.md":                  true,
+		"system/_off.nix":            true,
+		"home/_old/a.nix":            true,
+		"system/notes.md":            true,
+		"system/on.nix":              false,
+		"home/editor/settings.nix":   false,
+		"system/_off.nix,home/a.nix": false,
+	} {
+		data := map[string][]byte{}
+		for _, rel := range strings.Split(files, ",") {
+			data[rel] = []byte("{ }\n")
+		}
+		tree, err := Check(data)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if tree.Empty() != want {
+			t.Errorf("%s: Empty() = %v, want %v", files, tree.Empty(), want)
+		}
+	}
+}
+
+func TestTemplateBuildsNothing(t *testing.T) {
+	tree, err := Template()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(tree.Paths(), ","); got != "README.md,home/_example.nix,system/_example.nix" {
+		t.Fatalf("template paths %s", got)
+	}
+	if !tree.Empty() {
+		t.Fatal("the template builds a module before anything is renamed")
+	}
+}

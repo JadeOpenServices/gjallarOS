@@ -24,6 +24,7 @@ _gjallarctl_system() {
     'check:check the root-owned system checkout (root only)'
     'rebuild:rebuild from the system checkout (root only, started by rebuild)'
     'apply:copy ~/GjallarOS-local into the system and rebuild (developer mode)'
+    'status:show what the running system was built from'
   )
   if (( CURRENT == 2 )); then
     _describe -t commands 'system command' cmds

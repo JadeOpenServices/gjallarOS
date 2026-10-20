@@ -907,7 +907,7 @@ way to root.
       `local-changes` tag; 3b.2 the root copy through the settings
       service with the file diff; 3b.3 the CLI, template and status
       listing; 3b.4 the bar notice; 3b.5 the recovery exit. Done: 3b.1
-      (81cac146, 68eed82a), 3b.2.
+      (81cac146, 68eed82a), 3b.2 (b1a07ba9), 3b.3.
 - [ ] **Checkpoint 4: installer, README, migration.** New installs clone
       into `/etc/gjallar/system`. Existing installs: one privileged step
       re-clones the official origin at the revision the system runs,

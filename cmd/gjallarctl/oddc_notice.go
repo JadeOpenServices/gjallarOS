@@ -13,7 +13,7 @@ import (
 
 // buildSourcePath is written by system/security/build-source.nix from the
 // facts the rebuild recorded (flakesource.BuildSource).
-const buildSourcePath = "/etc/gjallar/build-source.json"
+var buildSourcePath = "/etc/gjallar/build-source.json"
 
 type builtSource struct {
 	Revision   string `json:"revision"`

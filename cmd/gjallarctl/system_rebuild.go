@@ -128,14 +128,17 @@ func startSystemRebuild(opts rebuildOptions, stdout, stderr io.Writer) int {
 }
 
 func runSystem(args []string, stdout, stderr io.Writer) int {
-	if len(args) == 0 || (args[0] != "check" && args[0] != "rebuild" && args[0] != "apply") {
-		fmt.Fprintln(stderr, "Usage: gjallarctl system check|rebuild [OPTIONS]\n       gjallarctl system apply")
+	if len(args) == 0 || (args[0] != "check" && args[0] != "rebuild" && args[0] != "apply" && args[0] != "status") {
+		fmt.Fprintln(stderr, "Usage: gjallarctl system check|rebuild [OPTIONS]\n       gjallarctl system apply|status")
 		return 2
 	}
 	// apply runs as the user: the folder is theirs, the settings service
-	// takes it from their session.
-	if args[0] == "apply" {
+	// takes it from their session. status reads only what anyone may read.
+	switch args[0] {
+	case "apply":
 		return systemApply(args[1:], stdout, stderr)
+	case "status":
+		return systemStatus(args[1:], stdout, stderr)
 	}
 	if os.Geteuid() != 0 {
 		fmt.Fprintf(stderr, "ERROR: gjallarctl system %s runs as root; use rebuild\n", args[0])
