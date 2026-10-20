@@ -2406,7 +2406,9 @@ func pullCheckout(repo string, stdout, stderr io.Writer) int {
 		if git("branch", "--quiet", "--set-upstream-to=origin/"+channel, channel) != 0 {
 			return failed("git branch --set-upstream-to=origin/" + channel)
 		}
-		if git("branch", "--quiet", "-d", branch) != 0 {
+		// The old branch points at HEAD, so deleting it loses no commit,
+		// even when it is ahead of its own upstream.
+		if git("branch", "--quiet", "-D", branch) != 0 {
 			fmt.Fprintf(stderr, "[GjallarOS] Warning: the old branch %s stays in %s\n", branch, repo)
 		}
 		fmt.Fprintf(stdout, "[GjallarOS] %s now follows the %s channel (was %s)\n", repo, channel, branch)

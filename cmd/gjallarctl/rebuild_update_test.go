@@ -116,10 +116,12 @@ func TestPullCheckoutMovesMainToChannel(t *testing.T) {
 }
 
 func TestPullCheckoutAheadOfChannelStays(t *testing.T) {
-	// dev moved on; the checkout follows dev, then moves to stable.
+	// dev moved on; the checkout follows dev with a local commit on top,
+	// then moves to stable.
 	upstream, checkout := channelCheckout(t, "dev", "stable")
 	gitRun(t, upstream, "commit", "-q", "--allow-empty", "-m", "dev two")
 	gitRun(t, checkout, "pull", "-q", "--ff-only")
+	gitRun(t, checkout, "commit", "-q", "--allow-empty", "-m", "local")
 	head := gitOut(t, checkout, "rev-parse", "HEAD")
 
 	var stdout, stderr bytes.Buffer
@@ -134,6 +136,9 @@ func TestPullCheckoutAheadOfChannelStays(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "until stable reaches it") {
 		t.Fatalf("stdout %q", stdout.String())
+	}
+	if gitOut(t, checkout, "branch", "--list", "dev") != "" {
+		t.Fatal("old dev branch kept")
 	}
 }
 
