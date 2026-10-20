@@ -25,7 +25,7 @@ func cloneGit(t *testing.T, dir string, args ...string) string {
 	return strings.TrimSpace(string(data))
 }
 
-// cloneFromFixture makes a local "official origin" with one commit on main
+// cloneFromFixture makes a local "official origin" with one commit on dev, staging and stable
 // and a user checkout with the machine-local files. All contents are
 // SYNTHETIC. It returns the user checkout, a destination that does not
 // exist yet, the origin and the commit.
@@ -53,10 +53,12 @@ func cloneFromFixture(t *testing.T) (from, dest, origin, revision string) {
 			writeTestFile(t, filepath.Join(dir, rel), data)
 		}
 	}
-	cloneGit(t, origin, "init", "--quiet", "--initial-branch=main")
+	cloneGit(t, origin, "init", "--quiet", "--initial-branch=dev")
 	cloneGit(t, origin, "add", ".")
 	cloneGit(t, origin, "commit", "--quiet", "-m", "first")
 	revision = cloneGit(t, origin, "rev-parse", "HEAD")
+	cloneGit(t, origin, "branch", "staging")
+	cloneGit(t, origin, "branch", "stable")
 	for rel, data := range map[string]string{
 		"generated/hardware.nix":         "{ }\n",
 		"generated/oddc/answer.json":     "{}\n",
@@ -95,7 +97,7 @@ func TestCloneFromClonesRunningCommit(t *testing.T) {
 	if got := cloneGit(t, dest, "rev-parse", "HEAD"); got != revision {
 		t.Fatalf("HEAD = %s, want %s", got, revision)
 	}
-	if got := cloneGit(t, dest, "rev-parse", "--abbrev-ref", "HEAD@{upstream}"); got != "origin/main" {
+	if got := cloneGit(t, dest, "rev-parse", "--abbrev-ref", "HEAD@{upstream}"); got != "origin/stable" {
 		t.Fatalf("upstream = %s", got)
 	}
 	if status := cloneGit(t, dest, "status", "--porcelain"); status != "" {
@@ -174,15 +176,15 @@ func TestCloneFromRefuses(t *testing.T) {
 			},
 			message: "generated/state.nix is not a regular file or directory",
 		},
-		"commit off main": {
+		"commit off the channels": {
 			change: func(t *testing.T, _, _, origin string) string {
 				cloneGit(t, origin, "checkout", "--quiet", "-b", "side")
 				cloneGit(t, origin, "commit", "--quiet", "--allow-empty", "-m", "side")
 				side := cloneGit(t, origin, "rev-parse", "HEAD")
-				cloneGit(t, origin, "checkout", "--quiet", "main")
+				cloneGit(t, origin, "checkout", "--quiet", "dev")
 				return "=" + side
 			},
-			message: "is not on main",
+			message: "is on no release channel",
 		},
 	}
 	for name, c := range cases {

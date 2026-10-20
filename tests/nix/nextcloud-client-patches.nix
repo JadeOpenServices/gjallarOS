@@ -27,10 +27,13 @@ pkgs.stdenvNoCC.mkDerivation {
     grep -A12 'void OpenVFS::fileStatusChanged' "$f" | grep -Fq 'Utility::isConflictFile(systemFileName)'
     grep -A12 'bool OpenVFS::setPinState' "$f" | grep -Fq 'if (attribs.pinState == convertPinState(state)) {'
     grep -B8 'Q_EMIT finished();' src/libsync/hydrationjob.cpp | grep -Fq '_device->close();'
-    # qt6ct's KDE patch swaps Fusion for the missing org.kde.desktop style
-    # during app construction, so "Add account" did nothing (2026-10-08).
-    grep -A6 'OCC::Application app(argc, argv);' src/gui/main.cpp \
-      | grep -Fq 'QQuickStyle::setStyle(qmlStyle);'
+    # A sync root claimed by an earlier account made OpenVFS fail to start;
+    # nothing listened, so the client synced the bare folder: placeholders
+    # read empty and local edits were never uploaded (2026-10-20).
+    grep -Fq '_syncResult.status() != SyncResult::SetupError && _vfsReady;' src/gui/folder.cpp
+    grep -A10 '_vfsReady = _vfs->mode() != Vfs::OpenVFS;' src/gui/folder.cpp | grep -Fq 'SyncResult::SetupError'
+    grep -Fq 'if (isOpenVfsMountPoint(path)) {' "$f"
+    ! grep -Fq 'QTimer::singleShot(1s, this, &Vfs::started);' "$f" || grep -B3 'QTimer::singleShot(1s, this, &Vfs::started);' "$f" | grep -Fq '#else'
     # Upstream defaults Linux to classic sync; with the preset server and
     # folder the wizard never asks, and new accounts downloaded everything
     # (2026-10-09).

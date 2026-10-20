@@ -90,12 +90,15 @@ type User struct {
 	JODSFingerprintEnroll     bool   `json:"jodsFingerprintEnrollmentAllowed" tier:"critical"`
 	AllowUnvalidatedODDCModel bool   `json:"allowUnvalidatedODDCModel" tier:"critical"`
 	DeveloperMode             bool   `json:"developerMode" tier:"critical"`
-	UnattendedInstall         bool   `json:"unattendedInstall" tier:"installer"`
-	AutoReboot                bool   `json:"autoReboot" tier:"installer"`
-	RunUpdateChecks           bool   `json:"runUpdateChecks" tier:"installer"`
-	WriteConfig               bool   `json:"writeConfig" tier:"installer"`
-	RunRebuild                bool   `json:"runRebuild" tier:"installer"`
-	ForceRedeploy             bool   `json:"forceRedeploy" tier:"installer"`
+	// ReleaseChannel is the branch of the official repository that
+	// rebuild --update follows (ROADMAP §11): dev, staging or stable.
+	ReleaseChannel    string `json:"releaseChannel" tier:"critical"`
+	UnattendedInstall bool   `json:"unattendedInstall" tier:"installer"`
+	AutoReboot        bool   `json:"autoReboot" tier:"installer"`
+	RunUpdateChecks   bool   `json:"runUpdateChecks" tier:"installer"`
+	WriteConfig       bool   `json:"writeConfig" tier:"installer"`
+	RunRebuild        bool   `json:"runRebuild" tier:"installer"`
+	ForceRedeploy     bool   `json:"forceRedeploy" tier:"installer"`
 }
 
 // Defaults is the starting point of every interactive install and the content
@@ -136,9 +139,19 @@ func Defaults() (User, error) {
 		JODSEnrollmentMode:      "manual",
 		JODSDeviceClass:         "laptop",
 		JODSDesktopProfile:      "headless",
+		ReleaseChannel:          DefaultReleaseChannel,
 		WriteConfig:             true,
 		RunRebuild:              true,
 	}, nil
+}
+
+// Channel is the release channel the install follows; empty means the
+// default.
+func (u User) Channel() string {
+	if u.ReleaseChannel == "" {
+		return DefaultReleaseChannel
+	}
+	return u.ReleaseChannel
 }
 
 // HasApp reports whether the catalogue app id is selected.
@@ -212,6 +225,13 @@ const DefaultUSBTrustTPMHandle = "0x81000042"
 // accepts. 0 means permanent USB trust never lapses.
 const MaxUSBTrustLapseDays = 36500
 
+// DefaultReleaseChannel is the channel of new installs and of configurations
+// written before channels existed.
+const DefaultReleaseChannel = "stable"
+
+// ReleaseChannels are the branches an install may follow, newest code first.
+var ReleaseChannels = []string{"dev", "staging", "stable"}
+
 func Load(path string) (User, error) {
 	contents, err := os.ReadFile(path)
 	if err != nil {
@@ -262,6 +282,9 @@ func Parse(contents []byte) (User, error) {
 	if user.FirefoxStoreAddons == nil {
 		user.FirefoxStoreAddons = []apps.FirefoxStoreAddon{}
 	}
+	if user.ReleaseChannel == "" {
+		user.ReleaseChannel = DefaultReleaseChannel
+	}
 	if err := NormalizeProjectTools(&user); err != nil {
 		return User{}, err
 	}
@@ -283,6 +306,9 @@ func Validate(user User) error {
 	}
 	if len(user.Editors) == 0 || len(user.Browsers) == 0 {
 		return fmt.Errorf("at least one editor and browser are required")
+	}
+	if user.ReleaseChannel != "" && !slices.Contains(ReleaseChannels, user.ReleaseChannel) {
+		return fmt.Errorf("invalid releaseChannel: %q; use %s", user.ReleaseChannel, strings.Join(ReleaseChannels, ", "))
 	}
 	if user.USBTrustTPMHandle != "" && !usbTrustTPMHandlePattern.MatchString(user.USBTrustTPMHandle) {
 		return fmt.Errorf("invalid usbTrustTpmHandle: %q", user.USBTrustTPMHandle)

@@ -324,6 +324,24 @@ func TestRebuildNetworkErrorFindsUnreachableHosts(t *testing.T) {
 	}
 }
 
+func TestRebuildEvalWarningsKeepsModuleWarnings(t *testing.T) {
+	log := strings.NewReader(strings.Join([]string{
+		"building the system configuration...",
+		"evaluation warning: tester profile: nextcloudEnable is on, but \"nextcloud\" is not in apps",
+		"trace: warning: an older nix prints warnings this way",
+		"evaluation warning: tester profile: nextcloudEnable is on, but \"nextcloud\" is not in apps",
+		"warning: unable to download 'http://127.0.0.1:9/x'; retrying in 260 ms (attempt 1/5)",
+	}, "\n"))
+	got := rebuildEvalWarnings(log)
+	want := []string{
+		"tester profile: nextcloudEnable is on, but \"nextcloud\" is not in apps",
+		"an older nix prints warnings this way",
+	}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("warnings = %q, want %q", got, want)
+	}
+}
+
 func TestSystemGenerationCleanupArgsUseCountRetention(t *testing.T) {
 	got := systemGenerationCleanupArgs(5)
 	want := []string{

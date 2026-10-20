@@ -127,6 +127,22 @@ func TestPlanLapseWaitsOnlyWhenLoosened(t *testing.T) {
 	}
 }
 
+func TestPlanReleaseChannelWaitsUnlessStable(t *testing.T) {
+	user := defaults(t)
+	change, err := Plan(configText(t, user), raw(map[string]string{"releaseChannel": `"staging"`}))
+	if err != nil || change.Tier != config.TierCritical {
+		t.Fatalf("to staging: %s %v", change.Tier, err)
+	}
+	user.ReleaseChannel = "dev"
+	change, err = Plan(configText(t, user), raw(map[string]string{"releaseChannel": `"stable"`}))
+	if err != nil || change.Tier != config.TierEveryday {
+		t.Fatalf("to stable: %s %v", change.Tier, err)
+	}
+	if _, err := Plan(configText(t, user), raw(map[string]string{"releaseChannel": `"main"`})); err == nil {
+		t.Fatal("accepted channel main")
+	}
+}
+
 func TestPlanDeveloperModeWaitsOnlyWhenTurnedOn(t *testing.T) {
 	user := defaults(t)
 	change, err := Plan(configText(t, user), raw(map[string]string{"developerMode": `true`}))

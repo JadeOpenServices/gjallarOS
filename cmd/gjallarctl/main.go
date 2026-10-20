@@ -1043,9 +1043,12 @@ func runAI(args []string, stdout, stderr io.Writer) int {
 	if len(args) > 0 && args[0] == "set-token" {
 		return runAISetToken(args[1:], stdout, stderr)
 	}
+	if len(args) > 0 && args[0] == "enable" {
+		return runAIEnable(args[1:], stdout, stderr)
+	}
 
 	if len(args) == 0 {
-		fmt.Fprintln(stderr, "Usage: gjallarctl ai {profile|tool|approve|research-serve|set-token}")
+		fmt.Fprintln(stderr, "Usage: gjallarctl ai {enable|profile|tool|approve|research-serve|set-token}")
 		return 2
 	}
 	if args[0] == "tool" {
@@ -2025,6 +2028,9 @@ func rebuildCheckout(repo string, opts rebuildOptions, system bool, stdout, stde
 		fmt.Fprintf(stderr, "[GjallarOS] Error: sync routed user intent: %v\n", err)
 		return 1
 	}
+	if !syncLocalAIModel(settingsPath, userConfig, stdout, stderr) {
+		return 1
+	}
 
 	// The device's ODDC answer follows the commit flake.lock pins, so
 	// `nix flake update oddc` and a rebuild take a new catalog revision.
@@ -2352,15 +2358,74 @@ func (p rebuildPlan) run(ctx context.Context, stdout, stderr io.Writer) int {
 	return runPrivilegedCommand(ctx, stdout, stderr, slices.Concat(p.activate, []string{"--store-path", system})...)
 }
 
-// pullCheckout brings the system's checkout up to date before the rebuild:
-// every install tracks the same upstream. The pull is fast-forward only, so
-// local commits or edits stop it with git's own message and nothing is
-// rebuilt.
+// pullCheckout brings the checkout up to date before the rebuild. It
+// follows the release channel of the checkout's user.config.json
+// (ROADMAP §11) and only fast-forwards, so local commits or edits stop it
+// with git's own message and nothing is rebuilt. A checkout ahead of its
+// channel, as after a move to an older channel, stays where it is until
+// the channel catches up. A checkout on another channel's branch or on the
+// old main branch moves to the channel's branch first.
 func pullCheckout(repo string, stdout, stderr io.Writer) int {
+	user, err := config.Load(filepath.Join(repo, "user.config.json"))
+	if err != nil {
+		fmt.Fprintf(stderr, "[GjallarOS] Error: %v; nothing rebuilt\n", err)
+		return 1
+	}
+	channel := user.Channel()
+	upstream := "refs/remotes/origin/" + channel
+	git := func(args ...string) int {
+		return runCommand(context.Background(), stdout, stderr, "git", append([]string{"-C", repo}, args...)...)
+	}
+	failed := func(what string) int {
+		fmt.Fprintf(stderr, "[GjallarOS] Error: %s in %s failed; nothing rebuilt\n", what, repo)
+		return 1
+	}
+	isAncestor := func(a, b string) bool {
+		return exec.Command("git", "-C", repo, "merge-base", "--is-ancestor", a, b).Run() == nil
+	}
+
 	before := gitHead(repo)
-	if status := runCommand(context.Background(), stdout, stderr, "git", "-C", repo, "pull", "--ff-only"); status != 0 {
-		fmt.Fprintf(stderr, "[GjallarOS] Error: git pull --ff-only in %s failed; nothing rebuilt\n", repo)
-		return status
+	if git("fetch", "--quiet", "--prune", "origin") != 0 {
+		return failed("git fetch origin")
+	}
+	if exec.Command("git", "-C", repo, "rev-parse", "--verify", "--quiet", upstream).Run() != nil {
+		fmt.Fprintf(stderr, "[GjallarOS] Error: origin has no %s branch for releaseChannel %q; nothing rebuilt\n", channel, channel)
+		return 1
+	}
+	out, err := exec.Command("git", "-C", repo, "symbolic-ref", "--quiet", "--short", "HEAD").Output()
+	if err != nil {
+		fmt.Fprintf(stderr, "[GjallarOS] Error: %s is not on a branch; check out %s first; nothing rebuilt\n", repo, channel)
+		return 1
+	}
+	branch := strings.TrimSpace(string(out))
+
+	if branch != channel {
+		if branch != "main" && !slices.Contains(config.ReleaseChannels, branch) {
+			fmt.Fprintf(stderr, "[GjallarOS] Error: %s is on branch %s, not on the %s channel; nothing rebuilt\n", repo, branch, channel)
+			return 1
+		}
+		// The new branch starts at HEAD, so the switch itself changes no
+		// file; the fast-forward below moves it if the channel is ahead.
+		if git("checkout", "--quiet", "--no-track", "-B", channel) != 0 {
+			return failed("git checkout -B " + channel)
+		}
+		if git("branch", "--quiet", "--set-upstream-to=origin/"+channel, channel) != 0 {
+			return failed("git branch --set-upstream-to=origin/" + channel)
+		}
+		// The old branch points at HEAD, so deleting it loses no commit,
+		// even when it is ahead of its own upstream.
+		if git("branch", "--quiet", "-D", branch) != 0 {
+			fmt.Fprintf(stderr, "[GjallarOS] Warning: the old branch %s stays in %s\n", branch, repo)
+		}
+		fmt.Fprintf(stdout, "[GjallarOS] %s now follows the %s channel (was %s)\n", repo, channel, branch)
+	}
+
+	if !isAncestor(upstream, "HEAD") {
+		if git("merge", "--quiet", "--ff-only", upstream) != 0 {
+			return failed("git merge --ff-only origin/" + channel)
+		}
+	} else if !isAncestor("HEAD", upstream) {
+		fmt.Fprintf(stdout, "[GjallarOS] %s is ahead of the %s channel; it stays at %s until %s reaches it\n", repo, channel, gitHead(repo), channel)
 	}
 	if after := gitHead(repo); before == after {
 		fmt.Fprintf(stdout, "[GjallarOS] %s already at %s\n", repo, after)
@@ -2375,8 +2440,10 @@ func printRebuildHelp(out io.Writer) {
 
 Apply the GjallarOS configuration in the system checkout.
 
-  --update              Pull the checkout from upstream first (fast-forward
-                        only; local commits or edits stop it).
+  --update              Update the checkout from its release channel first
+                        (releaseChannel in user.config.json: dev, staging
+                        or stable). Fast-forward only; local commits or
+                        edits stop it.
   --update-inputs       Move every flake input to its newest version first.
                         For development checkouts, not normal installs.
   --hardware-update     Move the ODDC hardware catalogue pin first.
@@ -2714,6 +2781,11 @@ func runRebuildQuiet(stdout, stderr io.Writer, host string, messages []string, s
 			fmt.Fprintf(stdout, "[rebuild] Downloads failed and were retried: %s\n", retriedError)
 		}
 	}
+	if status == 0 {
+		for _, warning := range rebuildEvalWarnings(log) {
+			fmt.Fprintf(stderr, "[rebuild] Warning: %s\n", warning)
+		}
+	}
 	if status != 0 {
 		keepLog = true
 		if _, err := log.Seek(0, io.SeekStart); err == nil {
@@ -2764,6 +2836,39 @@ func rebuildNetworkError(log io.ReadSeeker, retries bool) string {
 		}
 	}
 	return ""
+}
+
+// rebuildEvalWarnings returns the module warnings of a rebuild, once each.
+// A quiet rebuild that succeeds drops its log, so without this a warning
+// such as nextcloudEnable without the nextcloud app never reached the user
+// (fw13 VM, 2026-10-20).
+func rebuildEvalWarnings(log io.ReadSeeker) []string {
+	if _, err := log.Seek(0, io.SeekStart); err != nil {
+		return nil
+	}
+	seen := map[string]struct{}{}
+	var warnings []string
+	scanner := bufio.NewScanner(log)
+	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		var warning string
+		for _, prefix := range []string{"evaluation warning:", "trace: warning:"} {
+			if rest, ok := strings.CutPrefix(line, prefix); ok {
+				warning = strings.TrimSpace(rest)
+				break
+			}
+		}
+		if warning == "" {
+			continue
+		}
+		if _, ok := seen[warning]; ok {
+			continue
+		}
+		seen[warning] = struct{}{}
+		warnings = append(warnings, warning)
+	}
+	return warnings
 }
 
 func rebuildLocalDerivations(log io.ReadSeeker) []string {

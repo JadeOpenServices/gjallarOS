@@ -5,7 +5,7 @@ name: oddc security flags
 
 on:
   push:
-    branches: [main]
+    branches: [dev]
     paths:
       - flake.lock
       - cmd/gjallarctl/**

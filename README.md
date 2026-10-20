@@ -31,7 +31,7 @@ Needs a machine booted in UEFI mode (legacy BIOS/CSM is refused). On NixOS,
 or the NixOS minimal ISO:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/JadeOpenServices/gjallarOS/main/scripts/installation/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/JadeOpenServices/gjallarOS/stable/scripts/installation/install.sh | bash
 ```
 
 The script clones the repository with its submodules into
@@ -116,6 +116,9 @@ first under memory pressure) so a model load cannot take Hyprland down. Below
 AI, and local AI then runs only a model you name. From 8 GiB it picks a 7b
 model, from 24 GiB a 14b one, and with 32 GiB plus a 12 GiB graphics card a
 30b one.
+To turn local AI on after the install, run `gjallarctl ai enable`; the
+rebuild then picks the model the same way. A changed `overrideModelWith`
+takes effect with the next rebuild too.
 
 Instead of a local model, AI can use a central server: set `aiEndpoint`
 (`https://host[:port]` only), `aiRemoteModel` and `aiRemoteContextTokens`.
@@ -394,8 +397,14 @@ To bring an install up to date with upstream, run:
 rebuild --update
 ```
 
-It runs `git pull --ff-only` in that checkout and then rebuilds. Local
-commits or uncommitted edits stop the pull, and nothing is rebuilt.
+It fast-forwards that checkout to its release channel and then rebuilds.
+The channel is `releaseChannel` in `user.config.json`: `stable` (the
+default), `staging` or `dev`. Change it with
+`gjallarctl settings set releaseChannel=staging`. A move to `stable` applies
+at once; any other move waits like other critical settings.
+Local commits or uncommitted edits stop the update, and nothing is rebuilt.
+A checkout that is ahead of its channel stays where it is until the channel
+catches up; it never goes back to an older commit.
 `rebuild --update-inputs` moves every flake input first (for development
 checkouts). `rebuild --help` lists every option.
 

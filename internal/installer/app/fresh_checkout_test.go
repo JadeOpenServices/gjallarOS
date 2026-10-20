@@ -27,7 +27,7 @@ func runGit(t *testing.T, dir string, args ...string) string {
 	return strings.TrimSpace(string(data))
 }
 
-// cloneFixture makes a local "official origin" with one commit on main, the
+// cloneFixture makes a local "official origin" with one commit on dev, staging and stable, the
 // installer's tree at that commit with the files the installer writes, and
 // an empty target root. It returns the commit.
 func cloneFixture(t *testing.T) (repo, target, revision string) {
@@ -36,7 +36,7 @@ func cloneFixture(t *testing.T) (repo, target, revision string) {
 	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
 	origin := t.TempDir()
 	repo, target = t.TempDir(), t.TempDir()
-	runGit(t, origin, "init", "--quiet", "--initial-branch=main")
+	runGit(t, origin, "init", "--quiet", "--initial-branch=dev")
 	for _, dir := range []string{origin, repo} {
 		for rel, data := range officialFiles {
 			path := filepath.Join(dir, rel)
@@ -58,6 +58,8 @@ func cloneFixture(t *testing.T) (repo, target, revision string) {
 	runGit(t, origin, "add", ".")
 	runGit(t, origin, "commit", "--quiet", "-m", "first")
 	revision = runGit(t, origin, "rev-parse", "HEAD")
+	runGit(t, origin, "branch", "staging")
+	runGit(t, origin, "branch", "stable")
 
 	local := map[string]string{
 		"generated/hardware.nix": "{ }\n",
@@ -91,14 +93,14 @@ func TestCloneSystemCheckoutClonesInstalledRevision(t *testing.T) {
 	runGit(t, officialOrigin, "commit", "--quiet", "-m", "later")
 
 	var out strings.Builder
-	if err := cloneSystemCheckout(context.Background(), repo, target, "git:"+revision, &out); err != nil {
+	if err := cloneSystemCheckout(context.Background(), repo, target, "git:"+revision, "stable", &out); err != nil {
 		t.Fatal(err)
 	}
 	dest := filepath.Join(target, "etc", "gjallar", "system")
 	if got := runGit(t, dest, "rev-parse", "HEAD"); got != revision {
 		t.Fatalf("HEAD = %s, want %s", got, revision)
 	}
-	if got := runGit(t, dest, "rev-parse", "--abbrev-ref", "HEAD@{upstream}"); got != "origin/main" {
+	if got := runGit(t, dest, "rev-parse", "--abbrev-ref", "HEAD@{upstream}"); got != "origin/stable" {
 		t.Fatalf("upstream = %s", got)
 	}
 	if got := runGit(t, dest, "remote", "get-url", "origin"); got != officialOrigin {
@@ -128,7 +130,7 @@ func TestCloneSystemCheckoutClonesInstalledRevision(t *testing.T) {
 	if status := runGit(t, dest, "status", "--porcelain"); status != "" {
 		t.Fatalf("clone not clean:\n%s", status)
 	}
-	if !strings.Contains(out.String(), "PASS: /etc/gjallar/system cloned at "+revision[:12]+" (main)") {
+	if !strings.Contains(out.String(), "PASS: /etc/gjallar/system cloned at "+revision[:12]+" (stable)") {
 		t.Fatalf("output = %q", out.String())
 	}
 }
@@ -137,7 +139,7 @@ func TestCloneSystemCheckoutRefusesRevisionsThatAreNotCommits(t *testing.T) {
 	repo, target, revision := cloneFixture(t)
 	calls := withPrivilegedCommand(t, nil)
 	for _, bad := range []string{"", "git:" + revision + "-dirty", "nar:sha256-AAAA", "git:" + strings.ToUpper(revision)} {
-		err := cloneSystemCheckout(context.Background(), repo, target, bad, io.Discard)
+		err := cloneSystemCheckout(context.Background(), repo, target, bad, "stable", io.Discard)
 		if err == nil || !strings.Contains(err.Error(), "pushed commit without local changes") {
 			t.Fatalf("revision %q: %v", bad, err)
 		}
@@ -147,19 +149,39 @@ func TestCloneSystemCheckoutRefusesRevisionsThatAreNotCommits(t *testing.T) {
 	}
 }
 
-func TestCloneSystemCheckoutRefusesCommitOffDefaultBranch(t *testing.T) {
+func TestCloneSystemCheckoutRefusesCommitOffTheChannels(t *testing.T) {
 	repo, target, _ := cloneFixture(t)
 	runGit(t, officialOrigin, "checkout", "--quiet", "-b", "side")
 	runGit(t, officialOrigin, "commit", "--quiet", "--allow-empty", "-m", "side")
 	side := runGit(t, officialOrigin, "rev-parse", "HEAD")
-	runGit(t, officialOrigin, "checkout", "--quiet", "main")
+	runGit(t, officialOrigin, "checkout", "--quiet", "dev")
 
-	err := cloneSystemCheckout(context.Background(), repo, target, side, io.Discard)
-	if err == nil || !strings.Contains(err.Error(), "is not on main") {
-		t.Fatalf("commit off main: %v", err)
+	err := cloneSystemCheckout(context.Background(), repo, target, side, "stable", io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "is on no release channel") {
+		t.Fatalf("commit off the channels: %v", err)
 	}
 	if _, err := os.Lstat(filepath.Join(target, "etc", "gjallar", "system")); !os.IsNotExist(err) {
 		t.Fatalf("refused clone left behind: %v", err)
+	}
+}
+
+func TestCloneSystemCheckoutTracksChannelBehindRevision(t *testing.T) {
+	// The installer was built from dev; the user picked stable, which is
+	// older. The clone keeps the installed commit and tracks stable.
+	repo, target, _ := cloneFixture(t)
+	runGit(t, officialOrigin, "checkout", "--quiet", "dev")
+	runGit(t, officialOrigin, "commit", "--quiet", "--allow-empty", "-m", "dev only")
+	revision := runGit(t, officialOrigin, "rev-parse", "HEAD")
+
+	if err := cloneSystemCheckout(context.Background(), repo, target, revision, "stable", io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	dest := filepath.Join(target, "etc", "gjallar", "system")
+	if got := runGit(t, dest, "rev-parse", "HEAD"); got != revision {
+		t.Fatalf("HEAD = %s, want %s", got, revision)
+	}
+	if got := runGit(t, dest, "rev-parse", "--abbrev-ref", "HEAD@{upstream}"); got != "origin/stable" {
+		t.Fatalf("upstream = %s", got)
 	}
 }
 
@@ -188,7 +210,7 @@ func TestCloneSystemCheckoutRefusesTreeThatDiffers(t *testing.T) {
 			if err := change(repo); err != nil {
 				t.Fatal(err)
 			}
-			err := cloneSystemCheckout(context.Background(), repo, target, revision, io.Discard)
+			err := cloneSystemCheckout(context.Background(), repo, target, revision, "stable", io.Discard)
 			if err == nil || !strings.Contains(err.Error(), "differs from the official commit at "+rel+";") {
 				t.Fatalf("changed %s: %v", rel, err)
 			}
@@ -208,7 +230,7 @@ func TestCloneSystemCheckoutNeverMergesIntoExistingCheckout(t *testing.T) {
 	if err := os.WriteFile(old, []byte("old"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := cloneSystemCheckout(context.Background(), repo, target, revision, io.Discard); err == nil {
+	if err := cloneSystemCheckout(context.Background(), repo, target, revision, "stable", io.Discard); err == nil {
 		t.Fatal("cloned into an existing checkout")
 	}
 	if data, err := os.ReadFile(old); err != nil || string(data) != "old" {

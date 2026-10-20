@@ -222,6 +222,10 @@ func tightens(key string, oldValue, newValue json.RawMessage) bool {
 	case "developerMode":
 		// Turning developer mode off returns to the official system.
 		return string(newValue) == "false"
+	case "releaseChannel":
+		// stable takes new code last, and update never goes back to an
+		// older commit, so moving to it only slows what arrives.
+		return string(newValue) == `"stable"`
 	}
 	return false
 }

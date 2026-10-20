@@ -222,8 +222,12 @@ func cloneFrom(ctx context.Context, from, dest, origin, revision string) ([]stri
 	if err != nil {
 		return nil, fmt.Errorf("%s/user.config.json: %w", from, err)
 	}
+	user, err := config.Parse(userConfig)
+	if err != nil {
+		return nil, fmt.Errorf("%s/user.config.json: %w", from, err)
+	}
 
-	if _, err := systemcheckout.Clone(ctx, runDirect, origin, dest, revision); err != nil {
+	if err := systemcheckout.Clone(ctx, runDirect, origin, dest, revision, user.Channel()); err != nil {
 		return nil, err
 	}
 	copied, err := copyGenerated(source, dest)
