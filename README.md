@@ -672,8 +672,12 @@ rebuild, then delete the override file.
 ## 💜 Credits
 
 GjallarOS builds on the ideas and groundwork of
-[AlfheimOS](https://github.com/Serpentian/AlfheimOS). Please send some love
-their way as well.
+[AlfheimOS](https://github.com/Serpentian/AlfheimOS) and the
+[hyprdots](https://github.com/prasanthrangan/hyprdots) project.
+[v3rm1n's dotfiles](https://codeberg.org/v3rm1n/dotfiles) inspired it
+and got me started on this idea in the first place, together with my
+loving hate for Windows and what it has become, as an ex-Windows user
+since 2021. Please send some love their way as well.
 
 The desktop shell, greeter and default owl wallpaper come from
 [Noctalia](https://github.com/noctalia-dev/noctalia). The README layout
