@@ -1328,7 +1328,9 @@ a problem.
   files. Later: compare the security-relevant options of the official and
   the local build and list what local code changed (firewall, sshd, ...).
 - **Getting out.** If a local module breaks the system, the previous
-  generation boots; recovery offers "Turn off developer mode and rebuild
+  generation boots. Recovery and the other extra boot entries never hold
+  the local modules (they are disabled in every specialisation); recovery
+  offers "Turn off developer mode and rebuild
   the official system". Turning it off keeps `~/GjallarOS-local/`.
 - **Adding an app does not need it.** Extra nixpkgs packages are an
   everyday setting (attribute names checked against the pinned nixpkgs).

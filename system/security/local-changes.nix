@@ -4,7 +4,9 @@
 # below system/ are NixOS modules, files below home/ home-manager modules of
 # the owner; a name starting with _ is skipped. A staged folder that does
 # not match the recorded hash, or one gjallarctl did not stage, stops the
-# build. localDir is the staged folder's place in the source.
+# build. Recovery and the other extra boot entries leave the local modules
+# out: they are the way back when a local module breaks the system. localDir
+# is the staged folder's place in the source.
 { localDir }:
 {
   lib,
@@ -49,6 +51,18 @@ let
         && !(lib.any (lib.hasPrefix "_") (lib.splitString "/" rel))
       ) files
     );
+  systemModules = modulesBelow "system";
+  homeModules = modulesBelow "home";
+
+  # The boot entry and nixos-version say the generation holds local changes.
+  tag = {
+    key = "gjallar-local-changes-tag";
+    system.nixos.tags = lib.optional (local != null) "local-changes";
+  };
+  official = {
+    disabledModules = systemModules ++ [ { inherit (tag) key; } ];
+    home-manager.users.${settings.username}.disabledModules = homeModules;
+  };
 
   checked =
     if present && local == null then
@@ -62,10 +76,12 @@ let
 in
 assert checked;
 {
-  imports = modulesBelow "system";
+  imports = systemModules ++ [ tag ];
 
-  home-manager.users.${settings.username}.imports = modulesBelow "home";
+  # Adds the official module to every specialisation, also ones added later.
+  options.specialisation = lib.mkOption {
+    type = lib.types.attrsOf (lib.types.submodule { configuration = official; });
+  };
 
-  # The boot entry and nixos-version say the generation holds local changes.
-  system.nixos.tags = lib.optional (local != null) "local-changes";
+  config.home-manager.users.${settings.username}.imports = homeModules;
 }
