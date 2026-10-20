@@ -880,9 +880,7 @@ way to root.
       exists only in a fork is never fetched. Fails closed in both modes.
       Still open: the built revision in `system.configurationRevision`,
       applied local changes (3b), the 169 notice while the deployed oddc is
-      not the pinned one, and the user-side writers of `user.config.json`
-      (add-ons, USB, Secure Boot), which fail on a system checkout until
-      checkpoint 3. Creating the checkout is checkpoint 4.
+      not the pinned one. Creating the checkout is checkpoint 4.
       Done in 0bf0c1be and 76b1646b, tested on the fw13 VM.
 - [ ] **Checkpoint 3: settings service.** Root service with a typed
       D-Bus API over the `user.config.json` schema, tiers, reading and
@@ -894,9 +892,11 @@ way to root.
       `user.config.json` key (34ea9a04), the service itself with its
       `gjallarctl settings` front end (3.3, 887c1c5b) and the unique
       hostname check, signed export and import for the device's own users
-      (3.4a) and key wipe on user removal (3.4b). Next: pairing and the
-      installer opt-out (rest of 3.4), then the user-side writers (3.5).
-      Factory reset waits for a recovery mode that does one.
+      (3.4a), key wipe on user removal (3.4b), and the user-side writers
+      (add-ons, USB review, Secure Boot) asking the service on a system
+      checkout, with each inner value of a change listed (3.5, e511f5cb).
+      Next: pairing and the installer opt-out (rest of 3.4). Factory reset
+      waits for a recovery mode that does one.
 - [ ] **Checkpoint 3b: developer mode.** `~/GjallarOS-local/`, the copy
       into `/etc/gjallar/local`, the `local` flake input, notice, boot
       entry name and the recovery exit.
