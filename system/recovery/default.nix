@@ -11,7 +11,13 @@ let
   tools = import ./tools.nix {
     inherit config pkgs sourceRevision;
   };
-  inherit (tools) gjallarctl installer recovery recoveryExecutor;
+  inherit (tools)
+    gjallarctl
+    installer
+    recovery
+    recoveryCompletion
+    recoveryExecutor
+    ;
 
   maintenanceCandidates = lib.concatStringsSep "\n" (
     lib.mapAttrsToList (
@@ -99,6 +105,7 @@ lib.mkMerge [
       boot.kernelParams = [ "systemd.unit=multi-user.target" ];
       environment.systemPackages = [
         recovery
+        recoveryCompletion
         recoveryExecutor
         gjallarctl
         installer
