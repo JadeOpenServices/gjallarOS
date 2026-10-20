@@ -5,8 +5,8 @@
 let
   inherit (pkgs) lib systemd;
 in
-assert lib.assertMsg (systemd.version == "260.2")
-  "system/fixes/systemd-partition-reread was written for systemd 260.2; check whether ${systemd.version} still adds partitions before it removes the ones in the way, then update or remove the fix.";
+assert lib.assertMsg (systemd.version == "260.5")
+  "system/fixes/systemd-partition-reread was checked for systemd 260.5; check whether ${systemd.version} still adds partitions before it removes the ones in the way, then update or remove the fix.";
 systemd.overrideAttrs (old: {
   patches = (old.patches or [ ]) ++ [ ./remove-before-add.patch ];
 })
