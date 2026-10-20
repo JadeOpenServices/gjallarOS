@@ -9,7 +9,9 @@ import (
 	"strings"
 
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/config"
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/flakesource"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/systemcheckout"
+	"github.com/JadeOpenServices/gjallarOS/internal/localchanges"
 )
 
 // systemRebuildCommand is the root side of a system checkout rebuild. It is
@@ -24,6 +26,40 @@ type rebuildOptions struct {
 	channel, switchNow   string
 	update, updateInputs bool
 	rebuildArgs          []string
+}
+
+// localChangesPath is root's copy of the developer-mode folder.
+var localChangesPath = localchanges.Path
+
+// stageLocalChanges reads root's copy of the developer-mode folder for a
+// system rebuild with developer mode on and records it in facts; the caller
+// stages the returned tree next to the source. Development checkouts change
+// the repository itself and build no local folder.
+func stageLocalChanges(system, developerMode bool, facts *flakesource.BuildSource, stdout, stderr io.Writer) (localchanges.Tree, int) {
+	if !system {
+		return localchanges.Tree{}, 0
+	}
+	// With developer mode off the folder is not read, so a broken copy never
+	// stops the way back to the official system.
+	if !developerMode {
+		if _, err := os.Lstat(localChangesPath); err == nil {
+			fmt.Fprintf(stdout, "[GjallarOS] Developer mode is off; %s is not built\n", localChangesPath)
+		}
+		return localchanges.Tree{}, 0
+	}
+	tree, err := localchanges.ReadRoot(localChangesPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "[GjallarOS] Error: %v; nothing rebuilt\n", err)
+		return tree, 1
+	}
+	switch {
+	case tree.Empty():
+		fmt.Fprintf(stdout, "[GjallarOS] Developer mode is on; %s holds no .nix file yet\n", localChangesPath)
+	default:
+		facts.Local = &flakesource.LocalSource{Hash: tree.Hash(), Files: tree.Paths()}
+		fmt.Fprintf(stdout, "[GjallarOS] Developer mode: building %d local files (%s)\n", len(tree.Files), facts.Local.Hash[:12])
+	}
+	return tree, 0
 }
 
 // systemRebuildArgs turns the user's rebuild options into the fixed argument

@@ -54,4 +54,31 @@ assert
     entrypoint = "gjallarctl";
     source.branch = "main";
   });
+assert allowed {
+  schemaVersion = 1;
+  entrypoint = "gjallarctl";
+  source.local = {
+    hash = builtins.substring 0 64 (rev + rev);
+    files = [ "system/a.nix" ];
+  };
+};
+assert
+  !(allowed {
+    schemaVersion = 1;
+    entrypoint = "gjallarctl";
+    source.local = {
+      hash = "abc";
+      files = [ ];
+    };
+  });
+assert
+  !(allowed {
+    schemaVersion = 1;
+    entrypoint = "gjallarctl";
+    source.local = {
+      hash = builtins.substring 0 64 (rev + rev);
+      files = [ ];
+      path = "/home";
+    };
+  });
 pkgs.runCommand "gjallar-build-entrypoint-check" { } "touch $out"

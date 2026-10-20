@@ -26,6 +26,7 @@ func TestStageKeepsFlakeInputsAndDropsHistoryAndScratch(t *testing.T) {
 	write(t, filepath.Join(repo, "pkgs", "monique", ".git"), "gitdir: ../../.git/modules/monique", 0o644)
 	write(t, filepath.Join(repo, "pkgs", "monique", "default.nix"), "{}", 0o644)
 	write(t, filepath.Join(repo, ".vm", "disk.qcow2"), "vm", 0o644)
+	write(t, filepath.Join(repo, LocalName, "system", "a.nix"), "{}", 0o644)   // only root's copy is staged
 	write(t, filepath.Join(repo, "system", "result", "keep.nix"), "{}", 0o644) // nested "result" is source
 	if err := os.Symlink("/nix/store/x-system", filepath.Join(repo, "result")); err != nil {
 		t.Fatal(err)
@@ -45,7 +46,7 @@ func TestStageKeepsFlakeInputsAndDropsHistoryAndScratch(t *testing.T) {
 			t.Errorf("missing %s: %v", keep, err)
 		}
 	}
-	for _, drop := range []string{".git", "pkgs/monique/.git", ".vm", "result"} {
+	for _, drop := range []string{".git", "pkgs/monique/.git", ".vm", "result", LocalName} {
 		if _, err := os.Lstat(filepath.Join(src.Dir, drop)); !os.IsNotExist(err) {
 			t.Errorf("%s was staged: %v", drop, err)
 		}

@@ -89,6 +89,7 @@ type User struct {
 	JODSDesktopProfile        string `json:"jodsDesktopProfile" tier:"critical"`
 	JODSFingerprintEnroll     bool   `json:"jodsFingerprintEnrollmentAllowed" tier:"critical"`
 	AllowUnvalidatedODDCModel bool   `json:"allowUnvalidatedODDCModel" tier:"critical"`
+	DeveloperMode             bool   `json:"developerMode" tier:"critical"`
 	UnattendedInstall         bool   `json:"unattendedInstall" tier:"installer"`
 	AutoReboot                bool   `json:"autoReboot" tier:"installer"`
 	RunUpdateChecks           bool   `json:"runUpdateChecks" tier:"installer"`
@@ -399,6 +400,9 @@ func ValidateJODS(user User) error {
 			return fmt.Errorf("JODS preboot locking requires explicit JODS endpoint management enrollment")
 		}
 		return nil
+	}
+	if user.DeveloperMode {
+		return fmt.Errorf("developerMode builds local Nix code; it is not available on JODS-managed devices")
 	}
 	parsed, err := url.Parse(user.JODSEndpoint)
 	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil {

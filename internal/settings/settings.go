@@ -167,6 +167,9 @@ func tightens(key string, oldValue, newValue json.RawMessage) bool {
 			return false
 		}
 		return before <= 0 || after < before
+	case "developerMode":
+		// Turning developer mode off returns to the official system.
+		return string(newValue) == "false"
 	}
 	return false
 }

@@ -113,6 +113,7 @@ var presetSchema = map[string]presetValueType{
 	"dolphinDriveUsage":         presetBool,
 	"firmwareFlashReadEntry":    presetBool,
 	"allowUnvalidatedODDCModel": presetBool,
+	"developerMode":             presetBool,
 	"unattendedInstall":         presetBool,
 	"name":                      presetString, "email": presetString, "githubUsername": presetString, "dotfilesDir": presetString,
 	"shell": presetString, "editors": presetStringList, "browsers": presetStringList,

@@ -58,6 +58,7 @@ import (
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/secrets"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/secureboot"
 	"github.com/JadeOpenServices/gjallarOS/internal/installercheck"
+	"github.com/JadeOpenServices/gjallarOS/internal/localchanges"
 	"github.com/JadeOpenServices/gjallarOS/internal/oddccli"
 	"github.com/JadeOpenServices/gjallarOS/internal/preset"
 )
@@ -2148,12 +2149,22 @@ func rebuildCheckout(repo string, opts rebuildOptions, system bool, stdout, stde
 		facts.ODDC = overrideRev
 		fmt.Fprintf(stdout, "[GjallarOS] oddc %s is a commit, not a release; a plain rebuild returns to %s\n", overrideRev[:12], lockedODDC[:12])
 	}
+	local, localStatus := stageLocalChanges(system, userConfig.DeveloperMode, facts, stdout, stderr)
+	if localStatus != 0 {
+		return localStatus
+	}
 	source, err := flakesource.StageSource(repo, "", facts)
 	if err != nil {
 		fmt.Fprintf(stderr, "ERROR: %v\n", err)
 		return 1
 	}
 	defer source.Close()
+	if facts.Local != nil {
+		if err := localchanges.Write(filepath.Join(source.Dir, flakesource.LocalName), local); err != nil {
+			fmt.Fprintf(stderr, "[GjallarOS] Error: stage %s: %v; nothing rebuilt\n", localchanges.Path, err)
+			return 1
+		}
+	}
 	plan := newRebuildPlan(source.Dir, host, colors, debug, rebuildArgs)
 
 	var status int

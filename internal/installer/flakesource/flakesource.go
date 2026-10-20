@@ -22,6 +22,10 @@ import (
 // This is a workflow guard, not an authorization boundary against root.
 const BuildContextName = ".gjallar-build-context.json"
 
+// LocalName is where a developer-mode rebuild stages root's copy of the
+// local folder. A checkout's own entry of that name is never staged.
+const LocalName = ".gjallar-local"
+
 // excluded reports whether a repository entry is left out of the flake
 // source. .git is skipped at any depth (submodules carry a .git file).
 func excluded(rel string, entry fs.DirEntry) bool {
@@ -39,7 +43,7 @@ func excluded(rel string, entry fs.DirEntry) bool {
 // disks, agent settings, build links) that never leaves the machine.
 func Scratch(name string) bool {
 	switch {
-	case name == ".vm", name == ".claude", name == ".direnv", name == BuildContextName:
+	case name == ".vm", name == ".claude", name == ".direnv", name == BuildContextName, name == LocalName:
 		return true
 	case name == "result", strings.HasPrefix(name, "result-"):
 		return true
@@ -67,11 +71,20 @@ func (s Source) Close() error {
 // BuildSource is what a rebuild knows about the source it builds: Revision
 // is the checkout's HEAD commit (with -dirty when tracked files differ), ODDC
 // the oddc commit the build uses and ODDCPinned the one flake.lock pins.
-// The system records them; they differ only under an oddc override.
+// The system records them; they differ only under an oddc override. Local
+// is the developer-mode folder staged at LocalName, if any.
 type BuildSource struct {
-	Revision   string `json:"revision,omitempty"`
-	ODDC       string `json:"oddc,omitempty"`
-	ODDCPinned string `json:"oddcPinned,omitempty"`
+	Revision   string       `json:"revision,omitempty"`
+	ODDC       string       `json:"oddc,omitempty"`
+	ODDCPinned string       `json:"oddcPinned,omitempty"`
+	Local      *LocalSource `json:"local,omitempty"`
+}
+
+// LocalSource is the manifest hash and the file list of a staged local
+// folder.
+type LocalSource struct {
+	Hash  string   `json:"hash"`
+	Files []string `json:"files"`
 }
 
 type buildContext struct {

@@ -179,6 +179,8 @@
       checks.${system} = {
         build-entrypoint = import ./tests/nix/build-entrypoint.nix { inherit pkgs; };
 
+        local-changes = import ./tests/nix/local-changes.nix { inherit pkgs; };
+
         nextcloud-client-patches = import ./tests/nix/nextcloud-client-patches.nix { inherit pkgs; };
 
         security-baseline = import ./tests/nix/security-baseline.nix {
@@ -280,6 +282,7 @@
           modules = [
             (import ./system/security/build-entrypoint.nix { inherit buildContext; })
             ./system/security/secure-boot
+            (import ./system/security/local-changes.nix { localDir = ./.gjallar-local; })
             inputs.noctalia-greeter.nixosModules.default
             inputs.stylix.nixosModules.stylix
             inputs.sops-nix.nixosModules.sops

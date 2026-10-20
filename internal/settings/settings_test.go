@@ -126,6 +126,19 @@ func TestPlanLapseWaitsOnlyWhenLoosened(t *testing.T) {
 	}
 }
 
+func TestPlanDeveloperModeWaitsOnlyWhenTurnedOn(t *testing.T) {
+	user := defaults(t)
+	change, err := Plan(configText(t, user), raw(map[string]string{"developerMode": `true`}))
+	if err != nil || change.Tier != config.TierCritical {
+		t.Fatalf("developer mode on: %s %v", change.Tier, err)
+	}
+	user.DeveloperMode = true
+	change, err = Plan(configText(t, user), raw(map[string]string{"developerMode": `false`}))
+	if err != nil || change.Tier != config.TierEveryday {
+		t.Fatalf("developer mode off: %s %v", change.Tier, err)
+	}
+}
+
 func TestPlanOnManagedDeviceRefusesTighteningToo(t *testing.T) {
 	user := defaults(t)
 	user.EndpointManagedDevice = true

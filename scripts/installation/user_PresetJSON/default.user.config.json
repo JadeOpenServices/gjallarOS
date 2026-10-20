@@ -30,6 +30,7 @@
   "clamshellEnable": true,
   "consoleLoginEnable": false,
   "debugFunctions": false,
+  "developerMode": false,
   "dotfilesDir": "",
   "editors": [
     "vscodium"

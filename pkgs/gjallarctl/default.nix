@@ -29,6 +29,7 @@ buildGoModule {
       ../../internal/input
       ../../internal/installercheck
       ../../internal/installer
+      ../../internal/localchanges
       ../../internal/managedapps
       ../../internal/nettrust
       ../../internal/noctalia
