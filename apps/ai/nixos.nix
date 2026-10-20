@@ -1105,7 +1105,11 @@ let
             set -s exit-empty off \; \
             set-hook -g session-closed 'wait-for -S gjallar-ai-exit'
 
-          ${pkgs.tmux}/bin/tmux \
+          # Ready once the console exists; the launcher's start returns here.
+          exec ${pkgs.systemd}/bin/systemd-notify \
+            --ready \
+            --exec ';' -- \
+            ${pkgs.tmux}/bin/tmux \
             -S "$tmux_socket" \
             wait-for gjallar-ai-exit
   '';
@@ -1672,7 +1676,9 @@ lib.mkIf config.gjallar.apps.ai.enable (
             "/run/user"
           ];
 
-          Type = "simple";
+          Type = "notify";
+          # The warm-up run above loads the model on CPU-only machines too.
+          TimeoutStartSec = "180s";
 
           ExecStart = "${aiSessionRuntime} %i";
           User = settings.username;
