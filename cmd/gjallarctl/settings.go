@@ -232,63 +232,50 @@ func settingsKey(ctx context.Context, bus settingsBus, name string) (settings.Ke
 // settingsValues turns KEY=VALUE arguments into the request. A value that
 // is not JSON, or any value of a key that holds text, is sent as text, so
 // `set timezone=Europe/Berlin` needs no quotes.
-func settingsValues(ctx context.Context, bus settingsBus, args []string) (map[string]json.RawMessage, config.Tier, error) {
+func settingsValues(ctx context.Context, bus settingsBus, args []string) (map[string]json.RawMessage, error) {
 	if len(args) == 0 {
-		return nil, "", fmt.Errorf("usage: gjallarctl settings set KEY=VALUE...")
+		return nil, fmt.Errorf("usage: gjallarctl settings set KEY=VALUE...")
 	}
 	values := map[string]json.RawMessage{}
-	tier := config.TierEveryday
 	for _, arg := range args {
 		name, value, ok := strings.Cut(arg, "=")
 		if !ok || name == "" {
-			return nil, "", fmt.Errorf("%q is not KEY=VALUE", arg)
+			return nil, fmt.Errorf("%q is not KEY=VALUE", arg)
 		}
 		if _, dup := values[name]; dup {
-			return nil, "", fmt.Errorf("%s is given twice", name)
+			return nil, fmt.Errorf("%s is given twice", name)
 		}
 		key, err := settingsKey(ctx, bus, name)
 		if err != nil {
-			return nil, "", err
+			return nil, err
 		}
-		tier = higherTier(tier, key.Tier)
 		raw := json.RawMessage(value)
 		if strings.HasPrefix(string(key.Value), `"`) || !json.Valid(raw) {
 			if raw, err = json.Marshal(value); err != nil {
-				return nil, "", err
+				return nil, err
 			}
 		}
 		values[name] = raw
 	}
-	return values, tier, nil
-}
-
-// higherTier returns the stricter of two tiers.
-func higherTier(a, b config.Tier) config.Tier {
-	if b == config.TierCritical || (b == config.TierSecurity && a == config.TierEveryday) {
-		return b
-	}
-	return a
+	return values, nil
 }
 
 func settingsSet(ctx context.Context, bus settingsBus, args []string, stdout, stderr io.Writer) int {
-	values, tier, err := settingsValues(ctx, bus, args)
+	values, err := settingsValues(ctx, bus, args)
 	if err != nil {
 		fmt.Fprintf(stderr, "ERROR: %v\n", err)
 		return 1
 	}
-	return settingsRequest(ctx, bus, values, tier, stdout, stderr)
+	return settingsRequest(ctx, bus, values, stdout, stderr)
 }
 
 // settingsRequest asks for values and follows the change until it is
 // applied or has to wait.
-func settingsRequest(ctx context.Context, bus settingsBus, values map[string]json.RawMessage, tier config.Tier, stdout, stderr io.Writer) int {
+func settingsRequest(ctx context.Context, bus settingsBus, values map[string]json.RawMessage, stdout, stderr io.Writer) int {
 	request, err := json.Marshal(values)
 	if err != nil {
 		fmt.Fprintf(stderr, "ERROR: %v\n", err)
 		return 1
-	}
-	if tier == config.TierCritical {
-		fmt.Fprintln(stdout, "Critical change: the password is asked now, and again when the hour is over.")
 	}
 	answer, err := bus.Call(ctx, "Request", string(request))
 	if err != nil {
@@ -316,7 +303,7 @@ func settingsAsked(ctx context.Context, bus settingsBus, answer string, stdout, 
 	if wait > settingsReadingWait {
 		why := "Security changes wait an hour while this device is not on its home network."
 		if change.Tier == config.TierCritical {
-			why = "Critical changes always wait an hour."
+			why = "Critical changes always wait an hour, and the password is asked again then."
 		}
 		fmt.Fprintf(stdout, "%s\nFrom %s, run: gjallarctl settings apply %s\nLogging out or rebooting drops it; gjallarctl settings cancel drops it now.\n",
 			why, change.ReadyAt.Local().Format("15:04"), shortID(change.ID))
@@ -624,20 +611,19 @@ func askSystemSettings(values map[string]any, stdout, stderr io.Writer) int {
 	defer cancel()
 
 	request := map[string]json.RawMessage{}
-	tier := config.TierEveryday
 	for name, value := range values {
-		key, err := settingsKey(ctx, bus, name)
+		if _, err := settingsKey(ctx, bus, name); err != nil {
+			fmt.Fprintf(stderr, "ERROR: %v\n", err)
+			return 1
+		}
+		raw, err := json.Marshal(value)
 		if err != nil {
 			fmt.Fprintf(stderr, "ERROR: %v\n", err)
 			return 1
 		}
-		tier = higherTier(tier, key.Tier)
-		if request[name], err = json.Marshal(value); err != nil {
-			fmt.Fprintf(stderr, "ERROR: %v\n", err)
-			return 1
-		}
+		request[name] = raw
 	}
-	return settingsRequest(ctx, bus, request, tier, stdout, stderr)
+	return settingsRequest(ctx, bus, request, stdout, stderr)
 }
 
 // applySystemSettingNow writes an everyday setting on the system checkout
