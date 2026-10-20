@@ -106,6 +106,7 @@
   "printingEnable": false,
   "recoveryEnable": false,
   "recoveryPartitionEnable": true,
+  "releaseChannel": "stable",
   "runRebuild": true,
   "runUpdateChecks": false,
   "secureBootEnable": false,

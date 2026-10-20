@@ -1397,6 +1397,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 				targetDisk,
 				s.user.Hostname,
 				sourceRevision,
+				s.user.Channel(),
 				hardware,
 				resolvedDevice,
 				opt.recovery,

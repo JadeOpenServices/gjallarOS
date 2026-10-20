@@ -440,12 +440,14 @@ Ideas worth taking:
 
 ## 11. Releases and channels
 
-Plan agreed 2026-10-10. Nothing in this section is built yet.
+Plan agreed 2026-10-10. Channels decided 2026-10-20 (Q16): `main` became
+`dev`, the GitHub default branch is `stable`, new installs follow `stable`.
 
-- [ ] **Three channels.** `dev` is `main`. `staging` and `stable` are
-      branches that only ever fast-forward to a signed, annotated tag
-      `vYYYY.MM.N` (N counts the releases in that month). A tag never moves;
-      a fix found in staging gets a new tag.
+- [x] **Three channels.** `dev` replaced `main`. `staging` and `stable` are
+      branches that only ever fast-forward to a tag `vYYYY.MM.N` (N counts
+      the releases in that month). A tag never moves; a fix found in
+      staging gets a new tag. Tags are signed and annotated once the key
+      talk (Q4) is done; until then they are lightweight.
 - [ ] **Release flow.**
       1. A branch bumps all flake inputs (nixpkgs, Home Manager, Noctalia,
          the ODDC pin and the rest).
@@ -454,14 +456,20 @@ Plan agreed 2026-10-10. Nothing in this section is built yet.
       4. `staging` moves to the tag. The Framework 13 and the ZBook x2 G4
          run it for a while.
       5. `stable` moves to the same tag.
-- [ ] **Picking a channel.** `user.config.json` gets `releaseChannel`
-      (`dev`, `staging` or `stable`). `rebuild --update` fetches that branch
-      and only fast-forwards from the commit that is checked out, after the
-      signature check below. The bar shows a notice when the channel is
-      ahead. `deployment/release-policy.json` (today `updateEndpoint: null`,
-      `updatePolicy: review-and-lock`) is where the channel defaults live.
-      Open: the default channel for new installs, and what existing installs
-      on `main` move to.
+- [x] **Picking a channel.** `user.config.json` has `releaseChannel`
+      (`dev`, `staging` or `stable`; a critical setting, except that a move
+      to `stable` applies at once). New installs and older configurations
+      get `stable`. The installer clones the installed commit, which must be
+      on one of the three branches, onto a local branch that tracks the
+      chosen channel. `rebuild --update` fetches origin and only
+      fast-forwards to the channel. A checkout ahead of its channel stays
+      where it is until the channel catches up, so a move to an older
+      channel never downgrades. A checkout on the old `main` branch or on
+      another channel's branch moves to the channel's branch on its next
+      update; any other branch stops the update.
+- [ ] **Channel follow-ups.** The signature check below before the
+      fast-forward. A bar notice when the channel is ahead. JODS sets the
+      channel on managed devices.
 - [ ] **ODDC stays separate.** A release carries whatever ODDC commit its
       `flake.lock` pins; the next item keeps that pin current. `rebuild --hardware-update --channel stable|staging`
       keeps working as it does today and is not tied to the GjallarOS

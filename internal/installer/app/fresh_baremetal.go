@@ -41,6 +41,7 @@ func runFreshBareMetal(
 	targetPath string,
 	hostname string,
 	revision string,
+	channel string,
 	hardware discovery.Hardware,
 	resolvedDevice oddc.Resolved,
 	recovery bool,
@@ -273,6 +274,7 @@ func runFreshBareMetal(
 		repo,
 		rootResult.MountPoint,
 		revision,
+		channel,
 		out,
 	); err != nil {
 		return freshBareMetalResult{}, err

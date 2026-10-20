@@ -36,11 +36,11 @@ func cloneSystemCheckout(
 	repo string,
 	targetRoot string,
 	revision string,
+	channel string,
 	out io.Writer,
 ) error {
 	dest := filepath.Join(targetRoot, systemcheckout.Path)
-	branch, err := systemcheckout.Clone(ctx, systemcheckout.Runner(privilegedCommand), officialOrigin, dest, revision)
-	if err != nil {
+	if err := systemcheckout.Clone(ctx, systemcheckout.Runner(privilegedCommand), officialOrigin, dest, revision, channel); err != nil {
 		return fmt.Errorf("the installer cannot set up %s: %w", systemcheckout.Path, err)
 	}
 	revision, _ = systemcheckout.Commit(revision)
@@ -70,7 +70,7 @@ func cloneSystemCheckout(
 			}
 		}
 	}
-	fmt.Fprintf(out, "PASS: %s cloned at %s (%s), owned by root\n", systemcheckout.Path, revision[:12], branch)
+	fmt.Fprintf(out, "PASS: %s cloned at %s (%s), owned by root\n", systemcheckout.Path, revision[:12], channel)
 	return nil
 }
 

@@ -31,7 +31,7 @@ Needs a machine booted in UEFI mode (legacy BIOS/CSM is refused). On NixOS,
 or the NixOS minimal ISO:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/JadeOpenServices/gjallarOS/main/scripts/installation/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/JadeOpenServices/gjallarOS/stable/scripts/installation/install.sh | bash
 ```
 
 The script clones the repository with its submodules into
@@ -394,8 +394,14 @@ To bring an install up to date with upstream, run:
 rebuild --update
 ```
 
-It runs `git pull --ff-only` in that checkout and then rebuilds. Local
-commits or uncommitted edits stop the pull, and nothing is rebuilt.
+It fast-forwards that checkout to its release channel and then rebuilds.
+The channel is `releaseChannel` in `user.config.json`: `stable` (the
+default), `staging` or `dev`. Change it with
+`gjallarctl settings set releaseChannel=staging`. A move to `stable` applies
+at once; any other move waits like other critical settings.
+Local commits or uncommitted edits stop the update, and nothing is rebuilt.
+A checkout that is ahead of its channel stays where it is until the channel
+catches up; it never goes back to an older commit.
 `rebuild --update-inputs` moves every flake input first (for development
 checkouts). `rebuild --help` lists every option.
 

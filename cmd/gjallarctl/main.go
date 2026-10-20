@@ -2352,15 +2352,72 @@ func (p rebuildPlan) run(ctx context.Context, stdout, stderr io.Writer) int {
 	return runPrivilegedCommand(ctx, stdout, stderr, slices.Concat(p.activate, []string{"--store-path", system})...)
 }
 
-// pullCheckout brings the system's checkout up to date before the rebuild:
-// every install tracks the same upstream. The pull is fast-forward only, so
-// local commits or edits stop it with git's own message and nothing is
-// rebuilt.
+// pullCheckout brings the checkout up to date before the rebuild. It
+// follows the release channel of the checkout's user.config.json
+// (ROADMAP §11) and only fast-forwards, so local commits or edits stop it
+// with git's own message and nothing is rebuilt. A checkout ahead of its
+// channel, as after a move to an older channel, stays where it is until
+// the channel catches up. A checkout on another channel's branch or on the
+// old main branch moves to the channel's branch first.
 func pullCheckout(repo string, stdout, stderr io.Writer) int {
+	user, err := config.Load(filepath.Join(repo, "user.config.json"))
+	if err != nil {
+		fmt.Fprintf(stderr, "[GjallarOS] Error: %v; nothing rebuilt\n", err)
+		return 1
+	}
+	channel := user.Channel()
+	upstream := "refs/remotes/origin/" + channel
+	git := func(args ...string) int {
+		return runCommand(context.Background(), stdout, stderr, "git", append([]string{"-C", repo}, args...)...)
+	}
+	failed := func(what string) int {
+		fmt.Fprintf(stderr, "[GjallarOS] Error: %s in %s failed; nothing rebuilt\n", what, repo)
+		return 1
+	}
+	isAncestor := func(a, b string) bool {
+		return exec.Command("git", "-C", repo, "merge-base", "--is-ancestor", a, b).Run() == nil
+	}
+
 	before := gitHead(repo)
-	if status := runCommand(context.Background(), stdout, stderr, "git", "-C", repo, "pull", "--ff-only"); status != 0 {
-		fmt.Fprintf(stderr, "[GjallarOS] Error: git pull --ff-only in %s failed; nothing rebuilt\n", repo)
-		return status
+	if git("fetch", "--quiet", "--prune", "origin") != 0 {
+		return failed("git fetch origin")
+	}
+	if exec.Command("git", "-C", repo, "rev-parse", "--verify", "--quiet", upstream).Run() != nil {
+		fmt.Fprintf(stderr, "[GjallarOS] Error: origin has no %s branch for releaseChannel %q; nothing rebuilt\n", channel, channel)
+		return 1
+	}
+	out, err := exec.Command("git", "-C", repo, "symbolic-ref", "--quiet", "--short", "HEAD").Output()
+	if err != nil {
+		fmt.Fprintf(stderr, "[GjallarOS] Error: %s is not on a branch; check out %s first; nothing rebuilt\n", repo, channel)
+		return 1
+	}
+	branch := strings.TrimSpace(string(out))
+
+	if branch != channel {
+		if branch != "main" && !slices.Contains(config.ReleaseChannels, branch) {
+			fmt.Fprintf(stderr, "[GjallarOS] Error: %s is on branch %s, not on the %s channel; nothing rebuilt\n", repo, branch, channel)
+			return 1
+		}
+		// The new branch starts at HEAD, so the switch itself changes no
+		// file; the fast-forward below moves it if the channel is ahead.
+		if git("checkout", "--quiet", "--no-track", "-B", channel) != 0 {
+			return failed("git checkout -B " + channel)
+		}
+		if git("branch", "--quiet", "--set-upstream-to=origin/"+channel, channel) != 0 {
+			return failed("git branch --set-upstream-to=origin/" + channel)
+		}
+		if git("branch", "--quiet", "-d", branch) != 0 {
+			fmt.Fprintf(stderr, "[GjallarOS] Warning: the old branch %s stays in %s\n", branch, repo)
+		}
+		fmt.Fprintf(stdout, "[GjallarOS] %s now follows the %s channel (was %s)\n", repo, channel, branch)
+	}
+
+	if !isAncestor(upstream, "HEAD") {
+		if git("merge", "--quiet", "--ff-only", upstream) != 0 {
+			return failed("git merge --ff-only origin/" + channel)
+		}
+	} else if !isAncestor("HEAD", upstream) {
+		fmt.Fprintf(stdout, "[GjallarOS] %s is ahead of the %s channel; it stays at %s until %s reaches it\n", repo, channel, gitHead(repo), channel)
 	}
 	if after := gitHead(repo); before == after {
 		fmt.Fprintf(stdout, "[GjallarOS] %s already at %s\n", repo, after)
@@ -2375,8 +2432,10 @@ func printRebuildHelp(out io.Writer) {
 
 Apply the GjallarOS configuration in the system checkout.
 
-  --update              Pull the checkout from upstream first (fast-forward
-                        only; local commits or edits stop it).
+  --update              Update the checkout from its release channel first
+                        (releaseChannel in user.config.json: dev, staging
+                        or stable). Fast-forward only; local commits or
+                        edits stop it.
   --update-inputs       Move every flake input to its newest version first.
                         For development checkouts, not normal installs.
   --hardware-update     Move the ODDC hardware catalogue pin first.
