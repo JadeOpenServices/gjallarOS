@@ -86,6 +86,13 @@ pkgs.stdenvNoCC.mkDerivation {
     # "Classic sync" stood above virtual-file folders (2026-10-21).
     grep -A40 'void AccountSettings::updateSyncFoldersPanelVisibility' src/gui/accountsettings.cpp \
       | grep -Fq '_ui->syncFoldersPanelTitle->setText(tr("Sync folders"));'
+    # A folder's own attributes always said hydrated, so a folder of
+    # placeholders got the green tick in Dolphin (book12, 2026-10-13).
+    grep -A8 'Vfs::AvailabilityResult OpenVFS::availability' "$f" \
+      | grep -Fq 'return availabilityInDb(folderPath);'
+    grep -A14 'QString openVfsAvailabilitySocketSuffix' src/gui/socketapi/socketapi.cpp \
+      | grep -Fq 'AvailabilityRecursivity::RecursiveAvailability'
+    ! grep -Fq 'VFS_HYDRATING' src/gui/socketapi/socketapi.cpp
     touch $out
   '';
 }

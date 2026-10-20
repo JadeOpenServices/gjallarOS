@@ -1,0 +1,30 @@
+diff --git a/src/libsync/vfs/openvfs/vfs_openvfs.cpp b/src/libsync/vfs/openvfs/vfs_openvfs.cpp
+--- a/src/libsync/vfs/openvfs/vfs_openvfs.cpp
++++ b/src/libsync/vfs/openvfs/vfs_openvfs.cpp
+@@ -20,6 +20,7 @@
+ 
+ #include <QDir>
+ #include <QFile>
++#include <QFileInfo>
+ #include <QLoggingCategory>
+ #include <QString>
+ #include <QUuid>
+@@ -650,9 +651,16 @@ Optional<PinState> OpenVFS::pinState(const QString &folderPath)
+     }
+ }
+ 
+-Vfs::AvailabilityResult OpenVFS::availability(const QString &folderPath, [[maybe_unused]] const AvailabilityRecursivity recursiveCheck)
++Vfs::AvailabilityResult OpenVFS::availability(const QString &folderPath, const AvailabilityRecursivity recursiveCheck)
+ {
+-    const auto attribs = placeHolderAttributes(params().root() / folderPath);
++    const auto path = params().root() / folderPath;
++    // A folder's own attributes say nothing about the files below it: a folder
++    // of placeholders reported AllHydrated. Count the files in the journal, like
++    // the xattr backend does.
++    if (recursiveCheck == AvailabilityRecursivity::RecursiveAvailability && QFileInfo(path.toString()).isDir()) {
++        return availabilityInDb(folderPath);
++    }
++    const auto attribs = placeHolderAttributes(path);
+     if (attribs) {
+         switch (convertPinState(attribs.pinState)) {
+         case OCC::PinState::AlwaysLocal:
