@@ -53,6 +53,7 @@ import (
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/systemcheckout"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/targetdisk"
 	"github.com/JadeOpenServices/gjallarOS/internal/installercheck"
+	"github.com/JadeOpenServices/gjallarOS/internal/sshsig"
 )
 
 type options struct {
@@ -1904,6 +1905,9 @@ func collectInteractive(ctx context.Context, ui prompt.UI, root string, partitio
 	if err != nil {
 		return err
 	}
+	if u.SettingsSigningKey, err = askSigningKey(ctx, ui, a.SettingsSigningKey); err != nil {
+		return err
+	}
 	// Not asked: a rerun keeps the running system's checkout, and a new
 	// install gets the system checkout once collection is done.
 	u.DotfilesDir = defaultDotfilesDir(u.Username, root)
@@ -2543,6 +2547,29 @@ func askEndpoint(ctx context.Context, ui prompt.UI, label, def string, check fun
 			continue
 		}
 		return value, nil
+	}
+}
+
+// askSigningKey asks who signs the main user's settings files: GjallarOS,
+// or the user's own OpenSSH key (settingsSigningKey). running is the key of
+// the installed system on a rerun. The example is made up and never filled
+// in.
+func askSigningKey(ctx context.Context, ui prompt.UI, running string) (string, error) {
+	managed, err := ui.Confirm(ctx, "Let GjallarOS sign your settings files for you? (recommended; No: you sign them yourself with your own OpenSSH key, ssh-ed25519 or a FIDO sk-ssh-ed25519 key)", running == "")
+	if err != nil || managed {
+		return "", err
+	}
+	for {
+		line, err := askPersonal(ctx, ui, "Your OpenSSH public key line, from your .pub file", running, "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA... alex@example", true)
+		if err != nil {
+			return "", err
+		}
+		if _, err := sshsig.ParseKey(line); err != nil {
+			fmt.Fprintf(ui.Out, "%v\n", err)
+			running = ""
+			continue
+		}
+		return line, nil
 	}
 }
 

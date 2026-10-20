@@ -228,3 +228,55 @@ func uniqueNames(data []byte) error {
 	}
 	return nil
 }
+
+// A settings file for a user's own OpenSSH key (ROADMAP "Pairing and own
+// keys") is the magic line and the settings as JSON, with no key or sig
+// line. The user signs the whole file with
+//
+//	ssh-keygen -Y sign -n gjallaros-settings -f KEY FILE
+//
+// and imports FILE with FILE.sig next to it.
+const (
+	// SSHNamespace is the ssh-keygen -Y namespace of settings files.
+	SSHNamespace = "gjallaros-settings"
+
+	sshFileMagic = "gjallaros-settings-ssh-v1\n"
+)
+
+// Unsigned returns the bytes of file for the user to sign with their own
+// key.
+func Unsigned(file File) ([]byte, error) {
+	if file.Schema != FileSchema {
+		return nil, fmt.Errorf("settings file schema %d; this version writes %d", file.Schema, FileSchema)
+	}
+	payload, err := json.MarshalIndent(file, "", "  ")
+	if err != nil {
+		return nil, err
+	}
+	out := append([]byte(sshFileMagic), append(payload, '\n')...)
+	if len(out) > MaxFileBytes {
+		return nil, fmt.Errorf("the settings file would hold %d bytes; at most %d are allowed", len(out), MaxFileBytes)
+	}
+	return out, nil
+}
+
+// IsUnsigned reports whether data is a file for an own key.
+func IsUnsigned(data []byte) bool {
+	return bytes.HasPrefix(data, []byte(sshFileMagic))
+}
+
+// OpenSSH checks a file for an own key. verify checks the signature over
+// all of data; only after it holds is the payload parsed, as Open does.
+func OpenSSH(data []byte, verify func(message []byte) error) (File, error) {
+	if len(data) > MaxFileBytes {
+		return File{}, fmt.Errorf("%w: it is larger than %d bytes", ErrNotSettingsFile, MaxFileBytes)
+	}
+	payload, ok := bytes.CutPrefix(data, []byte(sshFileMagic))
+	if !ok {
+		return File{}, ErrNotSettingsFile
+	}
+	if err := verify(data); err != nil {
+		return File{}, err
+	}
+	return parseFile(payload)
+}

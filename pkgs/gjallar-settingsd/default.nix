@@ -1,6 +1,7 @@
 {
   lib,
   buildGoModule,
+  openssh,
 }:
 
 buildGoModule {
@@ -25,6 +26,7 @@ buildGoModule {
       ../../internal/nettrust
       ../../internal/noctalia
       ../../internal/settings
+      ../../internal/sshsig
       ../../internal/usbtrust
     ];
   };
@@ -36,6 +38,11 @@ buildGoModule {
     "cmd/gjallar-namecheck"
     "cmd/gjallar-settingsd"
     "cmd/gjallar-system-disk"
+  ];
+
+  # Own signing keys are checked by ssh-keygen -Y verify.
+  ldflags = [
+    "-X github.com/JadeOpenServices/gjallarOS/internal/sshsig.Keygen=${openssh}/bin/ssh-keygen"
   ];
 
   env.CGO_ENABLED = "0";

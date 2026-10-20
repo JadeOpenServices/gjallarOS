@@ -43,6 +43,11 @@ const introspection = `<node>
       <arg name="file" type="ay" direction="in"/>
       <arg name="change" type="s" direction="out"/>
     </method>
+    <method name="ImportSigned">
+      <arg name="file" type="ay" direction="in"/>
+      <arg name="sig" type="ay" direction="in"/>
+      <arg name="change" type="s" direction="out"/>
+    </method>
     <method name="PairExport"><arg name="file" type="ay" direction="out"/></method>
     <method name="PairCheck">
       <arg name="file" type="ay" direction="in"/>

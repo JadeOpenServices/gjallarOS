@@ -163,7 +163,10 @@ func (s *service) PairExport(ctx context.Context, sender string) ([]byte, error)
 	if err != nil {
 		return nil, err
 	}
-	if s.keys == nil || s.keys.hostKey == nil {
+	if err := s.refuseOwnKey(who, "your account cannot pair"); err != nil {
+		return nil, err
+	}
+	if s.keys.hostKey == nil {
 		return nil, errNoSigningKey
 	}
 	if err := s.sys.Authorize(ctx, sender, pairAction, map[string]string{
@@ -205,8 +208,8 @@ func (s *service) pairOffer(ctx context.Context, sender string, data []byte) (ca
 	if err != nil {
 		return caller{}, "", pairing{}, settings.PairOffer{}, err
 	}
-	if s.keys == nil {
-		return caller{}, "", pairing{}, settings.PairOffer{}, errNoSigningKey
+	if err := s.refuseOwnKey(who, "your account cannot pair"); err != nil {
+		return caller{}, "", pairing{}, settings.PairOffer{}, err
 	}
 	file, public, err := settings.OpenPairing(data)
 	if err != nil {

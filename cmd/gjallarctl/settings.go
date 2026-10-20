@@ -21,6 +21,7 @@ import (
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/systemcheckout"
 	"github.com/JadeOpenServices/gjallarOS/internal/installercheck"
 	"github.com/JadeOpenServices/gjallarOS/internal/settings"
+	"github.com/JadeOpenServices/gjallarOS/internal/sshsig"
 )
 
 // gjallarctl settings is the first front end of gjallar-settingsd (ROADMAP
@@ -35,7 +36,8 @@ const settingsUsage = `usage: gjallarctl settings list [--names]   every key wit
        gjallarctl settings apply [ID]          write a change and rebuild
        gjallarctl settings cancel [ID]
        gjallarctl settings export FILE         save the settings, signed with your key
-       gjallarctl settings import FILE         ask for the change a saved file makes
+       gjallarctl settings import FILE         ask for the change a saved file makes;
+                                               with an own key, FILE.sig is its signature
        gjallarctl settings pair export FILE    save a pairing file for your other device
        gjallarctl settings pair add FILE       pair with the device that made FILE
        gjallarctl settings pair list [--ids]
@@ -333,25 +335,33 @@ func settingsAsked(ctx context.Context, bus settingsBus, answer string, stdout, 
 
 // settingsExport saves a signed file of the settings. The service signs
 // what it reads itself; this command only writes the file, as the user, and
-// never over an existing one.
+// never over an existing one. For an account with its own key the file is
+// left unsigned, and the user signs it with ssh-keygen.
 func settingsExport(ctx context.Context, bus settingsBus, args []string, stdout io.Writer) error {
 	if len(args) != 1 || args[0] == "" {
 		return fmt.Errorf("usage: gjallarctl settings export FILE")
 	}
-	if err := exportNewFile(ctx, bus, "Export", args[0], stdout); err != nil {
+	data, err := exportNewFile(ctx, bus, "Export", args[0], stdout)
+	if err != nil {
 		return err
+	}
+	if settings.IsUnsigned(data) {
+		fmt.Fprintf(stdout, "Saved to %s. Sign it with your own key; KEY is its private key file (for a FIDO key, the id_ed25519_sk file):\n", args[0])
+		fmt.Fprintf(stdout, "  ssh-keygen -Y sign -n %s -f KEY %s\n", settings.SSHNamespace, shellQuote(args[0]))
+		fmt.Fprintf(stdout, "That writes %s.sig. Import both with: gjallarctl settings import %s\n", args[0], shellQuote(args[0]))
+		return nil
 	}
 	fmt.Fprintf(stdout, "Saved to %s. It imports on this device, for this account: gjallarctl settings import %s\n", args[0], args[0])
 	return nil
 }
 
 // exportNewFile saves what the service's method returns to path, a new file
-// only the user can read. The file is made before the service is asked, so
-// an existing file fails before the password dialog.
-func exportNewFile(ctx context.Context, bus settingsBus, method, path string, stdout io.Writer) error {
+// only the user can read, and returns it. The file is made before the
+// service is asked, so an existing file fails before the password dialog.
+func exportNewFile(ctx context.Context, bus settingsBus, method, path string, stdout io.Writer) ([]byte, error) {
 	out, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	fmt.Fprintln(stdout, "The password dialog asks for your own password.")
 	data, err := bus.Bytes(ctx, method)
@@ -363,9 +373,9 @@ func exportNewFile(ctx context.Context, bus settingsBus, method, path string, st
 	}
 	if err != nil {
 		os.Remove(path)
-		return err
+		return nil, err
 	}
-	return nil
+	return data, nil
 }
 
 func settingsImport(ctx context.Context, bus settingsBus, args []string, stdout, stderr io.Writer) int {
@@ -378,12 +388,29 @@ func settingsImport(ctx context.Context, bus settingsBus, args []string, stdout,
 		fmt.Fprintf(stderr, "ERROR: %v\n", err)
 		return 1
 	}
-	answer, err := bus.Call(ctx, "Import", data)
+	var answer string
+	if settings.IsUnsigned(data) {
+		answer, err = importSigned(ctx, bus, args[0], data)
+	} else {
+		answer, err = bus.Call(ctx, "Import", data)
+	}
 	if err != nil {
 		fmt.Fprintf(stderr, "ERROR: %v\n", err)
 		return 1
 	}
 	return settingsAsked(ctx, bus, answer, stdout, stderr)
+}
+
+// importSigned sends a file for an own key with its signature, path.sig.
+func importSigned(ctx context.Context, bus settingsBus, path string, data []byte) (string, error) {
+	sig, err := readLimited(path+".sig", "an OpenSSH signature", sshsig.MaxSignatureBytes)
+	if errors.Is(err, os.ErrNotExist) {
+		return "", fmt.Errorf("%s.sig is missing. This file is for your own key; sign it first: ssh-keygen -Y sign -n %s -f KEY %s", path, settings.SSHNamespace, shellQuote(path))
+	}
+	if err != nil {
+		return "", err
+	}
+	return bus.Call(ctx, "ImportSigned", data, sig)
 }
 
 func readSettingsFile(path string) ([]byte, error) {

@@ -52,3 +52,24 @@ func TestValidateReleaseChannel(t *testing.T) {
 		t.Fatalf("default channel = %q", user.Channel())
 	}
 }
+
+func TestValidateSettingsSigningKey(t *testing.T) {
+	user, err := Defaults()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// SYNTHETIC key: 32 bytes of 'k' in the OpenSSH wire format.
+	const key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGtra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tr"
+	for _, value := range []string{"", key, key + " SYNTHETIC comment"} {
+		user.SettingsSigningKey = value
+		if err := Validate(user); err != nil {
+			t.Errorf("settingsSigningKey %q rejected: %v", value, err)
+		}
+	}
+	for _, value := range []string{"ssh-rsa AAAA", "SYNTHETIC not a key", `from="x" ` + key} {
+		user.SettingsSigningKey = value
+		if err := Validate(user); err == nil || !strings.Contains(err.Error(), "settingsSigningKey") {
+			t.Errorf("settingsSigningKey %q: %v", value, err)
+		}
+	}
+}

@@ -31,6 +31,7 @@
   "consoleLoginEnable": false,
   "debugFunctions": false,
   "developerMode": false,
+  "settingsSigningKey": "",
   "dotfilesDir": "",
   "editors": [
     "vscodium"

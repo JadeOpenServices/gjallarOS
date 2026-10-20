@@ -114,6 +114,7 @@ var presetSchema = map[string]presetValueType{
 	"firmwareFlashReadEntry":    presetBool,
 	"allowUnvalidatedODDCModel": presetBool,
 	"developerMode":             presetBool,
+	"settingsSigningKey":        presetString,
 	"unattendedInstall":         presetBool,
 	"name":                      presetString, "email": presetString, "githubUsername": presetString, "dotfilesDir": presetString,
 	"shell": presetString, "editors": presetStringList, "browsers": presetStringList,

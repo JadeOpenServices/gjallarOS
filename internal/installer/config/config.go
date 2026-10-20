@@ -15,6 +15,7 @@ import (
 	"strings"
 
 	"github.com/JadeOpenServices/gjallarOS/apps"
+	"github.com/JadeOpenServices/gjallarOS/internal/sshsig"
 )
 
 // User is user.config.json. Every field carries a tier tag that says how the
@@ -92,6 +93,10 @@ type User struct {
 	JODSFingerprintEnroll     bool   `json:"jodsFingerprintEnrollmentAllowed" tier:"critical" scope:"device"`
 	AllowUnvalidatedODDCModel bool   `json:"allowUnvalidatedODDCModel" tier:"critical" scope:"device"`
 	DeveloperMode             bool   `json:"developerMode" tier:"critical" scope:"device"`
+	// SettingsSigningKey is the main user's own OpenSSH public key for
+	// settings files (ROADMAP "Pairing and own keys"); empty means
+	// GjallarOS manages that user's signing key.
+	SettingsSigningKey string `json:"settingsSigningKey" tier:"critical" scope:"device"`
 	// ReleaseChannel is the branch of the official repository that
 	// rebuild --update follows (ROADMAP §11): dev, staging or stable.
 	ReleaseChannel    string `json:"releaseChannel" tier:"critical" scope:"device"`
@@ -311,6 +316,11 @@ func Validate(user User) error {
 	}
 	if user.ReleaseChannel != "" && !slices.Contains(ReleaseChannels, user.ReleaseChannel) {
 		return fmt.Errorf("invalid releaseChannel: %q; use %s", user.ReleaseChannel, strings.Join(ReleaseChannels, ", "))
+	}
+	if user.SettingsSigningKey != "" {
+		if _, err := sshsig.ParseKey(user.SettingsSigningKey); err != nil {
+			return fmt.Errorf("invalid settingsSigningKey: %w", err)
+		}
 	}
 	if user.USBTrustTPMHandle != "" && !usbTrustTPMHandlePattern.MatchString(user.USBTrustTPMHandle) {
 		return fmt.Errorf("invalid usbTrustTpmHandle: %q", user.USBTrustTPMHandle)

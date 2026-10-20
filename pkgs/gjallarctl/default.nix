@@ -37,6 +37,7 @@ buildGoModule {
       ../../internal/oddccli
       ../../internal/preset
       ../../internal/settings
+      ../../internal/sshsig
       ../../internal/usbtrust
     ];
   };

@@ -180,7 +180,8 @@ func (s *service) request(ctx context.Context, sender string, who caller, wanted
 	if err != nil {
 		return settings.Pending{}, fmt.Errorf("%w: %v", errRefused, err)
 	}
-	return s.keep(ctx, sender, who, change, append(notes, slowBuildNotes(change)...))
+	notes = append(notes, slowBuildNotes(change)...)
+	return s.keep(ctx, sender, who, change, append(notes, signingKeyNotes(change)...))
 }
 
 // slowBuildNotes warns when a change makes the rebuild compile large parts
@@ -290,18 +291,24 @@ const exportAction = "org.gjallaros.settings.export"
 
 // Export signs the current settings, as root reads them from the checkout,
 // with the caller's key. It never signs bytes the caller sent, so a session
-// can only ever get a file of the settings the device already has.
+// can only ever get a file of the settings the device already has. For an
+// account with its own key, the file is left for the user to sign.
 func (s *service) Export(ctx context.Context, sender string) ([]byte, error) {
 	who, err := s.sys.Caller(ctx, sender)
 	if err != nil {
 		return nil, err
 	}
-	if s.keys == nil || s.keys.hostKey == nil {
+	own, hasOwn, err := s.ownKey(who)
+	if err != nil {
+		return nil, err
+	}
+	message := "Authentication is required to sign and export your GjallarOS settings"
+	if hasOwn {
+		message = "Authentication is required to export your GjallarOS settings for signing with your own key"
+	} else if s.keys.hostKey == nil {
 		return nil, errNoSigningKey
 	}
-	if err := s.sys.Authorize(ctx, sender, exportAction, map[string]string{
-		"polkit.message": "Authentication is required to sign and export your GjallarOS settings",
-	}); err != nil {
+	if err := s.sys.Authorize(ctx, sender, exportAction, map[string]string{"polkit.message": message}); err != nil {
 		return nil, err
 	}
 	_, fields, err := s.readConfig()
@@ -318,18 +325,30 @@ func (s *service) Export(ctx context.Context, sender string) ([]byte, error) {
 			exported[key] = value
 		}
 	}
+	file := settings.File{
+		Schema:   settings.FileSchema,
+		Device:   s.device,
+		UID:      who.UID,
+		Created:  s.now().UTC().Truncate(time.Second),
+		Settings: exported,
+	}
+	if hasOwn {
+		if file.User, err = s.keys.userName(who.UID); err != nil {
+			return nil, err
+		}
+		data, err := settings.Unsigned(file)
+		if err != nil {
+			return nil, err
+		}
+		log.Printf("uid %d exported %d settings to sign with its own key %s", who.UID, len(exported), own.Fingerprint())
+		return data, nil
+	}
 	key, name, err := s.keys.signer(who.UID)
 	if err != nil {
 		return nil, err
 	}
-	data, err := settings.Seal(key, settings.File{
-		Schema:   settings.FileSchema,
-		Device:   s.device,
-		User:     name,
-		UID:      who.UID,
-		Created:  s.now().UTC().Truncate(time.Second),
-		Settings: exported,
-	})
+	file.User = name
+	data, err := settings.Seal(key, file)
 	if err != nil {
 		return nil, err
 	}
@@ -349,6 +368,12 @@ func (s *service) Import(ctx context.Context, sender string, data []byte) (setti
 	}
 	if s.keys == nil {
 		return settings.Pending{}, errNoSigningKey
+	}
+	if settings.IsUnsigned(data) {
+		return settings.Pending{}, fmt.Errorf("%w: this file is for an own OpenSSH key; import it with its .sig file", errRefused)
+	}
+	if err := s.refuseOwnKey(who, "import files with their .sig file"); err != nil {
+		return settings.Pending{}, err
 	}
 	trusted, err := s.keys.trusted()
 	if err != nil {
@@ -374,10 +399,7 @@ func (s *service) Import(ctx context.Context, sender string, data []byte) (setti
 	if err != nil {
 		return settings.Pending{}, fmt.Errorf("%w: %v", errRefused, err)
 	}
-	created := file.Created.In(currentZone()).Format("2006-01-02 15:04:05 MST")
-	if days := int(s.now().Sub(file.Created).Hours() / 24); days > 0 {
-		created += fmt.Sprintf(", %d days ago", days)
-	}
+	created := s.madeOn(file.Created)
 	var note string
 	if owner, ok := trusted[string(public)]; ok {
 		if file.UID != owner.UID || file.User != owner.User || file.Device != s.device {
@@ -403,6 +425,15 @@ func (s *service) Import(ctx context.Context, sender string, data []byte) (setti
 	}
 	log.Printf("uid %d imports a file of uid %d on device %s made %s", who.UID, file.UID, file.Device, file.Created.Format(time.RFC3339))
 	return s.request(ctx, sender, who, file.Settings, []string{note})
+}
+
+// madeOn shows when a file was made, in the device's time zone.
+func (s *service) madeOn(created time.Time) string {
+	text := created.In(currentZone()).Format("2006-01-02 15:04:05 MST")
+	if days := int(s.now().Sub(created).Hours() / 24); days > 0 {
+		text += fmt.Sprintf(", %d days ago", days)
+	}
+	return text
 }
 
 // dropDeviceScoped removes the settings that belong to the device a file

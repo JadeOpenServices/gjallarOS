@@ -31,6 +31,7 @@ type fakeSettingsBus struct {
 	notes    []string
 	exported []byte
 	imported [][]byte
+	sigs     [][]byte
 	folders  []map[string][]byte
 	pairFile []byte
 	pairs    []settings.PairOffer
@@ -91,8 +92,11 @@ func (b *fakeSettingsBus) Call(_ context.Context, method string, args ...any) (s
 		}
 		b.pending = append(b.pending, change)
 		return answer(change)
-	case "Import":
+	case "Import", "ImportSigned":
 		b.imported = append(b.imported, args[0].([]byte))
+		if method == "ImportSigned" {
+			b.sigs = append(b.sigs, args[1].([]byte))
+		}
 		change := settings.Pending{
 			Change: settings.Change{
 				ID: "f11e0000" + strings.Repeat("0", 24), Tier: config.TierEveryday, Asked: settingsTestNow,
@@ -448,6 +452,43 @@ func TestSettingsImportSendsFileAndApplies(t *testing.T) {
 	}
 	if code := run([]string{"settings", "import", big}, &stdout, &stderr); code != 1 || len(bus.imported) != 1 {
 		t.Fatalf("import of an oversized file: code %d, sent %d", code, len(bus.imported))
+	}
+}
+
+func TestSettingsOwnKeyExportAndImport(t *testing.T) {
+	content := []byte("gjallaros-settings-ssh-v1\nSYNTHETIC\n")
+	bus := &fakeSettingsBus{exported: content}
+	useFakeSettings(t, bus)
+	path := filepath.Join(t.TempDir(), "my settings.gjs")
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"settings", "export", path}, &stdout, &stderr); code != 0 {
+		t.Fatalf("code %d, stderr %s", code, stderr.String())
+	}
+	if want := "ssh-keygen -Y sign -n gjallaros-settings -f KEY '" + path + "'"; !strings.Contains(stdout.String(), want) {
+		t.Errorf("stdout lacks %q:\n%s", want, stdout.String())
+	}
+
+	stdout.Reset()
+	if code := run([]string{"settings", "import", path}, &stdout, &stderr); code != 1 || len(bus.imported) != 0 ||
+		!strings.Contains(stderr.String(), ".sig is missing") {
+		t.Fatalf("import without FILE.sig: code %d, sent %d, stderr %s", code, len(bus.imported), stderr.String())
+	}
+	sig := []byte("-----BEGIN SSH SIGNATURE-----\nSYNTHETIC\n-----END SSH SIGNATURE-----\n")
+	if err := os.WriteFile(path+".sig", sig, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if code := run([]string{"settings", "import", path}, &stdout, &stderr); code != 0 {
+		t.Fatalf("code %d, stderr %s", code, stderr.String())
+	}
+	if len(bus.sigs) != 1 || !bytes.Equal(bus.imported[0], content) || !bytes.Equal(bus.sigs[0], sig) {
+		t.Fatalf("imported %q with %q", bus.imported, bus.sigs)
+	}
+
+	if err := os.WriteFile(path+".sig", make([]byte, 5<<10), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if code := run([]string{"settings", "import", path}, &stdout, &stderr); code != 1 || len(bus.imported) != 1 {
+		t.Fatalf("import with an oversized signature: code %d, sent %d", code, len(bus.imported))
 	}
 }
 

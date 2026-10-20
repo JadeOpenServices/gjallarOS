@@ -347,6 +347,11 @@ func (o object) Import(sender dbus.Sender, data []byte) (string, *dbus.Error) {
 	return answer(change, err)
 }
 
+func (o object) ImportSigned(sender dbus.Sender, data, sig []byte) (string, *dbus.Error) {
+	change, err := o.svc.ImportSigned(context.Background(), string(sender), data, sig)
+	return answer(change, err)
+}
+
 func (o object) PairExport(sender dbus.Sender) ([]byte, *dbus.Error) {
 	data, err := o.svc.PairExport(context.Background(), string(sender))
 	if err != nil {
