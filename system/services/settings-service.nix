@@ -109,7 +109,10 @@ lib.mkIf (settings.dotfilesDir == "/etc/gjallar/system") {
   # is one, else to this host's credential key, without PCR binding, so
   # turning on Secure Boot keeps it. A key that no longer decrypts (a
   # cleared TPM) is replaced; the service then gives each user a new key and
-  # keeps the old public key, so earlier files still import.
+  # keeps the old public key, so earlier files still import. The unit does
+  # not stay active, so every start of the service runs this check first: a
+  # key lost while the system runs (systemd drops its credential key when
+  # /etc/machine-id changes) would otherwise fail the service until reboot.
   systemd.services.gjallar-settings-key = {
     description = "Create the GjallarOS settings signing key";
     wantedBy = [ "multi-user.target" ];
@@ -117,7 +120,6 @@ lib.mkIf (settings.dotfilesDir == "/etc/gjallar/system") {
     path = [ pkgs.coreutils ];
     serviceConfig = {
       Type = "oneshot";
-      RemainAfterExit = true;
       UMask = "0077";
       PrivateNetwork = true;
       ProtectHome = true;

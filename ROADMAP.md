@@ -1256,7 +1256,11 @@ How 3.4a does it (`internal/settings/signed.go`,
   secret where there is a TPM, no PCR binding, so turning on Secure Boot
   keeps it. systemd hands it to the service with `LoadCredentialEncrypted=`;
   the service never touches the TPM. Without it export is off and import
-  still works.
+  still works. The key unit runs before every start of the service and
+  replaces a key that no longer decrypts. A cleared TPM or a changed
+  `/etc/machine-id` loses the key; systemd deletes its host secret when
+  the machine id changes. Without this check the service would fail until
+  the next boot.
 - **User keys.** Made on the first export. Each user's Ed25519 seed is
   HKDF-SHA256 of the host key with a random salt and the uid and name.
   `/var/lib/gjallarOS/settings/keys/<uid>.json` (root, 0600) holds the salt
