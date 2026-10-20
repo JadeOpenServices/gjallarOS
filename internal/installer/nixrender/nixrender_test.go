@@ -248,6 +248,7 @@ rec {
 		Theme:              "noctalia",
 		AIAgentMode:        "workspace",
 		JODSEnrollmentMode: "manual",
+		DeveloperMode:      true,
 	}
 
 	if err := SyncUserIntent(path, user); err != nil {
@@ -267,6 +268,7 @@ rec {
 		`webApplications = [ { id = "plane"; endpoint = "https://plane.example.test"; } ];`,
 		`aiModel = "derived-model";`,
 		`theme = "noctalia";`,
+		`developerMode = true;`,
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("missing %q after sync:\n%s", want, got)

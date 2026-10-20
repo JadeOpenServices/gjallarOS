@@ -268,6 +268,7 @@ var userIntentKeys = []string{
 	"githubUsername",
 	"dotfilesDir",
 	"debugFunctions",
+	"developerMode",
 	"shell",
 	"editors",
 	"browsers",
