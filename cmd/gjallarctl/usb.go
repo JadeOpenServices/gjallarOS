@@ -856,8 +856,9 @@ func usbReviewHeight(summary string, rows int) int {
 const usbReviewWidth = 520
 
 // usbReviewConfigKey is the user.config.json switch behind the "always" box.
-// The box edits the checkout's file directly, so the choice is part of the
-// system configuration and stays until someone unticks it.
+// The box edits the checkout's file (through the settings service on the
+// system checkout), so the choice is part of the system configuration and
+// stays until someone unticks it.
 const usbReviewConfigKey = "usbReviewTechnicalView"
 
 func usbReviewConfigPath() (string, error) {
@@ -900,6 +901,9 @@ func setUSBReviewAlwaysTechnical(on bool) error {
 	path, err := usbReviewConfigPath()
 	if err != nil {
 		return fmt.Errorf("find the GjallarOS checkout: %w", err)
+	}
+	if onSystemCheckout(path) {
+		return applySystemSettingNow(usbReviewConfigKey, on)
 	}
 	return config.SetBool(path, usbReviewConfigKey, on)
 }

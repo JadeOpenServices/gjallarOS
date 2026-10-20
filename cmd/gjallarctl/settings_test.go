@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -372,5 +373,79 @@ func TestSettingsImportSendsFileAndApplies(t *testing.T) {
 	}
 	if code := run([]string{"settings", "import", big}, &stdout, &stderr); code != 1 || len(bus.imported) != 1 {
 		t.Fatalf("import of an oversized file: code %d, sent %d", code, len(bus.imported))
+	}
+}
+
+// onTheSystemCheckout makes every config path count as the system
+// checkout's.
+func onTheSystemCheckout(t *testing.T) {
+	t.Helper()
+	old := onSystemCheckout
+	onSystemCheckout = func(string) bool { return true }
+	t.Cleanup(func() { onSystemCheckout = old })
+}
+
+func TestAddonsOnSystemCheckoutAskTheService(t *testing.T) {
+	bus := &fakeSettingsBus{readyIn: settings.SecurityDelay, values: map[string]settings.KeyValue{
+		"firefoxAddons": {Key: "firefoxAddons", Tier: config.TierSecurity, Value: json.RawMessage(`{}`)},
+	}}
+	useFakeSettings(t, bus)
+	onTheSystemCheckout(t)
+	path := addonsConfig(t)
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if err := addonsSet(path, []string{"passwords.passbolt", "locked"}, &out); err != nil {
+		t.Fatalf("%v\n%s", err, out.String())
+	}
+	if len(bus.requests) != 1 || !strings.HasPrefix(bus.requests[0], `{"firefoxAddons":{`) ||
+		!strings.Contains(bus.requests[0], `"passbolt":"locked"`) {
+		t.Fatalf("requests %q", bus.requests)
+	}
+	if len(bus.applied) != 0 || !strings.Contains(out.String(), "gjallarctl settings apply c0ffee00") {
+		t.Fatalf("applied %q, out %s", bus.applied, out.String())
+	}
+	if after, _ := os.ReadFile(path); !bytes.Equal(before, after) {
+		t.Fatal("the command wrote user.config.json itself")
+	}
+}
+
+func TestAddonsOnSystemCheckoutStopAsRoot(t *testing.T) {
+	bus := &fakeSettingsBus{}
+	useFakeSettings(t, bus)
+	onTheSystemCheckout(t)
+	settingsEUID = func() int { return 0 }
+	var out bytes.Buffer
+	if err := addonsSet(addonsConfig(t), []string{"passwords.passbolt", "locked"}, &out); !errors.Is(err, errShown) {
+		t.Fatalf("err %v", err)
+	}
+	if len(bus.requests) != 0 {
+		t.Fatalf("requests %q", bus.requests)
+	}
+}
+
+func TestUSBReviewTickOnSystemCheckoutAppliesWithoutWatching(t *testing.T) {
+	bus := &fakeSettingsBus{}
+	useFakeSettings(t, bus)
+	onTheSystemCheckout(t)
+	if err := applySystemSettingNow(usbReviewConfigKey, true); err != nil {
+		t.Fatal(err)
+	}
+	if len(bus.requests) != 1 || bus.requests[0] != `{"usbReviewTechnicalView":true}` {
+		t.Fatalf("requests %q", bus.requests)
+	}
+	if len(bus.applied) != 1 || bus.rebuilds != 0 {
+		t.Fatalf("applied %q, rebuild polls %d", bus.applied, bus.rebuilds)
+	}
+}
+
+func TestUSBReviewTickThatWaitsIsNotApplied(t *testing.T) {
+	bus := &fakeSettingsBus{readyIn: settings.SecurityDelay}
+	useFakeSettings(t, bus)
+	err := applySystemSettingNow(usbReviewConfigKey, true)
+	if err == nil || !strings.Contains(err.Error(), "gjallarctl settings apply c0ffee00") || len(bus.applied) != 0 {
+		t.Fatalf("err %v, applied %q", err, bus.applied)
 	}
 }

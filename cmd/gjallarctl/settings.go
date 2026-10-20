@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"slices"
 	"strings"
 	"text/tabwriter"
@@ -16,6 +17,8 @@ import (
 	"github.com/godbus/dbus/v5"
 
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/config"
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/systemcheckout"
+	"github.com/JadeOpenServices/gjallarOS/internal/installercheck"
 	"github.com/JadeOpenServices/gjallarOS/internal/settings"
 )
 
@@ -246,9 +249,7 @@ func settingsValues(ctx context.Context, bus settingsBus, args []string) (map[st
 		if err != nil {
 			return nil, "", err
 		}
-		if key.Tier == config.TierCritical || (key.Tier == config.TierSecurity && tier == config.TierEveryday) {
-			tier = key.Tier
-		}
+		tier = higherTier(tier, key.Tier)
 		raw := json.RawMessage(value)
 		if strings.HasPrefix(string(key.Value), `"`) || !json.Valid(raw) {
 			if raw, err = json.Marshal(value); err != nil {
@@ -260,12 +261,26 @@ func settingsValues(ctx context.Context, bus settingsBus, args []string) (map[st
 	return values, tier, nil
 }
 
+// higherTier returns the stricter of two tiers.
+func higherTier(a, b config.Tier) config.Tier {
+	if b == config.TierCritical || (b == config.TierSecurity && a == config.TierEveryday) {
+		return b
+	}
+	return a
+}
+
 func settingsSet(ctx context.Context, bus settingsBus, args []string, stdout, stderr io.Writer) int {
 	values, tier, err := settingsValues(ctx, bus, args)
 	if err != nil {
 		fmt.Fprintf(stderr, "ERROR: %v\n", err)
 		return 1
 	}
+	return settingsRequest(ctx, bus, values, tier, stdout, stderr)
+}
+
+// settingsRequest asks for values and follows the change until it is
+// applied or has to wait.
+func settingsRequest(ctx context.Context, bus settingsBus, values map[string]json.RawMessage, tier config.Tier, stdout, stderr io.Writer) int {
 	request, err := json.Marshal(values)
 	if err != nil {
 		fmt.Fprintf(stderr, "ERROR: %v\n", err)
@@ -534,6 +549,95 @@ func settingsApply(ctx context.Context, bus settingsBus, id string, stdout, stde
 			continue
 		}
 	}
+}
+
+// onSystemCheckout reports whether configPath is the user.config.json of
+// the system checkout the device builds from. Root owns that file, so the
+// commands that change it ask gjallar-settingsd (ROADMAP section 14, step
+// 3.5); a development checkout is still written directly. Tests replace it.
+var onSystemCheckout = func(configPath string) bool {
+	return filepath.Dir(filepath.Clean(configPath)) == systemcheckout.Path &&
+		systemcheckout.Active(installercheck.SystemRepositoryFile)
+}
+
+// errShown means the command already printed why it stopped.
+var errShown = errors.New("stopped")
+
+// openSettings connects to the settings service as the user, the way
+// gjallarctl settings does.
+func openSettings(stderr io.Writer) (settingsBus, bool) {
+	if settingsEUID() == 0 {
+		fmt.Fprintln(stderr, "ERROR: run this as your own user; the settings service takes changes from your login session")
+		return nil, false
+	}
+	bus, err := settingsConnect()
+	if err != nil {
+		fmt.Fprintf(stderr, "ERROR: system bus: %v\n", err)
+		return nil, false
+	}
+	return bus, true
+}
+
+// askSystemSettings asks the settings service for values on the system
+// checkout, with the waits and password of gjallarctl settings set, and
+// applies the change when it may be.
+func askSystemSettings(values map[string]any, stdout, stderr io.Writer) int {
+	bus, ok := openSettings(stderr)
+	if !ok {
+		return 1
+	}
+	defer bus.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), settingsCallTimeout)
+	defer cancel()
+
+	request := map[string]json.RawMessage{}
+	tier := config.TierEveryday
+	for name, value := range values {
+		key, err := settingsKey(ctx, bus, name)
+		if err != nil {
+			fmt.Fprintf(stderr, "ERROR: %v\n", err)
+			return 1
+		}
+		tier = higherTier(tier, key.Tier)
+		if request[name], err = json.Marshal(value); err != nil {
+			fmt.Fprintf(stderr, "ERROR: %v\n", err)
+			return 1
+		}
+	}
+	return settingsRequest(ctx, bus, request, tier, stdout, stderr)
+}
+
+// applySystemSettingNow writes an everyday setting on the system checkout
+// without following the rebuild, for a choice made in a dialog. The
+// password dialog still shows the change.
+func applySystemSettingNow(name string, value any) error {
+	var stderr strings.Builder
+	bus, ok := openSettings(&stderr)
+	if !ok {
+		return errors.New(strings.TrimPrefix(strings.TrimSpace(stderr.String()), "ERROR: "))
+	}
+	defer bus.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), settingsCallTimeout)
+	defer cancel()
+
+	request, err := json.Marshal(map[string]any{name: value})
+	if err != nil {
+		return err
+	}
+	answer, err := bus.Call(ctx, "Request", string(request))
+	if err != nil {
+		return err
+	}
+	var change settings.Pending
+	if err := json.Unmarshal([]byte(answer), &change); err != nil {
+		return fmt.Errorf("read the service's answer: %w", err)
+	}
+	if change.ReadyAt.After(settingsNow()) {
+		return fmt.Errorf("the change waits until %s; apply it then with gjallarctl settings apply %s",
+			change.ReadyAt.Local().Format("15:04"), shortID(change.ID))
+	}
+	_, err = bus.Call(ctx, "Apply", change.ID, rebuildColors(io.Discard))
+	return err
 }
 
 type systemSettingsBus struct{ conn *dbus.Conn }

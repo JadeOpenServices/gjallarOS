@@ -120,7 +120,9 @@ func runAddons(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	if err != nil {
-		fmt.Fprintf(stderr, "ERROR: %v\n", err)
+		if !errors.Is(err, errShown) {
+			fmt.Fprintf(stderr, "ERROR: %v\n", err)
+		}
 		return 1
 	}
 	return 0
@@ -329,6 +331,12 @@ func saveAddons(path string, user config.User, key string, out io.Writer) error 
 	var value any = user.FirefoxAddons
 	if key == "firefoxStoreAddons" {
 		value = user.FirefoxStoreAddons
+	}
+	if onSystemCheckout(path) {
+		if askSystemSettings(map[string]any{key: value}, out, os.Stderr) != 0 {
+			return errShown
+		}
+		return nil
 	}
 	if err := config.SetValue(path, key, value); err != nil {
 		return err
