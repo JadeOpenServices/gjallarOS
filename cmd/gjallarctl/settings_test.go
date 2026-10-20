@@ -24,6 +24,7 @@ type fakeSettingsBus struct {
 	missing  bool
 	requests []string
 	applied  []string
+	applyErr error
 	rebuilds int
 	result   string
 	notes    []string
@@ -92,7 +93,7 @@ func (b *fakeSettingsBus) Call(_ context.Context, method string, args ...any) (s
 		return answer(b.pending)
 	case "Apply":
 		b.applied = append(b.applied, args[0].(string))
-		return "", nil
+		return "", b.applyErr
 	case "Cancel":
 		b.pending = nil
 		return "", nil
@@ -438,6 +439,17 @@ func TestUSBReviewTickOnSystemCheckoutAppliesWithoutWatching(t *testing.T) {
 	}
 	if len(bus.applied) != 1 || bus.rebuilds != 0 {
 		t.Fatalf("applied %q, rebuild polls %d", bus.applied, bus.rebuilds)
+	}
+}
+
+func TestUSBReviewTickNotAuthorisedIsDropped(t *testing.T) {
+	bus := &fakeSettingsBus{applyErr: errors.New("not authorised")}
+	useFakeSettings(t, bus)
+	if err := applySystemSettingNow(usbReviewConfigKey, true); err == nil {
+		t.Fatal("a refused tick reported success")
+	}
+	if len(bus.pending) != 0 {
+		t.Fatalf("the refused tick stayed pending: %+v", bus.pending)
 	}
 }
 

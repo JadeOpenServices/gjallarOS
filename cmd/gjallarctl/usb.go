@@ -830,6 +830,8 @@ func usbReviewDialog(ctx context.Context, d usbtrust.Decision, enforcing, always
 			always = !always
 			technical = always
 			if err := setUSBReviewAlwaysTechnical(always); err != nil {
+				// The box shows what is saved; only this dialog keeps the view.
+				always = !always
 				_ = exec.CommandContext(ctx, "zenity", "--error", "--title=USB device review",
 					"--text="+html.EscapeString("The setting was not saved, so the next review starts as before.\n\n"+err.Error())).Run()
 			}

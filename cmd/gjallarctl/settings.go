@@ -634,7 +634,13 @@ func applySystemSettingNow(name string, value any) error {
 		return fmt.Errorf("the change waits until %s; apply it then with gjallarctl settings apply %s",
 			change.ReadyAt.Local().Format("15:04"), shortID(change.ID))
 	}
-	_, err = bus.Call(ctx, "Apply", change.ID, rebuildColors(io.Discard))
+	if _, err = bus.Call(ctx, "Apply", change.ID, rebuildColors(io.Discard)); err != nil {
+		// The caller shows the old value again, so the request goes too;
+		// left pending it could be applied later when nobody remembers it.
+		dropCtx, dropCancel := context.WithTimeout(context.Background(), settingsCallTimeout)
+		defer dropCancel()
+		_, _ = bus.Call(dropCtx, "Cancel", change.ID)
+	}
 	return err
 }
 
