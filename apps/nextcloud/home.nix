@@ -543,11 +543,26 @@ lib.mkMerge [
   ];
 
 
+  # Clients before 164bc3f3 wrote their own autostart entry on first start;
+  # the session starts the client. Remove those entries once per user, then
+  # leave the folder alone so a later choice in the client stays (wiki 752
+  # Q3). Drop this migration once every install has run it.
   home.activation.nextcloudAutostartOwnership = lib.mkIf enable (
     lib.hm.dag.entryAfter [ "writeBoundary" ] ''
-      ${pkgs.coreutils}/bin/rm -f \
-        "$HOME/.config/autostart/Nextcloud.desktop" \
-        "$HOME/.config/autostart/com.nextcloud.desktopclient.nextcloud.desktop"
+      marker=${lib.escapeShellArg "${config.xdg.stateHome}/gjallar/nextcloud-autostart-migrated"}
+      if [ ! -e "$marker" ]; then
+        for entry in \
+          "$HOME/.config/autostart/Nextcloud.desktop" \
+          "$HOME/.config/autostart/com.nextcloud.desktopclient.nextcloud.desktop"
+        do
+          if [ -e "$entry" ]; then
+            run ${pkgs.coreutils}/bin/rm -f "$entry"
+            echo "GjallarOS: removed the old Nextcloud autostart entry $entry; the session starts the client"
+          fi
+        done
+        run ${pkgs.coreutils}/bin/mkdir -p "$(${pkgs.coreutils}/bin/dirname "$marker")"
+        run ${pkgs.coreutils}/bin/touch "$marker"
+      fi
     ''
   );
 
