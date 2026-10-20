@@ -338,30 +338,30 @@ func settingsExport(ctx context.Context, bus settingsBus, args []string, stdout 
 	if len(args) != 1 || args[0] == "" {
 		return fmt.Errorf("usage: gjallarctl settings export FILE")
 	}
-	fmt.Fprintln(stdout, "The password dialog asks for your own password.")
-	data, err := bus.Bytes(ctx, "Export")
-	if err != nil {
-		return err
-	}
-	if err := writeNewFile(args[0], data); err != nil {
+	if err := exportNewFile(ctx, bus, "Export", args[0], stdout); err != nil {
 		return err
 	}
 	fmt.Fprintf(stdout, "Saved to %s. It imports on this device, for this account: gjallarctl settings import %s\n", args[0], args[0])
 	return nil
 }
 
-// writeNewFile writes data to a new file only the user can read.
-func writeNewFile(path string, data []byte) error {
+// exportNewFile saves what the service's method returns to path, a new file
+// only the user can read. The file is made before the service is asked, so
+// an existing file fails before the password dialog.
+func exportNewFile(ctx context.Context, bus settingsBus, method, path string, stdout io.Writer) error {
 	out, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
 		return err
 	}
-	if _, err := out.Write(data); err != nil {
-		out.Close()
-		os.Remove(path)
-		return err
+	fmt.Fprintln(stdout, "The password dialog asks for your own password.")
+	data, err := bus.Bytes(ctx, method)
+	if err == nil {
+		_, err = out.Write(data)
 	}
-	if err := out.Close(); err != nil {
+	if closeErr := out.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
 		os.Remove(path)
 		return err
 	}

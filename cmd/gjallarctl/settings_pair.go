@@ -52,12 +52,7 @@ func settingsPairExport(ctx context.Context, bus settingsBus, args []string, std
 	if len(args) != 1 || args[0] == "" {
 		return fmt.Errorf("usage: gjallarctl settings pair export FILE")
 	}
-	fmt.Fprintln(stdout, "The password dialog asks for your own password.")
-	data, err := bus.Bytes(ctx, "PairExport")
-	if err != nil {
-		return err
-	}
-	if err := writeNewFile(args[0], data); err != nil {
+	if err := exportNewFile(ctx, bus, "PairExport", args[0], stdout); err != nil {
 		return err
 	}
 	fmt.Fprintf(stdout, "Saved to %s. Take it to your other device, by USB stick, Nextcloud or mail, and run there:\n", args[0])

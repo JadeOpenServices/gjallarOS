@@ -35,6 +35,7 @@ type fakeSettingsBus struct {
 	pairFile []byte
 	pairs    []settings.PairOffer
 	checked  [][]byte
+	asked    []string
 }
 
 // fakeOffer is the SYNTHETIC offer the fake bus makes of any pairing file.
@@ -151,6 +152,7 @@ func (b *fakeSettingsBus) Call(_ context.Context, method string, args ...any) (s
 }
 
 func (b *fakeSettingsBus) Bytes(_ context.Context, method string) ([]byte, error) {
+	b.asked = append(b.asked, method)
 	if b.missing {
 		return nil, errSettingsMissing
 	}
@@ -396,6 +398,26 @@ func TestSettingsExportWritesNewPrivateFile(t *testing.T) {
 	stdout.Reset()
 	if code := run([]string{"settings", "export", path}, &stdout, &stderr); code != 1 {
 		t.Fatalf("export over an existing file: code %d", code)
+	}
+	if len(bus.asked) != 1 || strings.Contains(stdout.String(), "password") {
+		t.Errorf("export over an existing file asked the service %v, stdout %q", bus.asked, stdout.String())
+	}
+	if data, _ := os.ReadFile(path); !bytes.Equal(data, bus.exported) {
+		t.Errorf("the existing file changed to %q", data)
+	}
+}
+
+// A refused export leaves no empty file behind.
+func TestSettingsExportFailureRemovesFile(t *testing.T) {
+	bus := &fakeSettingsBus{missing: true}
+	useFakeSettings(t, bus)
+	path := filepath.Join(t.TempDir(), "settings.gjs")
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"settings", "export", path}, &stdout, &stderr); code == 0 {
+		t.Fatal("export without the service succeeded")
+	}
+	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("file after a failed export: %v", err)
 	}
 }
 

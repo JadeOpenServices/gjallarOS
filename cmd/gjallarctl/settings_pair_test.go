@@ -28,6 +28,9 @@ func TestSettingsPairExportWritesNewPrivateFile(t *testing.T) {
 	if code := run([]string{"settings", "pair", "export", path}, &stdout, &stderr); code != 1 {
 		t.Fatalf("export over an existing file: code %d", code)
 	}
+	if len(bus.asked) != 1 {
+		t.Errorf("export over an existing file asked the service: %v", bus.asked)
+	}
 }
 
 func writePairFile(t *testing.T) (string, []byte) {
