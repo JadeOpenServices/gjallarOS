@@ -46,10 +46,14 @@ let
       usbguardReadWritePaths =
         if enabled then c.systemd.services.usbguard.serviceConfig.ReadWritePaths else [ ];
       start = if enabled then c.systemd.services.usb-trust-broker.serviceConfig.ExecStart else null;
-      desktopGroups = if enabled then (c.users.users.testuser or { extraGroups = [ ]; }).extraGroups else [ ];
-      brokerGroup = if enabled then c.systemd.services.usb-trust-broker.serviceConfig.Group or null else null;
-      runtimeMode = if enabled then c.systemd.services.usb-trust-broker.serviceConfig.RuntimeDirectoryMode else null;
-      stateDirectory = if enabled then c.systemd.services.usb-trust-broker.serviceConfig.StateDirectory else null;
+      desktopGroups =
+        if enabled then (c.users.users.testuser or { extraGroups = [ ]; }).extraGroups else [ ];
+      brokerGroup =
+        if enabled then c.systemd.services.usb-trust-broker.serviceConfig.Group or null else null;
+      runtimeMode =
+        if enabled then c.systemd.services.usb-trust-broker.serviceConfig.RuntimeDirectoryMode else null;
+      stateDirectory =
+        if enabled then c.systemd.services.usb-trust-broker.serviceConfig.StateDirectory else null;
       # The broker needs /sys/bus/scsi at start (mount namespace and autoprobe).
       scsiAtBoot =
         !enabled
@@ -57,6 +61,15 @@ let
           builtins.elem "scsi_mod" c.boot.kernelModules
           && builtins.elem "systemd-modules-load.service" c.systemd.services.usb-trust-broker.after
         );
+      # With blocking on, stage 1 turns SCSI autoprobe off before udevd and
+      # binds what the media gate does not own (Plane 195).
+      initrdGate =
+        let
+          unit = c.boot.initrd.systemd.services.gjallar-scsi-autoprobe-off or null;
+        in
+        unit != null
+        && builtins.elem "systemd-udevd.service" unit.before
+        && builtins.match ".*gjallar-scsi-bind-ungated.*" c.boot.initrd.services.udev.rules != null;
       startsWithBackend =
         !enabled || builtins.elem "usbguard.service" c.systemd.services.usb-trust-broker.wantedBy;
       review =
@@ -91,8 +104,14 @@ assert builtins.elem "-/sys" enforcing.usbguardReadWritePaths;
 assert enforcing.usbAssertions;
 assert audit.startsWithBackend && enforcing.startsWithBackend;
 assert audit.scsiAtBoot && enforcing.scsiAtBoot;
+assert enforcing.initrdGate && !audit.initrdGate && !dormant.initrdGate;
 assert audit.review != null;
 assert managedAudit.review == null;
 {
-  inherit dormant audit enforcing managedAudit;
+  inherit
+    dormant
+    audit
+    enforcing
+    managedAudit
+    ;
 }

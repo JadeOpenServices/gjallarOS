@@ -29,6 +29,25 @@ let
     AuditFilePath=/dev/null
   '';
 
+  # Binds a USB SCSI device unless the media gate owns it: a removable disk
+  # or optical drive, the same test as mediagate LUN.Gated. Reads only the
+  # device type and the removable bit of the INQUIRY data, never the medium.
+  scsiBindUngated = pkgs.writeShellScript "gjallar-scsi-bind-ungated" ''
+    [[ $1 =~ ^[0-9]+:[0-9]+:[0-9]+:[0-9]+$ ]] || exit 1
+    dev=/sys/bus/scsi/devices/$1
+    type=$(<"$dev/type") || exit 1
+    flags=$(${pkgs.coreutils}/bin/od -An -tu1 -j1 -N1 "$dev/inquiry") || exit 1
+    if [[ $type == 0 || $type == 5 ]] && (( flags & 128 )); then
+      exit 0
+    fi
+    echo "$1" > /sys/bus/scsi/drivers_probe
+  '';
+  scsiBindRules = ''
+    ACTION=="add", SUBSYSTEM=="scsi", ENV{DEVTYPE}=="scsi_device", SUBSYSTEMS=="usb", ENV{GJALLAR_USB_SCSI}="1"
+    ACTION=="add", SUBSYSTEM=="scsi", ENV{DEVTYPE}=="scsi_device", ENV{GJALLAR_USB_SCSI}!="1", RUN+="${pkgs.runtimeShell} -c 'echo %k > /sys/bus/scsi/drivers_probe'"
+    ACTION=="add", SUBSYSTEM=="scsi", ENV{DEVTYPE}=="scsi_device", ENV{GJALLAR_USB_SCSI}=="1", RUN+="${scsiBindUngated} %k"
+  '';
+
   # zenity --password has no --text option and silently drops it, so the
   # reason line needs --entry --hide-text. Output is the same: text + newline.
   usbTrustAskpass = pkgs.writeShellScript "gjallar-usbtrust-askpass" ''
@@ -54,9 +73,11 @@ let
       ${lib.optionalString cfg.enforce "--enforce"} \
       ${lib.optionalString (cfg.lapseDays != null) "--lapse-days ${toString cfg.lapseDays}"} \
       --cryptsetup-binary ${pkgs.cryptsetup}/bin/cryptsetup \
-      ${lib.concatMapStringsSep " " (
-        luks: "--luks-device ${lib.escapeShellArg luks.device}"
-      ) (lib.attrValues config.boot.initrd.luks.devices)} \
+      ${
+        lib.concatMapStringsSep " " (luks: "--luks-device ${lib.escapeShellArg luks.device}") (
+          lib.attrValues config.boot.initrd.luks.devices
+        )
+      } \
       --usbguard-binary ${pkgs.usbguard}/bin/usbguard
   '';
 in
@@ -157,18 +178,46 @@ in
 
       # While USB protection enforces, the broker turns off automatic SCSI
       # driver binding so a medium in an allowed reader stays unread until
-      # the owner opens it (gjallar-usbtrustd media gate). Disks that are not
-      # on USB keep binding as soon as they appear.
-      services.udev.extraRules = ''
-        ACTION=="add", SUBSYSTEM=="scsi", ENV{DEVTYPE}=="scsi_device", SUBSYSTEMS=="usb", ENV{GJALLAR_USB_SCSI}="1"
-        ACTION=="add", SUBSYSTEM=="scsi", ENV{DEVTYPE}=="scsi_device", ENV{GJALLAR_USB_SCSI}!="1", RUN+="${pkgs.runtimeShell} -c 'echo %k > /sys/bus/scsi/drivers_probe'"
-      '';
+      # the owner opens it (gjallar-usbtrustd media gate). Every other SCSI
+      # device keeps binding as soon as it appears.
+      services.udev.extraRules = scsiBindRules;
 
       # The broker turns off SCSI autoprobe at start and the media gate binds
       # SCSI drivers later, so /sys/bus/scsi must exist before it starts.
       # Machines without SATA or USB disks at boot only get the SCSI core with
       # the first USB disk, so load it at boot.
       boot.kernelModules = [ "scsi_mod" ];
+
+      # The broker starts late in boot. Until then a card already in a reader
+      # would be read by sd (partition table) and udev (blkid) in stage 1 and
+      # early stage 2 (loophole 13a, Plane 195). With blocking on, autoprobe
+      # goes off before udevd runs in stage 1 and stays off across the switch
+      # to stage 2. The rules above bind everything the gate does not own, so
+      # SATA disks and USB disks that are not removable still boot.
+      boot.initrd = lib.mkIf (cfg.enforce && config.boot.initrd.systemd.enable) {
+        availableKernelModules = [ "scsi_mod" ];
+        services.udev.rules = scsiBindRules;
+        systemd.storePaths = [ scsiBindUngated ];
+        systemd.services.gjallar-scsi-autoprobe-off = {
+          description = "Keep USB storage media closed until the USB trust broker runs";
+          unitConfig.DefaultDependencies = false;
+          wantedBy = [ "sysinit.target" ];
+          before = [
+            "sysinit.target"
+            "systemd-modules-load.service"
+            "systemd-udevd.service"
+            "systemd-udev-trigger.service"
+          ];
+          serviceConfig = {
+            Type = "oneshot";
+            RemainAfterExit = true;
+          };
+          script = ''
+            ${pkgs.kmod}/bin/modprobe scsi_mod
+            echo 0 > /sys/bus/scsi/drivers_autoprobe
+          '';
+        };
+      };
 
       systemd.services.usb-trust-broker = {
         description = "USB trust broker";
