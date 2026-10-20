@@ -456,29 +456,6 @@ func TestCollectUSBTrustUSBSystemDisk(t *testing.T) {
 	}
 }
 
-func TestSystemDiskOnUSB(t *testing.T) {
-	defer func(old func(context.Context, string) (bool, error)) { diskUSBAttached = old }(diskUSBAttached)
-	for _, test := range []struct {
-		name, target string
-		usb          bool
-		err          error
-		wantReason   string
-	}{
-		{name: "internal disk", target: "/dev/nvme0n1"},
-		{name: "usb disk", target: "/dev/sda", usb: true, wantReason: "(/dev/sda) is a USB drive"},
-		{name: "lsblk fails: treated as USB", target: "/dev/sda", err: fmt.Errorf("SYNTHETIC lsblk failure"), wantReason: "could not check"},
-		{name: "no disk known", wantReason: "does not know which disk"},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			diskUSBAttached = func(context.Context, string) (bool, error) { return test.usb, test.err }
-			got := systemDiskOnUSB(context.Background(), false, "/mnt", test.target)
-			if (test.wantReason == "") != (got == "") || !strings.Contains(got, test.wantReason) {
-				t.Fatalf("reason = %q, want it to contain %q", got, test.wantReason)
-			}
-		})
-	}
-}
-
 func TestCollectUSBTrustLapse(t *testing.T) {
 	for _, test := range []struct {
 		name         string

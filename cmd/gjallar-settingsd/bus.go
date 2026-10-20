@@ -38,6 +38,9 @@ const (
 
 var vpnTrustPath = "/run/gjallar/vpn-trust.json"
 
+// systemDiskPath is where gjallar-system-disk writes its boot check.
+var systemDiskPath = "/run/gjallar/system-disk.json"
+
 type busSystem struct{ conn *dbus.Conn }
 
 func (b busSystem) Caller(ctx context.Context, sender string) (caller, error) {
@@ -174,23 +177,8 @@ func (busSystem) NameTaken(ctx context.Context, device, name string) (netip.Addr
 // readVerdict reads root's network verdict. Only a fresh verdict in a file
 // root wrote counts; anything else is not ok.
 func readVerdict(path string, now time.Time) (nettrust.Verdict, bool) {
-	file, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
-	if err != nil {
-		return nettrust.Verdict{}, false
-	}
-	defer file.Close()
-	info, err := file.Stat()
-	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0o022 != 0 {
-		return nettrust.Verdict{}, false
-	}
-	if stat, ok := info.Sys().(*syscall.Stat_t); !ok || stat.Uid != 0 {
-		return nettrust.Verdict{}, false
-	}
-	if now.Sub(info.ModTime()) > verdictMaxAge {
-		return nettrust.Verdict{}, false
-	}
-	data, err := io.ReadAll(io.LimitReader(file, 64<<10))
-	if err != nil {
+	data, written, ok := readRootFile(path)
+	if !ok || now.Sub(written) > verdictMaxAge {
 		return nettrust.Verdict{}, false
 	}
 	var verdict nettrust.Verdict
@@ -198,6 +186,47 @@ func readVerdict(path string, now time.Time) (nettrust.Verdict, bool) {
 		return nettrust.Verdict{}, false
 	}
 	return verdict, true
+}
+
+// SystemDiskOnUSB reads root's boot check of the system disk
+// (gjallar-system-disk).
+func (busSystem) SystemDiskOnUSB() string {
+	return readSystemDisk(systemDiskPath)
+}
+
+// readSystemDisk returns the reason in root's boot check. Without a check
+// root wrote, the disk counts as unchecked, which keeps blocking off.
+func readSystemDisk(path string) string {
+	var fact struct {
+		USBReason *string `json:"usbReason"`
+	}
+	data, _, ok := readRootFile(path)
+	if !ok || json.Unmarshal(data, &fact) != nil || fact.USBReason == nil {
+		return "the boot check of the system disk has no answer, so it is not known whether the system disk is a USB drive."
+	}
+	return *fact.USBReason
+}
+
+// readRootFile reads a small regular file only root can write, and when it
+// was written.
+func readRootFile(path string) ([]byte, time.Time, bool) {
+	file, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		return nil, time.Time{}, false
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0o022 != 0 {
+		return nil, time.Time{}, false
+	}
+	if stat, ok := info.Sys().(*syscall.Stat_t); !ok || stat.Uid != 0 {
+		return nil, time.Time{}, false
+	}
+	data, err := io.ReadAll(io.LimitReader(file, 64<<10))
+	if err != nil {
+		return nil, time.Time{}, false
+	}
+	return data, info.ModTime(), true
 }
 
 func (b busSystem) unit(ctx context.Context) (dbus.BusObject, error) {

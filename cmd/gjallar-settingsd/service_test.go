@@ -37,6 +37,7 @@ type fakeSystem struct {
 	tailnetErr error
 	taken      map[string]netip.Addr
 	probed     []string
+	usbDisk    string
 }
 
 func (f *fakeSystem) Caller(_ context.Context, sender string) (caller, error) {
@@ -65,6 +66,7 @@ func (f *fakeSystem) NameTaken(_ context.Context, device, name string) (netip.Ad
 	return f.taken[name], nil
 }
 func (f *fakeSystem) Rebuilding(context.Context) (bool, error) { return f.rebuilding, nil }
+func (f *fakeSystem) SystemDiskOnUSB() string                  { return f.usbDisk }
 func (f *fakeSystem) StartRebuild(_ context.Context, colors string) error {
 	f.rebuilt = append(f.rebuilt, colors)
 	return nil
@@ -370,5 +372,42 @@ func TestHostnameCheckFailsClosed(t *testing.T) {
 	}
 	if _, err := f.svc.Request(ctx, ":1.10", `{"hostname":"`+strings.ToUpper(old)+`"}`); err != nil {
 		t.Errorf("case change: %v", err)
+	}
+}
+
+func TestUSBBlockingRefusedOnUSBSystemDisk(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	f.sys.usbDisk = "the system disk (/dev/sda) is a USB drive, and blocking could cut off the disk the system runs from."
+	review := `"usbguardEnable":true,"usbTrustTpmHandle":"` + config.DefaultUSBTrustTPMHandle + `"`
+	if _, err := f.svc.Request(ctx, ":1.10", `{`+review+`,"usbTrustEnforce":true}`); !errors.Is(err, errRefused) || !strings.Contains(err.Error(), "/dev/sda") {
+		t.Fatalf("blocking on a USB system disk: %v", err)
+	}
+	if _, err := f.svc.Request(ctx, ":1.10", `{`+review+`}`); err != nil {
+		t.Fatalf("review without blocking: %v", err)
+	}
+	f.sys.usbDisk = ""
+	if _, err := f.svc.Request(ctx, ":1.11", `{`+review+`,"usbTrustEnforce":true}`); err != nil {
+		t.Fatalf("blocking on an internal system disk: %v", err)
+	}
+}
+
+func TestReadSystemDiskNeedsRootCheck(t *testing.T) {
+	dir := t.TempDir()
+	if readSystemDisk(filepath.Join(dir, "missing.json")) == "" {
+		t.Fatal("a missing boot check counts as an internal disk")
+	}
+	path := filepath.Join(dir, "system-disk.json")
+	if err := os.WriteFile(path, []byte(`{"usbReason":""}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := readSystemDisk(path); (os.Geteuid() == 0) != (got == "") {
+		t.Fatalf("reason %q from a file owned by uid %d", got, os.Geteuid())
+	}
+	if err := os.WriteFile(path, []byte(`{}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if readSystemDisk(path) == "" {
+		t.Fatal("a check without a reason field counts as an internal disk")
 	}
 }

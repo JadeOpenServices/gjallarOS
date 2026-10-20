@@ -2772,34 +2772,15 @@ func mountSourceDevice(source string) string {
 	return source
 }
 
-// diskUSBAttached is targetdisk.USBAttached; tests replace it.
-var diskUSBAttached = targetdisk.USBAttached
-
 // systemDiskOnUSB says why USB blocking must stay off because of the disk the
-// system runs from, or returns "" when that disk is known and not on USB.
-// Blocking could cut off a USB system disk, so a disk it cannot check counts
-// as USB. An installed host runs from the disk under root; a fresh install
-// from freshTarget.
+// system runs from, or returns "" when that disk is known and not on USB
+// (targetdisk.USBSystemDiskReason). An installed host runs from the disk
+// under root; a fresh install from freshTarget.
 func systemDiskOnUSB(ctx context.Context, persistentInstalledHost bool, root, freshTarget string) string {
-	disk := strings.TrimSpace(freshTarget)
 	if persistentInstalledHost {
-		mounted, err := exec.CommandContext(ctx, "findmnt", "-nvro", "SOURCE", "--target", root).Output()
-		if err != nil {
-			return fmt.Sprintf("the installer could not find the system disk (%v).", err)
-		}
-		disk = mountSourceDevice(string(mounted))
+		return targetdisk.MountedUSBReason(ctx, root)
 	}
-	if disk == "" {
-		return "the installer does not know which disk the system will run from."
-	}
-	usb, err := diskUSBAttached(ctx, disk)
-	switch {
-	case err != nil:
-		return fmt.Sprintf("the installer could not check whether the system disk is a USB drive (%v).", err)
-	case usb:
-		return fmt.Sprintf("the system disk (%s) is a USB drive, and blocking could cut off the disk the system runs from.", disk)
-	}
-	return ""
+	return targetdisk.USBSystemDiskReason(ctx, freshTarget)
 }
 
 // rootEncrypted reports whether mountpoint sits on a device-mapper (LUKS)

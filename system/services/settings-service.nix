@@ -129,12 +129,41 @@ lib.mkIf (settings.dotfilesDir == "/etc/gjallar/system") {
     '';
   };
 
-  systemd.tmpfiles.rules = [ "d /etc/gjallar/developer 0755 root root -" ];
+  # The settings service has no device access, so this unit checks at boot
+  # whether the system runs from a USB disk. The service refuses USB
+  # blocking when it does, or when this answer is missing (wiki 752 Q11).
+  systemd.services.gjallar-system-disk = {
+    description = "Check whether the GjallarOS system disk is on USB";
+    wantedBy = [ "multi-user.target" ];
+    before = [ "gjallar-settingsd.service" ];
+    path = [ pkgs.util-linux ];
+    serviceConfig = {
+      Type = "oneshot";
+      RemainAfterExit = true;
+      ExecStart = "${settingsd}/bin/gjallar-system-disk /run/gjallar/system-disk.json";
+      ProtectSystem = "strict";
+      ReadWritePaths = [ "/run/gjallar" ];
+      PrivateNetwork = true;
+      ProtectHome = true;
+      NoNewPrivileges = true;
+    };
+  };
+
+  systemd.tmpfiles.rules = [
+    "d /etc/gjallar/developer 0755 root root -"
+    "d /run/gjallar 0755 root root -"
+  ];
 
   systemd.services.gjallar-settingsd = {
     description = "GjallarOS settings service";
-    wants = [ "gjallar-settings-key.service" ];
-    after = [ "gjallar-settings-key.service" ];
+    wants = [
+      "gjallar-settings-key.service"
+      "gjallar-system-disk.service"
+    ];
+    after = [
+      "gjallar-settings-key.service"
+      "gjallar-system-disk.service"
+    ];
     # tailscale status lists the tailnet a new hostname must not clash with.
     path = lib.optional config.services.tailscale.enable config.services.tailscale.package;
     serviceConfig = {

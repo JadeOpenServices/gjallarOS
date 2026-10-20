@@ -16,8 +16,10 @@ buildGoModule {
       ../../apps/firefox-addons.json
       ../../cmd/gjallar-namecheck
       ../../cmd/gjallar-settingsd
+      ../../cmd/gjallar-system-disk
       ../../internal/installer/config
       ../../internal/installer/systemcheckout
+      ../../internal/installer/targetdisk
       ../../internal/localchanges
       ../../internal/namecheck
       ../../internal/nettrust
@@ -32,6 +34,7 @@ buildGoModule {
   subPackages = [
     "cmd/gjallar-namecheck"
     "cmd/gjallar-settingsd"
+    "cmd/gjallar-system-disk"
   ];
 
   env.CGO_ENABLED = "0";

@@ -66,6 +66,9 @@ type system interface {
 	Rebuilding(ctx context.Context) (bool, error)
 	// StartRebuild starts the rebuild unit with the checked colors.
 	StartRebuild(ctx context.Context, colors string) error
+	// SystemDiskOnUSB says why USB blocking must stay off because of the
+	// disk the system runs from; "" when that disk is not on USB.
+	SystemDiskOnUSB() string
 }
 
 type service struct {
@@ -244,6 +247,9 @@ func (s *service) keep(ctx context.Context, sender string, who caller, change se
 		return settings.Pending{}, err
 	}
 	notes = append(notes, nameNotes...)
+	if err := s.checkUSBSystemDisk(change); err != nil {
+		return settings.Pending{}, err
+	}
 	if change.Tier == config.TierCritical {
 		if err := s.authorize(ctx, sender, change); err != nil {
 			return settings.Pending{}, err
@@ -579,6 +585,21 @@ func (s *service) checkHostname(ctx context.Context, change settings.Change) ([]
 		return nil, fmt.Errorf("%w: hostname %q is taken on this network by %s; pick another one", errRefused, name, addr)
 	}
 	return notes, nil
+}
+
+// checkUSBSystemDisk refuses turning USB blocking on while the system runs
+// from a USB disk: blocking could cut that disk off (wiki 752 Q11).
+func (s *service) checkUSBSystemDisk(change settings.Change) error {
+	for _, key := range change.Keys {
+		var on bool
+		if key.Key != "usbTrustEnforce" || json.Unmarshal(key.New, &on) != nil || !on {
+			continue
+		}
+		if reason := s.sys.SystemDiskOnUSB(); reason != "" {
+			return fmt.Errorf("%w: USB blocking stays off: %s", errRefused, reason)
+		}
+	}
+	return nil
 }
 
 func peerName(peer nettrust.Peer) string {

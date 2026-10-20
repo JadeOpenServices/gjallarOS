@@ -57,3 +57,46 @@ type transportDevice struct {
 	Tran     string            `json:"tran"`
 	Children []transportDevice `json:"children"`
 }
+
+// USBSystemDiskReason says why USB blocking must stay off because of disk,
+// the disk the system runs from, or returns "" when disk is known and not on
+// USB (wiki 752 Q11). Blocking could cut off a USB system disk, so a disk
+// that cannot be checked counts as one.
+func USBSystemDiskReason(ctx context.Context, disk string) string {
+	return usbSystemDiskReason(ctx, disk, execRunner{})
+}
+
+// MountedUSBReason is USBSystemDiskReason for the disk mounted at
+// mountpoint, the way an installed system sees its own disk.
+func MountedUSBReason(ctx context.Context, mountpoint string) string {
+	return mountedUSBReason(ctx, mountpoint, execRunner{})
+}
+
+func mountedUSBReason(ctx context.Context, mountpoint string, runner commandRunner) string {
+	raw, err := runner.Output(ctx, "findmnt", "-nvro", "SOURCE", "--target", mountpoint)
+	if err != nil {
+		return fmt.Sprintf("the system disk could not be found (%v).", err)
+	}
+	source := strings.TrimSpace(string(raw))
+	// A Btrfs subvolume reads "/dev/mapper/cryptroot[/@]" without
+	// --nofsroot; the suffix is not part of the device name.
+	if i := strings.IndexByte(source, '['); i > 0 && strings.HasSuffix(source, "]") {
+		source = source[:i]
+	}
+	return usbSystemDiskReason(ctx, source, runner)
+}
+
+func usbSystemDiskReason(ctx context.Context, disk string, runner commandRunner) string {
+	disk = strings.TrimSpace(disk)
+	if disk == "" {
+		return "it is not known which disk the system runs from."
+	}
+	usb, err := usbAttached(ctx, disk, runner)
+	switch {
+	case err != nil:
+		return fmt.Sprintf("it could not be checked whether the system disk is a USB drive (%v).", err)
+	case usb:
+		return fmt.Sprintf("the system disk (%s) is a USB drive, and blocking could cut off the disk the system runs from.", disk)
+	}
+	return ""
+}
