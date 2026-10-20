@@ -40,6 +40,10 @@ let
     export WINEDEBUG="-all"
     # winetricks calls wine from PATH and needs unzstd for vkd3d-proton.
     export PATH="${lib.makeBinPath [ winePackage pkgs.zstd ]}:$PATH"
+    # bin/wine is a shell wrapper, so winetricks cannot read its arch, takes
+    # the prefix for an unknown WoW64 style and runs no wine at all. WINE_BIN
+    # is its switch for wrappers.
+    export WINE_BIN="${winePackage}/bin/.wine"
 
     unset WINEDLLOVERRIDES
 
@@ -129,7 +133,7 @@ let
       "d3dcompiler_43|Direct3D shader compiler 43"
       "d3dcompiler_47|Direct3D shader compiler 47"
       "d3dx9|D3DX9"
-      "dotnet48|.NET Framework 4.8 (the longest step)"
+      "dotnet48|.NET Framework 4.8|the longest step"
       "dotnetdesktop6|.NET 6 desktop runtime"
       "dotnetdesktop8|.NET 8 desktop runtime"
     )
@@ -139,13 +143,17 @@ let
 
     for entry in "''${downloads[@]}"; do
       verb="''${entry%%|*}"
+      rest="''${entry#*|}"
+      label="''${rest%%|*}"
+      note=
+      [[ "$rest" == *"|"* ]] && note=" (''${rest#*|})"
       step=$((step + 1))
       if [[ -z "$online" ]]; then
-        failed+=("''${entry#*|}")
+        failed+=("$label")
         continue
       fi
-      say "Downloading and installing: ''${entry#*|}"
-      ${pkgs.winetricks}/bin/winetricks -q "$verb" || failed+=("''${entry#*|}")
+      say "Downloading and installing: $label$note"
+      ${pkgs.winetricks}/bin/winetricks -q "$verb" || failed+=("$label")
       wineserver -w || true
     done
 
@@ -154,7 +162,8 @@ let
       exit 1
     fi
     if ((''${#failed[@]})); then
-      finish "Wine setup is not complete. Missing: ''${failed[*]}. The program starts now, and the next start tries again. Details: $log"
+      missing="$(printf '%s, ' "''${failed[@]}")"
+      finish "Wine setup is not complete. Missing: ''${missing%, }. The program starts now, and the next start tries again. Details: $log"
       exit 1
     fi
 
