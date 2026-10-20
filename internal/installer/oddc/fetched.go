@@ -3,6 +3,7 @@ package oddc
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -83,10 +84,35 @@ func (source *FetchedSource) ask(identity Identity) error {
 		return fmt.Errorf("fetch ODDC answer: %w", err)
 	}
 
-	if err := os.RemoveAll(source.Root); err != nil {
+	return publish(next, source.Root)
+}
+
+// publish replaces root with the complete answer in next. The answer is
+// part of the checkout its owner builds from, so its modes must not
+// follow the writer's umask: the installer resumed by installer-resume
+// runs with 0077 and left it unreadable to the owner's install.sh
+// (e2e-fw13, 2026-10-20).
+func publish(next, root string) error {
+	err := filepath.WalkDir(next, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		switch {
+		case entry.IsDir():
+			return os.Chmod(path, 0o755)
+		case entry.Type().IsRegular():
+			return os.Chmod(path, 0o644)
+		}
+		return nil
+	})
+	if err != nil {
 		return err
 	}
-	return os.Rename(next, source.Root)
+
+	if err := os.RemoveAll(root); err != nil {
+		return err
+	}
+	return os.Rename(next, root)
 }
 
 // gitSource fetches ODDC's tree at commit rev into a scratch repository;
@@ -139,11 +165,8 @@ func Refresh(root, rev string) (string, error) {
 	if err := portable.FetchModel(upstream, model, next); err != nil {
 		return current, fmt.Errorf("fetch ODDC answer: %w", err)
 	}
-	if err := os.RemoveAll(root); err != nil {
-		return current, err
-	}
 
-	return current, os.Rename(next, root)
+	return current, publish(next, root)
 }
 
 func (source *FetchedSource) Resolve(identity Identity) (Resolved, error) {
