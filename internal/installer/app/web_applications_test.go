@@ -25,6 +25,7 @@ func TestCollectProjectToolsSupportsTeamsWebApplication(t *testing.T) {
 			),
 			&output,
 		),
+		nil,
 		&user,
 	)
 	if err != nil {
@@ -81,6 +82,7 @@ func TestCollectProjectToolsProducesCanonicalWebApplicationIntent(t *testing.T) 
 			),
 			&output,
 		),
+		nil,
 		&user,
 	)
 	if err != nil {

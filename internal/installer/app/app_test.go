@@ -179,6 +179,7 @@ func TestCollectProjectToolsDefaultsDisabled(t *testing.T) {
 	err := collectProjectTools(
 		context.Background(),
 		prompt.New(strings.NewReader("\n\n\n\n"), &output),
+		nil,
 		&u,
 	)
 	if err != nil {
@@ -238,6 +239,7 @@ func TestCollectProjectToolsSupportsIndependentSelection(t *testing.T) {
 			err := collectProjectTools(
 				context.Background(),
 				prompt.New(strings.NewReader(tt.input), &output),
+				nil,
 				&u,
 			)
 			if err != nil {
@@ -271,6 +273,7 @@ func TestCollectProjectToolsSupportsNextcloud(t *testing.T) {
 			),
 			&output,
 		),
+		nil,
 		&u,
 	)
 	if err != nil {
@@ -303,6 +306,7 @@ func TestCollectProjectToolsReasksInvalidEndpoints(t *testing.T) {
 			),
 			&output,
 		),
+		nil,
 		&u,
 	)
 	if err != nil {
@@ -331,6 +335,7 @@ func TestCollectProjectToolsBlankEndpointSkips(t *testing.T) {
 			strings.NewReader("yes\n\nyes\nyes\n\nno\nyes\n\n"),
 			&output,
 		),
+		nil,
 		&u,
 	)
 	if err != nil {
@@ -393,7 +398,7 @@ func TestCollectRecoverySkipsPartitionWithoutSecureBoot(t *testing.T) {
 func TestCollectUSBTrustSkippedWithoutODDCModel(t *testing.T) {
 	var output bytes.Buffer
 	u := config.User{USBGuardEnable: true, USBTrustEnforce: true, USBTrustTPMHandle: config.DefaultUSBTrustTPMHandle}
-	if err := collectUSBTrust(context.Background(), prompt.New(strings.NewReader("yes\nyes\n"), &output), false, true, true, &u); err != nil {
+	if err := collectUSBTrust(context.Background(), prompt.New(strings.NewReader("yes\nyes\n"), &output), false, true, true, nil, &u); err != nil {
 		t.Fatal(err)
 	}
 	if u.USBGuardEnable || u.USBTrustEnforce || u.USBTrustTPMHandle != "" || strings.Contains(output.String(), "Enable USB trust review") {
@@ -422,7 +427,7 @@ func TestCollectUSBTrust(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			var output bytes.Buffer
 			u := config.User{}
-			if err := collectUSBTrust(context.Background(), prompt.New(strings.NewReader(test.input), &output), true, test.encryptedRoot, test.tpm2, &u); err != nil {
+			if err := collectUSBTrust(context.Background(), prompt.New(strings.NewReader(test.input), &output), true, test.encryptedRoot, test.tpm2, nil, &u); err != nil {
 				t.Fatal(err)
 			}
 			if u.USBGuardEnable != test.wantReview || u.USBTrustEnforce != test.wantEnforce || u.USBTrustTPMHandle != test.wantHandle {
@@ -451,7 +456,7 @@ func TestCollectUSBTrustLapse(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			var output bytes.Buffer
 			u := config.User{USBTrustLapseDays: 9}
-			if err := collectUSBTrust(context.Background(), prompt.New(strings.NewReader(test.input), &output), true, true, test.tpm2, &u); err != nil {
+			if err := collectUSBTrust(context.Background(), prompt.New(strings.NewReader(test.input), &output), true, true, test.tpm2, nil, &u); err != nil {
 				t.Fatal(err)
 			}
 			if u.USBTrustLapseDays != test.want {
@@ -470,7 +475,7 @@ func TestCollectJODSManagementSkippedWithoutSecureBootSupport(t *testing.T) {
 	var output bytes.Buffer
 	u := config.User{EndpointManagedDevice: true}
 	blocker := jodsManagementBlocker(false, true)
-	if err := collectJODSManagement(context.Background(), prompt.New(strings.NewReader("yes\n"), &output), blocker, &u); err != nil {
+	if err := collectJODSManagement(context.Background(), prompt.New(strings.NewReader("yes\n"), &output), blocker, nil, &u); err != nil {
 		t.Fatal(err)
 	}
 	if u.EndpointManagedDevice || strings.Contains(output.String(), "Manage this machine with JODS?") ||
@@ -491,7 +496,7 @@ func TestJODSManagementBlockerNamesTPM2(t *testing.T) {
 func TestCollectJODSManagementAskedWhenSupported(t *testing.T) {
 	var output bytes.Buffer
 	u := config.User{}
-	if err := collectJODSManagement(context.Background(), prompt.New(strings.NewReader("yes\n"), &output), "", &u); err != nil {
+	if err := collectJODSManagement(context.Background(), prompt.New(strings.NewReader("yes\n"), &output), "", nil, &u); err != nil {
 		t.Fatal(err)
 	}
 	if !u.EndpointManagedDevice {

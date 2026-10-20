@@ -109,6 +109,24 @@ func SplitList(raw string) ([]string, error) {
 	return out, nil
 }
 
+// JoinList is the answer SplitList reads back as items. An item that holds
+// a comma, starts with a quote or has surrounding spaces is quoted, in
+// single quotes when it holds a double quote.
+func JoinList(items []string) string {
+	parts := make([]string, 0, len(items))
+	for _, item := range items {
+		if strings.ContainsRune(item, ',') || strings.TrimSpace(item) != item || strings.HasPrefix(item, "\"") || strings.HasPrefix(item, "'") {
+			quote := "\""
+			if strings.Contains(item, quote) {
+				quote = "'"
+			}
+			item = quote + item + quote
+		}
+		parts = append(parts, item)
+	}
+	return strings.Join(parts, ", ")
+}
+
 // DefaultSiteRouterTarget suggests the first host of the first home subnet,
 // which is the home router on most LANs, on the DNS port.
 func DefaultSiteRouterTarget(homeSubnets []string) string {

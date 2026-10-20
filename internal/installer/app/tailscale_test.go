@@ -16,7 +16,7 @@ func collectTailscaleAnswers(t *testing.T, answers ...string) (*config.Tailscale
 	var output bytes.Buffer
 	user := config.User{}
 	ui := prompt.New(strings.NewReader(strings.Join(answers, "\n")+"\n"), &output)
-	if err := collectTailscale(context.Background(), ui, &user); err != nil {
+	if err := collectTailscale(context.Background(), ui, nil, &user); err != nil {
 		t.Fatal(err)
 	}
 	return user.Tailscale, output.String()
