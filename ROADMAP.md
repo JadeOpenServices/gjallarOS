@@ -908,9 +908,12 @@ way to root.
       service with the file diff; 3b.3 the CLI, template and status
       listing; 3b.4 the bar notice; 3b.5 the recovery exit. Done: 3b.1
       (81cac146, 68eed82a), 3b.2 (b1a07ba9), 3b.3 (d949e67c), 3b.4
-      (8415af43), 3b.5 (`gjallar-recover developer-off`; rebuilds in the
+      (8415af43; the key reaches `state.nix` ecaca469, whole tooltip
+      6a70e39d), 3b.5 (47731eb4: `gjallar-recover developer-off` runs
+      the root-only `gjallarctl system developer-off`, which passes only
+      when the next boot holds no local files, 0b1704c7; rebuilds in the
       recovery entry start with the next boot).
-- [ ] **Checkpoint 4: installer, README, migration.** New installs clone
+- [x] **Checkpoint 4: installer, README, migration.** New installs clone
       into `/etc/gjallar/system`. Existing installs: one privileged step
       re-clones the official origin at the revision the system runs,
       carries `generated/` and `user.config.json` over after a check, and
@@ -924,8 +927,10 @@ way to root.
       `sudo gjallarctl system clone --from DIR` (root, clones the running
       commit, copies the machine-local files as data, never runs git in
       DIR) in f3822087, 4.2 missing-checkout message (77525b5c), 4.4
-      README. fw13 VM test open; the live install moves after its
-      commits are on origin (Q9).
+      README. Tested on the fw13 VM (2026-10-20, 0b1704c7): missing
+      checkout message, move, clone, second clone refused, the rebuild
+      switching the pointer. The live install moves after its commits
+      are on origin (Q9).
 
 ### Editing on standalone devices
 
