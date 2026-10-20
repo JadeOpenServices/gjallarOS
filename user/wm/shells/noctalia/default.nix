@@ -426,6 +426,13 @@ in
   xdg.dataFile."noctalia/plugins/gjallar-developer-mode" = lib.mkIf hasDeveloperMode {
     source = ./plugins/developer-mode;
   };
+  # Noctalia loads plugin scripts once at start; a changed plugin restarts
+  # the bar like a changed config.toml does.
+  systemd.user.services.noctalia.Unit.X-Restart-Triggers =
+    lib.optional hasQuickKeys "${./plugins/quick-keys}"
+    ++ lib.optional hasTouchKeyboard "${./plugins/osk}"
+    ++ lib.optional hasEncryptedDisk "${./plugins/disk-protection}"
+    ++ lib.optional hasDeveloperMode "${./plugins/developer-mode}";
 
   # The developer-mode notice's click: the status in a terminal, readable
   # until Enter.
