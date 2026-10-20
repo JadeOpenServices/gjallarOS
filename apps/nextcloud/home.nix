@@ -444,10 +444,17 @@ if isinstance(wid, int) and wid > 0:
         chmod u+w "$desktop"
       fi
 
-      if [ -f "$desktop" ]; then
-        sed -i \
-          "0,/^Exec=/{s|^Exec=.*|Exec=$out/bin/nextcloud|}" \
-          "$desktop"
+      # The menu entry must start the wrapper, or enrollment is skipped.
+      if [ ! -f "$desktop" ]; then
+        echo "nextcloud: $desktop is missing" >&2
+        exit 1
+      fi
+      sed -i \
+        "0,/^Exec=/{s|^Exec=.*|Exec=$out/bin/nextcloud|}" \
+        "$desktop"
+      if ! grep -qx "Exec=$out/bin/nextcloud" "$desktop"; then
+        echo "nextcloud: no Exec line in $desktop" >&2
+        exit 1
       fi
     '';
   };
