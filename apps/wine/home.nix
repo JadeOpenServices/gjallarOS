@@ -196,9 +196,11 @@ let
       ${pkgs.util-linux}/bin/flock 9
 
       if [[ ! -f "$prefix/.gjallar-wine-initialized" ]]; then
-        ${wineInit}/bin/wine-win11-init ||
+        ${wineInit}/bin/wine-win11-init 9>&- ||
           echo "wine-win11: starting with an incomplete Wine setup" >&2
       fi
+      # Wine and its wineserver would inherit the lock and hold it.
+      exec 9>&-
     fi
 
     if [[ "$#" -gt 0 ]]; then
