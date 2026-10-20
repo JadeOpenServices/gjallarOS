@@ -162,6 +162,20 @@ func systemClone(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
+// systemCheckoutMissing names the way back when the system checkout is
+// missing or empty, so a rebuild does not stop at root's ownership check
+// with no hint.
+func systemCheckoutMissing() error {
+	if _, err := os.Lstat(filepath.Join(systemCloneDest, ".git")); err == nil || !errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	return fmt.Errorf(
+		"the checkout at %s is empty or missing; with a copy of this machine's generated/ and "+
+			"user.config.json, move it away and run: sudo gjallarctl system clone --from DIR",
+		systemCloneDest,
+	)
+}
+
 func cloneFailed(dest string, err error, stderr io.Writer) int {
 	_ = os.RemoveAll(dest)
 	fmt.Fprintf(stderr, "ERROR: %v; %s removed again, nothing changed\n", err, dest)

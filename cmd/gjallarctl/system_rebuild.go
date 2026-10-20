@@ -124,6 +124,10 @@ func startSystemRebuild(opts rebuildOptions, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "[GjallarOS] Error: %v\n", err)
 		return 2
 	}
+	if err := systemCheckoutMissing(); err != nil {
+		fmt.Fprintf(stderr, "[GjallarOS] Error: %v; nothing rebuilt\n", err)
+		return 1
+	}
 	rootArgs := append([]string{systemRebuildCommand}, args...)
 	if colors := rebuildColors(stderr); colors != "" {
 		rootArgs = append([]string{"env", noctaliaColorsEnv + "=" + colors}, rootArgs...)
@@ -158,6 +162,10 @@ func runSystem(args []string, stdout, stderr io.Writer) int {
 	if os.Geteuid() != 0 {
 		fmt.Fprintf(stderr, "ERROR: gjallarctl system %s runs as root; use rebuild\n", args[0])
 		return 2
+	}
+	if err := systemCheckoutMissing(); err != nil {
+		fmt.Fprintf(stderr, "[GjallarOS] Error: %v; nothing rebuilt\n", err)
+		return 1
 	}
 	if err := systemcheckout.CheckOwnership(systemcheckout.Path); err != nil {
 		fmt.Fprintf(stderr, "[GjallarOS] Error: %v; nothing rebuilt\n", err)

@@ -280,3 +280,20 @@ func TestSystemMoveListsWhatStaysBehind(t *testing.T) {
 		t.Fatalf("status %d: %s", status, stdout.String())
 	}
 }
+
+func TestSystemRebuildNamesMissingCheckout(t *testing.T) {
+	old := systemCloneDest
+	t.Cleanup(func() { systemCloneDest = old })
+	for _, dest := range []string{filepath.Join(t.TempDir(), "missing"), t.TempDir()} {
+		systemCloneDest = dest
+		err := systemCheckoutMissing()
+		if err == nil || !strings.Contains(err.Error(), "is empty or missing") ||
+			!strings.Contains(err.Error(), "sudo gjallarctl system clone --from DIR") {
+			t.Fatalf("%s: %v", dest, err)
+		}
+	}
+	writeTestFile(t, filepath.Join(systemCloneDest, ".git", "HEAD"), "ref: refs/heads/main\n")
+	if err := systemCheckoutMissing(); err != nil {
+		t.Fatal(err)
+	}
+}
