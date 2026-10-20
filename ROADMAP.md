@@ -902,11 +902,13 @@ way to root.
       `user.config.json` key (34ea9a04), the service itself with its
       `gjallarctl settings` front end (3.3, 887c1c5b) and the unique
       hostname check, signed export and import for the device's own users
-      (3.4a), key wipe on user removal (3.4b), and the user-side writers
-      (add-ons, USB review, Secure Boot) asking the service on a system
-      checkout, with each inner value of a change listed (3.5, e511f5cb).
-      Next: pairing and the installer opt-out (rest of 3.4). Factory reset
-      waits for a recovery mode that does one.
+      (3.4a), key wipe on user removal (3.4b), pairing two devices of one
+      person with a file each way and a code (3.4c, fbf8cc67), and the
+      user-side writers (add-ons, USB review, Secure Boot) asking the
+      service on a system checkout, with each inner value of a change
+      listed (3.5, e511f5cb).
+      Next: own keys (3.4d, `ssh-keygen -Y`) and the installer opt-out
+      (rest of 3.4). Factory reset waits for a recovery mode that does one.
 - [x] **Checkpoint 3b: developer mode.** `~/GjallarOS-local/`, the copy
       into `/etc/gjallar/developer/local`, the staged `.gjallar-local/`, notice,
       boot entry name and the recovery exit. Steps: 3b.1 the
