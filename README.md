@@ -425,9 +425,10 @@ gjallarctl system move
 It shows the commit the system runs, and lists local commits and changes in
 your checkout that the move leaves behind. Your checkout keeps them; local
 `.nix` changes go into the developer-mode folder instead (see
-`gjallarctl system apply`). The running commit must be on the official
-`main`; a system built with local changes refuses until you rebuild from a
-pushed commit. Then, as root:
+`gjallarctl system apply`). The running commit must be on an official
+release channel (`dev`, `staging` or `stable`); a system built with local
+changes refuses until you rebuild from a pushed commit. Set `releaseChannel`
+first: the new checkout follows that channel. Then, as root:
 
 ```sh
 sudo gjallarctl system clone --from ~/Documents/gjallarOS
