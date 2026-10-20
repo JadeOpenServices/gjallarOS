@@ -490,7 +490,13 @@ if isinstance(wid, int) and wid > 0:
     exec ${managedClient}/bin/nextcloud --background
   '';
 in
-lib.mkIf config.gjallar.apps.nextcloud.enable {
+lib.mkMerge [
+{
+  warnings = lib.optional (enable && !config.gjallar.apps.nextcloud.enable)
+    "nextcloudEnable is on, but \"nextcloud\" is not in apps, so the Nextcloud client is not installed. Add \"nextcloud\" to apps, or turn nextcloudEnable off.";
+}
+
+(lib.mkIf config.gjallar.apps.nextcloud.enable {
   assertions = lib.optionals enable [
     {
       assertion = host != "";
@@ -509,6 +515,7 @@ lib.mkIf config.gjallar.apps.nextcloud.enable {
 
   wayland.windowManager.hyprland.settings.windowrule = lib.optionals enable [
     "match:class ^(${loginClass})$, float on, center on, size (monitor_w*0.5) (monitor_h*0.75)"
+    "match:class ^([Nn]extcloud|com\\.nextcloud\\.desktopclient\\.nextcloud)$, focus_on_activate on"
   ];
 
 
@@ -546,4 +553,5 @@ lib.mkIf config.gjallar.apps.nextcloud.enable {
     ];
   };
 
-}
+})
+]

@@ -9,8 +9,10 @@
 let
   dolphinTheme = import ../../themes/apps/dolphin/darkly.nix { inherit pkgs; };
   dolphinNextcloudIcons = import ../../themes/apps/dolphin/nextcloud-icons.nix;
+  # Nextcloud parts only when its client is installed and configured.
+  nextcloudActive = config.gjallar.apps.nextcloud.enable && (settings.nextcloudEnable or false);
   dolphinClient =
-    if settings.nextcloudEnable or false then
+    if nextcloudActive then
       pkgs.symlinkJoin {
         name = "dolphin-openvfs";
         paths = [ pkgs.kdePackages.dolphin ];
@@ -118,17 +120,17 @@ lib.mkIf config.gjallar.apps.dolphin.enable {
   # Dolphin-specific Nextcloud availability glyphs. Unique names avoid
   # mutating Papirus or other applications' icon lookup.
   xdg.dataFile."icons/hicolor/scalable/places/${dolphinNextcloudIcons.places}.svg" =
-    lib.mkIf (settings.nextcloudEnable or false) {
+    lib.mkIf nextcloudActive {
       source = dolphinNextcloudIcons.cloudSource;
     };
 
   xdg.dataFile."icons/hicolor/scalable/emblems/${dolphinNextcloudIcons.onlineOnly}.svg" =
-    lib.mkIf (settings.nextcloudEnable or false) {
+    lib.mkIf nextcloudActive {
       source = dolphinNextcloudIcons.cloudSource;
     };
 
   xdg.dataFile."icons/hicolor/scalable/emblems/${dolphinNextcloudIcons.local}.svg" =
-    lib.mkIf (settings.nextcloudEnable or false) {
+    lib.mkIf nextcloudActive {
       source = dolphinNextcloudIcons.localSource;
     };
 
@@ -190,7 +192,7 @@ lib.mkIf config.gjallar.apps.dolphin.enable {
   # Migrate only GjallarOS' previous Nextcloud icon defaults. Preserve any
   # user-selected custom icon and every unrelated Places entry.
   home.activation.dolphinNextcloudIconMigration =
-    lib.mkIf (settings.nextcloudEnable or false) (
+    lib.mkIf nextcloudActive (
       lib.hm.dag.entryAfter [ "dolphinNextcloudPlace" ] ''
         places=${lib.escapeShellArg "${config.xdg.dataHome}/user-places.xbel"}
         nextcloud_uri="file://$HOME/Nextcloud"
