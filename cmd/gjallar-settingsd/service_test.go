@@ -361,6 +361,22 @@ func TestHostnameNotes(t *testing.T) {
 	}
 }
 
+func TestSlowBuildNote(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	change, err := f.svc.Request(ctx, ":1.10", `{"dolphinDriveUsage":true}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(change.Notes) != 1 || !strings.Contains(change.Notes[0], "can take hours") {
+		t.Errorf("notes %q", change.Notes)
+	}
+	setValue(t, f, "dolphinDriveUsage", "true")
+	if change, err = f.svc.Request(ctx, ":1.12", `{"dolphinDriveUsage":false}`); err != nil || len(change.Notes) != 0 {
+		t.Errorf("turning it off: notes %q, %v", change.Notes, err)
+	}
+}
+
 func TestHostnameCheckFailsClosed(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()

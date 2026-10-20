@@ -180,7 +180,19 @@ func (s *service) request(ctx context.Context, sender string, who caller, wanted
 	if err != nil {
 		return settings.Pending{}, fmt.Errorf("%w: %v", errRefused, err)
 	}
-	return s.keep(ctx, sender, who, change, notes)
+	return s.keep(ctx, sender, who, change, append(notes, slowBuildNotes(change)...))
+}
+
+// slowBuildNotes warns when a change makes the rebuild compile large parts
+// of the desktop on the device instead of downloading them.
+func slowBuildNotes(change settings.Change) []string {
+	for _, key := range change.Keys {
+		var on bool
+		if key.Key == "dolphinDriveUsage" && json.Unmarshal(key.New, &on) == nil && on {
+			return []string{"dolphinDriveUsage patches KIO, so KIO, Dolphin and the file dialogs are compiled on this device. The rebuild can take hours, and other changes wait until it has finished."}
+		}
+	}
+	return nil
 }
 
 // RequestLocal checks a new developer-mode folder, sent as data by the
