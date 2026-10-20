@@ -1,0 +1,33 @@
+--- a/src/openvfsfuse/openvfsfuse.cpp
++++ b/src/openvfsfuse/openvfsfuse.cpp
+@@ -607,7 +607,13 @@ static int openVFSfuse_open(const char *orig_path, struct fuse_file_info *fi)
+                 // the socketThread now talks to the client, which downloads the file for us.
+                 // Here in this thread we enter a loop and wait for results
+                 int state{1};
+-                const auto deadline = std::chrono::steady_clock::now() + 5min;
++                // The client writes the download into this file through the
++                // mount. Give up only after 5 min without a write, so a large
++                // file on a slow link is not cut off while it still arrives.
++                const auto noProgress = 5min;
++                auto deadline = std::chrono::steady_clock::now() + noProgress;
++                struct stat seen{};
++                lstat(path.c_str(), &seen);
+                 HydJob hj;
+ 
+                 while (state == 1) {
+@@ -622,7 +628,15 @@ static int openVFSfuse_open(const char *orig_path, struct fuse_file_info *fi)
+                         openvfsfuse_log(path, "open", 0, "Shutting down, dropping job %d", msgData->id);
+                         return -EIO;
+                     }
++                    struct stat now{};
++                    if (lstat(path.c_str(), &now) == 0
++                        && (now.st_size != seen.st_size || now.st_mtim.tv_sec != seen.st_mtim.tv_sec
++                            || now.st_mtim.tv_nsec != seen.st_mtim.tv_nsec)) {
++                        seen = now;
++                        deadline = std::chrono::steady_clock::now() + noProgress;
++                    }
+                     if (std::chrono::steady_clock::now() >= deadline) {
++                        openvfsfuse_log(path, "open", 0, "No download progress for job %d", msgData->id);
+                         state = 2;
+                         break;
+                     }
