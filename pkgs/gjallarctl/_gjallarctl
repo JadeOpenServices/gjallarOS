@@ -27,6 +27,7 @@ _gjallarctl_system() {
     'status:show what the running system was built from'
     'move:show what moving to the root-owned system checkout leaves behind'
     'clone:create the root-owned system checkout (root only)'
+    'developer-off:turn developer mode off and build the official system (recovery entry, root only)'
   )
   if (( CURRENT == 2 )); then
     _describe -t commands 'system command' cmds

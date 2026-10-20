@@ -298,8 +298,8 @@ let
           ;;
         developer-off)
           # The way back when local modules broke the system (ROADMAP
-          # section 14). This entry never holds them, so its settings
-          # service and rebuild are the official ones.
+          # section 14). This entry never holds them, so its gjallarctl
+          # and rebuild are the official ones.
           require_root
           [ -e /etc/gjallar/recovery ] || {
             printf '%s\n' \
@@ -311,15 +311,8 @@ let
             'This turns developer mode off and builds the official system for the next boot.' \
             'Your ~/GjallarOS-local folder is kept.'
           confirm_phrase DEVELOPER-OFF
-          if [ "$(gjallarctl settings get developerMode)" = true ]; then
-            gjallarctl settings set developerMode=false
-          else
-            # Off already, but the last rebuild may have failed and left the
-            # local build as the next boot.
-            printf '%s\n' 'Developer mode is already off; rebuilding the official system.'
-            /run/current-system/sw/bin/gjallar-system-rebuild
-          fi
-          printf '%s\n' 'PASS: the official system starts with the next boot. Restart with: systemctl reboot'
+          # It prints PASS only when the next boot holds no local files.
+          exec gjallarctl system developer-off
           ;;
         jods-execute)
           require_root
