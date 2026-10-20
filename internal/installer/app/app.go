@@ -50,6 +50,7 @@ import (
 	installerresume "github.com/JadeOpenServices/gjallarOS/internal/installer/resume"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/secureboot"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/sourcerevision"
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/systemcheckout"
 	"github.com/JadeOpenServices/gjallarOS/internal/installercheck"
 )
 
@@ -599,6 +600,11 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 		}
 	} else if err := collectInteractive(ctx, ui, root, partitionable, resolvedDevice.ModelID != "", diskcrypto.TPMAvailable(), jodsManagementBlocker(s.secureBootFirmware.Policy.Supported, diskcrypto.TPMAvailable()), hardware, choices, running, &s.user); err != nil {
 		return fail(errOut, err)
+	}
+	if !s.existing {
+		// ROADMAP section 14, checkpoint 4: a new install clones the official
+		// repository into the root-owned system checkout.
+		s.user.DotfilesDir = systemcheckout.Path
 	}
 	if err := configureWeatherLocation(ctx, ui, &s.user, out); err != nil {
 		return fail(errOut, err)
@@ -1390,8 +1396,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 				root,
 				targetDisk,
 				s.user.Hostname,
-				s.user.Username,
-				s.user.DotfilesDir,
+				sourceRevision,
 				hardware,
 				resolvedDevice,
 				opt.recovery,
@@ -1876,13 +1881,11 @@ func collectInteractive(ctx context.Context, ui prompt.UI, root string, partitio
 	if err != nil {
 		return err
 	}
-	dotfilesDefault := defaultDotfilesDir(u.Username, root)
+	// Not asked: a rerun keeps the running system's checkout, and a new
+	// install gets the system checkout once collection is done.
+	u.DotfilesDir = defaultDotfilesDir(u.Username, root)
 	if running != nil && running.DotfilesDir != "" && running.Username == u.Username {
-		dotfilesDefault = running.DotfilesDir
-	}
-	u.DotfilesDir, err = ui.Value(ctx, "Absolute dotfiles path", dotfilesDefault)
-	if err != nil {
-		return err
+		u.DotfilesDir = running.DotfilesDir
 	}
 	u.Shell, err = ui.Choice(ctx, "Login shell", a.Shell, o.Shells)
 	if err != nil {
