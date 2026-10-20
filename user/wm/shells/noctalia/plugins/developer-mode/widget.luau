@@ -15,11 +15,12 @@ function update()
   local hash = string.match(raw, '"local"%s*:%s*{.-"hash"%s*:%s*"(%x+)"')
   local tooltip
   if hash then
-    tooltip = "Developer mode is on. This system runs local Nix files ("
+    -- The bar tooltip cuts off near 90 characters.
+    tooltip = "Developer mode on: local Nix files "
       .. string.sub(hash, 1, 12)
-      .. "). Click for the status."
+      .. ". Click for status."
   else
-    tooltip = "Developer mode is on. This system runs no local files yet. Click for the status."
+    tooltip = "Developer mode on: no local files built yet. Click for status."
   end
   if tooltip == shown then
     return
