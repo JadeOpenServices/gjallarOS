@@ -46,11 +46,12 @@
       cp = "rsync -avhW --no-compress --progress";
       rm = "rm -rv";
       # The store copy from the built revision: the system checkout belongs
-      # to root, and nix refuses another user's git repository.
-      nix-python = "nix develop ${../../shells/python} -c zsh";
-      nix-lampray = "nix develop ${../../shells/lampray} -c zsh";
-      nix-invoke = "nix develop ${../../shells/invoke} -c zsh";
-      nix-comfy = "nix develop ${../../shells/comfy} -c zsh";
+      # to root, and nix refuses another user's git repository. path: makes
+      # nix read the store path as a flake, not as a derivation.
+      nix-python = "nix develop path:${../../shells/python} -c zsh";
+      nix-lampray = "nix develop path:${../../shells/lampray} -c zsh";
+      nix-invoke = "nix develop path:${../../shells/invoke} -c zsh";
+      nix-comfy = "nix develop path:${../../shells/comfy} -c zsh";
       nix-pkg-build = "nix build -f default.nix --arg pkgs 'import <nixpkgs> {}'";
       nix-pkg-shell = "nix shell -f default.nix --arg pkgs 'import <nixpkgs> {}'";
       git-clean = "git clean -xfd; git submodule foreach git clean -xfd";
