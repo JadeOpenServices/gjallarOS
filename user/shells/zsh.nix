@@ -1,5 +1,4 @@
 {
-  settings,
   config,
   pkgs,
   lib,
@@ -46,10 +45,12 @@
       mv = "mv -v";
       cp = "rsync -avhW --no-compress --progress";
       rm = "rm -rv";
-      nix-python = "nix develop ${settings.dotfilesDir}/shells/python -c zsh";
-      nix-lampray = "nix develop ${settings.dotfilesDir}/shells/lampray -c zsh";
-      nix-invoke = "nix develop ${settings.dotfilesDir}/shells/invoke -c zsh";
-      nix-comfy = "nix develop ${settings.dotfilesDir}/shells/comfy -c zsh";
+      # The store copy from the built revision: the system checkout belongs
+      # to root, and nix refuses another user's git repository.
+      nix-python = "nix develop ${../../shells/python} -c zsh";
+      nix-lampray = "nix develop ${../../shells/lampray} -c zsh";
+      nix-invoke = "nix develop ${../../shells/invoke} -c zsh";
+      nix-comfy = "nix develop ${../../shells/comfy} -c zsh";
       nix-pkg-build = "nix build -f default.nix --arg pkgs 'import <nixpkgs> {}'";
       nix-pkg-shell = "nix shell -f default.nix --arg pkgs 'import <nixpkgs> {}'";
       git-clean = "git clean -xfd; git submodule foreach git clean -xfd";
