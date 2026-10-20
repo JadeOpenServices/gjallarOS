@@ -2,9 +2,12 @@ package installercheck
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/config"
 )
 
 func TestResolveRepositoryRequiresMarkers(t *testing.T) {
@@ -149,4 +152,26 @@ func hasFinding(report Report, level Level, message string) bool {
 		}
 	}
 	return false
+}
+
+// Every field the installer writes must be in presetSchema, or the
+// preflight warns about it on each rebuild.
+func TestPresetSchemaCoversInstallerDefaults(t *testing.T) {
+	user, err := config.Defaults()
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := json.Marshal(user)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		t.Fatal(err)
+	}
+	var report Report
+	validatePresetSchema(&report, fields)
+	for _, finding := range report.Findings {
+		t.Errorf("%s", finding.Message)
+	}
 }

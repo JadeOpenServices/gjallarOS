@@ -135,7 +135,7 @@ var presetSchema = map[string]presetValueType{
 	"secureBootEnable": presetBool, "secureBootPrompt": presetBool, "firmwarePasswordLock": presetBool, "endpointManagedDevice": presetBool,
 	"jodsEndpoint": presetString, "jodsPolicySigningPublicKey": presetString,
 	"jodsRecoveryCommandSigningPublicKey": presetString, "jodsEnrollmentMode": presetString,
-	"jodsAllowInsecureTls": presetBool, "jodsDeviceClass": presetString, "jodsDesktopProfile": presetString,
+	"jodsAllowInsecureTls": presetBool, "jodsDeviceClass": presetString, "jodsDesktopProfile": presetString, "releaseChannel": presetString,
 	"autoReboot": presetBool, "runUpdateChecks": presetBool, "writeConfig": presetBool, "runRebuild": presetBool, "forceRedeploy": presetBool,
 }
 
