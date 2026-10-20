@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/config"
@@ -50,6 +51,13 @@ func tpm2AllowedForSecureBoot(secureBootEnabled bool) bool {
 // about it (e2e-target, 2026-09-29: rendered false, TPM2 never enrolled).
 func tpm2FollowsRequest(endpointManaged, persistentInstalledHost bool) bool {
 	return endpointManaged || !persistentInstalledHost
+}
+
+// installerTPM2Args checks the running system for an installed host's TPM2
+// request: its LUKS mapping, the TPM and the disk behind it. The request is
+// the Startup unlock answer (or the saved one); the check asks nothing.
+func installerTPM2Args(root, hardwarePath string, requested bool) []string {
+	return []string{"installer", "tpm2", "--repo", root, "--hardware", hardwarePath, "--requested=" + strconv.FormatBool(requested)}
 }
 
 // noSecureBootPolicyNotice tells the user why GjallarOS leaves Secure Boot

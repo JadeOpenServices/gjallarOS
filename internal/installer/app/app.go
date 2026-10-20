@@ -1037,7 +1037,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 		) {
 			s.render.LUKSTPM2Enable = s.user.LUKSTPM2Enable
 		} else {
-			tpmOut, err := controlOutput(ctx, s.control, errOut, "installer", "tpm2", "--repo", root, "--hardware", hardwarePath)
+			tpmOut, err := controlOutput(ctx, s.control, errOut, installerTPM2Args(root, hardwarePath, s.user.LUKSTPM2Enable)...)
 			if err != nil {
 				return fail(errOut, err)
 			}

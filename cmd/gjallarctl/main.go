@@ -268,27 +268,12 @@ func runBootstrap(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-func ttyConfirm(tty *os.File, reader *bufio.Reader, prompt string) (bool, bool, error) {
-	fmt.Fprintf(tty, "%s [y/N/q] ", prompt)
-	line, err := reader.ReadString('\n')
-	if err != nil {
-		return false, false, err
-	}
-	switch strings.ToLower(strings.TrimSpace(line)) {
-	case "y", "yes":
-		return true, false, nil
-	case "q", "quit":
-		return false, true, nil
-	default:
-		return false, false, nil
-	}
-}
-
 func runTPM2(args []string, stdout, stderr io.Writer) int {
 	f := flag.NewFlagSet("gjallarctl installer tpm2", flag.ContinueOnError)
 	f.SetOutput(stderr)
 	repo := f.String("repo", "", "repository path")
 	hardware := f.String("hardware", "", "hardware configuration")
+	requested := f.Bool("requested", false, "the installer answers asked for TPM2 unlock")
 	if err := f.Parse(args); err != nil || f.NArg() != 0 {
 		return 2
 	}
@@ -296,6 +281,13 @@ func runTPM2(args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		fmt.Fprintf(stderr, "ERROR: %v\n", err)
 		return 2
+	}
+	// The Startup unlock answer is the request. A second question here
+	// defaulted to no, so Enter on a rerun dropped TPM2 unlock the running
+	// system had (e2e-fw13, 2026-10-20).
+	if !*requested {
+		fmt.Fprintln(stdout, "luks_tpm2_enable=false")
+		return 0
 	}
 	mappingInfo, err := diskcrypto.MappingDetails(resolved)
 	if err != nil {
@@ -307,7 +299,7 @@ func runTPM2(args []string, stdout, stderr io.Writer) int {
 		return 0
 	}
 	if !diskcrypto.TPMAvailable() {
-		fmt.Fprintln(stdout, "luks_tpm2_enable=false\n[NOTE] No TPM2 device detected; keeping passphrase unlock.")
+		fmt.Fprintln(stdout, "luks_tpm2_enable=false\n[NOTE] No TPM2 device detected; startup keeps asking for the recovery key or passphrase.")
 		return 0
 	}
 	device, err := diskcrypto.DetectDevice(context.Background())
@@ -322,18 +314,6 @@ func runTPM2(args []string, stdout, stderr io.Writer) int {
 	if err := diskcrypto.VerifyDeviceIdentity(mappingInfo.Device, device); err != nil {
 		fmt.Fprintf(stderr, "ERROR: %v\n", err)
 		return 1
-	}
-	tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
-	if err != nil {
-		fmt.Fprintf(stderr, "ERROR: TPM2 enrollment requires a terminal: %v\n", err)
-		return 1
-	}
-	defer tty.Close()
-	reader := bufio.NewReader(tty)
-	yes, _, err := ttyConfirm(tty, reader, "Prepare TPM2 automatic unlock after GjallarOS Secure Boot and measured boot are verified? The passphrase remains as recovery.")
-	if err != nil || !yes {
-		fmt.Fprintln(stdout, "luks_tpm2_enable=false")
-		return 0
 	}
 	if err := diskcrypto.EnableTPMConfig(resolved); err != nil {
 		fmt.Fprintf(stderr, "ERROR: TPM2 preparation failed: %v\n", err)
