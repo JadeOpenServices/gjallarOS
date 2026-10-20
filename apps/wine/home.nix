@@ -62,7 +62,7 @@ let
     fi
 
     step=0
-    steps=13
+    steps=12
     say() {
       echo "wine-win11 setup: $1"
       echo "wine-win11 setup: $1" >&3 || true
@@ -98,6 +98,14 @@ let
 
     step=1
     say "Creating the Wine environment"
+    # Earlier versions ran the winetricks comctl32 verb. It sets comctl32 5.80
+    # to native and deletes the common-controls 6 manifests, so the Visual C++
+    # and .NET installers cannot open their window (0x583). Without the
+    # override, wineboot -u puts the manifests back.
+    if grep -q '^"\*comctl32"="native,builtin"' "$WINEPREFIX/user.reg" 2>/dev/null; then
+      wine reg delete 'HKCU\Software\Wine\DllOverrides' /v '*comctl32' /f ||
+        failed+=("reg *comctl32")
+    fi
     wineboot -u || failed+=("wineboot")
     wineserver -w || true
 
@@ -127,7 +135,6 @@ let
 
     downloads=(
       "corefonts|Core fonts"
-      "comctl32|Common controls"
       "vcrun2022|Visual C++ 2015-2022 runtime"
       "${vkd3dProtonVerb}/share/gjallar/winetricks/vkd3d_proton301.verb|vkd3d-proton 3.0.1 (Direct3D 12)"
       "d3dcompiler_43|Direct3D shader compiler 43"
