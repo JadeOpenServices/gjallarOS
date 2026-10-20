@@ -113,7 +113,7 @@ type Settings struct {
 	USBTrustLapseDays                                                                       int
 	Name, Email, GitHubUsername, DotfilesDir                                                string
 	RootPasswordFile, UserPasswordFile                                                      string
-	DebugFunctions                                                                          bool
+	DebugFunctions, DeveloperMode                                                           bool
 	Shell                                                                                   string
 	Editors, Browsers                                                                       []string
 	PreferredEditor, PreferredBrowser                                                       string
@@ -176,6 +176,7 @@ func FromUser(user config.User) Settings {
 		GitHubUsername:                      user.GitHubUsername,
 		DotfilesDir:                         user.DotfilesDir,
 		DebugFunctions:                      user.DebugFunctions,
+		DeveloperMode:                       user.DeveloperMode,
 		Shell:                               user.Shell,
 		Editors:                             user.Editors,
 		Browsers:                            user.Browsers,
@@ -448,6 +449,7 @@ func Render(s Settings) []byte {
 	str("rootPasswordFile", s.RootPasswordFile)
 	str("userPasswordFile", s.UserPasswordFile)
 	boolean("debugFunctions", s.DebugFunctions)
+	boolean("developerMode", s.DeveloperMode)
 	str("shell", s.Shell)
 	list("editors", s.Editors)
 	list("browsers", s.Browsers)

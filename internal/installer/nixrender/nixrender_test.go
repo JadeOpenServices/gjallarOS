@@ -114,6 +114,15 @@ func TestRenderIncludesOrientationSensorSetting(t *testing.T) {
 	}
 }
 
+// The bar notice reads developerMode from the generated state.
+func TestRenderIncludesDeveloperMode(t *testing.T) {
+	rendered := string(Render(FromUser(config.User{DeveloperMode: true})))
+
+	if !strings.Contains(rendered, "developerMode = true;") {
+		t.Fatalf("developer mode missing from render: %s", rendered)
+	}
+}
+
 func TestRenderThemeDetailsUsesRepositoryThemeDirectory(t *testing.T) {
 	got := string(Render(Settings{Theme: "noctalia"}))
 	want := `themeDetails = import (./. + "/../themes/${theme}.nix") {inherit pkgs;};`
