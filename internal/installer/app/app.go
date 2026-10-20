@@ -51,6 +51,7 @@ import (
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/secureboot"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/sourcerevision"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/systemcheckout"
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/targetdisk"
 	"github.com/JadeOpenServices/gjallarOS/internal/installercheck"
 )
 
@@ -590,15 +591,28 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 		return fail(errOut, err)
 	}
 	partitionable := !persistentInstalledHost || rootEncrypted(ctx, "/")
+	// A fresh install picks its disk before the questions, so USB blocking
+	// knows whether the system will run from a USB drive (wiki 752 Q11).
+	freshTarget := ""
+	if !persistentInstalledHost && !opt.noRebuild && (!s.preset || s.user.RunRebuild || opt.forceRedeploy) {
+		freshTarget, err = selectFreshTargetDisk(ctx, ui, out, opt.targetDisk)
+		if err != nil {
+			return fail(errOut, fmt.Errorf("select fresh installation target: %w", err))
+		}
+	}
+	usbSystemDisk := systemDiskOnUSB(ctx, persistentInstalledHost, root, freshTarget)
 	if s.preset {
 		normalizePreset(&s.user, root)
 		if s.user.USBGuardEnable && resolvedDevice.ModelID == "" {
 			return fail(errOut, errors.New("usbguardEnable needs an ODDC model, and ODDC has none for this machine; set usbguardEnable to false"))
 		}
+		if s.user.USBTrustEnforce && usbSystemDisk != "" {
+			return fail(errOut, fmt.Errorf("usbTrustEnforce is refused: %s Set usbTrustEnforce to false", usbSystemDisk))
+		}
 		if s.user.USBGuardEnable && s.user.USBTrustTPMHandle == "" && diskcrypto.TPMAvailable() {
 			s.user.USBTrustTPMHandle = config.DefaultUSBTrustTPMHandle
 		}
-	} else if err := collectInteractive(ctx, ui, root, partitionable, resolvedDevice.ModelID != "", diskcrypto.TPMAvailable(), jodsManagementBlocker(s.secureBootFirmware.Policy.Supported, diskcrypto.TPMAvailable()), hardware, choices, running, &s.user); err != nil {
+	} else if err := collectInteractive(ctx, ui, root, partitionable, usbSystemDisk, resolvedDevice.ModelID != "", diskcrypto.TPMAvailable(), jodsManagementBlocker(s.secureBootFirmware.Policy.Supported, diskcrypto.TPMAvailable()), hardware, choices, running, &s.user); err != nil {
 		return fail(errOut, err)
 	}
 	if !s.existing {
@@ -1374,20 +1388,28 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 				return fail(errOut, err)
 			}
 		} else {
-			targetDisk, err := selectFreshTargetDisk(
-				ctx,
-				ui,
-				out,
-				opt.targetDisk,
-			)
-			if err != nil {
-				return fail(
-					errOut,
-					fmt.Errorf(
-						"select fresh installation target: %w",
-						err,
-					),
+			targetDisk := freshTarget
+			if targetDisk == "" {
+				targetDisk, err = selectFreshTargetDisk(
+					ctx,
+					ui,
+					out,
+					opt.targetDisk,
 				)
+				if err != nil {
+					return fail(
+						errOut,
+						fmt.Errorf(
+							"select fresh installation target: %w",
+							err,
+						),
+					)
+				}
+			}
+			if s.user.USBTrustEnforce {
+				if reason := systemDiskOnUSB(ctx, false, root, targetDisk); reason != "" {
+					return fail(errOut, fmt.Errorf("USB blocking is on, but %s Nothing was changed; run the installer again and leave USB blocking off", reason))
+				}
 			}
 
 			result, err := runFreshBareMetal(
@@ -1765,7 +1787,7 @@ func containsValue(values []string, want string) bool {
 // machine or the checkout; the prompts show made-up examples instead. On a
 // rerun, running holds the installed system's own answers (runningAnswers),
 // and every question offers them; nil on a new install.
-func collectInteractive(ctx context.Context, ui prompt.UI, root string, partitionable, modelSelected, tpm2 bool, managedBlocker string, hardware discovery.Hardware, o discovery.Options, running *config.User, u *config.User) error {
+func collectInteractive(ctx context.Context, ui prompt.UI, root string, partitionable bool, usbSystemDisk string, modelSelected, tpm2 bool, managedBlocker string, hardware discovery.Hardware, o discovery.Options, running *config.User, u *config.User) error {
 	var err error
 	a := interviewDefaults(running, o)
 	if running != nil {
@@ -1867,7 +1889,7 @@ func collectInteractive(ctx context.Context, ui prompt.UI, root string, partitio
 	if err != nil {
 		return err
 	}
-	if err := collectUSBTrust(ctx, ui, modelSelected, partitionable, tpm2, running, u); err != nil {
+	if err := collectUSBTrust(ctx, ui, modelSelected, partitionable, tpm2, usbSystemDisk, running, u); err != nil {
 		return err
 	}
 	u.Name, err = askPersonal(ctx, ui, "Full name", a.Name, "Alex Example", true)
@@ -2750,6 +2772,36 @@ func mountSourceDevice(source string) string {
 	return source
 }
 
+// diskUSBAttached is targetdisk.USBAttached; tests replace it.
+var diskUSBAttached = targetdisk.USBAttached
+
+// systemDiskOnUSB says why USB blocking must stay off because of the disk the
+// system runs from, or returns "" when that disk is known and not on USB.
+// Blocking could cut off a USB system disk, so a disk it cannot check counts
+// as USB. An installed host runs from the disk under root; a fresh install
+// from freshTarget.
+func systemDiskOnUSB(ctx context.Context, persistentInstalledHost bool, root, freshTarget string) string {
+	disk := strings.TrimSpace(freshTarget)
+	if persistentInstalledHost {
+		mounted, err := exec.CommandContext(ctx, "findmnt", "-nvro", "SOURCE", "--target", root).Output()
+		if err != nil {
+			return fmt.Sprintf("the installer could not find the system disk (%v).", err)
+		}
+		disk = mountSourceDevice(string(mounted))
+	}
+	if disk == "" {
+		return "the installer does not know which disk the system will run from."
+	}
+	usb, err := diskUSBAttached(ctx, disk)
+	switch {
+	case err != nil:
+		return fmt.Sprintf("the installer could not check whether the system disk is a USB drive (%v).", err)
+	case usb:
+		return fmt.Sprintf("the system disk (%s) is a USB drive, and blocking could cut off the disk the system runs from.", disk)
+	}
+	return ""
+}
+
 // rootEncrypted reports whether mountpoint sits on a device-mapper (LUKS)
 // mapping, the first thing discoverInstalledRecoveryTopology requires.
 func rootEncrypted(ctx context.Context, mountpoint string) bool {
@@ -2788,9 +2840,10 @@ func jodsManagementBlocker(secureBootSupported, tpm2 bool) string {
 // system refuses USB trust without one, since the model names the internal
 // devices that must stay trusted. Blocking is offered only with TPM2 (the
 // approved-device list is signed by a TPM key the system creates on first
-// boot) and an encrypted root (turning blocking off asks for the disk
-// passphrase).
-func collectUSBTrust(ctx context.Context, ui prompt.UI, modelSelected, encryptedRoot, tpm2 bool, running, u *config.User) error {
+// boot), an encrypted root (turning blocking off asks for the disk
+// passphrase) and a system disk that is not on USB (usbSystemDisk says why
+// not, see systemDiskOnUSB).
+func collectUSBTrust(ctx context.Context, ui prompt.UI, modelSelected, encryptedRoot, tpm2 bool, usbSystemDisk string, running, u *config.User) error {
 	was := config.User{}
 	if running != nil {
 		was = *running
@@ -2817,7 +2870,9 @@ func collectUSBTrust(ctx context.Context, ui prompt.UI, modelSelected, encrypted
 	if u.USBTrustTPMHandle == "" {
 		u.USBTrustTPMHandle = config.DefaultUSBTrustTPMHandle
 	}
-	if !encryptedRoot {
+	if usbSystemDisk != "" {
+		fmt.Fprintf(ui.Out, "USB blocking stays off: %s\n", usbSystemDisk)
+	} else if !encryptedRoot {
 		fmt.Fprintln(ui.Out, "USB blocking stays off: turning it off again needs the disk passphrase, and this root is not encrypted.")
 	} else {
 		fmt.Fprintln(ui.Out, "With blocking on, only built-in devices and devices you approve work.")

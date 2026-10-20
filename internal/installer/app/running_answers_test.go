@@ -65,7 +65,7 @@ func TestRerunInterviewOffersRunningAnswers(t *testing.T) {
 
 	var output bytes.Buffer
 	ui := prompt.New(strings.NewReader(strings.Repeat("\n", 200)), &output)
-	if err := collectInteractive(context.Background(), ui, "/home/alex/gjallarOS", true, true, true, "SYNTHETIC: no JODS in this test", discovery.Hardware{}, o, &running, &u); err != nil {
+	if err := collectInteractive(context.Background(), ui, "/home/alex/gjallarOS", true, "", true, true, "SYNTHETIC: no JODS in this test", discovery.Hardware{}, o, &running, &u); err != nil {
 		t.Fatalf("%v\n%s", err, output.String())
 	}
 

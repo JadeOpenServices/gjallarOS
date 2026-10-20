@@ -398,7 +398,7 @@ func TestCollectRecoverySkipsPartitionWithoutSecureBoot(t *testing.T) {
 func TestCollectUSBTrustSkippedWithoutODDCModel(t *testing.T) {
 	var output bytes.Buffer
 	u := config.User{USBGuardEnable: true, USBTrustEnforce: true, USBTrustTPMHandle: config.DefaultUSBTrustTPMHandle}
-	if err := collectUSBTrust(context.Background(), prompt.New(strings.NewReader("yes\nyes\n"), &output), false, true, true, nil, &u); err != nil {
+	if err := collectUSBTrust(context.Background(), prompt.New(strings.NewReader("yes\nyes\n"), &output), false, true, true, "", nil, &u); err != nil {
 		t.Fatal(err)
 	}
 	if u.USBGuardEnable || u.USBTrustEnforce || u.USBTrustTPMHandle != "" || strings.Contains(output.String(), "Enable USB trust review") {
@@ -427,7 +427,7 @@ func TestCollectUSBTrust(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			var output bytes.Buffer
 			u := config.User{}
-			if err := collectUSBTrust(context.Background(), prompt.New(strings.NewReader(test.input), &output), true, test.encryptedRoot, test.tpm2, nil, &u); err != nil {
+			if err := collectUSBTrust(context.Background(), prompt.New(strings.NewReader(test.input), &output), true, test.encryptedRoot, test.tpm2, "", nil, &u); err != nil {
 				t.Fatal(err)
 			}
 			if u.USBGuardEnable != test.wantReview || u.USBTrustEnforce != test.wantEnforce || u.USBTrustTPMHandle != test.wantHandle {
@@ -435,6 +435,45 @@ func TestCollectUSBTrust(t *testing.T) {
 			}
 			if strings.Contains(output.String(), "Block unknown USB devices") != test.wantBlockQuestion {
 				t.Fatalf("block question shown=%t output:\n%s", !test.wantBlockQuestion, output.String())
+			}
+		})
+	}
+}
+
+func TestCollectUSBTrustUSBSystemDisk(t *testing.T) {
+	var output bytes.Buffer
+	u := config.User{}
+	running := config.User{USBTrustEnforce: true}
+	reason := "the system disk (/dev/sda) is a USB drive, and blocking could cut off the disk the system runs from."
+	if err := collectUSBTrust(context.Background(), prompt.New(strings.NewReader("yes\n\n"), &output), true, true, true, reason, &running, &u); err != nil {
+		t.Fatal(err)
+	}
+	if !u.USBGuardEnable || u.USBTrustEnforce || u.USBTrustTPMHandle != config.DefaultUSBTrustTPMHandle {
+		t.Fatalf("review=%t enforce=%t handle=%q output:\n%s", u.USBGuardEnable, u.USBTrustEnforce, u.USBTrustTPMHandle, output.String())
+	}
+	if strings.Contains(output.String(), "Block unknown USB devices") || !strings.Contains(output.String(), "USB blocking stays off: "+reason) {
+		t.Fatalf("blocking was offered or the reason is missing; output:\n%s", output.String())
+	}
+}
+
+func TestSystemDiskOnUSB(t *testing.T) {
+	defer func(old func(context.Context, string) (bool, error)) { diskUSBAttached = old }(diskUSBAttached)
+	for _, test := range []struct {
+		name, target string
+		usb          bool
+		err          error
+		wantReason   string
+	}{
+		{name: "internal disk", target: "/dev/nvme0n1"},
+		{name: "usb disk", target: "/dev/sda", usb: true, wantReason: "(/dev/sda) is a USB drive"},
+		{name: "lsblk fails: treated as USB", target: "/dev/sda", err: fmt.Errorf("SYNTHETIC lsblk failure"), wantReason: "could not check"},
+		{name: "no disk known", wantReason: "does not know which disk"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			diskUSBAttached = func(context.Context, string) (bool, error) { return test.usb, test.err }
+			got := systemDiskOnUSB(context.Background(), false, "/mnt", test.target)
+			if (test.wantReason == "") != (got == "") || !strings.Contains(got, test.wantReason) {
+				t.Fatalf("reason = %q, want it to contain %q", got, test.wantReason)
 			}
 		})
 	}
@@ -456,7 +495,7 @@ func TestCollectUSBTrustLapse(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			var output bytes.Buffer
 			u := config.User{USBTrustLapseDays: 9}
-			if err := collectUSBTrust(context.Background(), prompt.New(strings.NewReader(test.input), &output), true, true, test.tpm2, nil, &u); err != nil {
+			if err := collectUSBTrust(context.Background(), prompt.New(strings.NewReader(test.input), &output), true, true, test.tpm2, "", nil, &u); err != nil {
 				t.Fatal(err)
 			}
 			if u.USBTrustLapseDays != test.want {
