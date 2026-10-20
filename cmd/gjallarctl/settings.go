@@ -399,11 +399,9 @@ func readSettingsFile(path string) ([]byte, error) {
 
 func printKeyChanges(stdout io.Writer, change settings.Change) {
 	for _, key := range change.Keys {
-		old := "(not set)"
-		if key.Old != nil {
-			old = settings.Shown(key.Old, settings.MaxShownValue)
+		for _, line := range key.Lines() {
+			fmt.Fprintf(stdout, "  %s\n", line)
 		}
-		fmt.Fprintf(stdout, "  %s: %s -> %s\n", key.Key, old, settings.Shown(key.New, settings.MaxShownValue))
 	}
 }
 

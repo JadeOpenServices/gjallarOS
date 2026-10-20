@@ -2,6 +2,7 @@ package settings
 
 import (
 	"encoding/json"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -199,5 +200,28 @@ func TestMessageShowsHiddenCharacters(t *testing.T) {
 	}
 	if change.KeyNames() != "hostname,aiEndpoint" {
 		t.Fatalf("key names = %q", change.KeyNames())
+	}
+}
+
+func TestLinesShowWhatChangesInsideLongValues(t *testing.T) {
+	long := strings.Repeat("x", 200)
+	key := KeyChange{
+		Key: "firefoxAddons",
+		Old: json.RawMessage(`{"comfort":{"note":"` + long + `"},"passwords":{"enable":false,"addons":{"passbolt":"off"}},"list":[1,2]}`),
+		New: json.RawMessage(`{"comfort":{"note":"` + long + `"},"passwords":{"enable":true,"addons":{"passbolt":"on"}},"list":[1,3,4],"new\u202e":1}`),
+	}
+	got := key.Lines()
+	want := []string{
+		"firefoxAddons.list[1]: 2 -> 3",
+		"firefoxAddons.list[2]: (not set) -> 4",
+		"firefoxAddons.new\\u202e: (not set) -> 1",
+		"firefoxAddons.passwords.addons.passbolt: \"off\" -> \"on\"",
+		"firefoxAddons.passwords.enable: false -> true",
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("lines = %q, want %q", got, want)
+	}
+	if m := (Change{Keys: []KeyChange{key}}).Message(); strings.Contains(m, long) || !strings.Contains(m, "passbolt") {
+		t.Fatalf("message %q", m)
 	}
 }

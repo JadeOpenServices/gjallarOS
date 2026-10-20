@@ -225,13 +225,67 @@ func (c Change) Message() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Change %d GjallarOS setting(s) (%s):", len(c.Keys), c.Tier)
 	for _, key := range c.Keys {
-		old := "(not set)"
-		if key.Old != nil {
-			old = Shown(key.Old, MaxShownValue)
+		for _, line := range key.Lines() {
+			fmt.Fprintf(&b, "\n%s", line)
 		}
-		fmt.Fprintf(&b, "\n%s: %s -> %s", key.Key, old, Shown(key.New, MaxShownValue))
 	}
 	return b.String()
+}
+
+// Lines shows a key's change as "path: old -> new", one line per value
+// that differs. Objects and lists are followed down to what changed, so a
+// long value cut at MaxShownValue cannot hide the part that differs behind
+// the same first characters on both sides.
+func (k KeyChange) Lines() []string {
+	var lines []string
+	shownLines(Shown(json.RawMessage(k.Key), 0), k.Old, k.New, &lines)
+	return lines
+}
+
+func shownLines(path string, old, new json.RawMessage, lines *[]string) {
+	if bytes.Equal(old, new) {
+		return
+	}
+	var oldFields, newFields map[string]json.RawMessage
+	if json.Unmarshal(old, &oldFields) == nil && json.Unmarshal(new, &newFields) == nil &&
+		oldFields != nil && newFields != nil {
+		names := make([]string, 0, len(oldFields)+len(newFields))
+		for name := range oldFields {
+			names = append(names, name)
+		}
+		for name := range newFields {
+			if _, ok := oldFields[name]; !ok {
+				names = append(names, name)
+			}
+		}
+		slices.Sort(names)
+		for _, name := range names {
+			shownLines(path+"."+Shown(json.RawMessage(name), 0), oldFields[name], newFields[name], lines)
+		}
+		return
+	}
+	var oldItems, newItems []json.RawMessage
+	if json.Unmarshal(old, &oldItems) == nil && json.Unmarshal(new, &newItems) == nil &&
+		oldItems != nil && newItems != nil {
+		for i := range max(len(oldItems), len(newItems)) {
+			var o, n json.RawMessage
+			if i < len(oldItems) {
+				o = oldItems[i]
+			}
+			if i < len(newItems) {
+				n = newItems[i]
+			}
+			shownLines(fmt.Sprintf("%s[%d]", path, i), o, n, lines)
+		}
+		return
+	}
+	shown := func(v json.RawMessage) string {
+		if v == nil {
+			return "(not set)"
+		}
+		return Shown(v, MaxShownValue)
+	}
+	*lines = append(*lines, fmt.Sprintf("%s: %s -> %s", path, shown(old), shown(new)))
 }
 
 // KeyNames lists the keys of the change, for polkit rules.
