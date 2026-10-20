@@ -1043,9 +1043,12 @@ func runAI(args []string, stdout, stderr io.Writer) int {
 	if len(args) > 0 && args[0] == "set-token" {
 		return runAISetToken(args[1:], stdout, stderr)
 	}
+	if len(args) > 0 && args[0] == "enable" {
+		return runAIEnable(args[1:], stdout, stderr)
+	}
 
 	if len(args) == 0 {
-		fmt.Fprintln(stderr, "Usage: gjallarctl ai {profile|tool|approve|research-serve|set-token}")
+		fmt.Fprintln(stderr, "Usage: gjallarctl ai {enable|profile|tool|approve|research-serve|set-token}")
 		return 2
 	}
 	if args[0] == "tool" {
@@ -2023,6 +2026,9 @@ func rebuildCheckout(repo string, opts rebuildOptions, system bool, stdout, stde
 	settingsPath := filepath.Join(repo, "generated", "state.nix")
 	if err := nixrender.SyncUserIntent(settingsPath, userConfig); err != nil {
 		fmt.Fprintf(stderr, "[GjallarOS] Error: sync routed user intent: %v\n", err)
+		return 1
+	}
+	if !syncLocalAIModel(settingsPath, userConfig, stdout, stderr) {
 		return 1
 	}
 

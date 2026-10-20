@@ -116,6 +116,9 @@ first under memory pressure) so a model load cannot take Hyprland down. Below
 AI, and local AI then runs only a model you name. From 8 GiB it picks a 7b
 model, from 24 GiB a 14b one, and with 32 GiB plus a 12 GiB graphics card a
 30b one.
+To turn local AI on after the install, run `gjallarctl ai enable`; the
+rebuild then picks the model the same way. A changed `overrideModelWith`
+takes effect with the next rebuild too.
 
 Instead of a local model, AI can use a central server: set `aiEndpoint`
 (`https://host[:port]` only), `aiRemoteModel` and `aiRemoteContextTokens`.

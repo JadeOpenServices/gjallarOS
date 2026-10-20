@@ -1423,7 +1423,7 @@ lib.mkIf config.gjallar.apps.ai.enable (
         }
         {
           assertion = remote || baseModel != "";
-          message = "Local AI needs aiModel; the installer leaves it empty when the ai app was off or no model fit this machine's RAM. Rerun the installer, set aiEndpoint, or turn the ai app off.";
+          message = "Local AI needs aiModel; gjallarctl rebuild picks it for this machine, a bare nixos-rebuild does not. Rebuild with gjallarctl, set aiEndpoint, or turn the ai app off.";
         }
       ];
 
