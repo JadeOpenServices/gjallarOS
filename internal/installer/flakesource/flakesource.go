@@ -9,6 +9,7 @@
 package flakesource
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"io/fs"
@@ -63,9 +64,31 @@ func (s Source) Close() error {
 	return os.RemoveAll(filepath.Dir(s.Dir))
 }
 
+// BuildSource is what a rebuild knows about the source it builds: Revision
+// is the checkout's HEAD commit (with -dirty when tracked files differ), ODDC
+// the oddc commit the build uses and ODDCPinned the one flake.lock pins.
+// The system records them; they differ only under an oddc override.
+type BuildSource struct {
+	Revision   string `json:"revision,omitempty"`
+	ODDC       string `json:"oddc,omitempty"`
+	ODDCPinned string `json:"oddcPinned,omitempty"`
+}
+
+type buildContext struct {
+	SchemaVersion int          `json:"schemaVersion"`
+	Entrypoint    string       `json:"entrypoint"`
+	Source        *BuildSource `json:"source,omitempty"`
+}
+
 // Stage copies repo (which must contain flake.nix) into a new temporary
 // directory under tmpRoot ("" means os.TempDir) and returns it.
 func Stage(repo, tmpRoot string) (Source, error) {
+	return StageSource(repo, tmpRoot, nil)
+}
+
+// StageSource is Stage that also records facts about the source in the build
+// context; nil records none.
+func StageSource(repo, tmpRoot string, facts *BuildSource) (Source, error) {
 	root, err := filepath.Abs(repo)
 	if err != nil {
 		return Source{}, fmt.Errorf("resolve repository: %w", err)
@@ -88,7 +111,12 @@ func Stage(repo, tmpRoot string) (Source, error) {
 	}
 	// Never reuse a checkout marker (including symlinks); create it only in the
 	// disposable source, after staging has succeeded.
-	if err := os.WriteFile(filepath.Join(source.Dir, BuildContextName), []byte("{\"schemaVersion\":1,\"entrypoint\":\"gjallarctl\"}\n"), 0o600); err != nil {
+	data, err := json.Marshal(buildContext{SchemaVersion: 1, Entrypoint: "gjallarctl", Source: facts})
+	if err != nil {
+		_ = source.Close()
+		return Source{}, fmt.Errorf("write build context: %w", err)
+	}
+	if err := os.WriteFile(filepath.Join(source.Dir, BuildContextName), append(data, '\n'), 0o600); err != nil {
 		_ = source.Close()
 		return Source{}, fmt.Errorf("write build context: %w", err)
 	}

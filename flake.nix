@@ -69,6 +69,12 @@
           "nar:${self.narHash}"
         else
           throw "GjallarOS source provenance is unavailable";
+      # gjallarctl writes this into the staged source it builds.
+      buildContext =
+        if builtins.pathExists (self.outPath + "/.gjallar-build-context.json") then
+          builtins.fromJSON (builtins.readFile (self.outPath + "/.gjallar-build-context.json"))
+        else
+          null;
 
       overlays = [
         inputs.nur.overlays.default
@@ -272,13 +278,7 @@
 
         ${settings.hostname} = nixpkgs.lib.nixosSystem {
           modules = [
-            (import ./system/security/build-entrypoint.nix {
-              buildContext =
-                if builtins.pathExists (self.outPath + "/.gjallar-build-context.json") then
-                  builtins.fromJSON (builtins.readFile (self.outPath + "/.gjallar-build-context.json"))
-                else
-                  null;
-            })
+            (import ./system/security/build-entrypoint.nix { inherit buildContext; })
             ./system/security/secure-boot
             inputs.noctalia-greeter.nixosModules.default
             inputs.stylix.nixosModules.stylix
@@ -336,6 +336,7 @@
               sourceRevision
               installState
               ;
+            buildSource = if builtins.isAttrs buildContext then buildContext.source or { } else { };
           };
         };
       };

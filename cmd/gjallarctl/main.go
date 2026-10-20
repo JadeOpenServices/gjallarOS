@@ -52,6 +52,7 @@ import (
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/hardwareconfig"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/localgit"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/nixrender"
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/oddc"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/policy"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/release"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/secrets"
@@ -1809,7 +1810,7 @@ func printUsage(out io.Writer) {
 	fmt.Fprintln(out, "       gjallarctl addons {list|set|pin|update} [--repo PATH]")
 	fmt.Fprintln(out, "       gjallarctl settings {list|get|set|pending|apply|cancel}")
 	fmt.Fprintln(out, "       gjallarctl secure-boot {status|setup|update-dbx} [--repo PATH]")
-	fmt.Fprintln(out, "       gjallarctl security notice")
+	fmt.Fprintln(out, "       gjallarctl security notice|oddc-notice")
 	fmt.Fprintln(out, "       gjallarctl hyprland-render-gpu")
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "Safe GjallarOS maintenance commands. Rebuild invokes sudo explicitly.")
@@ -1966,10 +1967,13 @@ func rebuildCheckout(repo string, opts rebuildOptions, system bool, stdout, stde
 
 	// The system checkout must match a reviewed commit, so it is checked,
 	// not rewritten.
+	revision := ""
 	if system {
-		if status := checkSystemSource(repo, stdout, stderr); status != 0 {
+		checked, status := inspectSystemSource(repo, stdout, stderr)
+		if status != 0 {
 			return status
 		}
+		revision = checked.Revision
 	} else if _, err := repojson.CanonicalizeChangedTracked(
 		context.Background(),
 		repo,
@@ -2054,6 +2058,11 @@ func rebuildCheckout(repo string, opts rebuildOptions, system bool, stdout, stde
 			return 2
 		}
 		fmt.Fprintf(stdout, "[GjallarOS] oddc override %s is on an official ODDC branch\n", overrideRev[:12])
+	}
+	lockedODDC, err := oddc.LockedRevision(repo)
+	if err != nil {
+		fmt.Fprintf(stderr, "[GjallarOS] Error: %v\n", err)
+		return 1
 	}
 	var before, pinned string
 	if overrideRev != "" {
@@ -2151,7 +2160,15 @@ func rebuildCheckout(repo string, opts rebuildOptions, system bool, stdout, stde
 	colors := rebuildColors(stderr)
 	// Evaluate a staged copy: path: on the checkout copies .git (gigabytes of
 	// history) and ignored scratch such as .vm into the store on every rebuild.
-	source, err := flakesource.Stage(repo, "")
+	if !system {
+		revision = checkoutRevision(repo)
+	}
+	facts := &flakesource.BuildSource{Revision: revision, ODDC: lockedODDC, ODDCPinned: lockedODDC}
+	if overrideRev != "" {
+		facts.ODDC = overrideRev
+		fmt.Fprintf(stdout, "[GjallarOS] oddc %s is a commit, not a release; a plain rebuild returns to %s\n", overrideRev[:12], lockedODDC[:12])
+	}
+	source, err := flakesource.StageSource(repo, "", facts)
 	if err != nil {
 		fmt.Fprintf(stderr, "ERROR: %v\n", err)
 		return 1
@@ -2371,13 +2388,32 @@ Apply the GjallarOS configuration in the system checkout.
 
 Arguments after -- go to nixos-rebuild. --override-input oddc must name a
 commit (github:JadeOpenServices/oddc/<commit>); the ODDC answer for this
-machine is fetched at that commit too.
+machine is fetched at that commit too. Such a commit is not a release, so
+a notice comes at every login until a plain rebuild returns to the pin.
 
 When /etc/gjallar/system is the system checkout, root builds it as it is
 on the official origin: --repo, --host, --update-inputs and other
 nixos-rebuild arguments are refused, and an oddc override must be a commit
 of an official ODDC branch.
 `)
+}
+
+// checkoutRevision is HEAD of a development checkout, with -dirty when a
+// tracked file differs from it, or "" when git cannot tell.
+func checkoutRevision(repo string) string {
+	out, err := exec.Command("git", "-C", repo, "rev-parse", "--verify", "HEAD^{commit}").Output()
+	if err != nil {
+		return ""
+	}
+	revision := strings.TrimSpace(string(out))
+	status, err := exec.Command("git", "-C", repo, "status", "--porcelain", "--untracked-files=no").Output()
+	if err != nil {
+		return ""
+	}
+	if len(bytes.TrimSpace(status)) > 0 {
+		revision += "-dirty"
+	}
+	return revision
 }
 
 func gitHead(repo string) string {

@@ -878,10 +878,12 @@ way to root.
       partial clone (`/var/cache/gjallar/oddc-official.git`, or the user's
       cache for development checkouts) with lazy fetch off, so a commit that
       exists only in a fork is never fetched. Fails closed in both modes.
-      Still open: the built revision in `system.configurationRevision`,
-      applied local changes (3b), the 169 notice while the deployed oddc is
-      not the pinned one. Creating the checkout is checkpoint 4.
-      Done in 0bf0c1be and 76b1646b, tested on the fw13 VM.
+      Each build records its revision in `system.configurationRevision`
+      and in `/etc/gjallar/build-source.json` with the deployed and pinned
+      oddc commits. While they differ, a notice comes at every login until
+      a plain rebuild returns to the pin. Still open: applied local changes
+      (3b). Creating the checkout is checkpoint 4.
+      Done in 0bf0c1be, 76b1646b and job 169, tested on the fw13 VM.
 - [ ] **Checkpoint 3: settings service.** Root service with a typed
       D-Bus API over the `user.config.json` schema, tiers, reading and
       security delay, signed export and import, per-user device keys, key

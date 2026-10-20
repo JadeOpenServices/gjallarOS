@@ -3,6 +3,7 @@ package flakesource
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -93,5 +94,21 @@ func TestStageCreatesFreshBuildContextWithoutFollowingCheckoutSymlink(t *testing
 	}
 	if data, _ := os.ReadFile(outside); string(data) != "original" {
 		t.Fatal("staging followed the checkout marker symlink")
+	}
+}
+
+func TestStageSourceRecordsFacts(t *testing.T) {
+	repo := t.TempDir()
+	write(t, filepath.Join(repo, "flake.nix"), "{}", 0o644)
+	rev := strings.Repeat("a", 40)
+	source, err := StageSource(repo, t.TempDir(), &BuildSource{Revision: rev + "-dirty", ODDC: rev, ODDCPinned: rev})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer source.Close()
+	data, err := os.ReadFile(filepath.Join(source.Dir, BuildContextName))
+	want := `{"schemaVersion":1,"entrypoint":"gjallarctl","source":{"revision":"` + rev + `-dirty","oddc":"` + rev + `","oddcPinned":"` + rev + `"}}` + "\n"
+	if err != nil || string(data) != want {
+		t.Fatalf("build context %q, %v", data, err)
 	}
 }

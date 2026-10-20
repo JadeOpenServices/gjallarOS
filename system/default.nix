@@ -31,6 +31,7 @@
     ./security/touch-unlock.nix
     ./security/keyring.nix
     ./security/security-notice.nix
+    ./security/build-source.nix
     ./maintenance/storage.nix
     ./maintenance/installer-resume.nix
     ./maintenance/binary-cache.nix

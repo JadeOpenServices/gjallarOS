@@ -289,7 +289,7 @@ _gjallarctl() {
         helpme) _arguments '--text[print instead of opening a window]' ;;
         tpm2) _arguments '1:tpm2 command:((reenroll\:"enroll the TPM2 key again"))' ;;
         luks) _gjallarctl_luks ;;
-        security) _arguments '1:security command:((notice\:"show new security notes once, as at login"))' ;;
+        security) _arguments '1:security command:((notice\:"show new security notes once, as at login" oddc-notice\:"show the notice while ODDC is off its pin"))' ;;
         secure-boot)
           _arguments '1:secure-boot command:((status\:"show Secure Boot ownership" setup\:"set up Secure Boot on this installed system" update-dbx\:"install the newest dbx revocation list from LVFS"))' \
             '--repo[GjallarOS checkout]:checkout:_files -/' ;;

@@ -31,7 +31,10 @@ func runSecurity(args []string, stderr io.Writer) int {
 	if len(args) == 1 && args[0] == "notice" {
 		return runSecurityNotice(stderr)
 	}
-	fmt.Fprintln(stderr, "Usage: gjallarctl security notice")
+	if len(args) == 1 && args[0] == "oddc-notice" {
+		return runODDCNotice(stderr)
+	}
+	fmt.Fprintln(stderr, "Usage: gjallarctl security notice|oddc-notice")
 	return 2
 }
 

@@ -166,16 +166,22 @@ func parseSystemRebuildArgs(args []string) (rebuildOptions, error) {
 // checkSystemSource stops the root side unless the checkout is a commit of
 // the official origin with no tracked change but a checked oddc pin.
 func checkSystemSource(repo string, stdout, stderr io.Writer) int {
+	_, status := inspectSystemSource(repo, stdout, stderr)
+	return status
+}
+
+// inspectSystemSource is checkSystemSource that also returns what it found.
+func inspectSystemSource(repo string, stdout, stderr io.Writer) (systemcheckout.Source, int) {
 	ctx := context.Background()
 	source, err := systemcheckout.Inspect(ctx, repo)
 	if err != nil {
 		fmt.Fprintf(stderr, "[GjallarOS] Error: %s: %v; nothing rebuilt\n", repo, err)
-		return 1
+		return source, 1
 	}
 	if source.ODDCMoved {
 		if err := systemcheckout.OfficialODDC(ctx, oddcBranchCache(), source.ODDC); err != nil {
 			fmt.Fprintf(stderr, "[GjallarOS] Error: flake.lock: %v; nothing rebuilt\n", err)
-			return 1
+			return source, 1
 		}
 	}
 	pin := source.ODDC[:12]
@@ -184,7 +190,7 @@ func checkSystemSource(repo string, stdout, stderr io.Writer) int {
 	}
 	fmt.Fprintf(stdout, "[GjallarOS] Building %s (origin/%s), oddc %s\n",
 		source.Revision[:12], strings.Join(source.Branches, ", origin/"), pin)
-	return 0
+	return source, 0
 }
 
 // oddcBranchCache holds the commits of the official ODDC branches between
