@@ -1543,3 +1543,62 @@ untrusted network carries the traffic in the clear (loophole 24, below).
 5. `gjallarctl vpn pause` / `gjallarctl vpn resume` for the terminal, with
    zsh completion; the bar shows the paused state.
 6. Loophole 24 fixed as above, once question 25 is answered.
+
+## 17. Nextcloud: what syncs first on a new machine (draft, to discuss)
+
+Job 173. On a fresh book12 install the client went through about 2100
+Music files before `claude/` (lower case sorts last), and ODDC work waited
+over half an hour. Jade: a new machine syncs only the folders the user
+picks first; everything else is opt-in. Folder names come from the user,
+never from this repository.
+
+### Today
+
+- New accounts start in virtual-files mode (OpenVFS, patch
+  `nextcloud-vfs-default.patch`). Files are placeholders until opened.
+- Upstream turns "Choose what to sync" off when virtual files are on:
+  `Folder::supportsSelectiveSync()` returns false for VFS folders
+  (`src/gui/folder.cpp`). The sync engine still reads the exclude list
+  from the folder's journal database on every run (`SyncEngine::startSync`
+  in `src/libsync/syncengine.cpp`); upstream uses that for end-to-end
+  encrypted folders even with VFS on.
+- The list lives in the journal database (`.sync_*.db` in the sync
+  folder), not in `nextcloud.cfg`. Writing it from outside while the
+  client runs races with the client, so it has to go through the client.
+- Open fact (asked ODDC b12, answer 11.2): was book12 in virtual-files
+  mode during that sync? With placeholders only, half an hour means the
+  first listing is slow, which a folder list fixes the same way.
+
+### How others handle it
+
+- Nextcloud: folder selection only with virtual files off
+  ([forum](https://help.nextcloud.com/t/choose-what-to-sync-not-available/243421)).
+- OneDrive: "Choose folders" and Files On-Demand work together; unticked
+  folders stay in the cloud and per device
+  ([UW guide](https://asais.uw.edu/kb/onedrive-file-status-sync-settings)).
+
+### Security pass
+
+- Folder names are private data. They stay in the user's own config and
+  the client database; no logs with names, no handoff copies.
+- Taking a folder out of sync removes its local copy. A folder with local
+  changes that have not been uploaded must never be taken out silently:
+  the client refuses and says which folder still has changes. (Upstream
+  behaviour here still needs a VM check before the patch.)
+- New top-level folders made on another device follow the opt-in rule:
+  they wait for a yes instead of syncing on their own (question 28).
+- No change to the server side; the list only limits what this device
+  fetches.
+
+### Proposed design
+
+1. Client patch: under OpenVFS, "Choose what to sync" works like without
+   virtual files, using the engine's existing exclude list.
+2. First login on a new machine: right after the account wizard, the
+   folder picker opens with the real server folders, nothing ticked
+   except what the user picks. Sync starts after the pick.
+3. The picked list is saved in the user config so a reinstall or a second
+   machine of the same user can offer it again (question 27).
+4. Later changes go through the same picker; a terminal form
+   `gjallarctl nextcloud folders` with zsh completion is optional
+   (question 27).
