@@ -173,3 +173,32 @@ func TestRememberRepository(t *testing.T) {
 		t.Fatalf("state file = %q", string(data))
 	}
 }
+
+func TestDiscoverRepositorySystemCheckoutWinsClones(t *testing.T) {
+	root := repositoryRootForTest(t)
+	clone := t.TempDir()
+	old := systemCheckoutPath
+	systemCheckoutPath = root
+	t.Cleanup(func() { systemCheckoutPath = old })
+
+	got, err := discoverRepository("", clone, clone, root+"\n", clone)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got != root {
+		t.Fatalf("repository = %q, want %q", got, root)
+	}
+}
+
+func TestDiscoverRepositoryMissingSystemCheckoutFails(t *testing.T) {
+	root := repositoryRootForTest(t)
+	missing := filepath.Join(t.TempDir(), "system")
+	old := systemCheckoutPath
+	systemCheckoutPath = missing
+	t.Cleanup(func() { systemCheckoutPath = old })
+
+	if got, err := discoverRepository("", "", root, missing, root); err == nil {
+		t.Fatalf("repository = %q, want an error", got)
+	}
+}
