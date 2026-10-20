@@ -380,6 +380,30 @@ PY
     ${dolphinPlace} || true
 
     if [ "$policy_status" -eq 10 ]; then
+      if ${pkgs.util-linux}/bin/mountpoint -q "$root"; then
+        echo "Nextcloud enrollment refused: $root is still mounted from an earlier session. Log out and back in, then try again." >&2
+        exit 78
+      fi
+
+      # No account and an empty folder: a sync-root claim left by an
+      # earlier account is stale and would block the new one.
+      ${lib.getExe pkgs.python3} - "$root" <<'PY' || exit 78
+import errno, os, sys
+
+root = sys.argv[1]
+try:
+    os.removexattr(root, "user.openvfs.registration")
+except OSError as exc:
+    if exc.errno not in (errno.ENODATA, errno.ENOTSUP):
+        print(
+            f"Nextcloud enrollment refused: cannot clear the old sync-root claim on {root}: {exc}",
+            file=sys.stderr,
+        )
+        raise SystemExit(78)
+else:
+    print(f"Nextcloud: cleared an old sync-root claim on {root}.")
+PY
+
       auth_session="$$-$RANDOM-$RANDOM"
       export NEXTCLOUD_AUTH_SESSION="$auth_session"
       export NEXTCLOUD_BROWSER_OPENER=${nextcloudBrowserOpener}

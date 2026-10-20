@@ -9,36 +9,108 @@
 let
   winePackage = pkgs._wine;
 
+  # The winetricks vkd3d verb asks the GitHub API for the latest release, which
+  # fails offline and under its rate limit. The hash is the digest GitHub lists
+  # for the v3.0.1 asset. The verb name has to match the file name.
+  vkd3dProtonVerb = pkgs.writeTextDir "share/gjallar/winetricks/vkd3d_proton301.verb" ''
+    w_metadata vkd3d_proton301 dlls \
+        title="Vulkan-based D3D12 implementation for Linux / Wine (3.0.1)" \
+        publisher="Hans-Kristian Arntzen" \
+        year="2026" \
+        media="download" \
+        file1="vkd3d-proton-3.0.1.tar.zst" \
+        installed_file1="''${W_SYSTEM32_DLLS_WIN}/d3d12.dll" \
+        installed_file2="''${W_SYSTEM32_DLLS_WIN}/d3d12core.dll"
+
+    load_vkd3d_proton301()
+    {
+        w_download "https://github.com/HansKristian-Work/vkd3d-proton/releases/download/v3.0.1/vkd3d-proton-3.0.1.tar.zst" 3cf2315522af5e43605ef6d3c41dad91387040bf97199934f3f7ab76caaa2f0c
+        helper_vkd3d_proton "''${file1}"
+    }
+  '';
+
+  # Runs on the first start, not at rebuild (Q38): the runtimes come from their
+  # publishers and stay out of our cache. The desktop launcher has no terminal,
+  # so progress goes to a window and the full output to a log.
   wineInit = pkgs.writeShellScriptBin "wine-win11-init" ''
     set -euo pipefail
 
     export WINEPREFIX="''${WINEPREFIX:-$HOME/.local/share/wine/win11}"
     export WINEARCH=win64
     export WINEDEBUG="-all"
+    # winetricks calls wine from PATH and needs unzstd for vkd3d-proton.
+    export PATH="${lib.makeBinPath [ winePackage pkgs.zstd ]}:$PATH"
+    # bin/wine is a shell wrapper, so winetricks cannot read its arch, takes
+    # the prefix for an unknown WoW64 style and runs no wine at all. WINE_BIN
+    # is its switch for wrappers.
+    export WINE_BIN="${winePackage}/bin/.wine"
 
     unset WINEDLLOVERRIDES
 
-    install -d -m 0700 "$WINEPREFIX"
+    state="''${XDG_STATE_HOME:-$HOME/.local/state}/wine-win11"
+    log="$state/setup.log"
+    install -d -m 0700 "$state" "$WINEPREFIX"
 
-    # Fails when no wineserver runs, which is the usual case.
-    ${winePackage}/bin/wineserver -k || true
+    exec 3>&2 >>"$log" 2>&1
+    echo "--- $(date -Is) wine-win11-init"
 
-    ${winePackage}/bin/wineboot -u
-    ${winePackage}/bin/wineserver -w || true
+    gui=
+    if [[ ! -t 3 ]] && [[ -n "''${WAYLAND_DISPLAY:-''${DISPLAY:-}}" ]]; then
+      exec 4> >(${pkgs.zenity}/bin/zenity --progress --title="Wine setup" \
+        --width=560 --no-cancel --auto-close --percentage=0 || true)
+      gui=1
+    fi
+
+    step=0
+    steps=12
+    say() {
+      echo "wine-win11 setup: $1"
+      echo "wine-win11 setup: $1" >&3 || true
+      # A subshell, so a closed window ends only the write, not the setup.
+      if [[ -n "$gui" ]]; then
+        ( printf '%s\n# %s\n' "$((step * 100 / steps))" "$1" >&4 ) 2>/dev/null || true
+      fi
+    }
+    finish() {
+      step=$steps
+      say "$1"
+      if [[ -n "$gui" ]]; then
+        exec 4>&-
+        ${pkgs.libnotify}/bin/notify-send -a Wine "Wine setup" "$1" || true
+      fi
+    }
+
+    if [[ -f "$WINEPREFIX/system.reg" ]] &&
+       ${pkgs.procps}/bin/pgrep -u "$(id -u)" -x wineserver >/dev/null; then
+      finish "Wine setup is not complete yet, and a Wine program is still open. Setup continues on a start when no Wine program runs. Details: $log"
+      exit 1
+    fi
+
+    say "First start of Wine: setting up $WINEPREFIX. This happens once and can take 10 to 30 minutes. It downloads about 500 MB of fonts and runtimes (Visual C++, .NET, DirectX parts) from Microsoft, GitHub, SourceForge and files.holarse-linuxgaming.de. Details: $log"
 
     # A failed step leaves the prefix unmarked, so the next start tries again;
     # winetricks skips the verbs it already installed. Marking it anyway kept a
     # prefix set up offline incomplete for good.
     failed=()
     reg_add() {
-      ${winePackage}/bin/wine reg add "$1" /v "$2" /t "$3" /d "$4" /f ||
-        failed+=("reg $2")
-    }
-    tricks() {
-      ${pkgs.winetricks}/bin/winetricks -q "$@" || failed+=("winetricks $*")
-      ${winePackage}/bin/wineserver -w || true
+      wine reg add "$1" /v "$2" /t "$3" /d "$4" /f || failed+=("reg $2")
     }
 
+    step=1
+    say "Creating the Wine environment"
+    # Earlier versions ran the winetricks comctl32 verb. It sets comctl32 5.80
+    # to native and deletes the common-controls 6 manifests, so the Visual C++
+    # and .NET installers cannot open their window (0x583). Without the
+    # override, wineboot -u puts the manifests back.
+    if grep -q '^"\*comctl32"="native,builtin"' "$WINEPREFIX/user.reg" 2>/dev/null; then
+      wine reg delete 'HKCU\Software\Wine\DllOverrides' /v '*comctl32' /f ||
+        failed+=("reg *comctl32")
+    fi
+    wineboot -u || failed+=("wineboot")
+    wineserver -w || true
+
+    step=2
+    say "Applying display settings"
     reg_add 'HKCU\Software\Wine\X11 Driver' ClientSideWithRender REG_SZ N
     reg_add 'HKCU\Software\Wine\X11 Driver' DirectColor REG_SZ Y
     reg_add 'HKCU\Software\Wine\X11 Driver' Decorated REG_SZ Y
@@ -47,16 +119,63 @@ let
     reg_add 'HKCU\Software\Wine\Direct3D' MaxVersionGL REG_DWORD 40005
     reg_add 'HKCU\Software\Microsoft\Avalon.Graphics' DisableHWAcceleration REG_DWORD 1
 
-    tricks corefonts comctl32 gdiplus vcrun2022
-    tricks dxvk vkd3d d3dcompiler_43 d3dcompiler_47 d3dx9 dcomp
-    tricks dotnet48 dotnetdesktop6 dotnetdesktop8
+    # DXVK comes from Nix, so no download. setup_dxvk.sh is not used: with a
+    # WoW64 Wine it resolves both DLL folders to system32.
+    step=3
+    say "Installing DXVK ${pkgs.dxvk.version} (no download)"
+    windir="$WINEPREFIX/drive_c/windows"
+    for dll in d3d8 d3d9 d3d10core d3d11 dxgi; do
+      if install -m 0644 "${pkgs.dxvk.bin}/x64/$dll.dll" "$windir/system32/$dll.dll" &&
+         install -m 0644 "${pkgs.dxvk.bin}/x32/$dll.dll" "$windir/syswow64/$dll.dll"; then
+        reg_add 'HKCU\Software\Wine\DllOverrides' "$dll" REG_SZ native
+      else
+        failed+=("dxvk $dll")
+      fi
+    done
 
+    downloads=(
+      "corefonts|Core fonts"
+      "vcrun2022|Visual C++ 2015-2022 runtime"
+      "${vkd3dProtonVerb}/share/gjallar/winetricks/vkd3d_proton301.verb|vkd3d-proton 3.0.1 (Direct3D 12)"
+      "d3dcompiler_43|Direct3D shader compiler 43"
+      "d3dcompiler_47|Direct3D shader compiler 47"
+      "d3dx9|D3DX9"
+      "dotnet48|.NET Framework 4.8|the longest step"
+      "dotnetdesktop6|.NET 6 desktop runtime"
+      "dotnetdesktop8|.NET 8 desktop runtime"
+    )
+
+    online=1
+    ${pkgs.curl}/bin/curl -fsS --max-time 15 -o /dev/null https://github.com || online=
+
+    for entry in "''${downloads[@]}"; do
+      verb="''${entry%%|*}"
+      rest="''${entry#*|}"
+      label="''${rest%%|*}"
+      note=
+      [[ "$rest" == *"|"* ]] && note=" (''${rest#*|})"
+      step=$((step + 1))
+      if [[ -z "$online" ]]; then
+        failed+=("$label")
+        continue
+      fi
+      say "Downloading and installing: $label$note"
+      ${pkgs.winetricks}/bin/winetricks -q "$verb" || failed+=("$label")
+      wineserver -w || true
+    done
+
+    if [[ -z "$online" ]]; then
+      finish "No internet connection, so Wine set up only the parts that need no download. The program starts now, but some programs need the missing runtimes. The next start with internet finishes the setup. Details: $log"
+      exit 1
+    fi
     if ((''${#failed[@]})); then
-      echo "wine-win11-init: incomplete (''${failed[*]}); the next start tries again" >&2
+      missing="$(printf '%s, ' "''${failed[@]}")"
+      finish "Wine setup is not complete. Missing: ''${missing%, }. The program starts now, and the next start tries again. Details: $log"
       exit 1
     fi
 
     touch "$WINEPREFIX/.gjallar-wine-initialized"
+    finish "Wine setup is done. Programs start without this step from now on."
   '';
 
   wineWin11 = pkgs.writeShellScriptBin "wine-win11" ''
@@ -81,7 +200,7 @@ let
     export PULSE_LATENCY_MSEC=60
     export WPF_DISABLE_HARDWARE_ACCELERATION=1
     export WINEDEBUG="-fixme"
-    export WINEDLLOVERRIDES="winhttp=n,b;d3dcompiler_47=n,b;d3dcompiler_43=n,b;gdiplus=n,b;dxgi=n,b;d3d11=n,b;d3d10core=n,b;d3d9=n,b;dcomp=n,b"
+    export WINEDLLOVERRIDES="winhttp=n,b;d3dcompiler_47=n,b;d3dcompiler_43=n,b;dxgi=n,b;d3d11=n,b;d3d10core=n,b;d3d9=n,b"
 
     mkdir -p "$DXVK_STATE_CACHE_PATH"
 
@@ -93,9 +212,11 @@ let
       ${pkgs.util-linux}/bin/flock 9
 
       if [[ ! -f "$prefix/.gjallar-wine-initialized" ]]; then
-        ${wineInit}/bin/wine-win11-init ||
+        ${wineInit}/bin/wine-win11-init 9>&- ||
           echo "wine-win11: starting with an incomplete Wine setup" >&2
       fi
+      # Wine and its wineserver would inherit the lock and hold it.
+      exec 9>&-
     fi
 
     if [[ "$#" -gt 0 ]]; then
