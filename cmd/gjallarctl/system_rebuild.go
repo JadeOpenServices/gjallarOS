@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/config"
@@ -137,17 +138,22 @@ func startSystemRebuild(opts rebuildOptions, stdout, stderr io.Writer) int {
 }
 
 func runSystem(args []string, stdout, stderr io.Writer) int {
-	if len(args) == 0 || (args[0] != "check" && args[0] != "rebuild" && args[0] != "apply" && args[0] != "status") {
-		fmt.Fprintln(stderr, "Usage: gjallarctl system check|rebuild [OPTIONS]\n       gjallarctl system apply|status")
+	if len(args) == 0 || !slices.Contains([]string{"check", "rebuild", "apply", "status", "move", "clone"}, args[0]) {
+		fmt.Fprintln(stderr, "Usage: gjallarctl system check|rebuild [OPTIONS]\n       gjallarctl system apply|status|move\n       gjallarctl system clone --from DIR")
 		return 2
 	}
 	// apply runs as the user: the folder is theirs, the settings service
 	// takes it from their session. status reads only what anyone may read.
+	// move and clone check who runs them.
 	switch args[0] {
 	case "apply":
 		return systemApply(args[1:], stdout, stderr)
 	case "status":
 		return systemStatus(args[1:], stdout, stderr)
+	case "move":
+		return systemMove(args[1:], stdout, stderr)
+	case "clone":
+		return systemClone(args[1:], stdout, stderr)
 	}
 	if os.Geteuid() != 0 {
 		fmt.Fprintf(stderr, "ERROR: gjallarctl system %s runs as root; use rebuild\n", args[0])

@@ -25,10 +25,19 @@ _gjallarctl_system() {
     'rebuild:rebuild from the system checkout (root only, started by rebuild)'
     'apply:copy ~/GjallarOS-local into the system and rebuild (developer mode)'
     'status:show what the running system was built from'
+    'move:show what moving to the root-owned system checkout leaves behind'
+    'clone:create the root-owned system checkout (root only)'
   )
   if (( CURRENT == 2 )); then
     _describe -t commands 'system command' cmds
+    return
   fi
+  shift words
+  (( CURRENT-- ))
+  case $words[1] in
+    clone)
+      _arguments '--from[the checkout the system builds now]:directory:_files -/' ;;
+  esac
 }
 
 _gjallarctl_usb() {
