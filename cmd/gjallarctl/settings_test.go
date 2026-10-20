@@ -32,6 +32,17 @@ type fakeSettingsBus struct {
 	exported []byte
 	imported [][]byte
 	folders  []map[string][]byte
+	pairFile []byte
+	pairs    []settings.PairOffer
+	checked  [][]byte
+}
+
+// fakeOffer is the SYNTHETIC offer the fake bus makes of any pairing file.
+var fakeOffer = settings.PairOffer{
+	ID:       "12345-67890",
+	Code:     "11111 22222 33333 44444 55555 66666 77777 88888 99999 00000 12121 34343",
+	Hostname: "example-host",
+	User:     "tester",
 }
 
 var settingsTestNow = time.Date(2026, 10, 19, 12, 0, 0, 0, time.UTC)
@@ -114,13 +125,37 @@ func (b *fakeSettingsBus) Call(_ context.Context, method string, args ...any) (s
 	case "Cancel":
 		b.pending = nil
 		return "", nil
+	case "PairCheck":
+		b.checked = append(b.checked, args[0].([]byte))
+		return answer(fakeOffer)
+	case "PairAdd":
+		if args[1].(string) != fakeOffer.Code {
+			return "", errors.New("SYNTHETIC: wrong code")
+		}
+		offer := fakeOffer
+		offer.Code, offer.Added = "", settingsTestNow
+		b.pairs = append(b.pairs, offer)
+		return answer(offer)
+	case "PairList":
+		return answer(b.pairs)
+	case "PairRemove":
+		for i, offer := range b.pairs {
+			if offer.ID == args[0].(string) {
+				b.pairs = append(b.pairs[:i], b.pairs[i+1:]...)
+				return "", nil
+			}
+		}
+		return "", errors.New("SYNTHETIC: no such pairing")
 	}
 	return "", nil
 }
 
-func (b *fakeSettingsBus) Export(context.Context) ([]byte, error) {
+func (b *fakeSettingsBus) Bytes(_ context.Context, method string) ([]byte, error) {
 	if b.missing {
 		return nil, errSettingsMissing
+	}
+	if method == "PairExport" {
+		return b.pairFile, nil
 	}
 	return b.exported, nil
 }
@@ -133,9 +168,9 @@ func (b *fakeSettingsBus) Rebuild(context.Context) (bool, string, error) {
 func useFakeSettings(t *testing.T, bus *fakeSettingsBus) {
 	t.Helper()
 	t.Setenv("HOME", t.TempDir())
-	oldConnect, oldNow, oldSleep, oldEUID := settingsConnect, settingsNow, settingsSleep, settingsEUID
+	oldConnect, oldNow, oldSleep, oldEUID, oldStdin := settingsConnect, settingsNow, settingsSleep, settingsEUID, settingsStdin
 	t.Cleanup(func() {
-		settingsConnect, settingsNow, settingsSleep, settingsEUID = oldConnect, oldNow, oldSleep, oldEUID
+		settingsConnect, settingsNow, settingsSleep, settingsEUID, settingsStdin = oldConnect, oldNow, oldSleep, oldEUID, oldStdin
 	})
 	settingsConnect = func() (settingsBus, error) { return bus, nil }
 	settingsNow = func() time.Time { return settingsTestNow }

@@ -347,6 +347,33 @@ func (o object) Import(sender dbus.Sender, data []byte) (string, *dbus.Error) {
 	return answer(change, err)
 }
 
+func (o object) PairExport(sender dbus.Sender) ([]byte, *dbus.Error) {
+	data, err := o.svc.PairExport(context.Background(), string(sender))
+	if err != nil {
+		return nil, busError(err)
+	}
+	return data, nil
+}
+
+func (o object) PairCheck(sender dbus.Sender, data []byte) (string, *dbus.Error) {
+	offer, err := o.svc.PairCheck(context.Background(), string(sender), data)
+	return answer(offer, err)
+}
+
+func (o object) PairAdd(sender dbus.Sender, data []byte, code string) (string, *dbus.Error) {
+	offer, err := o.svc.PairAdd(context.Background(), string(sender), data, code)
+	return answer(offer, err)
+}
+
+func (o object) PairList(sender dbus.Sender) (string, *dbus.Error) {
+	list, err := o.svc.PairList(context.Background(), string(sender))
+	return answer(list, err)
+}
+
+func (o object) PairRemove(sender dbus.Sender, id string) *dbus.Error {
+	return busError(o.svc.PairRemove(context.Background(), string(sender), id))
+}
+
 func answer(value any, err error) (string, *dbus.Error) {
 	if err != nil {
 		return "", busError(err)

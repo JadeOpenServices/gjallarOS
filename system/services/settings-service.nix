@@ -70,6 +70,15 @@ let
           <allow_active>auth_self</allow_active>
         </defaults>
       </action>
+      <action id="org.gjallaros.settings.pair">
+        <description>Pair your account with your account on another device</description>
+        <message>Authentication is required to pair your account with another device</message>
+        <defaults>
+          <allow_any>no</allow_any>
+          <allow_inactive>no</allow_inactive>
+          <allow_active>auth_self</allow_active>
+        </defaults>
+      </action>
     </policyconfig>
   '';
 

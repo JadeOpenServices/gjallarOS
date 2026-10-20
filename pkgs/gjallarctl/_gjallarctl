@@ -197,6 +197,7 @@ _gjallarctl_settings() {
     'cancel:drop a waiting change'
     'export:save the settings in a file signed with your key'
     'import:ask for the change a saved settings file makes'
+    'pair:trust settings files of your account on another device'
   )
   if (( CURRENT == 2 )); then
     _describe -t commands 'settings command' cmds
@@ -220,6 +221,30 @@ _gjallarctl_settings() {
       ids=(${(f)"$(gjallarctl settings pending --ids 2>/dev/null)"})
       _arguments "1:change id:(${ids[*]})" ;;
     export|import) _arguments '1:settings file:_files' ;;
+    pair) _gjallarctl_settings_pair ;;
+  esac
+}
+
+_gjallarctl_settings_pair() {
+  local -a cmds=(
+    'export:save a pairing file for your other device'
+    'add:pair with the device that made a pairing file'
+    'list:show the paired devices'
+    'remove:stop trusting a paired device'
+  )
+  if (( CURRENT == 2 )); then
+    _describe -t commands 'pair command' cmds
+    return
+  fi
+  shift words
+  (( CURRENT-- ))
+  local -a ids
+  case $words[1] in
+    export|add) _arguments '1:pairing file:_files' ;;
+    list) _arguments '--ids[print only the pairing ids]' ;;
+    remove)
+      ids=(${(f)"$(gjallarctl settings pair list --ids 2>/dev/null)"})
+      _arguments "1:pairing id:(${ids[*]})" ;;
   esac
 }
 

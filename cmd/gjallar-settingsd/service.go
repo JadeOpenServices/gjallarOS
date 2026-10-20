@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	"encoding/json"
@@ -89,6 +90,8 @@ type service struct {
 	// app-specific id in them. Without keys, Export and Import refuse.
 	keys   *keyStore
 	device string
+	// pairMu keeps pairing writes from losing each other.
+	pairMu sync.Mutex
 
 	mu      sync.Mutex
 	pending map[string]settings.Change
@@ -324,7 +327,9 @@ func (s *service) Export(ctx context.Context, sender string) ([]byte, error) {
 
 // Import checks a settings file and asks for the change it makes, as
 // Request does: a valid signature says where the file came from, not that
-// the change is wanted now, so the usual tier, wait and password apply.
+// the change is wanted now, so the usual tier, wait and password apply. A
+// file from a device the caller paired with brings no settings scoped to
+// its device.
 func (s *service) Import(ctx context.Context, sender string, data []byte) (settings.Pending, error) {
 	who, err := s.sys.Caller(ctx, sender)
 	if err != nil {
@@ -337,26 +342,69 @@ func (s *service) Import(ctx context.Context, sender string, data []byte) (setti
 	if err != nil {
 		return settings.Pending{}, err
 	}
+	pairs, err := s.keys.pairs(who.UID)
+	if err != nil {
+		return settings.Pending{}, err
+	}
+	paired := func(key ed25519.PublicKey) (pairing, bool) {
+		for _, p := range pairs {
+			if bytes.Equal(p.Key, key) {
+				return p, true
+			}
+		}
+		return pairing{}, false
+	}
 	file, public, err := settings.Open(data, func(key ed25519.PublicKey) bool {
-		_, ok := trusted[string(key)]
-		return ok
+		_, local := trusted[string(key)]
+		_, other := paired(key)
+		return local || other
 	})
 	if err != nil {
 		return settings.Pending{}, fmt.Errorf("%w: %v", errRefused, err)
 	}
-	owner := trusted[string(public)]
-	if file.UID != owner.UID || file.User != owner.User || file.Device != s.device {
-		return settings.Pending{}, fmt.Errorf("%w: the file's contents do not match the key that signed it", errRefused)
-	}
-	if who.UID != file.UID {
-		return settings.Pending{}, fmt.Errorf("%w: %s made this file; only that account can import it", errRefused, file.User)
-	}
-	note := fmt.Sprintf("from a file %s made on this device on %s", file.User, file.Created.In(currentZone()).Format("2006-01-02 15:04:05 MST"))
+	created := file.Created.In(currentZone()).Format("2006-01-02 15:04:05 MST")
 	if days := int(s.now().Sub(file.Created).Hours() / 24); days > 0 {
-		note += fmt.Sprintf(", %d days ago", days)
+		created += fmt.Sprintf(", %d days ago", days)
 	}
-	log.Printf("uid %d imports a file of uid %d made %s", who.UID, file.UID, file.Created.Format(time.RFC3339))
+	var note string
+	if owner, ok := trusted[string(public)]; ok {
+		if file.UID != owner.UID || file.User != owner.User || file.Device != s.device {
+			return settings.Pending{}, fmt.Errorf("%w: the file's contents do not match the key that signed it", errRefused)
+		}
+		if who.UID != file.UID {
+			return settings.Pending{}, fmt.Errorf("%w: %s made this file; only that account can import it", errRefused, file.User)
+		}
+		note = fmt.Sprintf("from a file %s made on this device on %s", file.User, created)
+	} else {
+		other, _ := paired(public)
+		if file.UID != other.UID || file.User != other.User || file.Device != other.Device || file.Device == s.device {
+			return settings.Pending{}, fmt.Errorf("%w: the file's contents do not match the paired key that signed it", errRefused)
+		}
+		left := dropDeviceScoped(file.Settings)
+		if len(file.Settings) == 0 {
+			return settings.Pending{}, fmt.Errorf("%w: the file holds only settings that belong to its own device", errRefused)
+		}
+		note = fmt.Sprintf("from a file %s made on the paired device that says it is %q, on %s", file.User, other.Hostname, created)
+		if left > 0 {
+			note += fmt.Sprintf("; %d settings of that device were left out", left)
+		}
+	}
+	log.Printf("uid %d imports a file of uid %d on device %s made %s", who.UID, file.UID, file.Device, file.Created.Format(time.RFC3339))
 	return s.request(ctx, sender, who, file.Settings, []string{note})
+}
+
+// dropDeviceScoped removes the settings that belong to the device a file
+// was made on and returns how many it removed. A key this version does not
+// know stays, so the request refuses it by name.
+func dropDeviceScoped(values map[string]json.RawMessage) int {
+	dropped := 0
+	for key := range values {
+		if device, err := config.DeviceScoped(key); err == nil && device {
+			delete(values, key)
+			dropped++
+		}
+	}
+	return dropped
 }
 
 // currentZone is the device's time zone as it is now. time.Local is read

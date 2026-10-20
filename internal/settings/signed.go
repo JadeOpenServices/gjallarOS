@@ -69,24 +69,29 @@ func Seal(key ed25519.PrivateKey, file File) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	payload = append(payload, '\n')
-	signed := signedBytes(key.Public().(ed25519.PublicKey), payload)
-	sig := ed25519.Sign(key, signed)
-
-	var out bytes.Buffer
-	out.WriteString(fileMagic)
-	out.WriteString(keyPrefix + base64.StdEncoding.EncodeToString(key.Public().(ed25519.PublicKey)) + "\n")
-	out.WriteString(sigPrefix + base64.StdEncoding.EncodeToString(sig) + "\n")
-	out.Write(payload)
-	if out.Len() > MaxFileBytes {
-		return nil, fmt.Errorf("the settings file would hold %d bytes; at most %d are allowed", out.Len(), MaxFileBytes)
+	out := seal(fileMagic, key, append(payload, '\n'))
+	if len(out) > MaxFileBytes {
+		return nil, fmt.Errorf("the settings file would hold %d bytes; at most %d are allowed", len(out), MaxFileBytes)
 	}
-	return out.Bytes(), nil
+	return out, nil
 }
 
-func signedBytes(key ed25519.PublicKey, payload []byte) []byte {
+// seal writes magic, the key and sig lines and payload. Pairing files use
+// the same layout under another magic line.
+func seal(magic string, key ed25519.PrivateKey, payload []byte) []byte {
+	public := key.Public().(ed25519.PublicKey)
+	sig := ed25519.Sign(key, signedBytes(magic, public, payload))
+	var out bytes.Buffer
+	out.WriteString(magic)
+	out.WriteString(keyPrefix + base64.StdEncoding.EncodeToString(public) + "\n")
+	out.WriteString(sigPrefix + base64.StdEncoding.EncodeToString(sig) + "\n")
+	out.Write(payload)
+	return out.Bytes()
+}
+
+func signedBytes(magic string, key ed25519.PublicKey, payload []byte) []byte {
 	var b bytes.Buffer
-	b.WriteString(fileMagic)
+	b.WriteString(magic)
 	b.WriteString(keyPrefix + base64.StdEncoding.EncodeToString(key) + "\n")
 	b.Write(payload)
 	return b.Bytes()
@@ -100,28 +105,10 @@ func Open(data []byte, trusted func(ed25519.PublicKey) bool) (File, ed25519.Publ
 	if len(data) > MaxFileBytes {
 		return File{}, nil, fmt.Errorf("%w: it is larger than %d bytes", ErrNotSettingsFile, MaxFileBytes)
 	}
-	rest, ok := bytes.CutPrefix(data, []byte(fileMagic))
-	if !ok || len(rest) < keyLineLen+sigLineLen {
-		return File{}, nil, ErrNotSettingsFile
-	}
-	keyLine, sigLine, payload := rest[:keyLineLen], rest[keyLineLen:keyLineLen+sigLineLen], rest[keyLineLen+sigLineLen:]
-	key, err := headerValue(keyLine, keyPrefix, ed25519.PublicKeySize)
+	payload, public, err := open(fileMagic, ErrNotSettingsFile, data, trusted)
 	if err != nil {
 		return File{}, nil, err
 	}
-	sig, err := headerValue(sigLine, sigPrefix, ed25519.SignatureSize)
-	if err != nil {
-		return File{}, nil, err
-	}
-	public := ed25519.PublicKey(key)
-	if !trusted(public) {
-		return File{}, nil, ErrUnknownSigner
-	}
-	signed := append(data[:len(fileMagic)+keyLineLen:len(fileMagic)+keyLineLen], payload...)
-	if !ed25519.Verify(public, signed, sig) {
-		return File{}, nil, ErrBadSignature
-	}
-
 	file, err := parseFile(payload)
 	if err != nil {
 		return File{}, nil, err
@@ -129,14 +116,41 @@ func Open(data []byte, trusted func(ed25519.PublicKey) bool) (File, ed25519.Publ
 	return file, public, nil
 }
 
-func headerValue(line []byte, prefix string, size int) ([]byte, error) {
+// open checks the header and signature of data under magic and returns the
+// payload, still unparsed, and the key that signed it.
+func open(magic string, notFile error, data []byte, trusted func(ed25519.PublicKey) bool) ([]byte, ed25519.PublicKey, error) {
+	rest, ok := bytes.CutPrefix(data, []byte(magic))
+	if !ok || len(rest) < keyLineLen+sigLineLen {
+		return nil, nil, notFile
+	}
+	keyLine, sigLine, payload := rest[:keyLineLen], rest[keyLineLen:keyLineLen+sigLineLen], rest[keyLineLen+sigLineLen:]
+	key, err := headerValue(keyLine, keyPrefix, ed25519.PublicKeySize, notFile)
+	if err != nil {
+		return nil, nil, err
+	}
+	sig, err := headerValue(sigLine, sigPrefix, ed25519.SignatureSize, notFile)
+	if err != nil {
+		return nil, nil, err
+	}
+	public := ed25519.PublicKey(key)
+	if !trusted(public) {
+		return nil, nil, ErrUnknownSigner
+	}
+	signed := append(data[:len(magic)+keyLineLen:len(magic)+keyLineLen], payload...)
+	if !ed25519.Verify(public, signed, sig) {
+		return nil, nil, ErrBadSignature
+	}
+	return payload, public, nil
+}
+
+func headerValue(line []byte, prefix string, size int, notFile error) ([]byte, error) {
 	text, ok := bytes.CutPrefix(line, []byte(prefix))
 	if !ok || text[len(text)-1] != '\n' {
-		return nil, ErrNotSettingsFile
+		return nil, notFile
 	}
 	value, err := base64.StdEncoding.Strict().DecodeString(string(text[:len(text)-1]))
 	if err != nil || len(value) != size {
-		return nil, ErrNotSettingsFile
+		return nil, notFile
 	}
 	return value, nil
 }
@@ -189,7 +203,7 @@ func uniqueNames(data []byte) error {
 				}
 				key := name.(string)
 				if seen[key] {
-					return fmt.Errorf("the settings file names %q twice", key)
+					return fmt.Errorf("the file names %q twice", key)
 				}
 				seen[key] = true
 				if err := walk(); err != nil {
@@ -210,7 +224,7 @@ func uniqueNames(data []byte) error {
 		return nil
 	}
 	if err := walk(); err != nil {
-		return fmt.Errorf("read the settings in the file: %w", err)
+		return fmt.Errorf("read the file: %w", err)
 	}
 	return nil
 }

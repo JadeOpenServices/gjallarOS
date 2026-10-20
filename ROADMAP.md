@@ -1223,12 +1223,13 @@ profiles show "not signed" but still install, which is what phishing uses.
   on this device or a device you paired". A valid file still only loads
   as a draft, with the usual tier rules: a signature says where the file
   came from, not that the change is wanted now.
-- **Pairing own devices.** Both devices show the same short code; the
-  user confirms on both with their password. Each then trusts the other's
-  public key for that user. Unpairing removes it.
+- **Pairing own devices.** A pairing file goes each way; both devices
+  show the same code made from both public keys, and the user confirms on
+  both with their password. Each then trusts the other's public key for
+  that user. Unpairing removes it. See "Pairing and own keys" below.
 - **Opting out in the installer.** "Let GjallarOS manage signing keys
-  (recommended)". Saying no lets the person add their own public key (for
-  example an SSH or hardware key) as the only signer instead.
+  (recommended)". Saying no lets the person add their own OpenSSH public
+  key (ed25519 file or FIDO hardware key) as the only signer instead.
 - **Nothing is locked behind the key.** Login, disk unlock, applying
   settings in the editor and recovery never need it. Losing it only stops
   export until a new one is made; old exports still import, because the
@@ -1316,6 +1317,121 @@ design does about it:
   It only ever brings back that user's own earlier settings, as a draft
   with the tier rules and the password, and the note shows its age.
   Logged on the security review page.
+
+### Pairing and own keys
+
+Decided with Jade 2026-10-20 (wiki 752 Q13, Q14): pairing is a file each
+way plus a code made from both public keys, with no network listener; an
+own key is an OpenSSH key used with `ssh-keygen -Y sign`.
+
+How others do it:
+
+- Signal shows a 60-digit safety number: two 30-digit halves, one per
+  person, each an iterated SHA-512 over that person's key and identifier,
+  in groups of five digits. Both phones show the same number because the
+  halves are put in a fixed order
+  ([moderncrypto messaging list](https://moderncrypto.org/mail-archive/messaging/2017/002381.html)).
+- KDE Connect's pairing review
+  ([oss-security 2020-11-30](https://www.openwall.com/lists/oss-security/2020/11/30/1),
+  CVE-2020-26164): device names are chosen by the other side, and the
+  fix shows a hash over both keys, but by default only 8 hex digits.
+- Short key ids: 32-bit PGP key ids were collided for every key of the
+  web of trust, and fake kernel developer keys turned up on key servers
+  in 2016 ([LWN](https://lwn.net/Articles/697538/)). A short code that
+  someone can search for offline proves little.
+- OpenSSH signatures
+  ([PROTOCOL.sshsig](https://github.com/openssh/openssh-portable/blob/master/PROTOCOL.sshsig))
+  sign a namespace with the message hash, so a signature made for git
+  (namespace `git`) or anything else never counts for another use. FIDO
+  keys carry a user-presence flag, and `ssh-keygen -Y verify` refuses a
+  signature without it unless the signer line says `no-touch-required`.
+
+**Pairing (3.4c).**
+
+- **File.** `gjallaros-pairing-v1`, then the `key` and `sig` lines as in a
+  settings file, then JSON with schema, device, user, uid, time and the
+  hostname. Signed by the user's own key, so it shows the sender holds it.
+  The other magic line means a pairing file never opens as a settings
+  file, nor the other way round.
+- **Code.** One half per side, Signal-style: SHA-512 over
+  `gjallaros-pair-v1`, the device id, uid, user name and key, then 5200
+  more rounds over the hash and the key; the first 30 bytes give 30
+  digits. The two halves are put in byte order, so both screens show the
+  same 60 digits in groups of five. Changing either key changes its half,
+  so a swapped file needs a match for the whole 30-digit half of a key it
+  does not have.
+- **Flow.** `gjallarctl settings pair export FILE` on each device (own
+  password, `auth_self`, makes the key when there is none yet), then the
+  files go across by any way the user likes (USB stick, Nextcloud, mail).
+  `gjallarctl settings pair add FILE` shows the code and what the other
+  device says it is, and asks to compare it with the other screen, at the
+  same time, both devices in front of the user. A code sent by message
+  proves nothing; on a difference, stop. The user then confirms with their
+  own password. The service computes the code again from the bytes it gets
+  and adds the pairing only when it equals the code the user saw.
+  `pair list` shows pairings with a short id; `pair remove ID` drops one.
+- **Store.** `/var/lib/gjallarOS/settings/pairings/<uid>.json` (root,
+  0600), one per local user: the other device's key, device id, uid, user
+  name, claimed hostname and when it was added. A removed user loses their
+  pairings, as with keys. A key of this device, or a file naming this
+  device, is refused.
+- **Import from a paired device.** The signer must be one of the caller's
+  pairings, and the file's device, uid and user must be the ones stored
+  with it. Keys that describe the device rather than the person (struct
+  tag `scope:"device"` on `config.User`: hostname, username, disk, boot,
+  recovery, USB blocking, JODS, firmware, channel, developer mode,
+  tailscale, dotfiles folder, clamshell) are left out and the note says how
+  many. Everything else goes the way of `settings set`, with the tier
+  rules, waits and password, and a note naming the paired device.
+- **Key changes.** When the other device's host key changes (a cleared
+  TPM), its files no longer import here; pair again.
+
+**Own key (3.4d).**
+
+- The installer asks "Let GjallarOS manage signing keys (recommended)".
+  No: the user gives an OpenSSH public key (`ssh-ed25519` or
+  `sk-ssh-ed25519@openssh.com`). That key is then the only signer for that
+  user: no managed key, no pairing. It can be set or changed later with
+  the password (critical tier).
+- Export writes the settings without a signature, under its own magic
+  line (`gjallaros-settings-ssh-v1`). The user signs it:
+  `ssh-keygen -Y sign -n gjallaros-settings -f KEY FILE` gives `FILE.sig`.
+- Import checks with `ssh-keygen -Y verify -n gjallaros-settings` from the
+  Nix store path, no shell, a cleared environment, a size cap and a
+  timeout, inside the sandboxed settings service. The allowed-signers
+  line is written by the service from a parsed key only: comment dropped,
+  `namespaces="gjallaros-settings"`, never `no-touch-required`. Only then
+  is the payload parsed, with the same strict parser.
+- OpenSSH's own code checks the signature, so no new Go dependency
+  (`golang.org/x/crypto` has no sshsig).
+
+Security pass (2026-10-20). What went wrong elsewhere, and what this
+design does about it:
+
+- Short codes that can be searched for offline (KDE's 8 hex digits, 32-bit
+  PGP ids). File exchange has no commit step, so each half is long (30
+  digits per key) and slow to compute.
+- Names chosen by the other side (KDE review). The hostname is only shown
+  as "says it is", never used to decide anything, and text with control
+  characters is refused.
+- A file or signature made for one purpose used for another. Distinct
+  magic lines for settings, pairing and SSH files; the SSH namespace
+  `gjallaros-settings` keeps git or other SSH signatures out.
+- The file changing between showing the code and adding it. Add takes the
+  code the user saw and checks it against the bytes it gets.
+- Comparing over the same channel the file came by. The pairing screen
+  says to compare on both screens at once; the docs say a code sent by
+  message does not count.
+- FIDO keys without touch. The service never writes `no-touch-required`.
+- A root tool parsing untrusted signatures. `ssh-keygen` runs inside the
+  service's sandbox (no network, no capabilities, private /tmp) with fixed
+  arguments; the payload is parsed only after it says yes.
+- Device settings carried to another device. `scope:"device"` keys never
+  come from a paired device.
+- Residual, as with settings files: an old file from a paired device stays
+  valid until the pairing is removed. It only brings back that person's
+  settings as a draft with the tier rules. Logged on the security review
+  page.
 
 ### Developer mode and the local folder
 

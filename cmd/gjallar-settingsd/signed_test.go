@@ -23,6 +23,7 @@ func withKeys(t *testing.T, f *fixture) map[uint32]string {
 	names := map[uint32]string{1000: "tester", 1001: "other"}
 	f.svc.keys = &keyStore{
 		dir:     t.TempDir(),
+		pairDir: t.TempDir(),
 		hostKey: bytes.Repeat([]byte{7}, hostKeySize),
 		userName: func(uid uint32) (string, error) {
 			if name, ok := names[uid]; ok {

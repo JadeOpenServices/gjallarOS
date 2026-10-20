@@ -36,7 +36,7 @@ func trustOnly(key ed25519.PrivateKey) func(ed25519.PublicKey) bool {
 func resign(t *testing.T, key ed25519.PrivateKey, payload string) []byte {
 	t.Helper()
 	public := key.Public().(ed25519.PublicKey)
-	sig := ed25519.Sign(key, signedBytes(public, []byte(payload)))
+	sig := ed25519.Sign(key, signedBytes(fileMagic, public, []byte(payload)))
 	return []byte(fileMagic + keyPrefix + base64.StdEncoding.EncodeToString(public) + "\n" +
 		sigPrefix + base64.StdEncoding.EncodeToString(sig) + "\n" + payload)
 }

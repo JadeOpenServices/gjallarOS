@@ -74,3 +74,35 @@ func TierOf(key string) (Tier, error) {
 	}
 	return tier, nil
 }
+
+var deviceScoped = sync.OnceValues(func() (map[string]bool, error) {
+	t := reflect.TypeFor[User]()
+	keys := map[string]bool{}
+	for i := range t.NumField() {
+		field := t.Field(i)
+		key, _, _ := strings.Cut(field.Tag.Get("json"), ",")
+		switch scope := field.Tag.Get("scope"); scope {
+		case "":
+		case "device":
+			keys[key] = true
+		default:
+			return nil, fmt.Errorf("%s has scope %q; it must be device or none", key, scope)
+		}
+	}
+	return keys, nil
+})
+
+// DeviceScoped reports whether a user.config.json key describes the device
+// (disk, boot, USB blocking, management, names) rather than the person, so
+// a settings file from a paired device leaves it out (ROADMAP "Pairing and
+// own keys").
+func DeviceScoped(key string) (bool, error) {
+	keys, err := deviceScoped()
+	if err != nil {
+		return false, err
+	}
+	if _, err := TierOf(key); err != nil {
+		return false, err
+	}
+	return keys[key], nil
+}

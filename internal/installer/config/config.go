@@ -19,10 +19,12 @@ import (
 
 // User is user.config.json. Every field carries a tier tag that says how the
 // settings service confirms a change after install (ROADMAP §14); see
-// TierOf.
+// TierOf. Keys tagged scope:"device" describe this device rather than the
+// person and never come from another device's settings file; see
+// DeviceScoped.
 type User struct {
-	Hostname               string                 `json:"hostname" tier:"security"`
-	Username               string                 `json:"username" tier:"security"`
+	Hostname               string                 `json:"hostname" tier:"security" scope:"device"`
+	Username               string                 `json:"username" tier:"security" scope:"device"`
 	Timezone               string                 `json:"timezone" tier:"everyday"`
 	Locale                 string                 `json:"locale" tier:"everyday"`
 	KeyboardLayout         string                 `json:"keyboardLayout" tier:"everyday"`
@@ -30,28 +32,28 @@ type User struct {
 	WeatherCity            string                 `json:"weatherCity" tier:"everyday"`
 	WeatherCountry         string                 `json:"weatherCountry" tier:"everyday"`
 	TouchpadWorkspaceSwipe bool                   `json:"touchpadWorkspaceSwipe" tier:"everyday"`
-	ClamshellEnable        bool                   `json:"clamshellEnable" tier:"everyday"`
+	ClamshellEnable        bool                   `json:"clamshellEnable" tier:"everyday" scope:"device"`
 	ConsoleLoginEnable     bool                   `json:"consoleLoginEnable" tier:"security"`
-	USBGuardEnable         bool                   `json:"usbguardEnable" tier:"security"`
-	USBTrustEnforce        bool                   `json:"usbTrustEnforce" tier:"security"`
-	USBTrustTPMHandle      string                 `json:"usbTrustTpmHandle" tier:"security"`
-	USBTrustLapseDays      int                    `json:"usbTrustLapseDays" tier:"security"`
+	USBGuardEnable         bool                   `json:"usbguardEnable" tier:"security" scope:"device"`
+	USBTrustEnforce        bool                   `json:"usbTrustEnforce" tier:"security" scope:"device"`
+	USBTrustTPMHandle      string                 `json:"usbTrustTpmHandle" tier:"security" scope:"device"`
+	USBTrustLapseDays      int                    `json:"usbTrustLapseDays" tier:"security" scope:"device"`
 	USBReviewTechnical     bool                   `json:"usbReviewTechnicalView" tier:"everyday"`
 	PrintingEnable         bool                   `json:"printingEnable" tier:"everyday"`
 	NetworkPrintingEnable  bool                   `json:"networkPrintingEnable" tier:"security"`
 	DolphinDriveUsage      bool                   `json:"dolphinDriveUsage" tier:"everyday"`
-	FirmwareFlashReadEntry bool                   `json:"firmwareFlashReadEntry" tier:"critical"`
+	FirmwareFlashReadEntry bool                   `json:"firmwareFlashReadEntry" tier:"critical" scope:"device"`
 	Name                   string                 `json:"name" tier:"everyday"`
 	Email                  string                 `json:"email" tier:"everyday"`
 	GitHubUsername         string                 `json:"githubUsername" tier:"everyday"`
-	DotfilesDir            string                 `json:"dotfilesDir" tier:"security"`
+	DotfilesDir            string                 `json:"dotfilesDir" tier:"security" scope:"device"`
 	Shell                  string                 `json:"shell" tier:"everyday"`
 	Editors                []string               `json:"editors" tier:"everyday"`
 	Browsers               []string               `json:"browsers" tier:"everyday"`
 	PreferredEditor        string                 `json:"preferredEditor" tier:"everyday"`
 	PreferredBrowser       string                 `json:"preferredBrowser" tier:"everyday"`
 	WebApplications        []WebApplicationIntent `json:"webApplications" tier:"security"`
-	Tailscale              *TailscaleIntent       `json:"tailscale,omitempty" tier:"security"`
+	Tailscale              *TailscaleIntent       `json:"tailscale,omitempty" tier:"security" scope:"device"`
 	// Apps are the selected catalogue app IDs (apps/<id>/meta.json).
 	Apps []string `json:"apps" tier:"everyday"`
 	// FirefoxAddons holds the add-on collections (apps/firefox-addons.json)
@@ -71,28 +73,28 @@ type User struct {
 	AIEndpoint                string `json:"aiEndpoint" tier:"security"`
 	AIRemoteModel             string `json:"aiRemoteModel" tier:"everyday"`
 	AIRemoteContextTokens     int    `json:"aiRemoteContextTokens" tier:"everyday"`
-	LUKSTPM2Enable            bool   `json:"luksTpm2Enable" tier:"critical"`
-	LUKSTPM2PIN               bool   `json:"luksTpm2Pin" tier:"critical"`
-	RecoveryEnable            bool   `json:"recoveryEnable" tier:"critical"`
-	RecoveryPartitionEnable   bool   `json:"recoveryPartitionEnable" tier:"critical"`
-	JODSPrebootLockEnable     bool   `json:"jodsPrebootLockEnable" tier:"critical"`
-	SecureBootEnable          bool   `json:"secureBootEnable" tier:"critical"`
-	SecureBootPrompt          bool   `json:"secureBootPrompt" tier:"critical"`
-	FirmwarePasswordLock      bool   `json:"firmwarePasswordLock" tier:"critical"`
-	EndpointManagedDevice     bool   `json:"endpointManagedDevice" tier:"critical"`
-	JODSEndpoint              string `json:"jodsEndpoint" tier:"critical"`
-	JODSPolicySigningKey      string `json:"jodsPolicySigningPublicKey" tier:"critical"`
-	JODSRecoverySigningKey    string `json:"jodsRecoveryCommandSigningPublicKey" tier:"critical"`
-	JODSEnrollmentMode        string `json:"jodsEnrollmentMode" tier:"critical"`
-	JODSAllowInsecureTLS      bool   `json:"jodsAllowInsecureTls" tier:"critical"`
-	JODSDeviceClass           string `json:"jodsDeviceClass" tier:"critical"`
-	JODSDesktopProfile        string `json:"jodsDesktopProfile" tier:"critical"`
-	JODSFingerprintEnroll     bool   `json:"jodsFingerprintEnrollmentAllowed" tier:"critical"`
-	AllowUnvalidatedODDCModel bool   `json:"allowUnvalidatedODDCModel" tier:"critical"`
-	DeveloperMode             bool   `json:"developerMode" tier:"critical"`
+	LUKSTPM2Enable            bool   `json:"luksTpm2Enable" tier:"critical" scope:"device"`
+	LUKSTPM2PIN               bool   `json:"luksTpm2Pin" tier:"critical" scope:"device"`
+	RecoveryEnable            bool   `json:"recoveryEnable" tier:"critical" scope:"device"`
+	RecoveryPartitionEnable   bool   `json:"recoveryPartitionEnable" tier:"critical" scope:"device"`
+	JODSPrebootLockEnable     bool   `json:"jodsPrebootLockEnable" tier:"critical" scope:"device"`
+	SecureBootEnable          bool   `json:"secureBootEnable" tier:"critical" scope:"device"`
+	SecureBootPrompt          bool   `json:"secureBootPrompt" tier:"critical" scope:"device"`
+	FirmwarePasswordLock      bool   `json:"firmwarePasswordLock" tier:"critical" scope:"device"`
+	EndpointManagedDevice     bool   `json:"endpointManagedDevice" tier:"critical" scope:"device"`
+	JODSEndpoint              string `json:"jodsEndpoint" tier:"critical" scope:"device"`
+	JODSPolicySigningKey      string `json:"jodsPolicySigningPublicKey" tier:"critical" scope:"device"`
+	JODSRecoverySigningKey    string `json:"jodsRecoveryCommandSigningPublicKey" tier:"critical" scope:"device"`
+	JODSEnrollmentMode        string `json:"jodsEnrollmentMode" tier:"critical" scope:"device"`
+	JODSAllowInsecureTLS      bool   `json:"jodsAllowInsecureTls" tier:"critical" scope:"device"`
+	JODSDeviceClass           string `json:"jodsDeviceClass" tier:"critical" scope:"device"`
+	JODSDesktopProfile        string `json:"jodsDesktopProfile" tier:"critical" scope:"device"`
+	JODSFingerprintEnroll     bool   `json:"jodsFingerprintEnrollmentAllowed" tier:"critical" scope:"device"`
+	AllowUnvalidatedODDCModel bool   `json:"allowUnvalidatedODDCModel" tier:"critical" scope:"device"`
+	DeveloperMode             bool   `json:"developerMode" tier:"critical" scope:"device"`
 	// ReleaseChannel is the branch of the official repository that
 	// rebuild --update follows (ROADMAP §11): dev, staging or stable.
-	ReleaseChannel    string `json:"releaseChannel" tier:"critical"`
+	ReleaseChannel    string `json:"releaseChannel" tier:"critical" scope:"device"`
 	UnattendedInstall bool   `json:"unattendedInstall" tier:"installer"`
 	AutoReboot        bool   `json:"autoReboot" tier:"installer"`
 	RunUpdateChecks   bool   `json:"runUpdateChecks" tier:"installer"`
