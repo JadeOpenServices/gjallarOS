@@ -81,6 +81,10 @@ func Serve(ctx context.Context, cfg Config) error {
 		return err
 	}
 
+	if err := notifyReady(); err != nil {
+		return err
+	}
+
 	server := &http.Server{
 		Handler:           handler(cfg),
 		ReadHeaderTimeout: 5 * time.Second,
@@ -122,6 +126,32 @@ func Serve(ctx context.Context, cfg Config) error {
 	}
 
 	return err
+}
+
+// notifyReady tells systemd (Type=notify) that the socket takes
+// connections, so units ordered after the broker never have to poll it.
+// Without NOTIFY_SOCKET (started by hand, tests) it does nothing.
+func notifyReady() error {
+	addr := os.Getenv("NOTIFY_SOCKET")
+	if addr == "" {
+		return nil
+	}
+
+	conn, err := net.DialUnix(
+		"unixgram",
+		nil,
+		&net.UnixAddr{Name: addr, Net: "unixgram"},
+	)
+	if err != nil {
+		return fmt.Errorf("notify systemd: %w", err)
+	}
+	defer conn.Close()
+
+	if _, err := conn.Write([]byte("READY=1")); err != nil {
+		return fmt.Errorf("notify systemd: %w", err)
+	}
+
+	return nil
 }
 
 func handler(cfg Config) http.Handler {
