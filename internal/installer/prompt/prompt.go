@@ -48,11 +48,22 @@ func zenityCommand(ctx context.Context, args ...string) *exec.Cmd {
 	return cmd
 }
 
+var geteuid = os.Geteuid
+
 func gtkAvailable() bool {
 	_, err := exec.LookPath("zenity")
 	return err == nil &&
 		(os.Getenv("DISPLAY") != "" || os.Getenv("WAYLAND_DISPLAY") != "") &&
-		os.Getenv("SSH_CONNECTION") == ""
+		os.Getenv("SSH_CONNECTION") == "" &&
+		!sudoFromDesktop()
+}
+
+// sudo keeps WAYLAND_DISPLAY, but the session belongs to the user who ran
+// sudo and root's zenity cannot open it. Every zenity failure reads as a
+// cancel, so `sudo install.sh` stopped with "prompt cancelled" before the
+// first question (e2e-fw13 2026-10-20). Ask in the terminal instead.
+func sudoFromDesktop() bool {
+	return geteuid() == 0 && os.Getenv("SUDO_USER") != ""
 }
 
 func gtkConfirmationWidth(message string) int {

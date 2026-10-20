@@ -45,6 +45,17 @@
 # Network tab is not open. Drop it once the pin is 5.2.1 or newer, except for
 # the sender check and the notification.
 #
+# The shell picked its Wi-Fi backend once at startup. When NM was not on the bus
+# yet (or restarting), it fell back to wpa_supplicant, which the user may not
+# talk to, and never looked at NM again, so the Wi-Fi list stayed empty ("no
+# networks in range") until the shell restarted. networkmanager-follow-bus.patch
+# backports upstream 24f85bae to attach to NM whenever it appears on the bus and
+# detach when it leaves. Drop it once the pin includes that commit.
+# That alone does not cover a shell that starts while NM is down: NM's own
+# wpa_supplicant is on the bus, closed to the user, and the fallback took it
+# anyway. wpa-supplicant-access-denied.patch (ours; upstream has the same gap)
+# refuses a wpa_supplicant that answers AccessDenied, so the NM backend waits.
+#
 # libqalculate 5.10 frees its random state on exit even when nothing ever
 # created it, so the shell crashes every time it stops. Upstream fixed that in
 # 931c2aa9 (5.11); drop the patch once nixpkgs ships libqalculate 5.11 or newer.
@@ -70,5 +81,7 @@
       ./bluetooth-pairing.patch
       ./cpu-temp-smoothing.patch
       ./network-secret-agent.patch
+      ./networkmanager-follow-bus.patch
+      ./wpa-supplicant-access-denied.patch
     ];
   })

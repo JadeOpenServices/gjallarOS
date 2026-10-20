@@ -181,12 +181,6 @@ let
   gjallarWlCopy = pkgs.writeShellScriptBin "wl-copy" ''
     set -euo pipefail
 
-    ${pkgs.coreutils}/bin/touch \
-      "''${XDG_RUNTIME_DIR:-/tmp}/gjallar-clipboard-write-hit" \
-      2>/dev/null || true
-
-
-
     if [ -z "''${TMUX:-}" ]; then
       echo \
         "gjallarCode clipboard: TMUX unavailable" \
@@ -430,6 +424,15 @@ let
 
           trace_file="$RUNTIME_DIRECTORY/startup.log"
 
+          # systemd passes the bridge port from ai-session@.socket as fd 3,
+          # already listening; fd 3 becomes the trace log below.
+          if [ "''${LISTEN_FDS:-}" != 1 ] || [ "''${LISTEN_PID:-}" != "$$" ]; then
+            printf 'gjallar-ai-session: no bridge socket from systemd\n' >&2
+            exit 1
+          fi
+          exec {bridge_fd}<&3
+          unset LISTEN_FDS LISTEN_PID LISTEN_FDNAMES
+
           exec 3>>"$trace_file"
 
           ${pkgs.coreutils}/bin/chmod 0644 "$trace_file"
@@ -509,11 +512,13 @@ let
             0700 \
             "$RUNTIME_DIRECTORY"
 
-                  ${pkgs.socat}/bin/socat \
-              TCP-LISTEN:11434,bind=127.0.0.1,reuseaddr,fork \
-              UNIX-CONNECT:/run/gjallar-ai-model/model.sock &
+          ${pkgs.socat}/bin/socat \
+            "ACCEPT-FD:$bridge_fd,fork" \
+            UNIX-CONNECT:/run/gjallar-ai-model/model.sock &
 
           bridge_pid=$!
+
+          exec {bridge_fd}<&-
 
           cleanup() {
             if [ -n "''${tmux_socket:-}" ]; then
@@ -528,25 +533,16 @@ let
 
           trap cleanup EXIT INT TERM HUP
 
-          ready=false
-
-          for _ in $(${pkgs.coreutils}/bin/seq 1 50); do
-            if ${pkgs.curl}/bin/curl \
-              --silent \
-              --fail \
-              --max-time 1 \
-              http://127.0.0.1:11434/health \
-              >/dev/null 2>&1
-            then
-              ready=true
-              break
-            fi
-
-            ${pkgs.coreutils}/bin/sleep 0.1
-          done
-
-          [ "$ready" = true ] ||
-            die "model broker bridge did not become ready"
+          # The port listens since before this script started and the
+          # broker is a Type=notify unit ordered before the session, so one
+          # check is enough.
+          ${pkgs.curl}/bin/curl \
+            --silent \
+            --fail \
+            --max-time 5 \
+            http://127.0.0.1:11434/health \
+            >/dev/null 2>&1 ||
+            die "model broker bridge does not answer"
 
           export HOME="$RUNTIME_DIRECTORY/home"
           export XDG_CONFIG_HOME="$RUNTIME_DIRECTORY/config"
@@ -1098,20 +1094,24 @@ let
 
           tmux_socket="$RUNTIME_DIRECTORY/tmux.sock"
 
+          # The server outlives the session so the wait below can hear
+          # session-closed; a signal sent before the wait starts is kept.
           ${pkgs.tmux}/bin/tmux \
             -S "$tmux_socket" \
             new-session \
             -d \
             -s gjallar-ai \
-            ${lib.escapeShellArg "${gjallarCodeOpencode}/bin/opencode /workspace --agent build"}
+            ${lib.escapeShellArg "${gjallarCodeOpencode}/bin/opencode /workspace --agent build"} \; \
+            set -s exit-empty off \; \
+            set-hook -g session-closed 'wait-for -S gjallar-ai-exit'
 
-          while ${pkgs.tmux}/bin/tmux \
+          # Ready once the console exists; the launcher's start returns here.
+          exec ${pkgs.systemd}/bin/systemd-notify \
+            --ready \
+            --exec ';' -- \
+            ${pkgs.tmux}/bin/tmux \
             -S "$tmux_socket" \
-            has-session \
-            -t gjallar-ai         >/dev/null 2>&1
-          do
-            ${pkgs.coreutils}/bin/sleep 0.2
-          done
+            wait-for gjallar-ai-exit
   '';
 
   aiDiagnostics = pkgs.writeShellScriptBin "gjallar-ai-diagnostics" ''
@@ -1219,12 +1219,8 @@ let
       printf 'header = "Authorization: Bearer %s"\n' "$(cat "$CREDENTIALS_DIRECTORY/${tokenCredential}")" \
         | curl --config - --silent --show-error --fail --max-time "$seconds" "$@" ${lib.escapeShellArg upstream}"$path"
     }
-    ready=false
-    for _ in $(seq 1 30); do
-      if api 5 /api/tags >/dev/null; then ready=true; break; fi
-      sleep 1
-    done
-    if [ "$ready" != true ]; then echo "ERROR: AI server ${upstream} did not answer with the token within 30 seconds." >&2; exit 1; fi
+    # One check; gjallar-ai-session-start runs this unit again on every start.
+    if ! api 30 /api/tags >/dev/null; then echo "ERROR: AI server ${upstream} did not answer with the token." >&2; exit 1; fi
     api 1800 /api/pull --data @${remotePullRequest} >/dev/null
     state="$STATE_DIRECTORY/definition.sha256"
     applied="$(cat "$state" 2>/dev/null || true)"
@@ -1375,6 +1371,10 @@ let
     systemd.services.ollama.serviceConfig = {
       DynamicUser = lib.mkForce false;
 
+      # Ollama has no readiness signal, so the unit only turns active once
+      # the API answers; units ordered after it need no wait of their own.
+      ExecStartPost = "${pkgs.curl}/bin/curl --silent --show-error --fail --retry 30 --retry-connrefused --retry-delay 1 --max-time 60 ${upstream}/api/version -o /dev/null";
+
       # The desktop always wins: ollama yields CPU and IO, stays below a
       # memory ceiling, and is the first process the OOM killer picks.
       MemoryHigh = "50%";
@@ -1423,7 +1423,7 @@ lib.mkIf config.gjallar.apps.ai.enable (
         }
         {
           assertion = remote || baseModel != "";
-          message = "Local AI needs aiModel; the installer leaves it empty when the ai app was off or no model fit this machine's RAM. Rerun the installer, set aiEndpoint, or turn the ai app off.";
+          message = "Local AI needs aiModel; gjallarctl rebuild picks it for this machine, a bare nixos-rebuild does not. Rebuild with gjallarctl, set aiEndpoint, or turn the ai app off.";
         }
       ];
 
@@ -1587,6 +1587,7 @@ lib.mkIf config.gjallar.apps.ai.enable (
             + "--user ${lib.escapeShellArg settings.username} "
             + "--cgroup-prefix /ai-session@";
 
+          Type = "notify";
           User = "gjallar-ai-model";
           Group = "ai-model-access";
           LoadCredentialEncrypted = lib.mkIf remote "${tokenCredential}:${tokenSealed}";
@@ -1621,16 +1622,39 @@ lib.mkIf config.gjallar.apps.ai.enable (
         };
       };
 
+      # The bridge port inside the session's private network. systemd binds
+      # it before the session starts and hands it over as fd 3.
+      systemd.sockets."ai-session@" = {
+        description = "Model bridge port of the AI workspace session %i";
+
+        unitConfig = {
+          JoinsNamespaceOf = "ai-session@%i.service";
+          StopWhenUnneeded = true;
+        };
+
+        listenStreams = [
+          "127.0.0.1:11434"
+        ];
+
+        socketConfig = {
+          PrivateNetwork = true;
+        };
+      };
+
       systemd.services."ai-session@" = {
         description = "Controlled AI workspace session for %i";
+
+        unitConfig.JoinsNamespaceOf = "ai-session@%i.socket";
 
         after = [
           "ai-model-broker.service"
           "ollama-model-provision.service"
+          "ai-session@%i.socket"
         ];
 
         requires = [
           "ai-model-broker.service"
+          "ai-session@%i.socket"
         ]
         ++ lib.optional (!remote) "ollama.service";
 
@@ -1652,7 +1676,9 @@ lib.mkIf config.gjallar.apps.ai.enable (
             "/run/user"
           ];
 
-          Type = "simple";
+          Type = "notify";
+          # The warm-up run above loads the model on CPU-only machines too.
+          TimeoutStartSec = "180s";
 
           ExecStart = "${aiSessionRuntime} %i";
           User = settings.username;
@@ -1670,7 +1696,9 @@ lib.mkIf config.gjallar.apps.ai.enable (
           UMask = "0077";
 
           PrivateNetwork = true;
-          PrivateTmp = true;
+          # JoinsNamespaceOf would also join the socket's /tmp, which has
+          # none, leaving /tmp read-only. A fresh tmpfs is never shared.
+          PrivateTmp = "disconnected";
           PrivateDevices = true;
           PrivateMounts = true;
 
@@ -1759,12 +1787,6 @@ lib.mkIf config.gjallar.apps.ai.enable (
           else
             ''
               set -euo pipefail
-              ready=false
-              for _ in $(seq 1 30); do
-                if curl --silent --fail --max-time 2 ${lib.escapeShellArg upstream}/api/tags >/dev/null; then ready=true; break; fi
-                sleep 1
-              done
-              if [ "$ready" != true ]; then echo "ERROR: Ollama at ${upstream} did not become ready within 30 seconds." >&2; exit 1; fi
               ollama pull ${lib.escapeShellArg baseModel}
               state="$STATE_DIRECTORY/definition.sha256"
               applied="$(cat "$state" 2>/dev/null || true)"

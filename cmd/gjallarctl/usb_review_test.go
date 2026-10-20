@@ -6,8 +6,10 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/JadeOpenServices/gjallarOS/internal/usbtrust"
+	"github.com/JadeOpenServices/gjallarOS/internal/usbtrust/broker"
 )
 
 func TestUSBReviewUsesOnlyDomainActions(t *testing.T) {
@@ -74,6 +76,24 @@ func TestUSBReviewLabelsReplacementExplicitly(t *testing.T) {
 	}
 	if !reflect.DeepEqual(available, map[string]bool{"accept-replacement": true}) {
 		t.Fatalf("unexpected available actions: %v", available)
+	}
+}
+
+func TestUSBReviewOffersRenewForLapsedTrust(t *testing.T) {
+	d := usbtrust.Decision{
+		Reason:    string(usbtrust.CodeTrustedExternalLapsed),
+		TrustedID: "device:synthetic-stick",
+		Actions:   []usbtrust.Action{usbtrust.ActionKeepBlocked, usbtrust.ActionAllowOnce, usbtrust.ActionAcceptReplacement},
+	}
+	rows, _ := usbReviewChoices(d, false)
+	if rows[len(rows)-1] != "Always allow again" {
+		t.Fatalf("lapsed renew label: %q", rows)
+	}
+	if facts := usbReviewFacts(d); !strings.Contains(facts[0].text, "not connected for too long") {
+		t.Fatalf("lapse not explained: %+v", facts)
+	}
+	if _, headline, _ := usbReviewVerdict(d); headline == "New device" {
+		t.Fatalf("simple view calls a lapsed device new: %q", headline)
 	}
 }
 
@@ -212,21 +232,9 @@ func TestUSBReviewAlwaysTechnicalPreference(t *testing.T) {
 	}
 	t.Setenv("GJALLAROS_REPO", repo)
 
-	t.Setenv(usbReviewViewEnv, "")
 	if usbReviewAlwaysTechnical() {
 		t.Fatal("review must start in the simple view by default")
 	}
-	t.Setenv(usbReviewViewEnv, usbReviewTechnicalV)
-	if !usbReviewAlwaysTechnical() {
-		t.Fatal("built default was ignored while the key is missing")
-	}
-	if err := setUSBReviewAlwaysTechnical(false); err != nil {
-		t.Fatal(err)
-	}
-	if usbReviewAlwaysTechnical() {
-		t.Fatal("unticking the box must override the built default")
-	}
-	t.Setenv(usbReviewViewEnv, "")
 	if err := setUSBReviewAlwaysTechnical(true); err != nil {
 		t.Fatal(err)
 	}
@@ -262,5 +270,169 @@ func TestUSBMediaNotice(t *testing.T) {
 	}
 	if !usbMediaActive([]usbtrust.MediaDecision{{Connection: "a"}}, "a") {
 		t.Fatal("closed medium not active")
+	}
+}
+
+// poll runs one broker poll through r and returns the connections it would
+// announce.
+func poll(r *usbReviewState, policy ...usbtrust.Decision) []string {
+	r.begin()
+	var asked []string
+	for _, d := range policy {
+		if r.wants(d) {
+			asked = append(asked, d.Connection)
+		}
+	}
+	r.prune(true)
+	return asked
+}
+
+func TestUSBReviewAfterBrokerRestart(t *testing.T) {
+	device := func(connection string, target usbtrust.Target) usbtrust.Decision {
+		return usbtrust.Decision{
+			Connection:     connection,
+			Target:         target,
+			ObservedDevice: usbtrust.ObservedDevice{Identity: usbtrust.Identity{Hash: "SYNTHETIC-hash", Port: "2-2"}},
+		}
+	}
+	r := newUSBReviewState()
+	if got := poll(r, device("a", usbtrust.TargetBlock)); !reflect.DeepEqual(got, []string{"a"}) {
+		t.Fatalf("new device announced %v, want [a]", got)
+	}
+	r.done(device("a", usbtrust.TargetBlock), usbReviewAllowed)
+	if got := poll(r, device("a", usbtrust.TargetAllow)); got != nil {
+		t.Fatalf("allowed device announced %v", got)
+	}
+	// The restarted broker blocks it again under a new token: the allow
+	// is gone, so ask again.
+	if got := poll(r, device("b", usbtrust.TargetBlock)); !reflect.DeepEqual(got, []string{"b"}) {
+		t.Fatalf("device blocked again after restart announced %v, want [b]", got)
+	}
+	r.done(device("b", usbtrust.TargetBlock), usbReviewAnswered)
+	if got := poll(r, device("c", usbtrust.TargetBlock)); got != nil {
+		t.Fatalf("device kept blocked announced again after restart: %v", got)
+	}
+	// Unplugged and back: ask again.
+	poll(r)
+	if got := poll(r, device("d", usbtrust.TargetBlock)); !reflect.DeepEqual(got, []string{"d"}) {
+		t.Fatalf("replugged device announced %v, want [d]", got)
+	}
+}
+
+// pollMedia runs one broker poll of media through r and returns the
+// connections it would announce.
+func pollMedia(r *usbReviewState, pending bool, media ...usbtrust.MediaDecision) []string {
+	r.begin()
+	var asked []string
+	for _, m := range media {
+		if !pending && r.wantsMedia(m) {
+			asked = append(asked, m.Connection)
+		}
+	}
+	r.prune(!pending)
+	return asked
+}
+
+func TestUSBMediaKeptClosedAcrossRestarts(t *testing.T) {
+	// SYNTHETIC reader and card.
+	card := func(connection string) usbtrust.MediaDecision {
+		return usbtrust.MediaDecision{ID: "6:0:0:0", Connection: connection, VIDPID: "0000:0000", Port: "2-1", Bytes: 64e9}
+	}
+	path := filepath.Join(t.TempDir(), "gjallar", "usb-review.json")
+	r := newUSBReviewState()
+	r.path = path
+	if got := pollMedia(r, false, card("a")); !reflect.DeepEqual(got, []string{"a"}) {
+		t.Fatalf("new card announced %v, want [a]", got)
+	}
+	r.mediaDone(card("a"))
+	// A restarted broker lists nothing until it scanned, then the same card
+	// under a new token.
+	if got := pollMedia(r, true); got != nil {
+		t.Fatalf("pending poll announced %v", got)
+	}
+	if got := pollMedia(r, false, card("b")); got != nil {
+		t.Fatalf("card kept closed announced again after a broker restart: %v", got)
+	}
+	if err := r.save(); err != nil {
+		t.Fatal(err)
+	}
+	// A restarted review (a rebuild) remembers the answer.
+	r = newUSBReviewState()
+	r.path = path
+	if err := r.load(); err != nil {
+		t.Fatal(err)
+	}
+	if got := pollMedia(r, false, card("b")); got != nil {
+		t.Fatalf("card kept closed announced again after a review restart: %v", got)
+	}
+	// Pulled and put back: ask again.
+	pollMedia(r, false)
+	if got := pollMedia(r, false, card("c")); !reflect.DeepEqual(got, []string{"c"}) {
+		t.Fatalf("reinserted card announced %v, want [c]", got)
+	}
+	// Not answered (opened, or the notice closed with the review): a later
+	// token asks again.
+	if got := pollMedia(r, false, card("d")); !reflect.DeepEqual(got, []string{"d"}) {
+		t.Fatalf("card that was not kept closed announced %v, want [d]", got)
+	}
+}
+
+func TestUSBReviewKeptBlockedAcrossReviewRestart(t *testing.T) {
+	device := usbtrust.Decision{
+		Connection:     "a",
+		Target:         usbtrust.TargetBlock,
+		ObservedDevice: usbtrust.ObservedDevice{Identity: usbtrust.Identity{Hash: "SYNTHETIC-hash", Port: "2-2"}},
+	}
+	path := filepath.Join(t.TempDir(), "usb-review.json")
+	r := newUSBReviewState()
+	r.path = path
+	poll(r, device)
+	r.done(device, usbReviewAnswered)
+	if err := r.save(); err != nil {
+		t.Fatal(err)
+	}
+	if info, err := os.Stat(path); err != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("saved answers: %v %v", info, err)
+	}
+	r = newUSBReviewState()
+	r.path = path
+	if err := r.load(); err != nil {
+		t.Fatal(err)
+	}
+	if got := poll(r, device); got != nil {
+		t.Fatalf("device kept blocked announced again after a review restart: %v", got)
+	}
+}
+
+func TestUSBRenewalNotice(t *testing.T) {
+	// SYNTHETIC record name and times.
+	l := broker.TrustLapse{TrustedID: "device:synthetic", Name: "Synthetic <Dock>", LastUsed: "2026-09-21T10:00:00Z", LapsesAt: "2026-10-21T10:00:00Z"}
+	n := usbRenewalNotice(l, time.UTC)
+	if !strings.Contains(n.Body, "Synthetic &lt;Dock&gt; has not been connected since 21 Sep.") || !strings.Contains(n.Body, "From Wed 21 Oct 10:00") {
+		t.Fatalf("renewal body: %q", n.Body)
+	}
+	r := newUSBReviewState()
+	if !r.wantsRenewal(l) || r.wantsRenewal(l) {
+		t.Fatal("warning must show once per lapse time")
+	}
+	l.LapsesAt = "2026-11-20T10:00:00Z"
+	if !r.wantsRenewal(l) {
+		t.Fatal("new lapse time not warned")
+	}
+}
+
+func TestUSBReviewHeightFitsEveryAction(t *testing.T) {
+	d := usbtrust.Decision{ObservedDevice: usbtrust.ObservedDevice{
+		Identity: usbtrust.Identity{Name: "stick", VIDPID: "dead:beef", Serial: "S1", Interfaces: []string{"08:06:50"}},
+	}, Reason: string(usbtrust.CodeUnknownExternal), Actions: []usbtrust.Action{usbtrust.ActionKeepBlocked, usbtrust.ActionAllowOnce, usbtrust.ActionTrustPermanent}}
+	for _, technical := range []bool{false, true} {
+		summary := usbReviewSummary(d, true, technical)
+		rows, _ := usbReviewChoices(d, technical)
+		// fw13 VM, scale 1: the default height left 88 px of list, room for
+		// the header and two rows only.
+		natural := map[bool]int{false: 578, true: 634}[technical]
+		if got, want := usbReviewHeight(summary, len(rows)/3), natural+30; got < want {
+			t.Errorf("technical=%v: height %d hides the third action, want at least %d", technical, got, want)
+		}
 	}
 }

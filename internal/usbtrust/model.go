@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 )
 
 const SchemaVersion = 1
@@ -62,6 +63,9 @@ type Device struct {
 	Attestation    *Attestation     `json:"attestation,omitempty"`
 	FirstAccepted  string           `json:"firstAccepted"`
 	LastAccepted   string           `json:"lastAccepted"`
+	// LastUsed moves at most once a day while the device is connected
+	// under its trust. Trust lapse counts from it.
+	LastUsed string `json:"lastUsed,omitempty"`
 }
 
 // Enforcement is signed with the trust records so that switching blocking off
@@ -80,6 +84,9 @@ type Document struct {
 	Revision    uint64       `json:"revision"`
 	Devices     []Device     `json:"devices"`
 	Enforcement *Enforcement `json:"enforcement,omitempty"`
+	// LapseSince is when lapsing trust was switched on; empty while it is
+	// off.
+	LapseSince string `json:"lapseSince,omitempty"`
 }
 
 func (d *Document) Normalize() {
@@ -111,6 +118,12 @@ func (d Document) Validate() error {
 
 	if d.Enforcement != nil && (strings.TrimSpace(d.Enforcement.EnrolledAt) == "" || strings.TrimSpace(d.Enforcement.ChangedAt) == "") {
 		return errors.New("enforcement state requires enrollment and change times")
+	}
+
+	if d.LapseSince != "" {
+		if _, err := time.Parse(time.RFC3339, d.LapseSince); err != nil {
+			return fmt.Errorf("invalid lapseSince %q", d.LapseSince)
+		}
 	}
 
 	seen := make(map[string]struct{}, len(d.Devices))

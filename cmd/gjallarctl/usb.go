@@ -26,7 +26,7 @@ import (
 
 func runUSB(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		fmt.Fprintln(stderr, "Usage: gjallarctl usb {status|audit|policy|review|provision-key|allow-once|trust-permanent|keep-blocked|enroll-internal|accept-replacement|forget|disarm|allow-media} [--runtime-id ID --connection TOKEN] [--trusted-id ID] [--role ROLE] [--portable=true|false] [--media H:C:T:L --connection TOKEN]")
+		fmt.Fprintln(stderr, "Usage: gjallarctl usb {status|audit|policy|review|provision-key|allow-once|trust-permanent|keep-blocked|enroll-internal|accept-replacement|forget|renew|disarm|allow-media} [--runtime-id ID --connection TOKEN] [--trusted-id ID] [--role ROLE] [--portable=true|false] [--media H:C:T:L --connection TOKEN]")
 		return 2
 	}
 	if args[0] == "review" {
@@ -99,17 +99,18 @@ func runUSBReview(args []string, stderr io.Writer) int {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
-	seen := map[string]bool{}
-	// Devices the user already answered, by identity and port. A restarted
-	// broker hands out new connection tokens; that alone must not announce a
-	// device again that never left.
-	answered := map[string]bool{}
-	// Media notices close their cards when ctx ends; wait for that on exit.
+	review := newUSBReviewState()
+	review.path = usbReviewStatePath()
+	if err := review.load(); err != nil {
+		fmt.Fprintf(stderr, "WARN: USB review: %v\n", err)
+	}
+	// Media and renewal notices close their cards when ctx ends; wait for
+	// that on exit.
 	var media sync.WaitGroup
 	defer media.Wait()
 	// The same failure every 2 s says nothing new: report it once, and once
 	// more when the broker answers again.
-	lastErr := ""
+	lastErr, lastSaveErr := "", ""
 	for ctx.Err() == nil {
 		requestCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		response, err := broker.Call(requestCtx, broker.DefaultSocket, broker.Request{Action: broker.ActionPolicy})
@@ -124,50 +125,41 @@ func runUSBReview(args []string, stderr io.Writer) int {
 				fmt.Fprintln(stderr, "USB review: broker answers again")
 				lastErr = ""
 			}
-			active := map[string]bool{}
-			present := map[string]bool{}
+			review.begin()
 			for _, d := range response.Policy {
-				active[d.Connection] = true
-				present[usbReviewKey(d)] = true
-				if seen[d.Connection] || answered[usbReviewKey(d)] || d.Target != usbtrust.TargetBlock {
+				if !review.wants(d) {
 					continue
 				}
-				// Unsupported built-in parts stay blocked; asking would offer
-				// nothing but "keep blocked".
-				if usbtrust.AuditCode(d.Reason) == usbtrust.CodeInternalDebug {
-					continue
-				}
-				seen[d.Connection] = true
-				switch usbReviewDecision(ctx, executable, d, response.Enforcing) {
-				case usbReviewAnswered:
-					answered[usbReviewKey(d)] = true
-				case usbReviewRetry:
-					delete(seen, d.Connection)
-				}
+				review.done(d, usbReviewDecision(ctx, executable, d, response.Enforcing))
 			}
 			// Media notices run on their own: a card left closed must not hold
 			// back the review of the next USB device.
 			for _, m := range response.Media {
-				active[m.Connection] = true
-				if m.Allowed || seen[m.Connection] {
+				if response.MediaPending || !review.wantsMedia(m) {
 					continue
 				}
-				seen[m.Connection] = true
 				media.Add(1)
 				go func() {
 					defer media.Done()
-					usbReviewMedia(ctx, executable, m)
+					if usbReviewMedia(ctx, executable, m) {
+						review.mediaDone(m)
+					}
 				}()
 			}
-			for token := range seen {
-				if !active[token] {
-					delete(seen, token)
+			for _, l := range response.Renewals {
+				if !review.wantsRenewal(l) {
+					continue
 				}
+				media.Add(1)
+				go func() {
+					defer media.Done()
+					usbReviewRenewal(ctx, executable, l)
+				}()
 			}
-			for key := range answered {
-				if !present[key] {
-					delete(answered, key)
-				}
+			review.prune(!response.MediaPending)
+			if err := review.save(); err != nil && err.Error() != lastSaveErr {
+				fmt.Fprintf(stderr, "WARN: USB review: %v\n", err)
+				lastSaveErr = err.Error()
 			}
 		}
 		select {
@@ -181,8 +173,13 @@ func runUSBReview(args []string, stderr io.Writer) int {
 type usbReviewOutcome int
 
 const (
-	// The user answered; the device is not announced again while it stays.
+	// The user kept the device blocked; it is not announced again while it
+	// stays.
 	usbReviewAnswered usbReviewOutcome = iota
+	// The user allowed the device. Allowing once lasts only while the broker
+	// runs, so if it comes back blocked after a broker restart it is asked
+	// again.
+	usbReviewAllowed
 	// Nobody answered: the device left, its token changed or the review stops.
 	usbReviewInterrupted
 	// The decision failed and should be offered again.
@@ -193,6 +190,230 @@ const (
 // it is plugged in, without the per-connection token.
 func usbReviewKey(d usbtrust.Decision) string {
 	return d.Identity.Hash + "\x00" + d.Identity.Port
+}
+
+// usbMediaKey names a medium across broker restarts: the reader, its slot
+// and the size of what is in it, without the per-insertion token.
+func usbMediaKey(m usbtrust.MediaDecision) string {
+	return strings.Join([]string{m.VIDPID, m.Port, m.ID, strconv.FormatUint(m.Bytes, 10)}, "\x00")
+}
+
+// usbReviewState remembers what the review loop already asked, from one
+// broker poll to the next.
+type usbReviewState struct {
+	// Connections with an open or finished notice.
+	seen map[string]bool
+	// Devices the user kept blocked, by identity and port. A restarted
+	// broker hands out new connection tokens; that alone must not announce a
+	// device again that never left.
+	answered map[string]bool
+	// What the current poll listed.
+	active, present map[string]bool
+	// Lapse warnings shown, by record and lapse time. Renewing moves the
+	// time, so a later warning for the same device shows again.
+	warned map[string]bool
+
+	// Media connections with an open or finished notice, and those the
+	// current poll listed.
+	mediaSeen, mediaActive map[string]bool
+	// Media the user kept closed, by usbMediaKey, and those the current poll
+	// listed. Notices answer from their own goroutines.
+	mu                   sync.Mutex
+	closed, mediaPresent map[string]bool
+
+	// path keeps answered and closed across a restart of the review, such
+	// as the one a rebuild causes; empty keeps them in memory only.
+	path  string
+	dirty bool
+}
+
+func newUSBReviewState() *usbReviewState {
+	return &usbReviewState{
+		seen: map[string]bool{}, answered: map[string]bool{}, warned: map[string]bool{},
+		mediaSeen: map[string]bool{}, closed: map[string]bool{},
+	}
+}
+
+// usbReviewStatePath lives in the runtime directory: answers last until
+// logout, like the notices they close.
+func usbReviewStatePath() string {
+	dir := os.Getenv("XDG_RUNTIME_DIR")
+	if dir == "" {
+		dir = filepath.Join("/run/user", strconv.Itoa(os.Getuid()))
+	}
+	return filepath.Join(dir, "gjallar", "usb-review.json")
+}
+
+type usbReviewSaved struct {
+	Blocked []string `json:"blocked,omitempty"`
+	Closed  []string `json:"closed,omitempty"`
+}
+
+// load restores the answers of an earlier run. The first poll forgets the
+// devices and media that left in between.
+func (r *usbReviewState) load() error {
+	if r.path == "" {
+		return nil
+	}
+	data, err := os.ReadFile(r.path)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	var saved usbReviewSaved
+	if err := json.Unmarshal(data, &saved); err != nil {
+		return fmt.Errorf("%s: %w", r.path, err)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, key := range saved.Blocked {
+		r.answered[key] = true
+	}
+	for _, key := range saved.Closed {
+		r.closed[key] = true
+	}
+	return nil
+}
+
+// save writes the answers when they changed since the last save.
+func (r *usbReviewState) save() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.path == "" || !r.dirty {
+		return nil
+	}
+	saved := usbReviewSaved{Blocked: sortedKeys(r.answered), Closed: sortedKeys(r.closed)}
+	data, err := json.Marshal(saved)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(r.path), 0o700); err != nil {
+		return err
+	}
+	tmp := r.path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, r.path); err != nil {
+		return err
+	}
+	r.dirty = false
+	return nil
+}
+
+func sortedKeys(set map[string]bool) []string {
+	keys := make([]string, 0, len(set))
+	for key := range set {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+// begin starts a poll.
+func (r *usbReviewState) begin() {
+	r.active, r.present = map[string]bool{}, map[string]bool{}
+	r.mediaActive = map[string]bool{}
+	r.mu.Lock()
+	r.mediaPresent = map[string]bool{}
+	r.mu.Unlock()
+}
+
+// wants reports whether d should be announced now, and marks it as asked.
+func (r *usbReviewState) wants(d usbtrust.Decision) bool {
+	r.active[d.Connection] = true
+	r.present[usbReviewKey(d)] = true
+	if r.seen[d.Connection] || r.answered[usbReviewKey(d)] || d.Target != usbtrust.TargetBlock {
+		return false
+	}
+	// Unsupported built-in parts stay blocked; asking would offer nothing
+	// but "keep blocked".
+	if usbtrust.AuditCode(d.Reason) == usbtrust.CodeInternalDebug {
+		return false
+	}
+	r.seen[d.Connection] = true
+	return true
+}
+
+// done records how the review of d ended.
+func (r *usbReviewState) done(d usbtrust.Decision, outcome usbReviewOutcome) {
+	switch outcome {
+	case usbReviewAnswered:
+		r.mu.Lock()
+		r.answered[usbReviewKey(d)] = true
+		r.dirty = true
+		r.mu.Unlock()
+	case usbReviewRetry:
+		delete(r.seen, d.Connection)
+	}
+}
+
+// wantsMedia reports whether m should be announced now, and marks it as
+// asked.
+func (r *usbReviewState) wantsMedia(m usbtrust.MediaDecision) bool {
+	r.mediaActive[m.Connection] = true
+	r.mu.Lock()
+	r.mediaPresent[usbMediaKey(m)] = true
+	closed := r.closed[usbMediaKey(m)]
+	r.mu.Unlock()
+	if m.Allowed || closed || r.mediaSeen[m.Connection] {
+		return false
+	}
+	r.mediaSeen[m.Connection] = true
+	return true
+}
+
+// mediaDone records that the user kept m closed.
+func (r *usbReviewState) mediaDone(m usbtrust.MediaDecision) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.closed[usbMediaKey(m)] = true
+	r.dirty = true
+}
+
+// wantsRenewal reports whether the lapse warning for l should be shown now,
+// and marks it as shown.
+func (r *usbReviewState) wantsRenewal(l broker.TrustLapse) bool {
+	key := l.TrustedID + "@" + l.LapsesAt
+	if r.warned[key] {
+		return false
+	}
+	r.warned[key] = true
+	return true
+}
+
+// prune forgets connections, devices and media the current poll no longer
+// listed. Media are kept while the broker has not listed them yet.
+func (r *usbReviewState) prune(mediaListed bool) {
+	for token := range r.seen {
+		if !r.active[token] {
+			delete(r.seen, token)
+		}
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for key := range r.answered {
+		if !r.present[key] {
+			delete(r.answered, key)
+			r.dirty = true
+		}
+	}
+	if !mediaListed {
+		return
+	}
+	for token := range r.mediaSeen {
+		if !r.mediaActive[token] {
+			delete(r.mediaSeen, token)
+		}
+	}
+	for key := range r.closed {
+		if !r.mediaPresent[key] {
+			delete(r.closed, key)
+			r.dirty = true
+		}
+	}
 }
 
 // usbReviewDecision announces one blocked device and carries out the chosen
@@ -253,7 +474,7 @@ func usbReviewDecision(ctx context.Context, executable string, d usbtrust.Decisi
 		return usbReviewInterrupted
 	}
 	if err == nil {
-		return usbReviewAnswered
+		return usbReviewAllowed
 	}
 	_, _ = exec.Command("zenity", "--error", "--title=USB decision failed", "--text="+html.EscapeString(string(output))).Output()
 	return usbReviewRetry
@@ -261,24 +482,72 @@ func usbReviewDecision(ctx context.Context, executable string, d usbtrust.Decisi
 
 // usbReviewMedia announces a medium that stays closed in an allowed reader
 // and opens it after authentication. The notice closes when the medium is
-// removed or swapped.
-func usbReviewMedia(ctx context.Context, executable string, m usbtrust.MediaDecision) {
+// removed or swapped. It reports whether the user chose to keep the medium
+// closed; an opened medium that a broker restart closes again is announced
+// again.
+func usbReviewMedia(ctx context.Context, executable string, m usbtrust.MediaDecision) (keptClosed bool) {
 	ctx, cancel := usbWhileMediaPresent(ctx, m.Connection)
 	defer cancel()
 	picked, err := showNotice(ctx, usbMediaNotice(m))
 	if err != nil || ctx.Err() != nil {
-		return
+		return false
 	}
 	switch picked {
 	case "open", "default":
 	default:
-		return
+		return true
 	}
 	output, err := usbAuthorize(ctx, "the storage in "+usbMediaReader(m), []string{executable, "usb", "allow-media", "--media", m.ID, "--connection", m.Connection})
 	if err == nil || ctx.Err() != nil {
-		return
+		return false
 	}
 	_, _ = exec.Command("zenity", "--error", "--title=Storage stays closed", "--text="+html.EscapeString(string(output))).Output()
+	return false
+}
+
+// usbReviewRenewal warns that a device's trust lapses soon and renews it on
+// request. Not renewing is fine: the device asks again on its next connection.
+func usbReviewRenewal(ctx context.Context, executable string, l broker.TrustLapse) {
+	picked, err := showNotice(ctx, usbRenewalNotice(l, time.Local))
+	if err != nil || ctx.Err() != nil {
+		return
+	}
+	switch picked {
+	case "renew", "default":
+	default:
+		return
+	}
+	output, err := usbAuthorize(ctx, usbRenewalName(l), []string{executable, "usb", "renew", "--trusted-id", l.TrustedID})
+	if err == nil || ctx.Err() != nil {
+		return
+	}
+	_, _ = exec.Command("zenity", "--error", "--title=Trust not renewed", "--text="+html.EscapeString(string(output))).Output()
+}
+
+func usbRenewalName(l broker.TrustLapse) string {
+	if l.Name == "" {
+		return "a trusted USB device"
+	}
+	return l.Name
+}
+
+// usbRenewalNotice builds the warning for trust that lapses soon.
+func usbRenewalNotice(l broker.TrustLapse, zone *time.Location) desktopNotice {
+	body := usbRenewalName(l) + " has not been connected"
+	if used, err := time.Parse(time.RFC3339, l.LastUsed); err == nil {
+		body += " since " + used.In(zone).Format("2 Jan")
+	}
+	body += "."
+	if at, err := time.Parse(time.RFC3339, l.LapsesAt); err == nil {
+		body += "\nFrom " + at.In(zone).Format("Mon 2 Jan 15:04") + " it has to be allowed again. Connect it or renew it to keep it trusted."
+	}
+	return desktopNotice{
+		App:     "USB Guard",
+		Icon:    "drive-removable-media-usb",
+		Summary: "USB device trust ends soon",
+		Body:    html.EscapeString(body),
+		Actions: []noticeAction{{"default", "Renew"}, {"renew", "Renew"}, {"later", "Not now"}},
+	}
 }
 
 func usbMediaReader(m usbtrust.MediaDecision) string {
@@ -319,7 +588,7 @@ func usbWhileMediaPresent(ctx context.Context, connection string) (context.Conte
 			callCtx, done := context.WithTimeout(ctx, 2*time.Second)
 			response, err := broker.Call(callCtx, broker.DefaultSocket, broker.Request{Action: broker.ActionPolicy})
 			done()
-			if err == nil && !usbMediaActive(response.Media, connection) {
+			if err == nil && !response.MediaPending && !usbMediaActive(response.Media, connection) {
 				cancel()
 				return
 			}
@@ -455,6 +724,8 @@ func usbReviewFacts(d usbtrust.Decision) []usbFact {
 		}
 	case usbtrust.CodeTrustedExternalChanged:
 		add(usbBad, "Claims to be a trusted device, but its details changed")
+	case usbtrust.CodeTrustedExternalLapsed:
+		add(usbUnknown, "Trusted before, but not connected for too long, so it asks again")
 	case usbtrust.CodeUnexpectedInternal:
 		add(usbBad, "Unexpected device inside this computer")
 	case usbtrust.CodeInternalAmbiguous:
@@ -521,12 +792,10 @@ func usbReviewFacts(d usbtrust.Decision) []usbFact {
 // user.config.json, which makes the techy view the start view until it is
 // unticked. Neither changes the decision itself.
 const (
-	usbTechyView        = "Techy view"
-	usbSimpleView       = "Simple view"
-	usbAlwaysTechyOff   = "☐ Always techy view"
-	usbAlwaysTechyOn    = "☑ Always techy view"
-	usbReviewViewEnv    = "GJALLAR_USB_REVIEW_VIEW"
-	usbReviewTechnicalV = "technical"
+	usbTechyView      = "Techy view"
+	usbSimpleView     = "Simple view"
+	usbAlwaysTechyOff = "☐ Always techy view"
+	usbAlwaysTechyOn  = "☑ Always techy view"
 )
 
 // usbReviewDialog shows the review until an action is chosen or the dialog
@@ -543,7 +812,8 @@ func usbReviewDialog(ctx context.Context, d usbtrust.Decision, enforcing, always
 		if always {
 			box = usbAlwaysTechyOn
 		}
-		dialog := []string{"--list", "--radiolist", "--title=USB device review", "--text=" + usbReviewSummary(d, enforcing, technical), "--extra-button=" + toggle, "--extra-button=" + box, "--column=", "--column=Action", "--column=What to do", "--hide-column=2", "--print-column=2"}
+		summary := usbReviewSummary(d, enforcing, technical)
+		dialog := []string{"--list", "--radiolist", "--title=USB device review", "--text=" + summary, fmt.Sprintf("--width=%d", usbReviewWidth), fmt.Sprintf("--height=%d", usbReviewHeight(summary, len(rows)/3)), "--extra-button=" + toggle, "--extra-button=" + box, "--column=", "--column=Action", "--column=What to do", "--hide-column=2", "--print-column=2"}
 		choice, err := exec.CommandContext(ctx, "zenity", append(dialog, rows...)...).Output()
 		picked := strings.TrimSpace(string(choice))
 		if err == nil {
@@ -560,6 +830,8 @@ func usbReviewDialog(ctx context.Context, d usbtrust.Decision, enforcing, always
 			always = !always
 			technical = always
 			if err := setUSBReviewAlwaysTechnical(always); err != nil {
+				// The box shows what is saved; only this dialog keeps the view.
+				always = !always
 				_ = exec.CommandContext(ctx, "zenity", "--error", "--title=USB device review",
 					"--text="+html.EscapeString("The setting was not saved, so the next review starts as before.\n\n"+err.Error())).Run()
 			}
@@ -569,9 +841,24 @@ func usbReviewDialog(ctx context.Context, d usbtrust.Decision, enforcing, always
 	}
 }
 
+// usbReviewHeight sizes the review so every action row shows. Zenity gives
+// the list only what the text leaves of its default height, which fit two
+// rows and hid "Always allow" behind a scrollbar. Measured at scale 1: about
+// 380 px of title and buttons, 19 px per text line, 30 px per list row plus
+// the header, and a spare row's worth. The Hyprland rule for this title sets
+// no size, or it would override this one.
+func usbReviewHeight(summary string, rows int) int {
+	return 380 + 19*strings.Count(summary, "\n") + 30*(rows+2)
+}
+
+// usbReviewWidth keeps the review as wide as the old fixed window rule made
+// it on a 1280 px screen; the text wraps to it.
+const usbReviewWidth = 520
+
 // usbReviewConfigKey is the user.config.json switch behind the "always" box.
-// The box edits the checkout's file directly, so the choice is part of the
-// system configuration and stays until someone unticks it.
+// The box edits the checkout's file (through the settings service on the
+// system checkout), so the choice is part of the system configuration and
+// stays until someone unticks it.
 const usbReviewConfigKey = "usbReviewTechnicalView"
 
 func usbReviewConfigPath() (string, error) {
@@ -584,14 +871,16 @@ func usbReviewConfigPath() (string, error) {
 
 // usbReviewAlwaysTechnical reports whether the review starts in the techy
 // view. user.config.json is read at every review so a tick applies at once;
-// the service environment carries the built value if the file is unreadable.
+// if it cannot be read the review starts simple. The value stays out of the
+// service unit: a unit that changed with the tick was restarted by the
+// rebuild the tick starts, which closed the review that was open.
 func usbReviewAlwaysTechnical() bool {
 	if path, err := usbReviewConfigPath(); err == nil {
 		if on, ok := usbReviewConfigValue(path); ok {
 			return on
 		}
 	}
-	return os.Getenv(usbReviewViewEnv) == usbReviewTechnicalV
+	return false
 }
 
 func usbReviewConfigValue(path string) (bool, bool) {
@@ -615,6 +904,9 @@ func setUSBReviewAlwaysTechnical(on bool) error {
 	if err != nil {
 		return fmt.Errorf("find the GjallarOS checkout: %w", err)
 	}
+	if onSystemCheckout(path) {
+		return applySystemSettingNow(usbReviewConfigKey, on)
+	}
 	return config.SetBool(path, usbReviewConfigKey, on)
 }
 
@@ -626,8 +918,11 @@ func usbReviewVerdict(d usbtrust.Decision) (colour, headline, advice string) {
 			return usbBad, "This device may be unsafe", "Keep it blocked unless you know exactly what it is."
 		}
 	}
-	if usbtrust.AuditCode(d.Reason) == usbtrust.CodeInternalUnvalidated {
+	switch usbtrust.AuditCode(d.Reason) {
+	case usbtrust.CodeInternalUnvalidated:
 		return usbFine, "Built-in part of this computer", "Trust it once and you will not be asked again."
+	case usbtrust.CodeTrustedExternalLapsed:
+		return usbUnknown, "Allowed before, but not used for a long time", "Allow it again if you just plugged it in yourself."
 	}
 	return usbUnknown, "New device", "Allow it if you just plugged it in yourself."
 }
@@ -804,6 +1099,12 @@ func usbReviewChoices(d usbtrust.Decision, technical bool) ([]string, map[string
 			label = "Accept as replacement for a trusted device"
 			if technical {
 				label = "Accept replacement for " + d.TrustedID
+			}
+			if usbtrust.AuditCode(d.Reason) == usbtrust.CodeTrustedExternalLapsed {
+				label = "Always allow again"
+				if technical {
+					label = "Renew trust for " + d.TrustedID
+				}
 			}
 		default:
 			continue

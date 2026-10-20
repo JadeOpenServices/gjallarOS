@@ -3,6 +3,7 @@ package readmodel
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/JadeOpenServices/gjallarOS/internal/usbtrust"
 	"github.com/JadeOpenServices/gjallarOS/internal/usbtrust/broker"
@@ -56,6 +57,9 @@ type Reader struct {
 	RootHubs RootHubSource
 	// Bluetooth is optional and fills Identity.BluetoothAddress.
 	Bluetooth BluetoothSource
+	// LapseAfter lets permanent external trust run out after this long
+	// without a connection. Zero keeps it forever.
+	LapseAfter time.Duration
 }
 
 // Expected returns the USB expectations for this machine. Parts with a
@@ -162,6 +166,7 @@ func (r Reader) Audit(
 		Expected: state.expected,
 		Trusted:  state.trusted,
 		Observed: state.observed,
+		Lapse:    usbtrust.NewLapse(r.LapseAfter, time.Now().UTC(), state.trusted),
 	})
 	if err != nil {
 		return usbtrust.AuditResult{}, 0, fmt.Errorf(

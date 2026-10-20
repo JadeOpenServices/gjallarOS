@@ -7,6 +7,8 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -37,8 +39,10 @@ type Controller struct {
 	DisarmDelay time.Duration
 	// Media keeps media in allowed USB readers closed until allowed.
 	Media interface {
-		MediaPolicy() []usbtrust.MediaDecision
+		MediaPolicy() (media []usbtrust.MediaDecision, listed bool)
 		AllowMedia(id, connection string) error
+		// MountedPorts lists USB devices, by port, with a mounted medium.
+		MountedPorts() map[string]bool
 	}
 	mu               sync.Mutex
 	sessions         usbtrust.Sessions
@@ -51,6 +55,24 @@ type Controller struct {
 	// armed mirrors the last verified document; disarmed withdraws ArmOnStart
 	// until the daemon restarts.
 	armed, disarmed atomic.Bool
+	// kept holds the ports the arming in this process kept open; it stays
+	// nil when this process did not arm. ready is set once the first
+	// Reconcile has run, so the arming decision is known.
+	kept  atomic.Pointer[map[string]bool]
+	ready atomic.Bool
+}
+
+// Ready reports whether the first Reconcile has run. The media gate waits for
+// it so it never closes a medium the arming is about to keep.
+func (c *Controller) Ready() bool { return c.ready.Load() }
+
+// KeptAtArming lists the USB ports whose mounted storage the arming in this
+// process kept open. It is nil after a boot or a broker restart.
+func (c *Controller) KeptAtArming() map[string]bool {
+	if kept := c.kept.Load(); kept != nil {
+		return *kept
+	}
+	return nil
 }
 
 func (c *Controller) EnforcementEnabled() bool {
@@ -60,10 +82,11 @@ func (c *Controller) EnforcementEnabled() bool {
 	return c.armed.Load() || (c.ArmOnStart && !c.disarmed.Load())
 }
 
-// MediaPolicy lists the media in gated USB readers.
-func (c *Controller) MediaPolicy() []usbtrust.MediaDecision {
+// MediaPolicy lists the media in gated USB readers; listed is false while
+// the gate has not scanned yet.
+func (c *Controller) MediaPolicy() (media []usbtrust.MediaDecision, listed bool) {
 	if c.Media == nil {
-		return nil
+		return nil, true
 	}
 	return c.Media.MediaPolicy()
 }
@@ -93,8 +116,66 @@ func (c *Controller) Status(ctx context.Context) (broker.Status, error) {
 		s.Revision = input.Trusted.Revision
 		s.TrustedDevices = len(input.Trusted.Devices)
 		s.Devices = append([]usbtrust.Device(nil), input.Trusted.Devices...)
+		if input.Lapse.Enabled() {
+			s.LapseDays = int(input.Lapse.After / (24 * time.Hour))
+			for _, device := range input.Trusted.Devices {
+				if lapse, ok := trustLapse(input.Lapse, device); ok {
+					s.Lapses = append(s.Lapses, lapse)
+				}
+			}
+		}
 	}
 	return s, nil
+}
+
+// Renewals lists the unconnected trusted devices whose trust lapses soon,
+// for the renewal notice.
+func (c *Controller) Renewals(ctx context.Context) ([]broker.TrustLapse, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !c.persistenceReady {
+		return nil, nil
+	}
+	input, err := c.snapshot(ctx)
+	if err != nil || input.Trusted == nil {
+		return nil, err
+	}
+	// A device connected under live trust renews itself; asking about it
+	// would also claim it has not been connected.
+	audit, err := usbtrust.Audit(input)
+	if err != nil {
+		return nil, err
+	}
+	connected := map[string]bool{}
+	for _, finding := range audit.Findings {
+		if finding.Code == usbtrust.CodeTrustedExternal {
+			connected[finding.TrustedID] = true
+		}
+	}
+	var renewals []broker.TrustLapse
+	for _, device := range input.Trusted.Devices {
+		if connected[device.ID] || !input.Lapse.Renewable(device) {
+			continue
+		}
+		lapse, _ := trustLapse(input.Lapse, device)
+		renewals = append(renewals, lapse)
+	}
+	return renewals, nil
+}
+
+func trustLapse(l usbtrust.Lapse, device usbtrust.Device) (broker.TrustLapse, bool) {
+	at, ok := l.LapsesAt(device)
+	if !ok {
+		return broker.TrustLapse{}, false
+	}
+	lapse := broker.TrustLapse{TrustedID: device.ID, Name: device.Identity.Name, Lapsed: l.Lapsed(device)}
+	if used, valid := usbtrust.LastUsed(device); valid {
+		lapse.LastUsed = used.UTC().Format(time.RFC3339)
+	}
+	if !at.IsZero() {
+		lapse.LapsesAt = at.UTC().Format(time.RFC3339)
+	}
+	return lapse, true
 }
 
 func (c *Controller) Audit(ctx context.Context) (usbtrust.AuditResult, uint64, error) {
@@ -127,6 +208,15 @@ func (c *Controller) Policy(ctx context.Context) ([]usbtrust.Decision, uint64, e
 func (c *Controller) Reconcile(ctx context.Context) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	defer c.ready.Store(true)
+	if c.EnforcementEnabled() {
+		// USBGuard keeps its fallback across a broker restart and does not
+		// restart when only the mode changes, so a new broker may find it
+		// still allowing new devices.
+		if err := c.syncImplicit(ctx); err != nil {
+			return err
+		}
+	}
 	input, err := c.snapshot(ctx)
 	if err != nil {
 		return err
@@ -142,6 +232,12 @@ func (c *Controller) Reconcile(ctx context.Context) error {
 		}
 		if err := c.learnBluetoothAddresses(ctx, &input); err != nil {
 			return fmt.Errorf("store Bluetooth addresses: %w", err)
+		}
+		if err := c.markLapseStart(ctx, &input); err != nil {
+			return fmt.Errorf("store USB trust lapse start: %w", err)
+		}
+		if err := c.refreshLastUsed(ctx, &input); err != nil {
+			return fmt.Errorf("store USB last use: %w", err)
 		}
 	}
 	return c.apply(ctx, input)
@@ -218,6 +314,56 @@ func (c *Controller) learnBluetoothAddresses(ctx context.Context, input *usbtrus
 	return nil
 }
 
+// markLapseStart signs when lapsing trust was switched on, so that records
+// last used long ago do not all lapse at once, and drops the mark once it
+// is off again.
+func (c *Controller) markLapseStart(ctx context.Context, input *usbtrust.AuditInput) error {
+	if input.Trusted == nil || input.Lapse.Enabled() == (input.Trusted.LapseSince != "") {
+		return nil
+	}
+	doc, err := c.next(input.Trusted)
+	if err != nil {
+		return err
+	}
+	doc.LapseSince = ""
+	if input.Lapse.Enabled() {
+		doc.LapseSince = input.Lapse.Now.UTC().Format(time.RFC3339)
+	}
+	if err := doc.Validate(); err != nil {
+		return err
+	}
+	if err := c.commit(ctx, doc); err != nil {
+		return err
+	}
+	input.Trusted = &doc
+	input.Lapse = usbtrust.NewLapse(input.Lapse.After, input.Lapse.Now, &doc)
+	return nil
+}
+
+// refreshLastUsed signs a new lastUsed for trusted external devices that
+// are connected, at most once a day each.
+func (c *Controller) refreshLastUsed(ctx context.Context, input *usbtrust.AuditInput) error {
+	if input.Trusted == nil {
+		return nil
+	}
+	doc, err := c.next(input.Trusted)
+	if err != nil {
+		return err
+	}
+	changed, err := usbtrust.RefreshLastUsed(*input, &doc)
+	if err != nil || !changed {
+		return err
+	}
+	if err := doc.Validate(); err != nil {
+		return err
+	}
+	if err := c.commit(ctx, doc); err != nil {
+		return err
+	}
+	input.Trusted = &doc
+	return nil
+}
+
 // rememberBluetooth fills in addresses that cannot be read right now from
 // the last reading of the same connection, and forgets connections that
 // are gone.
@@ -280,7 +426,52 @@ func (c *Controller) arm(ctx context.Context, input *usbtrust.AuditInput) error 
 	}
 	input.Trusted = &doc
 	c.armed.Store(true)
-	return c.sessions.Observe(input.Observed)
+	if err := c.sessions.Observe(input.Observed); err != nil {
+		return err
+	}
+	return c.keepMounted(*input)
+}
+
+// keepMounted allows, for this connection only, USB storage whose medium is
+// mounted while blocking is switched on, so arming does not pull a filesystem
+// away. Only devices with nothing but mass-storage interfaces qualify, and
+// only when the owner would be offered allow-once for them anyway.
+func (c *Controller) keepMounted(input usbtrust.AuditInput) error {
+	if c.Media == nil {
+		return nil
+	}
+	mounted := c.Media.MountedPorts()
+	policy, err := c.sessions.Derive(input)
+	if err != nil {
+		return err
+	}
+	kept := map[string]bool{}
+	for _, decision := range policy {
+		if decision.Target != usbtrust.TargetBlock || decision.Identity.Port == "" ||
+			!mounted[decision.Identity.Port] || !massStorageOnly(decision.Identity.Interfaces) ||
+			!slices.Contains(decision.Actions, usbtrust.ActionAllowOnce) {
+			continue
+		}
+		if err := c.sessions.Choose(decision.RuntimeID, decision.Connection, usbtrust.TargetAllow); err != nil {
+			return err
+		}
+		kept[decision.Identity.Port] = true
+	}
+	c.kept.Store(&kept)
+	return nil
+}
+
+// massStorageOnly reports whether every interface is USB mass storage (08).
+func massStorageOnly(interfaces []string) bool {
+	if len(interfaces) == 0 {
+		return false
+	}
+	for _, iface := range interfaces {
+		if !strings.HasPrefix(iface, "08:") {
+			return false
+		}
+	}
+	return true
 }
 
 // disarm needs the disk encryption passphrase, so a stolen sudo session alone
@@ -391,6 +582,7 @@ func (c *Controller) snapshot(ctx context.Context) (input usbtrust.AuditInput, e
 		}
 	}
 	c.armed.Store(input.Trusted != nil && input.Trusted.Enforcement != nil && input.Trusted.Enforcement.Armed)
+	input.Lapse = usbtrust.NewLapse(c.Reader.LapseAfter, time.Now().UTC(), input.Trusted)
 	input.Observed, err = c.Reader.Observed(ctx)
 	if err != nil {
 		return input, err
@@ -435,7 +627,7 @@ func (c *Controller) Mutate(ctx context.Context, request broker.Request) (broker
 	if err != nil {
 		return broker.Response{}, err
 	}
-	if request.Action != broker.ActionForget {
+	if request.Action != broker.ActionForget && request.Action != broker.ActionRenew {
 		if err := c.sessions.Check(request.RuntimeID, request.Connection); err != nil {
 			return broker.Response{}, err
 		}
@@ -467,7 +659,7 @@ func (c *Controller) Mutate(ctx context.Context, request broker.Request) (broker
 		// Revoke choices/reviews for affected identities only. Trusting a disk
 		// must not discard an unrelated keyboard's current allow-once grant.
 		for _, decision := range previousPolicy {
-			if decision.RuntimeID == request.RuntimeID || (request.TrustedID != "" && decision.TrustedID == request.TrustedID) {
+			if decision.RuntimeID == request.RuntimeID || (request.TrustedID != "" && request.Action != broker.ActionRenew && decision.TrustedID == request.TrustedID) {
 				c.sessions.Disconnect(decision.RuntimeID)
 			}
 		}
@@ -512,7 +704,8 @@ func persistentMutation(action broker.Action) bool {
 		broker.ActionForget,
 		broker.ActionAcceptReplacement,
 		broker.ActionEnrollInternal,
-		broker.ActionDisarm:
+		broker.ActionDisarm,
+		broker.ActionRenew:
 		return true
 	default:
 		return false
@@ -560,6 +753,19 @@ func (c *Controller) change(input usbtrust.AuditInput, request broker.Request) (
 			return doc, fmt.Errorf("trusted device not found")
 		}
 		doc.Devices = append(doc.Devices[:index], doc.Devices[index+1:]...)
+		return doc, doc.Validate()
+	}
+	if request.Action == broker.ActionRenew {
+		if index < 0 {
+			return doc, fmt.Errorf("trusted device not found")
+		}
+		// Only the warning window: a lapsed device has to be connected and
+		// reviewed, so renewing cannot bring back trust the machine already
+		// dropped.
+		if !input.Lapse.Renewable(doc.Devices[index]) {
+			return doc, fmt.Errorf("renewal is offered only in the last days before this device's trust lapses")
+		}
+		doc.Devices[index].LastUsed = input.Lapse.Now.UTC().Format(time.RFC3339)
 		return doc, doc.Validate()
 	}
 	var observed usbtrust.ObservedDevice
@@ -612,7 +818,7 @@ func (c *Controller) change(input usbtrust.AuditInput, request broker.Request) (
 		if old.Class == usbtrust.ClassInternal && (decision.Role != old.Role || decision.TrustedID != old.ID || decision.Reason != string(usbtrust.CodeInternalChanged)) {
 			return doc, fmt.Errorf("replacement must be an unambiguous changed identity for the accepted ODDC role")
 		}
-		if old.Class == usbtrust.ClassExternal && (decision.Role != "" || observed.Identity.ConnectType == "hardwired") {
+		if old.Class == usbtrust.ClassExternal && (decision.Role != "" || decision.TrustedID != old.ID || observed.Identity.ConnectType == "hardwired") {
 			return doc, fmt.Errorf("external replacement cannot enroll internal hardware")
 		}
 		device.ID, device.Class, device.Role, device.Portable, device.ExpectedByODDC, device.FirstAccepted = old.ID, old.Class, old.Role, old.Portable, old.ExpectedByODDC, old.FirstAccepted
@@ -638,7 +844,7 @@ func newDevice(identity usbtrust.Identity, now string) (usbtrust.Device, error) 
 	if _, err := rand.Read(id[:]); err != nil {
 		return usbtrust.Device{}, err
 	}
-	device := usbtrust.Device{ID: "device:" + hex.EncodeToString(id[:]), Class: usbtrust.ClassExternal, Identity: identity, FirstAccepted: now, LastAccepted: now, Strength: usbtrust.StrengthDescriptor}
+	device := usbtrust.Device{ID: "device:" + hex.EncodeToString(id[:]), Class: usbtrust.ClassExternal, Identity: identity, FirstAccepted: now, LastAccepted: now, LastUsed: now, Strength: usbtrust.StrengthDescriptor}
 	if identity.Serial != "" {
 		device.Strength = usbtrust.StrengthSerialDescriptor
 	}

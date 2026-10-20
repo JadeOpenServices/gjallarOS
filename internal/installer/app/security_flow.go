@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/config"
@@ -52,6 +53,13 @@ func tpm2FollowsRequest(endpointManaged, persistentInstalledHost bool) bool {
 	return endpointManaged || !persistentInstalledHost
 }
 
+// installerTPM2Args checks the running system for an installed host's TPM2
+// request: its LUKS mapping, the TPM and the disk behind it. The request is
+// the Startup unlock answer (or the saved one); the check asks nothing.
+func installerTPM2Args(root, hardwarePath string, requested bool) []string {
+	return []string{"installer", "tpm2", "--repo", root, "--hardware", hardwarePath, "--requested=" + strconv.FormatBool(requested)}
+}
+
 // noSecureBootPolicyNotice tells the user why GjallarOS leaves Secure Boot
 // alone on this machine. A generic "Secure Boot is disabled" read like a
 // misdetection on the real HP, where nobody had said that ODDC simply has no
@@ -67,6 +75,21 @@ func noSecureBootPolicyNotice(modelID string) string {
 		"  GjallarOS will not install its own Secure Boot keys here, and TPM2 disk unlock stays off because it depends on them.",
 	)
 	return strings.Join(lines, "\n") + "\n"
+}
+
+// secureBootDeclinedNotice says what an install without GjallarOS Secure
+// Boot does not have, in words a non-technical owner can follow. later says
+// how to get it afterwards.
+func secureBootDeclinedNotice(later string) string {
+	return strings.Join([]string{
+		"Without GjallarOS Secure Boot:",
+		"  - Nothing checks the startup files before they run. Someone who gets the machine",
+		"    alone for a while could change them to record the disk passphrase.",
+		"  - The disk does not unlock on its own; the passphrase is typed at every startup.",
+		"  - No recovery partition. Repairs start from a GjallarOS USB stick.",
+		"  - JODS cannot manage this machine.",
+		"  " + later,
+	}, "\n") + "\n"
 }
 
 // firmwareSecureBootNotice reports the firmware's own Secure Boot state when

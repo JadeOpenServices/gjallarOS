@@ -25,10 +25,12 @@ buildGoModule {
       ../../cmd
       ../../internal/ai
       ../../internal/binarycache
+      ../../internal/gittest
       ../../internal/hardware
       ../../internal/input
       ../../internal/installercheck
       ../../internal/installer
+      ../../internal/localchanges
       ../../internal/managedapps
       ../../internal/nettrust
       ../../internal/noctalia

@@ -82,6 +82,10 @@ type Gate struct {
 	Probe     Probe
 	// Event receives audit events; it may be nil.
 	Event func(map[string]any)
+	// Kept returns the USB ports whose mounted medium the first arming kept
+	// open. Nil, or a nil result, keeps nothing: a boot or a broker restart
+	// closes every medium.
+	Kept func() map[string]bool
 
 	// writeFile replaces sysfs writes in tests.
 	writeFile func(path, value string) error
@@ -89,30 +93,38 @@ type Gate struct {
 	mu        sync.Mutex
 	started   bool
 	enforcing bool
-	luns      map[string]*state
+	// listed is set once a scan since the start or the last mode change
+	// succeeded, so luns holds every medium in a gated reader.
+	listed bool
+	luns   map[string]*state
 }
 
 // Sync applies one poll. While enforcing, every gated LUN stays unbound unless
-// its current medium was allowed. Turning enforcement on keeps media that are
-// already mounted or held open, so arming never pulls a filesystem away.
+// its current medium was allowed. On the first enforcing poll, a medium that
+// is mounted or held open stays open when its USB device is one the arming
+// kept (see Kept), so arming never pulls that filesystem away.
 func (g *Gate) Sync(enforcing bool) error {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	if g.luns == nil {
 		g.luns = map[string]*state{}
 	}
-	arming := enforcing && (!g.started || !g.enforcing)
+	var kept map[string]bool
+	if enforcing && (!g.started || !g.enforcing) && g.Kept != nil {
+		kept = g.Kept()
+	}
 	if !g.started || enforcing != g.enforcing {
 		if err := g.write("bus/scsi/drivers_autoprobe", boolText(!enforcing)); err != nil {
 			return err
 		}
-		g.started, g.enforcing = true, enforcing
+		g.started, g.enforcing, g.listed = true, enforcing, false
 		clear(g.luns)
 	}
 	luns, err := g.scan()
 	if err != nil {
 		return err
 	}
+	g.listed = true
 	if !enforcing {
 		var errs []error
 		for _, lun := range luns {
@@ -138,7 +150,7 @@ func (g *Gate) Sync(enforcing bool) error {
 			g.luns[lun.ID] = st
 		}
 		st.lun = lun
-		errs = append(errs, g.step(st, arming))
+		errs = append(errs, g.step(st, kept[lun.Port] && lun.Driver != "" && lun.InUse))
 	}
 	for id := range g.luns {
 		if !seen[id] {
@@ -148,7 +160,9 @@ func (g *Gate) Sync(enforcing bool) error {
 	return errors.Join(errs...)
 }
 
-func (g *Gate) step(st *state, arming bool) error {
+// step applies one poll to a gated LUN. keepOpen grandfathers the medium that
+// is mounted in it now.
+func (g *Gate) step(st *state, keepOpen bool) error {
 	lun := st.lun
 	medium, err := g.Probe.Medium(lun.ID)
 	if st.allowed && lun.DiskSeq != "" {
@@ -159,10 +173,10 @@ func (g *Gate) step(st *state, arming bool) error {
 	}
 	if err != nil || medium == MediumUnknown {
 		// Fail closed: an unanswered probe never opens a medium.
-		if !st.allowed && lun.Driver != "" && !(arming && lun.InUse) {
+		if !st.allowed && lun.Driver != "" && !keepOpen {
 			return errors.Join(err, g.unbind(lun))
 		}
-		if arming && lun.Driver != "" && lun.InUse {
+		if keepOpen {
 			g.keep(st)
 		}
 		return err
@@ -189,7 +203,7 @@ func (g *Gate) step(st *state, arming bool) error {
 			st.present = true
 			st.token = newToken()
 			st.bytes, _ = g.Probe.Capacity(lun.ID)
-			if arming && lun.Driver != "" && lun.InUse {
+			if keepOpen {
 				g.keep(st)
 				return nil
 			}
@@ -213,17 +227,36 @@ func (g *Gate) keep(st *state) {
 	g.event("kept-open", st)
 }
 
-// MediaPolicy lists the media that are in gated LUNs now.
-func (g *Gate) MediaPolicy() []usbtrust.MediaDecision {
+// MountedPorts lists the USB devices (by port) with a bound LUN that is
+// mounted or held open now. It returns nil when sysfs cannot be read.
+func (g *Gate) MountedPorts() map[string]bool {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	var result []usbtrust.MediaDecision
-	for _, st := range g.luns {
-		if st.present {
-			result = append(result, decision(st))
+	luns, err := g.scan()
+	if err != nil {
+		return nil
+	}
+	ports := map[string]bool{}
+	for _, lun := range luns {
+		if lun.Driver != "" && lun.InUse {
+			ports[lun.Port] = true
 		}
 	}
-	return result
+	return ports
+}
+
+// MediaPolicy lists the media that are in gated LUNs now. listed is false
+// until the first scan after a start or mode change: an empty list then
+// does not mean that no medium is inserted.
+func (g *Gate) MediaPolicy() (media []usbtrust.MediaDecision, listed bool) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	for _, st := range g.luns {
+		if st.present {
+			media = append(media, decision(st))
+		}
+	}
+	return media, g.listed
 }
 
 // AllowMedia opens the medium that is in LUN id now. connection must match

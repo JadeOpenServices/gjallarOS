@@ -35,6 +35,7 @@ type User struct {
 	USBGuardEnable         bool                   `json:"usbguardEnable" tier:"security"`
 	USBTrustEnforce        bool                   `json:"usbTrustEnforce" tier:"security"`
 	USBTrustTPMHandle      string                 `json:"usbTrustTpmHandle" tier:"security"`
+	USBTrustLapseDays      int                    `json:"usbTrustLapseDays" tier:"security"`
 	USBReviewTechnical     bool                   `json:"usbReviewTechnicalView" tier:"everyday"`
 	PrintingEnable         bool                   `json:"printingEnable" tier:"everyday"`
 	NetworkPrintingEnable  bool                   `json:"networkPrintingEnable" tier:"security"`
@@ -60,13 +61,6 @@ type User struct {
 	// pinned to one file.
 	FirefoxStoreAddons []apps.FirefoxStoreAddon `json:"firefoxStoreAddons" tier:"security"`
 
-	// Compatibility fields retained while the installer prompt and generated
-	// Nix settings migrate to the generic webApplications contract.
-	PlaneEnable               bool   `json:"planeEnable" tier:"security"`
-	PlaneHost                 string `json:"planeHost" tier:"security"`
-	DrawioEnable              bool   `json:"drawioEnable" tier:"security"`
-	DrawioSelfHosted          bool   `json:"drawioSelfHosted" tier:"security"`
-	DrawioHost                string `json:"drawioHost" tier:"security"`
 	NextcloudEnable           bool   `json:"nextcloudEnable" tier:"security"`
 	NextcloudHost             string `json:"nextcloudHost" tier:"security"`
 	Theme                     string `json:"theme" tier:"everyday"`
@@ -95,12 +89,16 @@ type User struct {
 	JODSDesktopProfile        string `json:"jodsDesktopProfile" tier:"critical"`
 	JODSFingerprintEnroll     bool   `json:"jodsFingerprintEnrollmentAllowed" tier:"critical"`
 	AllowUnvalidatedODDCModel bool   `json:"allowUnvalidatedODDCModel" tier:"critical"`
-	UnattendedInstall         bool   `json:"unattendedInstall" tier:"installer"`
-	AutoReboot                bool   `json:"autoReboot" tier:"installer"`
-	RunUpdateChecks           bool   `json:"runUpdateChecks" tier:"installer"`
-	WriteConfig               bool   `json:"writeConfig" tier:"installer"`
-	RunRebuild                bool   `json:"runRebuild" tier:"installer"`
-	ForceRedeploy             bool   `json:"forceRedeploy" tier:"installer"`
+	DeveloperMode             bool   `json:"developerMode" tier:"critical"`
+	// ReleaseChannel is the branch of the official repository that
+	// rebuild --update follows (ROADMAP §11): dev, staging or stable.
+	ReleaseChannel    string `json:"releaseChannel" tier:"critical"`
+	UnattendedInstall bool   `json:"unattendedInstall" tier:"installer"`
+	AutoReboot        bool   `json:"autoReboot" tier:"installer"`
+	RunUpdateChecks   bool   `json:"runUpdateChecks" tier:"installer"`
+	WriteConfig       bool   `json:"writeConfig" tier:"installer"`
+	RunRebuild        bool   `json:"runRebuild" tier:"installer"`
+	ForceRedeploy     bool   `json:"forceRedeploy" tier:"installer"`
 }
 
 // Defaults is the starting point of every interactive install and the content
@@ -141,9 +139,19 @@ func Defaults() (User, error) {
 		JODSEnrollmentMode:      "manual",
 		JODSDeviceClass:         "laptop",
 		JODSDesktopProfile:      "headless",
+		ReleaseChannel:          DefaultReleaseChannel,
 		WriteConfig:             true,
 		RunRebuild:              true,
 	}, nil
+}
+
+// Channel is the release channel the install follows; empty means the
+// default.
+func (u User) Channel() string {
+	if u.ReleaseChannel == "" {
+		return DefaultReleaseChannel
+	}
+	return u.ReleaseChannel
 }
 
 // HasApp reports whether the catalogue app id is selected.
@@ -213,6 +221,17 @@ var usbTrustTPMHandlePattern = regexp.MustCompile(`^0x810[0-9a-fA-F]{5}$`)
 // (0x81000001, 0x81000002) and the endorsement range (0x8101xxxx).
 const DefaultUSBTrustTPMHandle = "0x81000042"
 
+// MaxUSBTrustLapseDays bounds usbTrustLapseDays to what the Nix option
+// accepts. 0 means permanent USB trust never lapses.
+const MaxUSBTrustLapseDays = 36500
+
+// DefaultReleaseChannel is the channel of new installs and of configurations
+// written before channels existed.
+const DefaultReleaseChannel = "stable"
+
+// ReleaseChannels are the branches an install may follow, newest code first.
+var ReleaseChannels = []string{"dev", "staging", "stable"}
+
 func Load(path string) (User, error) {
 	contents, err := os.ReadFile(path)
 	if err != nil {
@@ -232,8 +251,15 @@ func Parse(contents []byte) (User, error) {
 			}
 		}
 		// Noctalia owns the wallpaper now; older configs still carry the key.
-		if _, old := fields["backgroundNormal"]; old {
-			delete(fields, "backgroundNormal")
+		_, oldBackground := fields["backgroundNormal"]
+		delete(fields, "backgroundNormal")
+		oldWebApplications := legacyWebApplications(fields)
+		if oldWebApplications {
+			if err := migrateLegacyWebApplications(fields); err != nil {
+				return User{}, fmt.Errorf("user configuration: %w", err)
+			}
+		}
+		if oldBackground || oldWebApplications {
 			if contents, err = json.Marshal(fields); err != nil {
 				return User{}, fmt.Errorf("parse user configuration: %w", err)
 			}
@@ -255,6 +281,9 @@ func Parse(contents []byte) (User, error) {
 	user.FirefoxAddons = apps.CompleteFirefoxAddons(user.FirefoxAddons)
 	if user.FirefoxStoreAddons == nil {
 		user.FirefoxStoreAddons = []apps.FirefoxStoreAddon{}
+	}
+	if user.ReleaseChannel == "" {
+		user.ReleaseChannel = DefaultReleaseChannel
 	}
 	if err := NormalizeProjectTools(&user); err != nil {
 		return User{}, err
@@ -278,8 +307,14 @@ func Validate(user User) error {
 	if len(user.Editors) == 0 || len(user.Browsers) == 0 {
 		return fmt.Errorf("at least one editor and browser are required")
 	}
+	if user.ReleaseChannel != "" && !slices.Contains(ReleaseChannels, user.ReleaseChannel) {
+		return fmt.Errorf("invalid releaseChannel: %q; use %s", user.ReleaseChannel, strings.Join(ReleaseChannels, ", "))
+	}
 	if user.USBTrustTPMHandle != "" && !usbTrustTPMHandlePattern.MatchString(user.USBTrustTPMHandle) {
 		return fmt.Errorf("invalid usbTrustTpmHandle: %q", user.USBTrustTPMHandle)
+	}
+	if user.USBTrustLapseDays < 0 || user.USBTrustLapseDays > MaxUSBTrustLapseDays {
+		return fmt.Errorf("invalid usbTrustLapseDays: %d; use 0 (never) or 1 to %d", user.USBTrustLapseDays, MaxUSBTrustLapseDays)
 	}
 	if user.USBTrustEnforce {
 		if !user.USBGuardEnable {
@@ -391,6 +426,9 @@ func ValidateJODS(user User) error {
 			return fmt.Errorf("JODS preboot locking requires explicit JODS endpoint management enrollment")
 		}
 		return nil
+	}
+	if user.DeveloperMode {
+		return fmt.Errorf("developerMode builds local Nix code; it is not available on JODS-managed devices")
 	}
 	parsed, err := url.Parse(user.JODSEndpoint)
 	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil {

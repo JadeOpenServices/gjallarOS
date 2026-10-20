@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/systemcheckout"
 )
 
 // DiscoverRepository resolves the active GjallarOS checkout.
@@ -15,6 +17,11 @@ import (
 //  3. last successfully rebuilt checkout
 //  4. the system's checkout, SystemRepositoryFile
 //  5. cwd and its parents
+//
+// When SystemRepositoryFile names the root-owned system checkout, that
+// checkout moves up to 2: the system builds nothing else, so a clone left
+// in GJALLAROS_REPO or remembered from before the move must not take
+// settings the system never reads.
 func DiscoverRepository(explicit string) (string, error) {
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -38,6 +45,9 @@ func DiscoverRepository(explicit string) (string, error) {
 // place to find it.
 var SystemRepositoryFile = "/etc/gjallar/repository"
 
+// systemCheckoutPath is systemcheckout.Path; tests point it elsewhere.
+var systemCheckoutPath = systemcheckout.Path
+
 func discoverRepository(
 	explicit string,
 	environment string,
@@ -45,15 +55,24 @@ func discoverRepository(
 	system string,
 	start string,
 ) (string, error) {
-	for _, candidate := range []struct {
+	type candidate struct {
 		name string
 		path string
-	}{
+	}
+	candidates := []candidate{
 		{"explicit repository", strings.TrimSpace(explicit)},
 		{"GJALLAROS_REPO", strings.TrimSpace(environment)},
 		{"remembered repository", strings.TrimSpace(remembered)},
 		{"system repository", strings.TrimSpace(system)},
-	} {
+	}
+	if s := strings.TrimSpace(system); s != "" && filepath.Clean(s) == systemCheckoutPath {
+		candidates = []candidate{
+			candidates[0],
+			{"system checkout", systemCheckoutPath},
+		}
+	}
+	stale := ""
+	for _, candidate := range candidates {
 		if candidate.path == "" {
 			continue
 		}
@@ -63,6 +82,17 @@ func discoverRepository(
 			return root, nil
 		}
 
+		if candidate.name == "system checkout" {
+			return "", fmt.Errorf(
+				"the system checkout %s is missing or broken: %w; "+
+					"with a copy of this machine's generated/ and user.config.json, "+
+					"move %s away and run: sudo gjallarctl system clone --from DIR",
+				candidate.path, err, candidate.path,
+			)
+		}
+		if candidate.name == "system repository" {
+			stale = candidate.path
+		}
 		// Stale pointers fall through; explicit choices must resolve.
 		if candidate.name != "remembered repository" &&
 			candidate.name != "system repository" {
@@ -95,6 +125,13 @@ func discoverRepository(
 		current = parent
 	}
 
+	if stale != "" {
+		return "", fmt.Errorf(
+			"the checkout at %s that this system was built from is missing or empty; "+
+				"use --repo PATH or GJALLAROS_REPO",
+			stale,
+		)
+	}
 	return "", fmt.Errorf(
 		"no GjallarOS repository found; use --repo PATH or GJALLAROS_REPO",
 	)

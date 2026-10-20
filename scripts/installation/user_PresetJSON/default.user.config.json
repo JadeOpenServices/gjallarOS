@@ -30,6 +30,7 @@
   "clamshellEnable": true,
   "consoleLoginEnable": false,
   "debugFunctions": false,
+  "developerMode": false,
   "dotfilesDir": "",
   "editors": [
     "vscodium"
@@ -105,6 +106,7 @@
   "printingEnable": false,
   "recoveryEnable": false,
   "recoveryPartitionEnable": true,
+  "releaseChannel": "stable",
   "runRebuild": true,
   "runUpdateChecks": false,
   "secureBootEnable": false,
@@ -117,6 +119,7 @@
   "usbReviewTechnicalView": false,
   "usbTrustEnforce": false,
   "usbTrustTpmHandle": "",
+  "usbTrustLapseDays": 0,
   "usbguardEnable": false,
   "username": "usernamehere",
   "weatherCity": "",

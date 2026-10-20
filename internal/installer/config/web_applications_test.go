@@ -68,16 +68,9 @@ func TestNormalizeWebApplicationsCanonicalizesGenericIntent(t *testing.T) {
 		}
 	}
 
-	if !user.PlaneEnable || user.PlaneHost != "http://plane.example.test" {
-		t.Fatalf("Plane compatibility bridge incorrect: %#v", user)
-	}
-
-	if !user.DrawioEnable || user.DrawioSelfHosted || user.DrawioHost != "" {
-		t.Fatalf("Draw.io public compatibility bridge incorrect: %#v", user)
-	}
 }
 
-func TestNormalizeWebApplicationsMapsSelfHostedDrawioCompatibility(t *testing.T) {
+func TestNormalizeWebApplicationsKeepsSelfHostedDrawioEndpoint(t *testing.T) {
 	user := User{
 		WebApplications: []WebApplicationIntent{
 			{
@@ -91,82 +84,44 @@ func TestNormalizeWebApplicationsMapsSelfHostedDrawioCompatibility(t *testing.T)
 		t.Fatal(err)
 	}
 
-	if !user.DrawioEnable ||
-		!user.DrawioSelfHosted ||
-		user.DrawioHost != "https://drawio.example.test" {
-		t.Fatalf("self-hosted Draw.io compatibility bridge incorrect: %#v", user)
-	}
+	assertWebApplications(t, user.WebApplications, []WebApplicationIntent{
+		{ID: WebApplicationDrawio, Endpoint: "https://drawio.example.test"},
+	})
 }
 
-func TestNormalizeWebApplicationsSynthesizesLegacyIntent(t *testing.T) {
-	user := User{
-		PlaneEnable:      true,
-		PlaneHost:        "plane.example.test/",
-		DrawioEnable:     true,
-		DrawioSelfHosted: false,
-		DrawioHost:       "ignored.example.test",
-	}
-
-	if err := NormalizeWebApplications(&user); err != nil {
+func TestParseMigratesPublicDrawioWithoutEndpoint(t *testing.T) {
+	user, err := parsePresetWith(t, `{
+		"planeEnable": true,
+		"planeHost": "plane.example.test/",
+		"drawioEnable": true,
+		"drawioSelfHosted": false,
+		"drawioHost": "ignored.example.test"
+	}`)
+	if err != nil {
 		t.Fatal(err)
 	}
 
-	want := []WebApplicationIntent{
-		{
-			ID: WebApplicationTeams,
-		},
-		{
-			ID:       WebApplicationPlane,
-			Endpoint: "http://plane.example.test",
-		},
-		{
-			ID: WebApplicationDrawio,
-		},
-	}
-
-	if len(user.WebApplications) != len(want) {
-		t.Fatalf("legacy bridge = %#v, want %#v", user.WebApplications, want)
-	}
-
-	for index := range want {
-		if user.WebApplications[index] != want[index] {
-			t.Fatalf(
-				"legacy bridge[%d] = %#v, want %#v",
-				index,
-				user.WebApplications[index],
-				want[index],
-			)
-		}
-	}
-
-	if user.DrawioHost != "" {
-		t.Fatalf("public Draw.io retained unused legacy host %q", user.DrawioHost)
-	}
+	assertWebApplications(t, user.WebApplications, []WebApplicationIntent{
+		{ID: WebApplicationTeams},
+		{ID: WebApplicationPlane, Endpoint: "http://plane.example.test"},
+		{ID: WebApplicationDrawio},
+	})
 }
 
-func TestNormalizeWebApplicationsGenericIntentOverridesLegacyCompatibility(t *testing.T) {
-	user := User{
-		WebApplications: []WebApplicationIntent{
-			{ID: WebApplicationTeams},
-		},
-		PlaneEnable:      true,
-		PlaneHost:        "https://stale-plane.example.test",
-		DrawioEnable:     true,
-		DrawioSelfHosted: true,
-		DrawioHost:       "https://stale-drawio.example.test",
-	}
-
-	if err := NormalizeWebApplications(&user); err != nil {
+func TestParseCanonicalListWinsOverLegacyKeys(t *testing.T) {
+	user, err := parsePresetWith(t, `{
+		"webApplications": [{"id": "teams"}],
+		"planeEnable": true,
+		"planeHost": "https://stale-plane.example.test",
+		"drawioEnable": true,
+		"drawioSelfHosted": true,
+		"drawioHost": "https://stale-drawio.example.test"
+	}`)
+	if err != nil {
 		t.Fatal(err)
 	}
 
-	if user.PlaneEnable ||
-		user.PlaneHost != "" ||
-		user.DrawioEnable ||
-		user.DrawioSelfHosted ||
-		user.DrawioHost != "" {
-		t.Fatalf("generic intent did not replace stale compatibility state: %#v", user)
-	}
+	assertWebApplications(t, user.WebApplications, []WebApplicationIntent{{ID: WebApplicationTeams}})
 }
 
 func TestNormalizeWebApplicationsRejectsDuplicateIDs(t *testing.T) {

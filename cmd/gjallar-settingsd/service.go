@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/ed25519"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/config"
+	"github.com/JadeOpenServices/gjallarOS/internal/localchanges"
 	"github.com/JadeOpenServices/gjallarOS/internal/namecheck"
 	"github.com/JadeOpenServices/gjallarOS/internal/nettrust"
 	"github.com/JadeOpenServices/gjallarOS/internal/noctalia"
@@ -72,6 +74,15 @@ type service struct {
 	checkoutPath string
 	checkout     func(string) error
 	now          func() time.Time
+	// localPath is root's copy of the developer-mode folder, readLocal
+	// reads it.
+	localPath string
+	readLocal func(string) (localchanges.Tree, error)
+
+	// keys signs and checks settings files; device is this machine's
+	// app-specific id in them. Without keys, Export and Import refuse.
+	keys   *keyStore
+	device string
 
 	mu      sync.Mutex
 	pending map[string]settings.Change
@@ -84,6 +95,8 @@ func newService(sys system, checkoutPath string, checkout func(string) error) *s
 		checkoutPath: checkoutPath,
 		checkout:     checkout,
 		now:          time.Now,
+		localPath:    localchanges.Path,
+		readLocal:    localchanges.ReadRoot,
 		pending:      map[string]settings.Change{},
 	}
 }
@@ -145,6 +158,11 @@ func (s *service) Request(ctx context.Context, sender, values string) (settings.
 	if err := json.Unmarshal([]byte(values), &wanted); err != nil {
 		return settings.Pending{}, fmt.Errorf("%w: the request is not a JSON object of keys and values", errRefused)
 	}
+	return s.request(ctx, sender, who, wanted, nil)
+}
+
+// request plans wanted for who and keeps it as a pending change.
+func (s *service) request(ctx context.Context, sender string, who caller, wanted map[string]json.RawMessage, notes []string) (settings.Pending, error) {
 	data, _, err := s.readConfig()
 	if err != nil {
 		return settings.Pending{}, err
@@ -153,24 +171,79 @@ func (s *service) Request(ctx context.Context, sender, values string) (settings.
 	if err != nil {
 		return settings.Pending{}, fmt.Errorf("%w: %v", errRefused, err)
 	}
+	return s.keep(ctx, sender, who, change, notes)
+}
+
+// RequestLocal checks a new developer-mode folder, sent as data by the
+// owner's session, against root's copy and keeps the change. Root never
+// reads the folder in the user's home itself.
+func (s *service) RequestLocal(ctx context.Context, sender string, files map[string][]byte) (settings.Pending, error) {
+	who, err := s.sys.Caller(ctx, sender)
+	if err != nil {
+		return settings.Pending{}, err
+	}
+	if err := s.developerMode(); err != nil {
+		return settings.Pending{}, err
+	}
+	wanted, err := localchanges.Check(files)
+	if err != nil {
+		return settings.Pending{}, fmt.Errorf("%w: %v", errRefused, err)
+	}
+	current, err := s.readLocal(s.localPath)
+	if err != nil {
+		return settings.Pending{}, err
+	}
+	change, err := settings.PlanLocal(current, wanted)
+	if err != nil {
+		return settings.Pending{}, fmt.Errorf("%w: %v", errRefused, err)
+	}
+	return s.keep(ctx, sender, who, change, nil)
+}
+
+// developerMode refuses unless the configuration turns developer mode on.
+func (s *service) developerMode() error {
+	data, _, err := s.readConfig()
+	if err != nil {
+		return err
+	}
+	current, err := config.Parse(data)
+	if err != nil {
+		return fmt.Errorf("the current configuration does not load: %w", err)
+	}
+	if !current.DeveloperMode {
+		return fmt.Errorf("%w: developer mode is off; turn it on with gjallarctl settings set developerMode=true", errRefused)
+	}
+	return nil
+}
+
+// keep stores a planned change for who.
+func (s *service) keep(ctx context.Context, sender string, who caller, change settings.Change, notes []string) (settings.Pending, error) {
 	change.UID, change.Session = who.UID, who.Session
 
 	s.mu.Lock()
 	count := 0
+	local := ""
 	for _, other := range s.pending {
 		if other.UID == who.UID {
 			count++
+			if other.Local != nil {
+				local = other.ID
+			}
 		}
 	}
 	s.mu.Unlock()
 	if count >= maxPendingPerUser {
 		return settings.Pending{}, fmt.Errorf("%w: %d changes already wait; apply or cancel one first", errRefused, count)
 	}
+	if change.Local != nil && local != "" {
+		return settings.Pending{}, fmt.Errorf("%w: folder change %s already waits; apply or cancel it first", errRefused, local[:min(len(local), 8)])
+	}
 
-	notes, err := s.checkHostname(ctx, change)
+	nameNotes, err := s.checkHostname(ctx, change)
 	if err != nil {
 		return settings.Pending{}, err
 	}
+	notes = append(notes, nameNotes...)
 	if change.Tier == config.TierCritical {
 		if err := s.authorize(ctx, sender, change); err != nil {
 			return settings.Pending{}, err
@@ -182,6 +255,111 @@ func (s *service) Request(ctx context.Context, sender, values string) (settings.
 	s.mu.Unlock()
 	log.Printf("uid %d session %s asked %s change %s: %s", who.UID, who.Session, change.Tier, change.ID, change.KeyNames())
 	return settings.Pending{Change: change, ReadyAt: change.ReadyAt(s.sys.Home()), Notes: notes}, nil
+}
+
+// exportAction asks for the caller's own password: a signed file is one
+// this device will take back later.
+const exportAction = "org.gjallaros.settings.export"
+
+// Export signs the current settings, as root reads them from the checkout,
+// with the caller's key. It never signs bytes the caller sent, so a session
+// can only ever get a file of the settings the device already has.
+func (s *service) Export(ctx context.Context, sender string) ([]byte, error) {
+	who, err := s.sys.Caller(ctx, sender)
+	if err != nil {
+		return nil, err
+	}
+	if s.keys == nil || s.keys.hostKey == nil {
+		return nil, errNoSigningKey
+	}
+	if err := s.sys.Authorize(ctx, sender, exportAction, map[string]string{
+		"polkit.message": "Authentication is required to sign and export your GjallarOS settings",
+	}); err != nil {
+		return nil, err
+	}
+	_, fields, err := s.readConfig()
+	if err != nil {
+		return nil, err
+	}
+	tiers, err := config.Tiers()
+	if err != nil {
+		return nil, err
+	}
+	exported := map[string]json.RawMessage{}
+	for key, tier := range tiers {
+		if value, ok := fields[key]; ok && tier != config.TierInstaller {
+			exported[key] = value
+		}
+	}
+	key, name, err := s.keys.signer(who.UID)
+	if err != nil {
+		return nil, err
+	}
+	data, err := settings.Seal(key, settings.File{
+		Schema:   settings.FileSchema,
+		Device:   s.device,
+		User:     name,
+		UID:      who.UID,
+		Created:  s.now().UTC().Truncate(time.Second),
+		Settings: exported,
+	})
+	if err != nil {
+		return nil, err
+	}
+	log.Printf("uid %d exported %d settings", who.UID, len(exported))
+	return data, nil
+}
+
+// Import checks a settings file and asks for the change it makes, as
+// Request does: a valid signature says where the file came from, not that
+// the change is wanted now, so the usual tier, wait and password apply.
+func (s *service) Import(ctx context.Context, sender string, data []byte) (settings.Pending, error) {
+	who, err := s.sys.Caller(ctx, sender)
+	if err != nil {
+		return settings.Pending{}, err
+	}
+	if s.keys == nil {
+		return settings.Pending{}, errNoSigningKey
+	}
+	trusted, err := s.keys.trusted()
+	if err != nil {
+		return settings.Pending{}, err
+	}
+	file, public, err := settings.Open(data, func(key ed25519.PublicKey) bool {
+		_, ok := trusted[string(key)]
+		return ok
+	})
+	if err != nil {
+		return settings.Pending{}, fmt.Errorf("%w: %v", errRefused, err)
+	}
+	owner := trusted[string(public)]
+	if file.UID != owner.UID || file.User != owner.User || file.Device != s.device {
+		return settings.Pending{}, fmt.Errorf("%w: the file's contents do not match the key that signed it", errRefused)
+	}
+	if who.UID != file.UID {
+		return settings.Pending{}, fmt.Errorf("%w: %s made this file; only that account can import it", errRefused, file.User)
+	}
+	note := fmt.Sprintf("from a file %s made on this device on %s", file.User, file.Created.In(currentZone()).Format("2006-01-02 15:04:05 MST"))
+	if days := int(s.now().Sub(file.Created).Hours() / 24); days > 0 {
+		note += fmt.Sprintf(", %d days ago", days)
+	}
+	log.Printf("uid %d imports a file of uid %d made %s", who.UID, file.UID, file.Created.Format(time.RFC3339))
+	return s.request(ctx, sender, who, file.Settings, []string{note})
+}
+
+// currentZone is the device's time zone as it is now. time.Local is read
+// once when the service starts, so after a timezone change it would show
+// times in the old zone.
+func currentZone() *time.Location {
+	data, err := os.ReadFile("/etc/localtime")
+	if err != nil {
+		return time.Local
+	}
+	zone, err := time.LoadLocationFromTZData("", data)
+	if err != nil {
+		return time.Local
+	}
+	return zone
 }
 
 // Pending lists the caller's own changes.
@@ -268,22 +446,65 @@ func (s *service) Apply(ctx context.Context, sender, id, colors string) error {
 	if err := s.checkout(s.checkoutPath); err != nil {
 		return fmt.Errorf("%w: %v; nothing written", errRefused, err)
 	}
-	data, _, err := s.readConfig()
-	if err != nil {
-		return err
-	}
-	updated, err := change.Apply(data)
-	if err != nil {
-		delete(s.pending, id)
-		return fmt.Errorf("%w: %v", errRefused, err)
-	}
-	if err := config.WriteText(s.configPath, updated); err != nil {
+	if change.Local != nil {
+		if err := s.writeLocal(change); err != nil {
+			if errors.Is(err, errRefused) {
+				delete(s.pending, id)
+			}
+			return err
+		}
+	} else if err := s.writeConfig(change); err != nil {
+		if errors.Is(err, errRefused) {
+			delete(s.pending, id)
+		}
 		return err
 	}
 	delete(s.pending, id)
 	log.Printf("uid %d applied %s change %s: %s", who.UID, change.Tier, id, change.KeyNames())
 	if err := s.sys.StartRebuild(ctx, colors); err != nil {
 		return fmt.Errorf("the change is written, but the rebuild did not start: %w; run rebuild", err)
+	}
+	return nil
+}
+
+// writeConfig writes a change of keys into user.config.json. It is
+// errRefused when a key no longer holds the value the change was asked
+// against. The caller holds s.mu.
+func (s *service) writeConfig(change settings.Change) error {
+	data, _, err := s.readConfig()
+	if err != nil {
+		return err
+	}
+	updated, err := change.Apply(data)
+	if err != nil {
+		return fmt.Errorf("%w: %v", errRefused, err)
+	}
+	return config.WriteText(s.configPath, updated)
+}
+
+// writeLocal makes the change's folder root's copy. It is errRefused when
+// developer mode is off by now or the copy is no longer the one the change
+// was asked against. The caller holds s.mu.
+func (s *service) writeLocal(change settings.Change) error {
+	if err := s.developerMode(); err != nil {
+		return err
+	}
+	current, err := s.readLocal(s.localPath)
+	if err != nil {
+		return err
+	}
+	if current.Hash() != change.Local.OldHash {
+		return fmt.Errorf("%w: %s changed since this change was asked; ask again", errRefused, s.localPath)
+	}
+	if err := localchanges.Replace(s.localPath, change.Local.Tree); err != nil {
+		return fmt.Errorf("write %s: %w", s.localPath, err)
+	}
+	written, err := s.readLocal(s.localPath)
+	if err != nil {
+		return fmt.Errorf("read back %s: %w", s.localPath, err)
+	}
+	if written.Hash() != change.Local.NewHash {
+		return fmt.Errorf("%s does not hold the folder that was asked after writing it", s.localPath)
 	}
 	return nil
 }

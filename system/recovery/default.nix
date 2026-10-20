@@ -11,7 +11,13 @@ let
   tools = import ./tools.nix {
     inherit config pkgs sourceRevision;
   };
-  inherit (tools) gjallarctl installer recovery recoveryExecutor;
+  inherit (tools)
+    gjallarctl
+    installer
+    recovery
+    recoveryCompletion
+    recoveryExecutor
+    ;
 
   maintenanceCandidates = lib.concatStringsSep "\n" (
     lib.mapAttrsToList (
@@ -99,6 +105,7 @@ lib.mkMerge [
       boot.kernelParams = [ "systemd.unit=multi-user.target" ];
       environment.systemPackages = [
         recovery
+        recoveryCompletion
         recoveryExecutor
         gjallarctl
         installer
@@ -124,6 +131,8 @@ lib.mkMerge [
         Trusted GjallarOS recovery entry.
         Sign in locally and run: sudo gjallar-recover audit
         Root disks need the disk recovery key or passphrase.
+        Developer mode off and back to the official system:
+        sudo gjallar-recover developer-off
       '';
     }
     // lib.optionalAttrs settings.endpointManagedDevice {

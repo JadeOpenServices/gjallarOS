@@ -69,6 +69,12 @@
           "nar:${self.narHash}"
         else
           throw "GjallarOS source provenance is unavailable";
+      # gjallarctl writes this into the staged source it builds.
+      buildContext =
+        if builtins.pathExists (self.outPath + "/.gjallar-build-context.json") then
+          builtins.fromJSON (builtins.readFile (self.outPath + "/.gjallar-build-context.json"))
+        else
+          null;
 
       overlays = [
         inputs.nur.overlays.default
@@ -129,10 +135,14 @@
         "nextcloud-client-openvfs" = (import ./apps/nextcloud/package.nix { inherit pkgs; }).client;
         openvfs = (import ./apps/nextcloud/package.nix { inherit pkgs; }).openvfs;
         "gjallar-opencode" = import ./apps/ai/opencode.nix { inherit pkgs; };
+        "systemd-partition-reread" = import ./system/fixes/systemd-partition-reread/package.nix {
+          inherit pkgs;
+        };
         inherit (pkgs.qt6Packages) qt6ct;
         inherit (pkgs.kdePackages) dolphin;
         inherit (pkgs)
           _nemu
+          _wine
           ghostty
           hyprland
           udiskie
@@ -151,8 +161,10 @@
           nextcloud-client-openvfs
           openvfs
           gjallar-opencode
+          systemd-partition-reread
           qt6ct
           _nemu
+          _wine
           # pkgs/overlays patches these, so cache.nixos.org has other builds.
           dolphin
           ghostty
@@ -167,7 +179,11 @@
       checks.${system} = {
         build-entrypoint = import ./tests/nix/build-entrypoint.nix { inherit pkgs; };
 
+        local-changes = import ./tests/nix/local-changes.nix { inherit pkgs; };
+
         nextcloud-client-patches = import ./tests/nix/nextcloud-client-patches.nix { inherit pkgs; };
+
+        qt6ct-kde-style = import ./tests/nix/qt6ct-kde-style.nix { inherit pkgs; };
 
         security-baseline = import ./tests/nix/security-baseline.nix {
           inherit nixpkgs system;
@@ -266,14 +282,9 @@
 
         ${settings.hostname} = nixpkgs.lib.nixosSystem {
           modules = [
-            (import ./system/security/build-entrypoint.nix {
-              buildContext =
-                if builtins.pathExists (self.outPath + "/.gjallar-build-context.json") then
-                  builtins.fromJSON (builtins.readFile (self.outPath + "/.gjallar-build-context.json"))
-                else
-                  null;
-            })
+            (import ./system/security/build-entrypoint.nix { inherit buildContext; })
             ./system/security/secure-boot
+            (import ./system/security/local-changes.nix { localDir = ./.gjallar-local; })
             inputs.noctalia-greeter.nixosModules.default
             inputs.stylix.nixosModules.stylix
             inputs.sops-nix.nixosModules.sops
@@ -330,6 +341,7 @@
               sourceRevision
               installState
               ;
+            buildSource = if builtins.isAttrs buildContext then buildContext.source or { } else { };
           };
         };
       };

@@ -1,4 +1,5 @@
 {
+  config,
   lib,
   pkgs,
   settings,
@@ -59,14 +60,13 @@ let
         ${coreutils}/id
         ${pkgs.systemd}/bin/systemctl --user show hyprland-session.target --property=ActiveState --property=SubState --property=Result --no-pager || true
         ${coreutils}/printenv | ${pkgs.gnugrep}/bin/grep -E '^(PATH|XDG_|WAYLAND_DISPLAY|HYPRLAND_INSTANCE_SIGNATURE|DBUS_SESSION_BUS_ADDRESS)=' || true
+        # Hyprland opens its IPC socket during init and starts
+        # hyprland-session.target later from exec-once, so one try is enough;
+        # false here is a real finding.
         hyprland_ready=false
-        for attempt in $(${coreutils}/seq 1 300); do
-          if ${pkgs.hyprland}/bin/hyprctl monitors >/dev/null 2>&1; then
-            hyprland_ready=true
-            break
-          fi
-          ${coreutils}/bin/sleep 0.1
-        done
+        if ${pkgs.hyprland}/bin/hyprctl monitors >/dev/null 2>&1; then
+          hyprland_ready=true
+        fi
         log "hyprland-ipc-ready=$hyprland_ready"
         for command in fuzzel ghostty noctalia; do
           path="$(${pkgs.findutils}/bin/find "$HOME/.nix-profile/bin" "/etc/profiles/per-user/$USER/bin" -maxdepth 1 -name "$command" \( -type l -o -type f \) -print -quit 2>/dev/null || true)"
@@ -82,7 +82,12 @@ let
         ${pkgs.hyprland}/bin/hyprctl monitors || true
         ${pkgs.hyprland}/bin/hyprctl clients || true
         ${lib.getExe config.programs.noctalia.package} config validate || true
-        ${lib.getExe config.programs.noctalia.package} msg status >/dev/null 2>&1 || true
+        # Noctalia can start after this unit, so false here is no finding alone.
+        noctalia_ready=false
+        if ${lib.getExe config.programs.noctalia.package} msg status >/dev/null 2>&1; then
+          noctalia_ready=true
+        fi
+        log "noctalia-ipc-ready-at-diagnostics=$noctalia_ready"
         ${pkgs.systemd}/bin/journalctl --user -b --no-pager -u hyprland-session-diagnostics.service || true
         ${pkgs.procps}/bin/pgrep -f -a -u "$USER" 'Hyprland|noctalia|fuzzel|ghostty|swaybg|waybar' || true
         log 'end'
@@ -131,12 +136,23 @@ in
         ];
       };
 
+      # The stock quit units end Plymouth before greetd and drop the splash,
+      # so the console shows through until the greeter draws. greetd quits it
+      # itself, keeping the last frame up until the greeter takes the display.
       systemd.services.plymouth-quit.enable = false;
       systemd.services.plymouth-quit-wait.enable = false;
 
       systemd.services.greetd.serviceConfig.ExecStartPre =
+        let
+          plymouth = "${config.boot.plymouth.package}/bin/plymouth";
+        in
         pkgs.writeShellScript "handoff-plymouth-to-greetd" ''
-          ${pkgs.plymouth}/bin/plymouth quit --retain-splash || true
+          # No daemon: the splash is off or already gone, nothing to hand over.
+          ${plymouth} --ping || exit 0
+          # --wait returns once plymouthd has exited and let go of the display.
+          if ! ${plymouth} quit --retain-splash --wait; then
+            echo "handoff-plymouth-to-greetd: plymouth quit failed, starting the greeter anyway" >&2
+          fi
         '';
 
       systemd.services.plymouth-poweroff = {

@@ -18,6 +18,7 @@ buildGoModule {
       ../../cmd/gjallar-settingsd
       ../../internal/installer/config
       ../../internal/installer/systemcheckout
+      ../../internal/localchanges
       ../../internal/namecheck
       ../../internal/nettrust
       ../../internal/noctalia

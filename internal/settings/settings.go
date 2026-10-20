@@ -16,6 +16,7 @@ import (
 	"unicode"
 
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/config"
+	"github.com/JadeOpenServices/gjallarOS/internal/localchanges"
 )
 
 const (
@@ -51,7 +52,28 @@ type Change struct {
 	Session string      `json:"session"`
 	Tier    config.Tier `json:"tier"`
 	Keys    []KeyChange `json:"keys"`
-	Asked   time.Time   `json:"asked"`
+	// Local is set instead of Keys for a new developer-mode folder.
+	Local *LocalChange `json:"local,omitempty"`
+	Asked time.Time    `json:"asked"`
+}
+
+// LocalChange replaces root's copy of the developer-mode folder.
+type LocalChange struct {
+	// OldHash is the copy the change was asked against, NewHash the one it
+	// writes (localchanges.Tree.Hash).
+	OldHash string       `json:"oldHash"`
+	NewHash string       `json:"newHash"`
+	Files   []FileChange `json:"files"`
+	// Tree is the folder root writes. It stays in the service.
+	Tree localchanges.Tree `json:"-"`
+}
+
+// FileChange is one file of a local change with its SHA-256 before and
+// after. Old is empty for a new file, New for a removed one.
+type FileChange struct {
+	Path string `json:"path"`
+	Old  string `json:"old,omitempty"`
+	New  string `json:"new,omitempty"`
 }
 
 // KeyValue is one key of the service's List and Get answers.
@@ -127,6 +149,9 @@ func Plan(data []byte, values map[string]json.RawMessage) (Change, error) {
 		}
 		wanted[key] = newValue
 		change.Keys = append(change.Keys, KeyChange{Key: key, Old: oldValue, New: newValue})
+		if tightens(key, oldValue, newValue) {
+			tier = config.TierEveryday
+		}
 		if tierRank[tier] > tierRank[change.Tier] {
 			change.Tier = tier
 		}
@@ -140,12 +165,69 @@ func Plan(data []byte, values map[string]json.RawMessage) (Change, error) {
 	slices.SortFunc(change.Keys, func(a, b KeyChange) int {
 		return strings.Compare(a.Key, b.Key)
 	})
+	change.ID, err = newID()
+	return change, err
+}
+
+// PlanLocal is the change that turns root's copy of the developer-mode
+// folder from current into wanted. It is a security change: new local code
+// runs as root after the rebuild.
+func PlanLocal(current, wanted localchanges.Tree) (Change, error) {
+	old := map[string]string{}
+	for _, file := range current.Files {
+		old[file.Path] = file.SHA256
+	}
+	local := &LocalChange{OldHash: current.Hash(), NewHash: wanted.Hash(), Tree: wanted}
+	for _, file := range wanted.Files {
+		if old[file.Path] != file.SHA256 {
+			local.Files = append(local.Files, FileChange{Path: file.Path, Old: old[file.Path], New: file.SHA256})
+		}
+		delete(old, file.Path)
+	}
+	for path, sum := range old {
+		local.Files = append(local.Files, FileChange{Path: path, Old: sum})
+	}
+	if len(local.Files) == 0 {
+		return Change{}, fmt.Errorf("nothing changes; root's copy already holds this folder")
+	}
+	slices.SortFunc(local.Files, func(a, b FileChange) int { return strings.Compare(a.Path, b.Path) })
+	id, err := newID()
+	return Change{ID: id, Tier: config.TierSecurity, Local: local}, err
+}
+
+func newID() (string, error) {
 	id := make([]byte, 16)
 	if _, err := rand.Read(id); err != nil {
-		return Change{}, err
+		return "", err
 	}
-	change.ID = hex.EncodeToString(id)
-	return change, nil
+	return hex.EncodeToString(id), nil
+}
+
+// tightens reports whether a change only makes the system stricter, so it
+// need not wait out its tier's delay. Only the keys named here qualify; the
+// managed-device check still runs on their real tier.
+func tightens(key string, oldValue, newValue json.RawMessage) bool {
+	switch key {
+	case "usbTrustLapseDays":
+		// Turning the lapse on or shortening it applies at once; turning it
+		// off or lengthening it waits.
+		var before, after int
+		if json.Unmarshal(newValue, &after) != nil || after <= 0 {
+			return false
+		}
+		if len(oldValue) > 0 && json.Unmarshal(oldValue, &before) != nil {
+			return false
+		}
+		return before <= 0 || after < before
+	case "developerMode":
+		// Turning developer mode off returns to the official system.
+		return string(newValue) == "false"
+	case "releaseChannel":
+		// stable takes new code last, and update never goes back to an
+		// older commit, so moving to it only slows what arrives.
+		return string(newValue) == `"stable"`
+	}
+	return false
 }
 
 // ReadyAt is the earliest time the change may be applied. home says whether
@@ -169,6 +251,9 @@ func (c Change) ReadyAt(home bool) time.Time {
 // when a key no longer holds the old value the change was asked against, so
 // nothing is written that the person did not see.
 func (c Change) Apply(data []byte) ([]byte, error) {
+	if c.Local != nil {
+		return nil, fmt.Errorf("a local change writes the developer-mode folder, not the configuration")
+	}
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(data, &fields); err != nil {
 		return nil, fmt.Errorf("parse user configuration: %w", err)
@@ -191,24 +276,119 @@ func (c Change) Apply(data []byte) ([]byte, error) {
 	return updated, err
 }
 
-// MaxShownValue is how much of one value the password dialog shows.
-const MaxShownValue = 120
+const (
+	// MaxShownValue is how much of one value the password dialog shows.
+	MaxShownValue = 120
+	// MaxShownFiles is how many files of a local change it lists.
+	MaxShownFiles = 20
+)
 
 // Message is the text of the password dialog: every key with its old and
 // new value. Characters that do not print, including those that turn text
 // direction, are shown as escapes, so the dialog cannot be made to show
-// something other than what root writes.
+// something other than what root writes. A local change lists its files and
+// the folder's new hash, which gjallarctl system apply prints too.
 func (c Change) Message() string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "Change %d GjallarOS setting(s) (%s):", len(c.Keys), c.Tier)
-	for _, key := range c.Keys {
-		old := "(not set)"
-		if key.Old != nil {
-			old = Shown(key.Old, MaxShownValue)
+	lines := c.Lines()
+	if c.Local != nil {
+		fmt.Fprintf(&b, "Change %d file(s) of the developer-mode folder (%s), new hash %s:", len(c.Local.Files), c.Tier, ShortHash(c.Local.NewHash))
+		if len(lines) > MaxShownFiles {
+			lines = append(lines[:MaxShownFiles], fmt.Sprintf("and %d more", len(lines)-MaxShownFiles))
 		}
-		fmt.Fprintf(&b, "\n%s: %s -> %s", key.Key, old, Shown(key.New, MaxShownValue))
+	} else {
+		fmt.Fprintf(&b, "Change %d GjallarOS setting(s) (%s):", len(c.Keys), c.Tier)
+	}
+	for _, line := range lines {
+		fmt.Fprintf(&b, "\n%s", line)
 	}
 	return b.String()
+}
+
+// Lines shows the change one line per value or file that differs.
+func (c Change) Lines() []string {
+	var lines []string
+	for _, key := range c.Keys {
+		lines = append(lines, key.Lines()...)
+	}
+	if c.Local != nil {
+		for _, file := range c.Local.Files {
+			what := "changed"
+			switch {
+			case file.Old == "":
+				what = "added"
+			case file.New == "":
+				what = "removed"
+			}
+			lines = append(lines, fmt.Sprintf("local %s: %s", Shown(json.RawMessage(file.Path), 0), what))
+		}
+	}
+	return lines
+}
+
+// ShortHash is the start of a folder hash, as the dialog and the terminal
+// show it.
+func ShortHash(hash string) string {
+	if len(hash) > 12 {
+		return hash[:12]
+	}
+	return hash
+}
+
+// Lines shows a key's change as "path: old -> new", one line per value
+// that differs. Objects and lists are followed down to what changed, so a
+// long value cut at MaxShownValue cannot hide the part that differs behind
+// the same first characters on both sides.
+func (k KeyChange) Lines() []string {
+	var lines []string
+	shownLines(Shown(json.RawMessage(k.Key), 0), k.Old, k.New, &lines)
+	return lines
+}
+
+func shownLines(path string, old, new json.RawMessage, lines *[]string) {
+	if bytes.Equal(old, new) {
+		return
+	}
+	var oldFields, newFields map[string]json.RawMessage
+	if json.Unmarshal(old, &oldFields) == nil && json.Unmarshal(new, &newFields) == nil &&
+		oldFields != nil && newFields != nil {
+		names := make([]string, 0, len(oldFields)+len(newFields))
+		for name := range oldFields {
+			names = append(names, name)
+		}
+		for name := range newFields {
+			if _, ok := oldFields[name]; !ok {
+				names = append(names, name)
+			}
+		}
+		slices.Sort(names)
+		for _, name := range names {
+			shownLines(path+"."+Shown(json.RawMessage(name), 0), oldFields[name], newFields[name], lines)
+		}
+		return
+	}
+	var oldItems, newItems []json.RawMessage
+	if json.Unmarshal(old, &oldItems) == nil && json.Unmarshal(new, &newItems) == nil &&
+		oldItems != nil && newItems != nil {
+		for i := range max(len(oldItems), len(newItems)) {
+			var o, n json.RawMessage
+			if i < len(oldItems) {
+				o = oldItems[i]
+			}
+			if i < len(newItems) {
+				n = newItems[i]
+			}
+			shownLines(fmt.Sprintf("%s[%d]", path, i), o, n, lines)
+		}
+		return
+	}
+	shown := func(v json.RawMessage) string {
+		if v == nil {
+			return "(not set)"
+		}
+		return Shown(v, MaxShownValue)
+	}
+	*lines = append(*lines, fmt.Sprintf("%s: %s -> %s", path, shown(old), shown(new)))
 }
 
 // KeyNames lists the keys of the change, for polkit rules.
@@ -216,6 +396,9 @@ func (c Change) KeyNames() string {
 	names := make([]string, len(c.Keys))
 	for i, key := range c.Keys {
 		names[i] = key.Key
+	}
+	if c.Local != nil {
+		names = append(names, "local")
 	}
 	return strings.Join(names, ",")
 }

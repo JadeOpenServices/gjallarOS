@@ -31,7 +31,7 @@ Needs a machine booted in UEFI mode (legacy BIOS/CSM is refused). On NixOS,
 or the NixOS minimal ISO:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/JadeOpenServices/gjallarOS/main/scripts/installation/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/JadeOpenServices/gjallarOS/stable/scripts/installation/install.sh | bash
 ```
 
 The script clones the repository with its submodules into
@@ -39,6 +39,13 @@ The script clones the repository with its submodules into
 interactive installer from that checkout. Re-running it reuses the checkout.
 `GJALLAR_CLONE_ONLY=1` stops after the clone. From an existing checkout,
 run `./scripts/installation/install.sh` directly.
+
+That checkout only runs the installer. The installed system gets its own
+clone of the official repository in `/etc/gjallar/system`, owned by root,
+at the commit the installer was built from, with this machine's
+`generated/` and `user.config.json` copied in. An installer built from a
+commit that is not pushed to `main`, or with local changes, stops before
+the clone.
 
 For automated non-secret answers:
 
@@ -109,6 +116,9 @@ first under memory pressure) so a model load cannot take Hyprland down. Below
 AI, and local AI then runs only a model you name. From 8 GiB it picks a 7b
 model, from 24 GiB a 14b one, and with 32 GiB plus a 12 GiB graphics card a
 30b one.
+To turn local AI on after the install, run `gjallarctl ai enable`; the
+rebuild then picks the model the same way. A changed `overrideModelWith`
+takes effect with the next rebuild too.
 
 Instead of a local model, AI can use a central server: set `aiEndpoint`
 (`https://host[:port]` only), `aiRemoteModel` and `aiRemoteContextTokens`.
@@ -177,8 +187,8 @@ development shell intentionally uses unstable.
 
 Web apps are listed in `webApplications`, for example
 `[{"id": "teams"}, {"id": "plane", "endpoint": "https://plane.example"}]`.
-The older `planeEnable`/`planeHost`/`drawio*` fields are still read when
-`webApplications` is absent, but new configs should use the list.
+An older config with `planeEnable`/`planeHost`/`drawio*` is moved into the
+list once on the next rebuild, and the rebuild says so.
 
 `"dolphinDriveUsage": true` shows used and total space next to each drive in
 the Dolphin places panel. It patches KIO, so KIO, Dolphin and the file dialogs
@@ -220,6 +230,19 @@ off or the network is not trusted, `set` says that part was not checked. To
 hear the answers, the firewall lets in UDP from port 5353 to port 1015, only
 from private and link-local addresses; nothing listens there outside a
 check.
+
+To keep your settings, save them to a file and bring them back later:
+
+```sh
+gjallarctl settings export ~/settings.gjallar
+gjallarctl settings import ~/settings.gjallar
+```
+
+Export asks for your own password and signs the file with a key that only
+the settings service holds. Import takes only files made on this device by
+your account, and refuses a file that was changed after it was made. It
+asks for the change the way `set` does, with the same tiers and waits, and
+says how old the file is.
 
 ### App catalogue
 
@@ -374,8 +397,14 @@ To bring an install up to date with upstream, run:
 rebuild --update
 ```
 
-It runs `git pull --ff-only` in that checkout and then rebuilds. Local
-commits or uncommitted edits stop the pull, and nothing is rebuilt.
+It fast-forwards that checkout to its release channel and then rebuilds.
+The channel is `releaseChannel` in `user.config.json`: `stable` (the
+default), `staging` or `dev`. Change it with
+`gjallarctl settings set releaseChannel=staging`. A move to `stable` applies
+at once; any other move waits like other critical settings.
+Local commits or uncommitted edits stop the update, and nothing is rebuilt.
+A checkout that is ahead of its channel stays where it is until the channel
+catches up; it never goes back to an older commit.
 `rebuild --update-inputs` moves every flake input first (for development
 checkouts). `rebuild --help` lists every option.
 
@@ -383,6 +412,36 @@ When `dotfilesDir` is `/etc/gjallar/system`, root owns the checkout and
 builds it only as it is on the official origin. `--repo`, `--host`,
 `--update-inputs` and other `nixos-rebuild` arguments are refused there; the
 oddc pin may move only to a commit of an official ODDC branch (ROADMAP §14).
+
+### Moving an older install to `/etc/gjallar/system`
+
+Installs made before the system checkout build from a checkout in your home
+folder. To move one over, run as your own user:
+
+```sh
+gjallarctl system move
+```
+
+It shows the commit the system runs, and lists local commits and changes in
+your checkout that the move leaves behind. Your checkout keeps them; local
+`.nix` changes go into the developer-mode folder instead (see
+`gjallarctl system apply`). The running commit must be on the official
+`main`; a system built with local changes refuses until you rebuild from a
+pushed commit. Then, as root:
+
+```sh
+sudo gjallarctl system clone --from ~/Documents/gjallarOS
+sudo gjallar-system-rebuild
+```
+
+`system clone` clones the official repository at the running commit and
+copies `generated/` and `user.config.json` from the old checkout as files.
+It never runs git in the old checkout. The rebuild switches
+`/etc/gjallar/repository` to the new checkout; plain `rebuild` uses it from
+then on. The old checkout stays where it is.
+
+When `/etc/gjallar/system` is missing or broken, `rebuild` says so and names
+the same `system clone` step.
 
 To try a `gjallarctl` change before rebuilding, run it from the checkout with
 `go run ./cmd/gjallarctl rebuild` (or any other command). It uses the sudo
@@ -457,7 +516,13 @@ GjallarOS. If the ESP itself is broken, boot the recovery ISO from USB.
 ### Secure Boot
 
 The installer offers Secure Boot on models whose ODDC entry has a Secure Boot
-setup. A system installed without it gets it with:
+setup, with yes as the default. It asks this before the recovery questions:
+the recovery partition is signed with this machine's Secure Boot key, so
+without Secure Boot there is no recovery partition and the disk is not shrunk
+for one. Saying no, or a model without an ODDC Secure Boot setup, shows what
+the install goes without: nothing checks the startup files, the disk
+passphrase is typed at every startup, repairs start from a USB stick, and JODS
+cannot manage the machine. A system installed without it gets it with:
 
 ```bash
 gjallarctl secure-boot setup
@@ -521,6 +586,16 @@ not built in, so it stays blocked until approved. Enforcement can be turned on
 later with `"usbTrustEnforce": true` in `user.config.json` and a `rebuild`. To turn it off, set it back to `false`, `rebuild`, then run
 `sudo gjallarctl usb disarm` and enter the disk encryption passphrase. Disarm
 alone is temporary: the broker re-arms from the config on its next restart.
+
+On a machine with TPM2 the installer also asks "Let approved USB devices expire
+when unused?" (default no). With it on, an approved external device that was
+not connected for `usbTrustLapseDays` days (30 by default, any number from 1)
+asks for approval again. The days count from the last connection, and from the
+moment the setting was turned on, so old devices do not all ask at once. Three
+days before a device expires, a notice offers to renew it. Built-in devices
+never expire. Without a built-in USB keyboard, the keyboard and mouse used last
+never expire either. `gjallarctl settings` turns it on or shortens it at once;
+turning it off (`0`) or lengthening it waits out the security delay.
 
 The review dialog opens in a simple view. "Techy view" shows IDs, ports and
 interfaces for that dialog only. The "Always techy view" box writes
@@ -606,8 +681,12 @@ rebuild, then delete the override file.
 ## 💜 Credits
 
 GjallarOS builds on the ideas and groundwork of
-[AlfheimOS](https://github.com/Serpentian/AlfheimOS). Please send some love
-their way as well.
+[AlfheimOS](https://github.com/Serpentian/AlfheimOS) and the
+[hyprdots](https://github.com/prasanthrangan/hyprdots) project.
+[v3rm1n's dotfiles](https://codeberg.org/v3rm1n/dotfiles) inspired it
+and got me started on this idea in the first place, together with my
+loving hate for Windows and what it has become, as an ex-Windows user
+since 2021. Please send some love their way as well.
 
 The desktop shell, greeter and default owl wallpaper come from
 [Noctalia](https://github.com/noctalia-dev/noctalia). The README layout

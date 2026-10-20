@@ -19,7 +19,7 @@ func TestCollectAIServerRetriesUntilValid(t *testing.T) {
 		"https://192.168.8.205/", "", "",
 	}
 	ui := prompt.New(strings.NewReader(strings.Join(answers, "\n")+"\n"), &output)
-	if err := collectAIServer(context.Background(), ui, &user); err != nil {
+	if err := collectAIServer(context.Background(), ui, nil, &user); err != nil {
 		t.Fatal(err)
 	}
 	if user.AIEndpoint != "https://192.168.8.205" || user.AIRemoteModel != "qwen3-coder:30b" || user.AIRemoteContextTokens != 32768 {
@@ -54,7 +54,7 @@ func TestCollectAILowMemory(t *testing.T) {
 			var output bytes.Buffer
 			user := config.User{Apps: []string{"git", "ai"}}
 			ui := prompt.New(strings.NewReader(strings.Join(test.answers, "\n")+"\n"), &output)
-			if err := collectAI(context.Background(), ui, &user); err != nil {
+			if err := collectAI(context.Background(), ui, nil, &user); err != nil {
 				t.Fatal(err)
 			}
 			if strings.Join(user.Apps, ",") != strings.Join(test.apps, ",") || user.OverrideModelWith != test.model {

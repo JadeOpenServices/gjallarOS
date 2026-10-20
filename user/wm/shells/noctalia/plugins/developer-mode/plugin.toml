@@ -1,0 +1,12 @@
+id          = "gjallar/developer-mode"
+name        = "Developer mode"
+version     = "1.0.0"
+plugin_api  = 3
+author      = "gjallar"
+license     = "AGPL-3.0"
+icon        = "code"
+description = "Shows that developer mode is on while it is."
+
+[[widget]]
+id    = "status"
+entry = "widget.luau"

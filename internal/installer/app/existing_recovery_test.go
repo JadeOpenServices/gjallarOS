@@ -396,9 +396,48 @@ func TestRecoveryAfterMaintenanceNeedsNoAnswers(t *testing.T) {
 			if s.recoveryPartition != tc.want {
 				t.Fatalf("recovery partition %q; want %q", s.recoveryPartition, tc.want)
 			}
+			// Neither answer may send the rebuild back to the storage
+			// check: after a "no" it would find /dev/vda3 and format it.
+			if needsRecoveryStorage(s) {
+				t.Fatal("rebuild would look for recovery storage again")
+			}
 			if strings.Contains(out.String(), "signing key") {
 				t.Fatalf("asked for release signing keys:\n%s", out.String())
 			}
 		})
+	}
+}
+
+func TestRecoveryPartitionUnusedWithoutSecureBoot(t *testing.T) {
+	original := findRecoveryPartition
+	t.Cleanup(func() { findRecoveryPartition = original })
+	findRecoveryPartition = func(context.Context) string { return "/dev/vda3" }
+
+	for _, resume := range []string{"", installerresume.StateMaintenanceReboot} {
+		t.Setenv("GJALLAR_INSTALLER_RESUME_STATE", resume)
+		s := state{
+			existing: true,
+			user: config.User{
+				RecoveryEnable:          true,
+				RecoveryPartitionEnable: true,
+			},
+		}
+		var out bytes.Buffer
+		// No input: any question would fail on EOF.
+		err := configureRecoveryProvisioning(
+			context.Background(),
+			prompt.New(strings.NewReader(""), &out),
+			options{},
+			&s,
+		)
+		if err != nil {
+			t.Fatalf("resume %q: %v", resume, err)
+		}
+		if s.recoveryPartition != "" {
+			t.Fatalf("resume %q: recovery partition %q kept without Secure Boot", resume, s.recoveryPartition)
+		}
+		if !strings.Contains(out.String(), "/dev/vda3 stays unused") {
+			t.Fatalf("resume %q: no notice:\n%s", resume, out.String())
+		}
 	}
 }

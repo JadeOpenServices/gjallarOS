@@ -2,11 +2,14 @@ package settings
 
 import (
 	"encoding/json"
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/config"
+	"github.com/JadeOpenServices/gjallarOS/internal/localchanges"
 )
 
 func configText(t *testing.T, user config.User) []byte {
@@ -93,6 +96,80 @@ func TestPlanOnManagedDeviceAllowsEverydayOnly(t *testing.T) {
 	}
 }
 
+func TestPlanLapseWaitsOnlyWhenLoosened(t *testing.T) {
+	user := defaults(t)
+	cases := []struct {
+		old, new int
+		tier     config.Tier
+	}{
+		{0, 30, config.TierEveryday},
+		{30, 7, config.TierEveryday},
+		{30, 60, config.TierSecurity},
+		{30, 0, config.TierSecurity},
+	}
+	for _, c := range cases {
+		user.USBTrustLapseDays = c.old
+		change, err := Plan(configText(t, user), raw(map[string]string{"usbTrustLapseDays": strconv.Itoa(c.new)}))
+		if err != nil {
+			t.Fatalf("%d → %d: %v", c.old, c.new, err)
+		}
+		if change.Tier != c.tier {
+			t.Errorf("%d → %d: tier %s, want %s", c.old, c.new, change.Tier, c.tier)
+		}
+	}
+	user.USBTrustLapseDays = 0
+	change, err := Plan(configText(t, user), raw(map[string]string{"usbTrustLapseDays": `30`, "hostname": `"desk-07"`}))
+	if err != nil || change.Tier != config.TierSecurity {
+		t.Fatalf("lapse on beside a security key: %s %v", change.Tier, err)
+	}
+	if _, err := Plan(configText(t, user), raw(map[string]string{"usbTrustLapseDays": `-1`})); err == nil {
+		t.Fatal("accepted a negative lapse")
+	}
+}
+
+func TestPlanReleaseChannelWaitsUnlessStable(t *testing.T) {
+	user := defaults(t)
+	change, err := Plan(configText(t, user), raw(map[string]string{"releaseChannel": `"staging"`}))
+	if err != nil || change.Tier != config.TierCritical {
+		t.Fatalf("to staging: %s %v", change.Tier, err)
+	}
+	user.ReleaseChannel = "dev"
+	change, err = Plan(configText(t, user), raw(map[string]string{"releaseChannel": `"stable"`}))
+	if err != nil || change.Tier != config.TierEveryday {
+		t.Fatalf("to stable: %s %v", change.Tier, err)
+	}
+	if _, err := Plan(configText(t, user), raw(map[string]string{"releaseChannel": `"main"`})); err == nil {
+		t.Fatal("accepted channel main")
+	}
+}
+
+func TestPlanDeveloperModeWaitsOnlyWhenTurnedOn(t *testing.T) {
+	user := defaults(t)
+	change, err := Plan(configText(t, user), raw(map[string]string{"developerMode": `true`}))
+	if err != nil || change.Tier != config.TierCritical {
+		t.Fatalf("developer mode on: %s %v", change.Tier, err)
+	}
+	user.DeveloperMode = true
+	change, err = Plan(configText(t, user), raw(map[string]string{"developerMode": `false`}))
+	if err != nil || change.Tier != config.TierEveryday {
+		t.Fatalf("developer mode off: %s %v", change.Tier, err)
+	}
+}
+
+func TestPlanOnManagedDeviceRefusesTighteningToo(t *testing.T) {
+	user := defaults(t)
+	user.EndpointManagedDevice = true
+	user.JODSEndpoint = "https://jods.example.test:1666"
+	user.JODSPolicySigningKey = strings.Repeat("ab", 32)
+	user.JODSRecoverySigningKey = strings.Repeat("cd", 32)
+	user.JODSEnrollmentMode = "manual"
+	user.JODSDeviceClass = "laptop"
+	user.JODSDesktopProfile = "headless"
+	if _, err := Plan(configText(t, user), raw(map[string]string{"usbTrustLapseDays": `30`})); err == nil {
+		t.Fatal("JODS-managed lapse changed locally")
+	}
+}
+
 func TestReadyAt(t *testing.T) {
 	asked := time.Date(2026, 10, 19, 12, 0, 0, 0, time.UTC)
 	for _, tc := range []struct {
@@ -153,5 +230,72 @@ func TestMessageShowsHiddenCharacters(t *testing.T) {
 	}
 	if change.KeyNames() != "hostname,aiEndpoint" {
 		t.Fatalf("key names = %q", change.KeyNames())
+	}
+}
+
+func TestLinesShowWhatChangesInsideLongValues(t *testing.T) {
+	long := strings.Repeat("x", 200)
+	key := KeyChange{
+		Key: "firefoxAddons",
+		Old: json.RawMessage(`{"comfort":{"note":"` + long + `"},"passwords":{"enable":false,"addons":{"passbolt":"off"}},"list":[1,2]}`),
+		New: json.RawMessage(`{"comfort":{"note":"` + long + `"},"passwords":{"enable":true,"addons":{"passbolt":"on"}},"list":[1,3,4],"new\u202e":1}`),
+	}
+	got := key.Lines()
+	want := []string{
+		"firefoxAddons.list[1]: 2 -> 3",
+		"firefoxAddons.list[2]: (not set) -> 4",
+		"firefoxAddons.new\\u202e: (not set) -> 1",
+		"firefoxAddons.passwords.addons.passbolt: \"off\" -> \"on\"",
+		"firefoxAddons.passwords.enable: false -> true",
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("lines = %q, want %q", got, want)
+	}
+	if m := (Change{Keys: []KeyChange{key}}).Message(); strings.Contains(m, long) || !strings.Contains(m, "passbolt") {
+		t.Fatalf("message %q", m)
+	}
+}
+
+func TestPlanLocalListsFiles(t *testing.T) {
+	current, _ := localchanges.Check(map[string][]byte{"system/a.nix": []byte("{ }\n"), "system/b.nix": []byte("{ }\n")})
+	wanted, _ := localchanges.Check(map[string][]byte{"system/a.nix": []byte("{ x = 1; }\n"), "home/c.nix": []byte("{ }\n"), "system/b.nix": []byte("{ }\n")})
+	change, err := PlanLocal(current, wanted)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if change.Tier != config.TierSecurity || change.ID == "" || change.Local.OldHash != current.Hash() || change.Local.NewHash != wanted.Hash() {
+		t.Fatalf("change %+v", change)
+	}
+	if got := strings.Join(change.Lines(), "; "); got != "local home/c.nix: added; local system/a.nix: changed" {
+		t.Fatalf("lines %q", got)
+	}
+	if change.KeyNames() != "local" || !strings.Contains(change.Message(), ShortHash(wanted.Hash())) {
+		t.Fatalf("message %q, keys %q", change.Message(), change.KeyNames())
+	}
+	removed, err := PlanLocal(wanted, localchanges.Tree{})
+	if err != nil || len(removed.Local.Files) != 3 || removed.Local.Files[0].New != "" {
+		t.Fatalf("removing the folder: %+v %v", removed.Local, err)
+	}
+	if _, err := PlanLocal(wanted, wanted); err == nil {
+		t.Fatal("a folder that changes nothing was planned")
+	}
+	if _, err := change.Apply([]byte("{}")); err == nil {
+		t.Fatal("a local change wrote the configuration")
+	}
+}
+
+func TestLocalMessageCapsFiles(t *testing.T) {
+	files := map[string][]byte{}
+	for i := range MaxShownFiles + 5 {
+		files["system/f"+strconv.Itoa(i)+".nix"] = []byte("{ }\n")
+	}
+	wanted, _ := localchanges.Check(files)
+	change, err := PlanLocal(localchanges.Tree{}, wanted)
+	if err != nil {
+		t.Fatal(err)
+	}
+	message := change.Message()
+	if strings.Count(message, "\nlocal ") != MaxShownFiles || !strings.HasSuffix(message, "\nand 5 more") {
+		t.Fatalf("message %q", message)
 	}
 }

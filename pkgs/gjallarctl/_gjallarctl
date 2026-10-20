@@ -23,10 +23,22 @@ _gjallarctl_system() {
   local -a cmds=(
     'check:check the root-owned system checkout (root only)'
     'rebuild:rebuild from the system checkout (root only, started by rebuild)'
+    'apply:copy ~/GjallarOS-local into the system and rebuild (developer mode)'
+    'status:show what the running system was built from'
+    'move:show what moving to the root-owned system checkout leaves behind'
+    'clone:create the root-owned system checkout (root only)'
+    'developer-off:turn developer mode off and build the official system (recovery entry, root only)'
   )
   if (( CURRENT == 2 )); then
     _describe -t commands 'system command' cmds
+    return
   fi
+  shift words
+  (( CURRENT-- ))
+  case $words[1] in
+    clone)
+      _arguments '--from[the checkout the system builds now]:directory:_files -/' ;;
+  esac
 }
 
 _gjallarctl_usb() {
@@ -42,6 +54,7 @@ _gjallarctl_usb() {
     'enroll-internal:enroll a built-in device'
     'accept-replacement:accept a replaced built-in device'
     'forget:forget a trusted device'
+    'renew:keep trusting a device whose trust lapses soon'
     'disarm:turn enforcement off until the next arm'
     'allow-media:open the card or storage in an allowed reader'
   )
@@ -182,6 +195,8 @@ _gjallarctl_settings() {
     'pending:show the changes waiting in this session'
     'apply:write a waiting change and rebuild'
     'cancel:drop a waiting change'
+    'export:save the settings in a file signed with your key'
+    'import:ask for the change a saved settings file makes'
   )
   if (( CURRENT == 2 )); then
     _describe -t commands 'settings command' cmds
@@ -204,6 +219,7 @@ _gjallarctl_settings() {
     apply|cancel)
       ids=(${(f)"$(gjallarctl settings pending --ids 2>/dev/null)"})
       _arguments "1:change id:(${ids[*]})" ;;
+    export|import) _arguments '1:settings file:_files' ;;
   esac
 }
 
@@ -261,7 +277,7 @@ _gjallarctl() {
     'cleanup:delete old generations'
     'cleanup-old-generations:delete generations older than the kept ones'
     'thermal-test:pause (off) or resume (on) matching processes'
-    'ai:local AI profile'
+    'ai:local AI'
     'preset:read user.config.json presets'
     'normalize:normalize a setting'
     'device-probe:refresh the hardware probe'
@@ -285,7 +301,7 @@ _gjallarctl() {
         helpme) _arguments '--text[print instead of opening a window]' ;;
         tpm2) _arguments '1:tpm2 command:((reenroll\:"enroll the TPM2 key again"))' ;;
         luks) _gjallarctl_luks ;;
-        security) _arguments '1:security command:((notice\:"show new security notes once, as at login"))' ;;
+        security) _arguments '1:security command:((notice\:"show new security notes once, as at login" oddc-notice\:"show the notice while ODDC is off its pin"))' ;;
         secure-boot)
           _arguments '1:secure-boot command:((status\:"show Secure Boot ownership" setup\:"set up Secure Boot on this installed system" update-dbx\:"install the newest dbx revocation list from LVFS"))' \
             '--repo[GjallarOS checkout]:checkout:_files -/' ;;
@@ -297,7 +313,7 @@ _gjallarctl() {
             '--timeout[time per external check]:duration:' ;;
         preflight) _arguments '--repo[GjallarOS checkout]:checkout:_files -/' ;;
         ai)
-          _arguments '1:ai command:(profile)' \
+          _arguments '1:ai command:((enable\:"turn local AI on; the rebuild picks the model" profile\:"show the profile this machine gets" set-token\:"store the bearer token of the AI server"))' \
             '--config[user configuration]:file:_files -g "*.json"' ;;
         preset)
           _arguments '1:preset command:(validate get list bool)' \

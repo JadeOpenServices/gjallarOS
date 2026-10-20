@@ -1,0 +1,20 @@
+Our own fix, not upstream (upstream main has the same gap as of 2026-10-20):
+a wpa_supplicant that answers AccessDenied is no usable backend, so the
+NetworkManager backend keeps waiting instead of losing to it at startup.
+
+diff --git a/src/dbus/network/wpa_supplicant_service.cpp b/src/dbus/network/wpa_supplicant_service.cpp
+index f11910f..13206da 100644
+--- a/src/dbus/network/wpa_supplicant_service.cpp
++++ b/src/dbus/network/wpa_supplicant_service.cpp
+@@ -128,6 +128,11 @@ WpaSupplicantService::WpaSupplicantService(SystemBus& bus) : m_bus(bus) {
+       subscribeInterface(std::string(p));
+     }
+   } catch (const sdbus::Error& e) {
++    // A wpa_supplicant owned by NetworkManager is on the bus but closed to users by its bus policy. It is
++    // no usable backend then, and taking it over would keep the NetworkManager backend from waiting.
++    if (e.getName() == sdbus::Error::Name{"org.freedesktop.DBus.Error.AccessDenied"}) {
++      throw;
++    }
+     kLog.warn("failed to enumerate interfaces: {}", e.what());
+   }
+ 

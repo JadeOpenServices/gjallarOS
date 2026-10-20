@@ -9,6 +9,7 @@
 package flakesource
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"io/fs"
@@ -20,6 +21,10 @@ import (
 // BuildContextName marks sources prepared by the supported deployment entrypoints.
 // This is a workflow guard, not an authorization boundary against root.
 const BuildContextName = ".gjallar-build-context.json"
+
+// LocalName is where a developer-mode rebuild stages root's copy of the
+// local folder. A checkout's own entry of that name is never staged.
+const LocalName = ".gjallar-local"
 
 // excluded reports whether a repository entry is left out of the flake
 // source. .git is skipped at any depth (submodules carry a .git file).
@@ -38,7 +43,7 @@ func excluded(rel string, entry fs.DirEntry) bool {
 // disks, agent settings, build links) that never leaves the machine.
 func Scratch(name string) bool {
 	switch {
-	case name == ".vm", name == ".claude", name == ".direnv", name == BuildContextName:
+	case name == ".vm", name == ".claude", name == ".direnv", name == BuildContextName, name == LocalName:
 		return true
 	case name == "result", strings.HasPrefix(name, "result-"):
 		return true
@@ -63,9 +68,40 @@ func (s Source) Close() error {
 	return os.RemoveAll(filepath.Dir(s.Dir))
 }
 
+// BuildSource is what a rebuild knows about the source it builds: Revision
+// is the checkout's HEAD commit (with -dirty when tracked files differ), ODDC
+// the oddc commit the build uses and ODDCPinned the one flake.lock pins.
+// The system records them; they differ only under an oddc override. Local
+// is the developer-mode folder staged at LocalName, if any.
+type BuildSource struct {
+	Revision   string       `json:"revision,omitempty"`
+	ODDC       string       `json:"oddc,omitempty"`
+	ODDCPinned string       `json:"oddcPinned,omitempty"`
+	Local      *LocalSource `json:"local,omitempty"`
+}
+
+// LocalSource is the manifest hash and the file list of a staged local
+// folder.
+type LocalSource struct {
+	Hash  string   `json:"hash"`
+	Files []string `json:"files"`
+}
+
+type buildContext struct {
+	SchemaVersion int          `json:"schemaVersion"`
+	Entrypoint    string       `json:"entrypoint"`
+	Source        *BuildSource `json:"source,omitempty"`
+}
+
 // Stage copies repo (which must contain flake.nix) into a new temporary
 // directory under tmpRoot ("" means os.TempDir) and returns it.
 func Stage(repo, tmpRoot string) (Source, error) {
+	return StageSource(repo, tmpRoot, nil)
+}
+
+// StageSource is Stage that also records facts about the source in the build
+// context; nil records none.
+func StageSource(repo, tmpRoot string, facts *BuildSource) (Source, error) {
 	root, err := filepath.Abs(repo)
 	if err != nil {
 		return Source{}, fmt.Errorf("resolve repository: %w", err)
@@ -88,7 +124,12 @@ func Stage(repo, tmpRoot string) (Source, error) {
 	}
 	// Never reuse a checkout marker (including symlinks); create it only in the
 	// disposable source, after staging has succeeded.
-	if err := os.WriteFile(filepath.Join(source.Dir, BuildContextName), []byte("{\"schemaVersion\":1,\"entrypoint\":\"gjallarctl\"}\n"), 0o600); err != nil {
+	data, err := json.Marshal(buildContext{SchemaVersion: 1, Entrypoint: "gjallarctl", Source: facts})
+	if err != nil {
+		_ = source.Close()
+		return Source{}, fmt.Errorf("write build context: %w", err)
+	}
+	if err := os.WriteFile(filepath.Join(source.Dir, BuildContextName), append(data, '\n'), 0o600); err != nil {
 		_ = source.Close()
 		return Source{}, fmt.Errorf("write build context: %w", err)
 	}

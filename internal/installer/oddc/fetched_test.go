@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 
 	portable "github.com/JadeOpenServices/oddc/pkg/oddc"
@@ -73,6 +74,38 @@ func TestRefreshFetchesFromGit(t *testing.T) {
 		if model, err := AnswerModel(answer.Root); err != nil || model != answer.Model {
 			t.Errorf("%s: answer holds %q, %v", answer.Model, model, err)
 		}
+	}
+}
+
+func TestRefreshKeepsAnswerReadableUnderStrictUmask(t *testing.T) {
+	rev := catalogRemote(t)
+	previous := syscall.Umask(0o077)
+	t.Cleanup(func() { syscall.Umask(previous) })
+
+	answer := oddctest.Answers(t)[0]
+	if _, err := Refresh(answer.Root, rev); err != nil {
+		t.Fatal(err)
+	}
+
+	err := filepath.WalkDir(answer.Root, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		want := os.FileMode(0o644)
+		if entry.IsDir() {
+			want = 0o755
+		}
+		if got := info.Mode().Perm(); got != want {
+			t.Errorf("%s: mode %v, want %v", path, got, want)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 }
 

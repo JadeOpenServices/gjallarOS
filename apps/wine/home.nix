@@ -7,7 +7,7 @@
 }:
 
 let
-  winePackage = pkgs.wineWow64Packages.staging;
+  winePackage = pkgs._wine;
 
   wineInit = pkgs.writeShellScriptBin "wine-win11-init" ''
     set -euo pipefail
@@ -20,50 +20,41 @@ let
 
     install -d -m 0700 "$WINEPREFIX"
 
+    # Fails when no wineserver runs, which is the usual case.
     ${winePackage}/bin/wineserver -k || true
 
     ${winePackage}/bin/wineboot -u
     ${winePackage}/bin/wineserver -w || true
 
-    ${winePackage}/bin/wine reg add \
-      "HKCU\\Software\\Wine\\X11 Driver" \
-      /v ClientSideWithRender /t REG_SZ /d "N" /f || true
+    # A failed step leaves the prefix unmarked, so the next start tries again;
+    # winetricks skips the verbs it already installed. Marking it anyway kept a
+    # prefix set up offline incomplete for good.
+    failed=()
+    reg_add() {
+      ${winePackage}/bin/wine reg add "$1" /v "$2" /t "$3" /d "$4" /f ||
+        failed+=("reg $2")
+    }
+    tricks() {
+      ${pkgs.winetricks}/bin/winetricks -q "$@" || failed+=("winetricks $*")
+      ${winePackage}/bin/wineserver -w || true
+    }
 
-    ${winePackage}/bin/wine reg add \
-      "HKCU\\Software\\Wine\\X11 Driver" \
-      /v DirectColor /t REG_SZ /d "Y" /f || true
+    reg_add 'HKCU\Software\Wine\X11 Driver' ClientSideWithRender REG_SZ N
+    reg_add 'HKCU\Software\Wine\X11 Driver' DirectColor REG_SZ Y
+    reg_add 'HKCU\Software\Wine\X11 Driver' Decorated REG_SZ Y
+    reg_add 'HKCU\Software\Wine\X11 Driver' Managed REG_SZ Y
+    reg_add 'HKCU\Software\Wine\Direct3D' csmt REG_DWORD 1
+    reg_add 'HKCU\Software\Wine\Direct3D' MaxVersionGL REG_DWORD 40005
+    reg_add 'HKCU\Software\Microsoft\Avalon.Graphics' DisableHWAcceleration REG_DWORD 1
 
-    ${winePackage}/bin/wine reg add \
-      "HKCU\\Software\\Wine\\X11 Driver" \
-      /v Decorated /t REG_SZ /d "Y" /f || true
+    tricks corefonts comctl32 gdiplus vcrun2022
+    tricks dxvk vkd3d d3dcompiler_43 d3dcompiler_47 d3dx9 dcomp
+    tricks dotnet48 dotnetdesktop6 dotnetdesktop8
 
-    ${winePackage}/bin/wine reg add \
-      "HKCU\\Software\\Wine\\X11 Driver" \
-      /v Managed /t REG_SZ /d "Y" /f || true
-
-    ${winePackage}/bin/wine reg add \
-      "HKCU\\Software\\Wine\\Direct3D" \
-      /v csmt /t REG_DWORD /d 1 /f || true
-
-    ${winePackage}/bin/wine reg add \
-      "HKCU\\Software\\Wine\\Direct3D" \
-      /v MaxVersionGL /t REG_DWORD /d 40005 /f || true
-
-    ${winePackage}/bin/wine reg add \
-      "HKCU\\Software\\Microsoft\\Avalon.Graphics" \
-      /v DisableHWAcceleration /t REG_DWORD /d 1 /f || true
-
-    ${pkgs.winetricks}/bin/winetricks \
-      -q corefonts comctl32 gdiplus vcrun2022 || true
-    ${winePackage}/bin/wineserver -w || true
-
-    ${pkgs.winetricks}/bin/winetricks \
-      -q dxvk vkd3d d3dcompiler_43 d3dcompiler_47 d3dx9 dcomp || true
-    ${winePackage}/bin/wineserver -w || true
-
-    ${pkgs.winetricks}/bin/winetricks \
-      -q dotnet48 dotnetdesktop6 dotnetdesktop8 || true
-    ${winePackage}/bin/wineserver -w || true
+    if ((''${#failed[@]})); then
+      echo "wine-win11-init: incomplete (''${failed[*]}); the next start tries again" >&2
+      exit 1
+    fi
 
     touch "$WINEPREFIX/.gjallar-wine-initialized"
   '';
@@ -102,7 +93,8 @@ let
       ${pkgs.util-linux}/bin/flock 9
 
       if [[ ! -f "$prefix/.gjallar-wine-initialized" ]]; then
-        ${wineInit}/bin/wine-win11-init
+        ${wineInit}/bin/wine-win11-init ||
+          echo "wine-win11: starting with an incomplete Wine setup" >&2
       fi
     fi
 

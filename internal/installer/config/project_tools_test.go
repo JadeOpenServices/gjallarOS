@@ -5,59 +5,34 @@ import (
 	"testing"
 )
 
-func TestProjectToolsDisabledAllowEmptyHosts(t *testing.T) {
-	u := User{
-		PlaneEnable:  false,
-		PlaneHost:    "",
-		DrawioEnable: false,
-		DrawioHost:   "",
-	}
-
-	if err := ValidateProjectTools(u); err != nil {
-		t.Fatalf("disabled project tools should allow empty hosts: %v", err)
+func TestProjectToolsWithoutWebApplicationsValidate(t *testing.T) {
+	if err := ValidateProjectTools(User{}); err != nil {
+		t.Fatalf("no web applications should validate: %v", err)
 	}
 }
 
-func TestPlaneRequiresHostWhenEnabled(t *testing.T) {
-	u := User{PlaneEnable: true}
+func TestPlaneRequiresEndpoint(t *testing.T) {
+	u := User{WebApplications: []WebApplicationIntent{{ID: WebApplicationPlane}}}
 
 	err := ValidateProjectTools(u)
-	if err == nil || !strings.Contains(err.Error(), "planeHost") {
-		t.Fatalf("expected planeHost validation error, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "Plane requires an endpoint") {
+		t.Fatalf("expected Plane endpoint validation error, got %v", err)
 	}
 }
 
-func TestDrawioRequiresHostWhenSelfHosted(t *testing.T) {
-	u := User{
-		DrawioEnable:     true,
-		DrawioSelfHosted: true,
-	}
-
-	err := ValidateProjectTools(u)
-	if err == nil || !strings.Contains(err.Error(), "drawioHost") {
-		t.Fatalf("expected drawioHost validation error, got %v", err)
-	}
-}
-
-func TestDrawioPublicModeDoesNotRequireHost(t *testing.T) {
-	u := User{
-		DrawioEnable:     true,
-		DrawioSelfHosted: false,
-		DrawioHost:       "",
-	}
+func TestDrawioPublicModeDoesNotRequireEndpoint(t *testing.T) {
+	u := User{WebApplications: []WebApplicationIntent{{ID: WebApplicationDrawio}}}
 
 	if err := ValidateProjectTools(u); err != nil {
-		t.Fatalf("public Draw.io mode should not require drawioHost: %v", err)
+		t.Fatalf("public Draw.io mode should not require an endpoint: %v", err)
 	}
 }
 
-func TestProjectToolsAcceptConfiguredHosts(t *testing.T) {
-	u := User{
-		PlaneEnable:  true,
-		PlaneHost:    "192.0.2.203",
-		DrawioEnable: true,
-		DrawioHost:   "192.0.2.204:8080",
-	}
+func TestProjectToolsAcceptConfiguredEndpoints(t *testing.T) {
+	u := User{WebApplications: []WebApplicationIntent{
+		{ID: WebApplicationPlane, Endpoint: "192.0.2.203"},
+		{ID: WebApplicationDrawio, Endpoint: "192.0.2.204:8080"},
+	}}
 
 	if err := ValidateProjectTools(u); err != nil {
 		t.Fatalf("configured project tools should validate: %v", err)
@@ -141,37 +116,21 @@ func TestNormalizeExternalServiceEndpointRejectsMalformedValues(t *testing.T) {
 }
 
 func TestNormalizeProjectToolsCanonicalizesEnabledEndpoints(t *testing.T) {
-	u := User{
-		PlaneEnable:      true,
-		PlaneHost:        "192.0.2.203",
-		DrawioEnable:     true,
-		DrawioSelfHosted: true,
-		DrawioHost:       "192.0.2.204:8080///",
-	}
+	u := User{WebApplications: []WebApplicationIntent{
+		{ID: WebApplicationPlane, Endpoint: "192.0.2.203"},
+		{ID: WebApplicationDrawio, Endpoint: "192.0.2.204:8080///"},
+	}}
 
 	if err := NormalizeProjectTools(&u); err != nil {
 		t.Fatal(err)
 	}
 
-	if u.PlaneHost != "http://192.0.2.203" {
-		t.Fatalf("unexpected normalized Plane endpoint: %q", u.PlaneHost)
+	if u.WebApplications[0].Endpoint != "http://192.0.2.203" {
+		t.Fatalf("unexpected normalized Plane endpoint: %q", u.WebApplications[0].Endpoint)
 	}
 
-	if u.DrawioHost != "http://192.0.2.204:8080" {
-		t.Fatalf("unexpected normalized Draw.io endpoint: %q", u.DrawioHost)
-	}
-}
-
-func TestNormalizeProjectToolsLeavesDisabledValuesUnused(t *testing.T) {
-	u := User{
-		PlaneEnable:  false,
-		PlaneHost:    "",
-		DrawioEnable: false,
-		DrawioHost:   "",
-	}
-
-	if err := NormalizeProjectTools(&u); err != nil {
-		t.Fatalf("disabled project tools should not require endpoints: %v", err)
+	if u.WebApplications[1].Endpoint != "http://192.0.2.204:8080" {
+		t.Fatalf("unexpected normalized Draw.io endpoint: %q", u.WebApplications[1].Endpoint)
 	}
 }
 
@@ -206,7 +165,6 @@ func TestProjectToolsRemainIndependentFromJODS(t *testing.T) {
 		planeEnable        bool
 		planeHost          string
 		drawioEnable       bool
-		drawioSelfHosted   bool
 		drawioHost         string
 		jodsEnable         bool
 		wantProjectToolErr bool
@@ -220,18 +178,16 @@ func TestProjectToolsRemainIndependentFromJODS(t *testing.T) {
 			planeHost:   "https://plane.example.test",
 		},
 		{
-			name:             "Draw.io only",
-			drawioEnable:     true,
-			drawioSelfHosted: true,
-			drawioHost:       "https://drawio.example.test",
+			name:         "Draw.io only",
+			drawioEnable: true,
+			drawioHost:   "https://drawio.example.test",
 		},
 		{
-			name:             "both enabled",
-			planeEnable:      true,
-			planeHost:        "https://plane.example.test",
-			drawioEnable:     true,
-			drawioSelfHosted: true,
-			drawioHost:       "https://drawio.example.test",
+			name:         "both enabled",
+			planeEnable:  true,
+			planeHost:    "https://plane.example.test",
+			drawioEnable: true,
+			drawioHost:   "https://drawio.example.test",
 		},
 		{
 			name:               "Plane enabled with empty endpoint",
@@ -239,42 +195,34 @@ func TestProjectToolsRemainIndependentFromJODS(t *testing.T) {
 			wantProjectToolErr: true,
 		},
 		{
-			name:               "self-hosted Draw.io enabled with empty endpoint",
-			drawioEnable:       true,
-			drawioSelfHosted:   true,
-			wantProjectToolErr: true,
-		},
-		{
-			name:             "JODS disabled with project tools enabled",
-			planeEnable:      true,
-			planeHost:        "https://plane.example.test",
-			drawioEnable:     true,
-			drawioSelfHosted: true,
-			drawioHost:       "https://drawio.example.test",
+			name:         "JODS disabled with project tools enabled",
+			planeEnable:  true,
+			planeHost:    "https://plane.example.test",
+			drawioEnable: true,
+			drawioHost:   "https://drawio.example.test",
 		},
 		{
 			name:       "JODS enabled with project tools disabled",
 			jodsEnable: true,
 		},
 		{
-			name:             "JODS enabled with project tools enabled",
-			planeEnable:      true,
-			planeHost:        "https://plane.example.test",
-			drawioEnable:     true,
-			drawioSelfHosted: true,
-			drawioHost:       "https://drawio.example.test",
-			jodsEnable:       true,
+			name:         "JODS enabled with project tools enabled",
+			planeEnable:  true,
+			planeHost:    "https://plane.example.test",
+			drawioEnable: true,
+			drawioHost:   "https://drawio.example.test",
+			jodsEnable:   true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			u := User{
-				PlaneEnable:      tt.planeEnable,
-				PlaneHost:        tt.planeHost,
-				DrawioEnable:     tt.drawioEnable,
-				DrawioSelfHosted: tt.drawioSelfHosted,
-				DrawioHost:       tt.drawioHost,
+			u := User{}
+			if tt.planeEnable {
+				u.WebApplications = append(u.WebApplications, WebApplicationIntent{ID: WebApplicationPlane, Endpoint: tt.planeHost})
+			}
+			if tt.drawioEnable {
+				u.WebApplications = append(u.WebApplications, WebApplicationIntent{ID: WebApplicationDrawio, Endpoint: tt.drawioHost})
 			}
 
 			if tt.jodsEnable {

@@ -15,6 +15,7 @@
     ./services/resource-qos.nix
     ./services/removable-media.nix
     ./url-handler.nix
+    ./browsers/login.nix
     ./apps
   ]
   ++ (map (wm: ./wm/${wm}) settings.wms)

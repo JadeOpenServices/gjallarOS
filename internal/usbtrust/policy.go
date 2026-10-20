@@ -34,6 +34,9 @@ type connection struct {
 	identity Identity
 	token    string
 	choice   Target
+	// trusted is set once the connection matched live trust. Trust that
+	// lapses later does not cut the connection off; the next one asks.
+	trusted bool
 }
 
 // Sessions belongs to a single observation-backend lifetime. Call Reset when
@@ -140,6 +143,15 @@ func (s *Sessions) Derive(input AuditInput) ([]Decision, error) {
 				d.Target = TargetAllow
 			}
 		}
+		switch AuditCode(d.Reason) {
+		case CodeTrustedExternal:
+			current.trusted = true
+			s.connected[device.RuntimeID] = current
+		case CodeTrustedExternalLapsed:
+			if current.trusted {
+				d.Target = TargetAllow
+			}
+		}
 		// The client displays these domain-owned capabilities; it must not
 		// infer enrollment/replacement eligibility from role strings.
 		switch AuditCode(d.Reason) {
@@ -147,7 +159,7 @@ func (s *Sessions) Derive(input AuditInput) ([]Decision, error) {
 			d.Actions = append(d.Actions, ActionTrustPermanent)
 		case CodeInternalUnvalidated:
 			d.Actions = append(d.Actions, ActionEnrollInternal)
-		case CodeInternalChanged, CodeTrustedExternalChanged:
+		case CodeInternalChanged, CodeTrustedExternalChanged, CodeTrustedExternalLapsed:
 			d.Actions = append(d.Actions, ActionAcceptReplacement)
 		case CodeInternalDebug:
 			// ODDC does not stand behind this part; no one-off allow either.

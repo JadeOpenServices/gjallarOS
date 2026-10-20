@@ -28,12 +28,21 @@ const introspection = `<node>
       <arg name="values" type="s" direction="in"/>
       <arg name="change" type="s" direction="out"/>
     </method>
+    <method name="RequestLocal">
+      <arg name="files" type="a{say}" direction="in"/>
+      <arg name="change" type="s" direction="out"/>
+    </method>
     <method name="Apply">
       <arg name="id" type="s" direction="in"/>
       <arg name="colors" type="s" direction="in"/>
     </method>
     <method name="Pending"><arg name="changes" type="s" direction="out"/></method>
     <method name="Cancel"><arg name="id" type="s" direction="in"/></method>
+    <method name="Export"><arg name="file" type="ay" direction="out"/></method>
+    <method name="Import">
+      <arg name="file" type="ay" direction="in"/>
+      <arg name="change" type="s" direction="out"/>
+    </method>
   </interface>` + introspect.IntrospectDataString + `</node>`
 
 func main() {
@@ -52,6 +61,13 @@ func main() {
 	defer conn.Close()
 
 	svc := newService(busSystem{conn}, systemcheckout.Path, systemcheckout.CheckOwnership)
+	svc.keys = loadKeyStore()
+	if svc.device, err = deviceID("/etc/machine-id"); err != nil {
+		log.Printf("settings files: %v; export and import are off", err)
+		svc.keys = nil
+	} else if _, err := svc.keys.trusted(); err != nil {
+		log.Printf("settings files: %v", err)
+	}
 	if err := conn.Export(object{svc}, objectPath, interfaceName); err != nil {
 		log.Fatal(err)
 	}

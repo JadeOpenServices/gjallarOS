@@ -49,6 +49,7 @@ let
           '  gjallar-recover rollback ROOT GENERATION' \
           '  gjallar-recover repair-boot ROOT' \
           '  gjallar-recover rebuild ROOT FLAKE#HOST' \
+          '  gjallar-recover developer-off' \
           '  gjallar-recover jods {repair|reinstall|fresh}' \
           '  gjallar-recover install'
       }
@@ -295,6 +296,24 @@ let
           nixos-enter --root "$root" -- /run/current-system/sw/bin/gjallarctl \
             installer deploy --repo "$repo" --hostname "$host" --apply
           ;;
+        developer-off)
+          # The way back when local modules broke the system (ROADMAP
+          # section 14). This entry never holds them, so its gjallarctl
+          # and rebuild are the official ones.
+          require_root
+          [ -e /etc/gjallar/recovery ] || {
+            printf '%s\n' \
+              'ERROR: run this in the trusted recovery boot entry.' \
+              'In the running system: gjallarctl settings set developerMode=false' >&2
+            exit 1
+          }
+          printf '%s\n' \
+            'This turns developer mode off and builds the official system for the next boot.' \
+            'Your ~/GjallarOS-local folder is kept.'
+          confirm_phrase DEVELOPER-OFF
+          # It prints PASS only when the next boot holds no local files.
+          exec gjallarctl system developer-off
+          ;;
         jods-execute)
           require_root
           contract="''${2:?CONTRACT required}"
@@ -355,12 +374,54 @@ let
     ];
     text = builtins.readFile ../../scripts/recovery/console.sh;
   };
+
+  # The trusted recovery entry of an installed system logs in with the
+  # user's zsh; the recovery image itself runs bash and skips this.
+  recoveryCompletion = pkgs.writeTextDir "share/zsh/site-functions/_gjallar-recover" ''
+    #compdef gjallar-recover
+    local -a cmds=(
+      'audit:show Secure Boot, TPM and disk state'
+      'unlock:open an encrypted device'
+      'mount:mount a device'
+      'open-root:unlock the encrypted root and mount it on /mnt'
+      'generations:list the system generations of a mounted root'
+      'rollback:make an older generation the next boot'
+      'repair-boot:write the boot entries of a mounted root again'
+      'rebuild:rebuild a mounted root from FLAKE#HOST'
+      'developer-off:turn developer mode off and go back to the official system'
+      'jods:JODS repair, reinstall or fresh install'
+      'install:run the installer after the recovery console erased the disk'
+    )
+    if (( CURRENT == 2 )); then
+      _describe -t commands 'gjallar-recover command' cmds
+      return
+    fi
+    case $words[2] in
+      unlock|open-root)
+        (( CURRENT == 3 )) && _files -W /dev
+        ;;
+      mount)
+        if (( CURRENT == 3 )); then
+          _files -W /dev
+        elif (( CURRENT == 4 )); then
+          _directories
+        fi
+        ;;
+      generations|rollback|repair-boot|rebuild)
+        (( CURRENT == 3 )) && _directories
+        ;;
+      jods)
+        (( CURRENT == 3 )) && compadd repair reinstall fresh
+        ;;
+    esac
+  '';
 in
 {
   inherit
     gjallarctl
     installer
     recovery
+    recoveryCompletion
     recoveryConsole
     recoveryExecutor
     ;

@@ -24,6 +24,7 @@ const (
 	ActionEnrollInternal    = usbtrust.ActionEnrollInternal
 	ActionDisarm            = usbtrust.ActionDisarm
 	ActionAllowMedia        = usbtrust.ActionAllowMedia
+	ActionRenew             = usbtrust.ActionRenew
 )
 
 type Request struct {
@@ -54,6 +55,18 @@ type Status struct {
 	TrustedDevices      int               `json:"trustedDevices"`
 	ExpectedDevices     int               `json:"expectedDevices"`
 	ObservedDevices     int               `json:"observedDevices"`
+	LapseDays           int               `json:"lapseDays,omitempty"`
+	Lapses              []TrustLapse      `json:"lapses,omitempty"`
+}
+
+// TrustLapse says when an external device's permanent trust runs out.
+// LapsesAt is empty when its stored time is unusable, which counts as lapsed.
+type TrustLapse struct {
+	TrustedID string `json:"trustedId"`
+	Name      string `json:"name,omitempty"`
+	LastUsed  string `json:"lastUsed,omitempty"`
+	LapsesAt  string `json:"lapsesAt,omitempty"`
+	Lapsed    bool   `json:"lapsed"`
 }
 
 type Response struct {
@@ -66,6 +79,11 @@ type Response struct {
 	Audit     *usbtrust.AuditResult    `json:"audit,omitempty"`
 	Policy    []usbtrust.Decision      `json:"policy,omitempty"`
 	Media     []usbtrust.MediaDecision `json:"media,omitempty"`
+	// MediaPending is set while the broker has not scanned the readers since
+	// it started: Media may then miss inserted media.
+	MediaPending bool `json:"mediaPending,omitempty"`
+	// Renewals lists trusted devices that lapse soon and may be renewed.
+	Renewals []TrustLapse `json:"renewals,omitempty"`
 }
 
 func ValidateRequest(request Request) error {
@@ -78,7 +96,7 @@ func ValidateRequest(request Request) error {
 	// Reject surplus fields rather than letting an unrelated identifier alter
 	// the target of a mutation.
 	if request.Action.Mutation() {
-		if request.TrustedID != "" && request.Action != ActionForget && request.Action != ActionAcceptReplacement {
+		if request.TrustedID != "" && request.Action != ActionForget && request.Action != ActionAcceptReplacement && request.Action != ActionRenew {
 			return fmt.Errorf("%s does not accept trustedId", request.Action)
 		}
 		if request.Role != "" && request.Action != ActionEnrollInternal {
@@ -93,8 +111,8 @@ func ValidateRequest(request Request) error {
 		if request.Media != "" && request.Action != ActionAllowMedia {
 			return fmt.Errorf("%s does not accept media", request.Action)
 		}
-		if request.Action == ActionForget && (request.RuntimeID != "" || request.Connection != "") {
-			return fmt.Errorf("forget does not accept a connection")
+		if (request.Action == ActionForget || request.Action == ActionRenew) && (request.RuntimeID != "" || request.Connection != "") {
+			return fmt.Errorf("%s does not accept a connection", request.Action)
 		}
 	}
 
@@ -121,7 +139,7 @@ func ValidateRequest(request Request) error {
 			)
 		}
 
-	case ActionForget:
+	case ActionForget, ActionRenew:
 		if strings.TrimSpace(request.TrustedID) == "" {
 			return fmt.Errorf(
 				"%s requires trustedId",

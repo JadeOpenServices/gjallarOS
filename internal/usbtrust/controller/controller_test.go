@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/JadeOpenServices/gjallarOS/internal/usbtrust"
 	"github.com/JadeOpenServices/gjallarOS/internal/usbtrust/broker"
@@ -331,5 +332,158 @@ func TestReconcileStoresPortMatchOnceStoreIsReady(t *testing.T) {
 	revision := s.doc.Revision
 	if err := c.Reconcile(ctx); err != nil || s.doc.Revision != revision {
 		t.Fatalf("second reconcile wrote again: %v", err)
+	}
+}
+
+func TestLapsedTrustAsksOnReconnectAndRenewKeepsRecord(t *testing.T) {
+	c, s := fixture()
+	ctx := context.Background()
+	policy, _, err := c.Policy(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	portable := false
+	if _, err := c.Mutate(ctx, broker.Request{Action: broker.ActionTrustPermanent, RuntimeID: "12", Connection: policy[0].Connection, Portable: &portable}); err != nil {
+		t.Fatal(err)
+	}
+	accepted := s.doc.Devices[0]
+	if accepted.LastUsed == "" {
+		t.Fatal("new trust has no lastUsed")
+	}
+	// SYNTHETIC: pretend the device was last used 40 days ago.
+	s.doc.Devices[0].LastUsed = time.Now().UTC().Add(-40 * 24 * time.Hour).Format(time.RFC3339)
+	c.Reader.LapseAfter = 30 * 24 * time.Hour
+	policy, _, _ = c.Policy(ctx)
+	if policy[0].Target != usbtrust.TargetAllow {
+		t.Fatal("lapse cut off the connected device")
+	}
+	s.observed[0].RuntimeID = "13"
+	policy, _, err = c.Policy(ctx)
+	if err != nil || policy[0].Target != usbtrust.TargetBlock || policy[0].Reason != string(usbtrust.CodeTrustedExternalLapsed) {
+		t.Fatalf("lapsed device on reconnect: %v %v", policy, err)
+	}
+	renew := broker.Request{Action: broker.ActionAcceptReplacement, RuntimeID: "13", Connection: policy[0].Connection, TrustedID: "synthetic-other"}
+	if _, err := c.Mutate(ctx, renew); err == nil {
+		t.Fatal("renew accepted for another record")
+	}
+	renew.TrustedID = accepted.ID
+	if _, err := c.Mutate(ctx, renew); err != nil {
+		t.Fatal(err)
+	}
+	renewed := s.doc.Devices[0]
+	if len(s.doc.Devices) != 1 || renewed.ID != accepted.ID || renewed.FirstAccepted != accepted.FirstAccepted {
+		t.Fatalf("renew changed the record: %+v", s.doc.Devices)
+	}
+	if used, ok := usbtrust.LastUsed(renewed); !ok || time.Since(used) > time.Hour {
+		t.Fatalf("renew left lastUsed at %q", renewed.LastUsed)
+	}
+	policy, _, _ = c.Policy(ctx)
+	if policy[0].Target != usbtrust.TargetAllow {
+		t.Fatal("renewed device still blocked")
+	}
+}
+
+func TestStatusListsWhenTrustLapses(t *testing.T) {
+	c, s := fixture()
+	ctx := context.Background()
+	policy, _, _ := c.Policy(ctx)
+	portable := false
+	if _, err := c.Mutate(ctx, broker.Request{Action: broker.ActionTrustPermanent, RuntimeID: "12", Connection: policy[0].Connection, Portable: &portable}); err != nil {
+		t.Fatal(err)
+	}
+	status, _ := c.Status(ctx)
+	if status.LapseDays != 0 || status.Lapses != nil {
+		t.Fatalf("lapse shown while off: %+v", status)
+	}
+	c.Reader.LapseAfter = 30 * 24 * time.Hour
+	status, err := c.Status(ctx)
+	if err != nil || status.LapseDays != 30 || len(status.Lapses) != 1 || status.Lapses[0].TrustedID != s.doc.Devices[0].ID || status.Lapses[0].Lapsed {
+		t.Fatalf("status lapse: %+v %v", status, err)
+	}
+	at, err := time.Parse(time.RFC3339, status.Lapses[0].LapsesAt)
+	if err != nil || time.Until(at) < 29*24*time.Hour {
+		t.Fatalf("lapses at %q", status.Lapses[0].LapsesAt)
+	}
+}
+
+func TestLapseClockStartsWhenSwitchedOn(t *testing.T) {
+	c, s := fixture()
+	ctx := context.Background()
+	policy, _, _ := c.Policy(ctx)
+	portable := false
+	if _, err := c.Mutate(ctx, broker.Request{Action: broker.ActionTrustPermanent, RuntimeID: "12", Connection: policy[0].Connection, Portable: &portable}); err != nil {
+		t.Fatal(err)
+	}
+	// SYNTHETIC: last used 40 days ago, while lapsing was off.
+	s.doc.Devices[0].LastUsed = time.Now().UTC().Add(-40 * 24 * time.Hour).Format(time.RFC3339)
+	s.observed = nil
+	if err := c.Reconcile(ctx); err != nil || s.doc.LapseSince != "" {
+		t.Fatalf("start marked while off: %q %v", s.doc.LapseSince, err)
+	}
+	c.Reader.LapseAfter = 30 * 24 * time.Hour
+	if err := c.Reconcile(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if since, err := time.Parse(time.RFC3339, s.doc.LapseSince); err != nil || time.Since(since) > time.Hour {
+		t.Fatalf("start %q", s.doc.LapseSince)
+	}
+	status, err := c.Status(ctx)
+	if err != nil || len(status.Lapses) != 1 || status.Lapses[0].Lapsed {
+		t.Fatalf("lapsed when switched on: %+v %v", status.Lapses, err)
+	}
+	revision := s.doc.Revision
+	if err := c.Reconcile(ctx); err != nil || s.doc.Revision != revision {
+		t.Fatalf("start marked again: %v", err)
+	}
+	c.Reader.LapseAfter = 0
+	if err := c.Reconcile(ctx); err != nil || s.doc.LapseSince != "" {
+		t.Fatalf("start kept while off: %q %v", s.doc.LapseSince, err)
+	}
+}
+
+func TestRenewOnlyBeforeTrustLapses(t *testing.T) {
+	c, s := fixture()
+	ctx := context.Background()
+	policy, _, _ := c.Policy(ctx)
+	portable := false
+	if _, err := c.Mutate(ctx, broker.Request{Action: broker.ActionTrustPermanent, RuntimeID: "12", Connection: policy[0].Connection, Portable: &portable}); err != nil {
+		t.Fatal(err)
+	}
+	id := s.doc.Devices[0].ID
+	c.Reader.LapseAfter = 30 * 24 * time.Hour
+	// SYNTHETIC: last used 28 days ago but plugged in now; it renews itself.
+	s.doc.Devices[0].LastUsed = time.Now().UTC().Add(-28 * 24 * time.Hour).Format(time.RFC3339)
+	if renewals, _ := c.Renewals(ctx); len(renewals) != 0 {
+		t.Fatalf("connected device offered for renewal: %+v", renewals)
+	}
+	s.doc.Devices[0].LastUsed = time.Now().UTC().Format(time.RFC3339)
+	s.observed = nil
+	renew := broker.Request{Action: broker.ActionRenew, TrustedID: id}
+	if renewals, _ := c.Renewals(ctx); len(renewals) != 0 {
+		t.Fatalf("fresh trust offered for renewal: %+v", renewals)
+	}
+	if _, err := c.Mutate(ctx, renew); err == nil {
+		t.Fatal("renewed fresh trust")
+	}
+	// SYNTHETIC: last used 28 days ago, two days before the lapse.
+	s.doc.Devices[0].LastUsed = time.Now().UTC().Add(-28 * 24 * time.Hour).Format(time.RFC3339)
+	renewals, err := c.Renewals(ctx)
+	if err != nil || len(renewals) != 1 || renewals[0].TrustedID != id {
+		t.Fatalf("renewals: %+v %v", renewals, err)
+	}
+	if _, err := c.Mutate(ctx, renew); err != nil {
+		t.Fatal(err)
+	}
+	if used, _ := usbtrust.LastUsed(s.doc.Devices[0]); time.Since(used) > time.Hour {
+		t.Fatalf("renew left lastUsed at %q", s.doc.Devices[0].LastUsed)
+	}
+	// SYNTHETIC: last used 31 days ago, already lapsed.
+	s.doc.Devices[0].LastUsed = time.Now().UTC().Add(-31 * 24 * time.Hour).Format(time.RFC3339)
+	if _, err := c.Mutate(ctx, renew); err == nil {
+		t.Fatal("renewed lapsed trust without the device")
+	}
+	c.SetPersistenceReady(false)
+	if renewals, _ := c.Renewals(ctx); renewals != nil {
+		t.Fatal("renewal offered without the signing key")
 	}
 }

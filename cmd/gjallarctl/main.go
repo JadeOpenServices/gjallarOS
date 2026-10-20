@@ -52,11 +52,13 @@ import (
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/hardwareconfig"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/localgit"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/nixrender"
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/oddc"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/policy"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/release"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/secrets"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/secureboot"
 	"github.com/JadeOpenServices/gjallarOS/internal/installercheck"
+	"github.com/JadeOpenServices/gjallarOS/internal/localchanges"
 	"github.com/JadeOpenServices/gjallarOS/internal/oddccli"
 	"github.com/JadeOpenServices/gjallarOS/internal/preset"
 )
@@ -267,27 +269,12 @@ func runBootstrap(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-func ttyConfirm(tty *os.File, reader *bufio.Reader, prompt string) (bool, bool, error) {
-	fmt.Fprintf(tty, "%s [y/N/q] ", prompt)
-	line, err := reader.ReadString('\n')
-	if err != nil {
-		return false, false, err
-	}
-	switch strings.ToLower(strings.TrimSpace(line)) {
-	case "y", "yes":
-		return true, false, nil
-	case "q", "quit":
-		return false, true, nil
-	default:
-		return false, false, nil
-	}
-}
-
 func runTPM2(args []string, stdout, stderr io.Writer) int {
 	f := flag.NewFlagSet("gjallarctl installer tpm2", flag.ContinueOnError)
 	f.SetOutput(stderr)
 	repo := f.String("repo", "", "repository path")
 	hardware := f.String("hardware", "", "hardware configuration")
+	requested := f.Bool("requested", false, "the installer answers asked for TPM2 unlock")
 	if err := f.Parse(args); err != nil || f.NArg() != 0 {
 		return 2
 	}
@@ -295,6 +282,13 @@ func runTPM2(args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		fmt.Fprintf(stderr, "ERROR: %v\n", err)
 		return 2
+	}
+	// The Startup unlock answer is the request. A second question here
+	// defaulted to no, so Enter on a rerun dropped TPM2 unlock the running
+	// system had (e2e-fw13, 2026-10-20).
+	if !*requested {
+		fmt.Fprintln(stdout, "luks_tpm2_enable=false")
+		return 0
 	}
 	mappingInfo, err := diskcrypto.MappingDetails(resolved)
 	if err != nil {
@@ -306,7 +300,7 @@ func runTPM2(args []string, stdout, stderr io.Writer) int {
 		return 0
 	}
 	if !diskcrypto.TPMAvailable() {
-		fmt.Fprintln(stdout, "luks_tpm2_enable=false\n[NOTE] No TPM2 device detected; keeping passphrase unlock.")
+		fmt.Fprintln(stdout, "luks_tpm2_enable=false\n[NOTE] No TPM2 device detected; startup keeps asking for the recovery key or passphrase.")
 		return 0
 	}
 	device, err := diskcrypto.DetectDevice(context.Background())
@@ -321,18 +315,6 @@ func runTPM2(args []string, stdout, stderr io.Writer) int {
 	if err := diskcrypto.VerifyDeviceIdentity(mappingInfo.Device, device); err != nil {
 		fmt.Fprintf(stderr, "ERROR: %v\n", err)
 		return 1
-	}
-	tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
-	if err != nil {
-		fmt.Fprintf(stderr, "ERROR: TPM2 enrollment requires a terminal: %v\n", err)
-		return 1
-	}
-	defer tty.Close()
-	reader := bufio.NewReader(tty)
-	yes, _, err := ttyConfirm(tty, reader, "Prepare TPM2 automatic unlock after GjallarOS Secure Boot and measured boot are verified? The passphrase remains as recovery.")
-	if err != nil || !yes {
-		fmt.Fprintln(stdout, "luks_tpm2_enable=false")
-		return 0
 	}
 	if err := diskcrypto.EnableTPMConfig(resolved); err != nil {
 		fmt.Fprintf(stderr, "ERROR: TPM2 preparation failed: %v\n", err)
@@ -1061,9 +1043,12 @@ func runAI(args []string, stdout, stderr io.Writer) int {
 	if len(args) > 0 && args[0] == "set-token" {
 		return runAISetToken(args[1:], stdout, stderr)
 	}
+	if len(args) > 0 && args[0] == "enable" {
+		return runAIEnable(args[1:], stdout, stderr)
+	}
 
 	if len(args) == 0 {
-		fmt.Fprintln(stderr, "Usage: gjallarctl ai {profile|tool|approve|research-serve|set-token}")
+		fmt.Fprintln(stderr, "Usage: gjallarctl ai {enable|profile|tool|approve|research-serve|set-token}")
 		return 2
 	}
 	if args[0] == "tool" {
@@ -1798,6 +1783,8 @@ func printUsage(out io.Writer) {
 	fmt.Fprintln(out, "       gjallarctl auth")
 	fmt.Fprintln(out, "       gjallarctl rebuild [--repo PATH] [--host HOST] [-d|--debug] [-n|--no-cleanup] [--update] [--update-inputs] [--hardware-update [--channel stable|staging] [--switch 0|1]] [NIXOS-REBUILD-ARGS...]")
 	fmt.Fprintln(out, "       gjallarctl system {check|rebuild}   (root; rebuild starts it for the system checkout)")
+	fmt.Fprintln(out, "       gjallarctl system apply              (developer mode: build ~/GjallarOS-local)")
+	fmt.Fprintln(out, "       gjallarctl system status             (what the running system was built from)")
 	fmt.Fprintln(out, "       gjallarctl device-probe refresh [--output PATH]")
 	fmt.Fprintln(out, "       gjallarctl fan {status|list|reconcile}")
 	fmt.Fprintln(out, "       gjallarctl ai profile [--config PATH]")
@@ -1809,7 +1796,7 @@ func printUsage(out io.Writer) {
 	fmt.Fprintln(out, "       gjallarctl addons {list|set|pin|update} [--repo PATH]")
 	fmt.Fprintln(out, "       gjallarctl settings {list|get|set|pending|apply|cancel}")
 	fmt.Fprintln(out, "       gjallarctl secure-boot {status|setup|update-dbx} [--repo PATH]")
-	fmt.Fprintln(out, "       gjallarctl security notice")
+	fmt.Fprintln(out, "       gjallarctl security notice|oddc-notice")
 	fmt.Fprintln(out, "       gjallarctl hyprland-render-gpu")
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "Safe GjallarOS maintenance commands. Rebuild invokes sudo explicitly.")
@@ -1966,10 +1953,13 @@ func rebuildCheckout(repo string, opts rebuildOptions, system bool, stdout, stde
 
 	// The system checkout must match a reviewed commit, so it is checked,
 	// not rewritten.
+	revision := ""
 	if system {
-		if status := checkSystemSource(repo, stdout, stderr); status != 0 {
+		checked, status := inspectSystemSource(repo, stdout, stderr)
+		if status != 0 {
 			return status
 		}
+		revision = checked.Revision
 	} else if _, err := repojson.CanonicalizeChangedTracked(
 		context.Background(),
 		repo,
@@ -1982,23 +1972,34 @@ func rebuildCheckout(repo string, opts rebuildOptions, system bool, stdout, stde
 	// refreshes direct user-owned generated-state assignments. Hardware, AI
 	// discovery and installer-owned facts remain untouched.
 	configPath := filepath.Join(repo, "user.config.json")
-	userConfig, err := config.Load(configPath)
+	rawConfig, err := os.ReadFile(configPath)
 	if err != nil {
 		fmt.Fprintf(stderr, "[GjallarOS] Error: load user configuration: %v\n", err)
 		return 1
 	}
+	userConfig, err := config.Parse(rawConfig)
+	if err != nil {
+		fmt.Fprintf(stderr, "[GjallarOS] Error: load user configuration: %v\n", err)
+		return 1
+	}
+	legacyWebApplications := config.HasLegacyWebApplications(rawConfig)
 
 	intentChanged, err := normalizeRebuildUserIntent(&userConfig, repo)
 	if err != nil {
 		fmt.Fprintf(stderr, "[GjallarOS] Error: normalize user configuration: %v\n", err)
 		return 1
 	}
-	if intentChanged {
+	if intentChanged || legacyWebApplications {
 		if err := config.WriteAtomic(configPath, userConfig); err != nil {
 			fmt.Fprintf(stderr, "[GjallarOS] Error: persist normalized user configuration: %v\n", err)
 			return 1
 		}
+	}
+	if intentChanged {
 		fmt.Fprintln(stdout, "[GjallarOS] Migrated missing dotfilesDir to the discovered repository path.")
+	}
+	if legacyWebApplications {
+		fmt.Fprintln(stdout, "[GjallarOS] Migrated planeEnable/planeHost/drawio* in user.config.json into webApplications (one-time).")
 	}
 
 	if host == "" {
@@ -2027,6 +2028,9 @@ func rebuildCheckout(repo string, opts rebuildOptions, system bool, stdout, stde
 		fmt.Fprintf(stderr, "[GjallarOS] Error: sync routed user intent: %v\n", err)
 		return 1
 	}
+	if !syncLocalAIModel(settingsPath, userConfig, stdout, stderr) {
+		return 1
+	}
 
 	// The device's ODDC answer follows the commit flake.lock pins, so
 	// `nix flake update oddc` and a rebuild take a new catalog revision.
@@ -2043,6 +2047,11 @@ func rebuildCheckout(repo string, opts rebuildOptions, system bool, stdout, stde
 			return 2
 		}
 		fmt.Fprintf(stdout, "[GjallarOS] oddc override %s is on an official ODDC branch\n", overrideRev[:12])
+	}
+	lockedODDC, err := oddc.LockedRevision(repo)
+	if err != nil {
+		fmt.Fprintf(stderr, "[GjallarOS] Error: %v\n", err)
+		return 1
 	}
 	var before, pinned string
 	if overrideRev != "" {
@@ -2140,13 +2149,36 @@ func rebuildCheckout(repo string, opts rebuildOptions, system bool, stdout, stde
 	colors := rebuildColors(stderr)
 	// Evaluate a staged copy: path: on the checkout copies .git (gigabytes of
 	// history) and ignored scratch such as .vm into the store on every rebuild.
-	source, err := flakesource.Stage(repo, "")
+	if !system {
+		revision = checkoutRevision(repo)
+	}
+	facts := &flakesource.BuildSource{Revision: revision, ODDC: lockedODDC, ODDCPinned: lockedODDC}
+	if overrideRev != "" {
+		facts.ODDC = overrideRev
+		fmt.Fprintf(stdout, "[GjallarOS] oddc %s is a commit, not a release; a plain rebuild returns to %s\n", overrideRev[:12], lockedODDC[:12])
+	}
+	local, localStatus := stageLocalChanges(system, userConfig.DeveloperMode, facts, stdout, stderr)
+	if localStatus != 0 {
+		return localStatus
+	}
+	source, err := flakesource.StageSource(repo, "", facts)
 	if err != nil {
 		fmt.Fprintf(stderr, "ERROR: %v\n", err)
 		return 1
 	}
 	defer source.Close()
+	if facts.Local != nil {
+		if err := localchanges.Write(filepath.Join(source.Dir, flakesource.LocalName), local); err != nil {
+			fmt.Fprintf(stderr, "[GjallarOS] Error: stage %s: %v; nothing rebuilt\n", localchanges.Path, err)
+			return 1
+		}
+	}
 	plan := newRebuildPlan(source.Dir, host, colors, debug, rebuildArgs)
+	if inRecoveryEntry() {
+		// The generation running now stays until the new one has booted.
+		cleanup = false
+		fmt.Fprintln(stdout, "[GjallarOS] Recovery entry: the rebuilt system starts with the next boot")
+	}
 
 	var status int
 	if debug {
@@ -2283,6 +2315,11 @@ func newRebuildPlan(
 		// on a flake system and has nothing to offer for a prebuilt one.
 		activate: slices.Concat([]string{"nixos-rebuild", "switch", "--no-reexec"}, switchArgs),
 	}
+	// The trusted recovery entry runs without the desktop, and its tty is the
+	// only login; switching the rebuilt system in would stop both.
+	if inRecoveryEntry() {
+		plan.activate[1] = "boot"
+	}
 
 	// Pure evaluation is the default. The only current impure input is the
 	// checked Noctalia colors (see rebuildColors), snapshotted into build-time
@@ -2321,15 +2358,74 @@ func (p rebuildPlan) run(ctx context.Context, stdout, stderr io.Writer) int {
 	return runPrivilegedCommand(ctx, stdout, stderr, slices.Concat(p.activate, []string{"--store-path", system})...)
 }
 
-// pullCheckout brings the system's checkout up to date before the rebuild:
-// every install tracks the same upstream. The pull is fast-forward only, so
-// local commits or edits stop it with git's own message and nothing is
-// rebuilt.
+// pullCheckout brings the checkout up to date before the rebuild. It
+// follows the release channel of the checkout's user.config.json
+// (ROADMAP §11) and only fast-forwards, so local commits or edits stop it
+// with git's own message and nothing is rebuilt. A checkout ahead of its
+// channel, as after a move to an older channel, stays where it is until
+// the channel catches up. A checkout on another channel's branch or on the
+// old main branch moves to the channel's branch first.
 func pullCheckout(repo string, stdout, stderr io.Writer) int {
+	user, err := config.Load(filepath.Join(repo, "user.config.json"))
+	if err != nil {
+		fmt.Fprintf(stderr, "[GjallarOS] Error: %v; nothing rebuilt\n", err)
+		return 1
+	}
+	channel := user.Channel()
+	upstream := "refs/remotes/origin/" + channel
+	git := func(args ...string) int {
+		return runCommand(context.Background(), stdout, stderr, "git", append([]string{"-C", repo}, args...)...)
+	}
+	failed := func(what string) int {
+		fmt.Fprintf(stderr, "[GjallarOS] Error: %s in %s failed; nothing rebuilt\n", what, repo)
+		return 1
+	}
+	isAncestor := func(a, b string) bool {
+		return exec.Command("git", "-C", repo, "merge-base", "--is-ancestor", a, b).Run() == nil
+	}
+
 	before := gitHead(repo)
-	if status := runCommand(context.Background(), stdout, stderr, "git", "-C", repo, "pull", "--ff-only"); status != 0 {
-		fmt.Fprintf(stderr, "[GjallarOS] Error: git pull --ff-only in %s failed; nothing rebuilt\n", repo)
-		return status
+	if git("fetch", "--quiet", "--prune", "origin") != 0 {
+		return failed("git fetch origin")
+	}
+	if exec.Command("git", "-C", repo, "rev-parse", "--verify", "--quiet", upstream).Run() != nil {
+		fmt.Fprintf(stderr, "[GjallarOS] Error: origin has no %s branch for releaseChannel %q; nothing rebuilt\n", channel, channel)
+		return 1
+	}
+	out, err := exec.Command("git", "-C", repo, "symbolic-ref", "--quiet", "--short", "HEAD").Output()
+	if err != nil {
+		fmt.Fprintf(stderr, "[GjallarOS] Error: %s is not on a branch; check out %s first; nothing rebuilt\n", repo, channel)
+		return 1
+	}
+	branch := strings.TrimSpace(string(out))
+
+	if branch != channel {
+		if branch != "main" && !slices.Contains(config.ReleaseChannels, branch) {
+			fmt.Fprintf(stderr, "[GjallarOS] Error: %s is on branch %s, not on the %s channel; nothing rebuilt\n", repo, branch, channel)
+			return 1
+		}
+		// The new branch starts at HEAD, so the switch itself changes no
+		// file; the fast-forward below moves it if the channel is ahead.
+		if git("checkout", "--quiet", "--no-track", "-B", channel) != 0 {
+			return failed("git checkout -B " + channel)
+		}
+		if git("branch", "--quiet", "--set-upstream-to=origin/"+channel, channel) != 0 {
+			return failed("git branch --set-upstream-to=origin/" + channel)
+		}
+		// The old branch points at HEAD, so deleting it loses no commit,
+		// even when it is ahead of its own upstream.
+		if git("branch", "--quiet", "-D", branch) != 0 {
+			fmt.Fprintf(stderr, "[GjallarOS] Warning: the old branch %s stays in %s\n", branch, repo)
+		}
+		fmt.Fprintf(stdout, "[GjallarOS] %s now follows the %s channel (was %s)\n", repo, channel, branch)
+	}
+
+	if !isAncestor(upstream, "HEAD") {
+		if git("merge", "--quiet", "--ff-only", upstream) != 0 {
+			return failed("git merge --ff-only origin/" + channel)
+		}
+	} else if !isAncestor("HEAD", upstream) {
+		fmt.Fprintf(stdout, "[GjallarOS] %s is ahead of the %s channel; it stays at %s until %s reaches it\n", repo, channel, gitHead(repo), channel)
 	}
 	if after := gitHead(repo); before == after {
 		fmt.Fprintf(stdout, "[GjallarOS] %s already at %s\n", repo, after)
@@ -2344,8 +2440,10 @@ func printRebuildHelp(out io.Writer) {
 
 Apply the GjallarOS configuration in the system checkout.
 
-  --update              Pull the checkout from upstream first (fast-forward
-                        only; local commits or edits stop it).
+  --update              Update the checkout from its release channel first
+                        (releaseChannel in user.config.json: dev, staging
+                        or stable). Fast-forward only; local commits or
+                        edits stop it.
   --update-inputs       Move every flake input to its newest version first.
                         For development checkouts, not normal installs.
   --hardware-update     Move the ODDC hardware catalogue pin first.
@@ -2360,13 +2458,32 @@ Apply the GjallarOS configuration in the system checkout.
 
 Arguments after -- go to nixos-rebuild. --override-input oddc must name a
 commit (github:JadeOpenServices/oddc/<commit>); the ODDC answer for this
-machine is fetched at that commit too.
+machine is fetched at that commit too. Such a commit is not a release, so
+a notice comes at every login until a plain rebuild returns to the pin.
 
 When /etc/gjallar/system is the system checkout, root builds it as it is
 on the official origin: --repo, --host, --update-inputs and other
 nixos-rebuild arguments are refused, and an oddc override must be a commit
 of an official ODDC branch.
 `)
+}
+
+// checkoutRevision is HEAD of a development checkout, with -dirty when a
+// tracked file differs from it, or "" when git cannot tell.
+func checkoutRevision(repo string) string {
+	out, err := exec.Command("git", "-C", repo, "rev-parse", "--verify", "HEAD^{commit}").Output()
+	if err != nil {
+		return ""
+	}
+	revision := strings.TrimSpace(string(out))
+	status, err := exec.Command("git", "-C", repo, "status", "--porcelain", "--untracked-files=no").Output()
+	if err != nil {
+		return ""
+	}
+	if len(bytes.TrimSpace(status)) > 0 {
+		revision += "-dirty"
+	}
+	return revision
 }
 
 func gitHead(repo string) string {
@@ -2664,6 +2781,11 @@ func runRebuildQuiet(stdout, stderr io.Writer, host string, messages []string, s
 			fmt.Fprintf(stdout, "[rebuild] Downloads failed and were retried: %s\n", retriedError)
 		}
 	}
+	if status == 0 {
+		for _, warning := range rebuildEvalWarnings(log) {
+			fmt.Fprintf(stderr, "[rebuild] Warning: %s\n", warning)
+		}
+	}
 	if status != 0 {
 		keepLog = true
 		if _, err := log.Seek(0, io.SeekStart); err == nil {
@@ -2714,6 +2836,39 @@ func rebuildNetworkError(log io.ReadSeeker, retries bool) string {
 		}
 	}
 	return ""
+}
+
+// rebuildEvalWarnings returns the module warnings of a rebuild, once each.
+// A quiet rebuild that succeeds drops its log, so without this a warning
+// such as nextcloudEnable without the nextcloud app never reached the user
+// (fw13 VM, 2026-10-20).
+func rebuildEvalWarnings(log io.ReadSeeker) []string {
+	if _, err := log.Seek(0, io.SeekStart); err != nil {
+		return nil
+	}
+	seen := map[string]struct{}{}
+	var warnings []string
+	scanner := bufio.NewScanner(log)
+	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		var warning string
+		for _, prefix := range []string{"evaluation warning:", "trace: warning:"} {
+			if rest, ok := strings.CutPrefix(line, prefix); ok {
+				warning = strings.TrimSpace(rest)
+				break
+			}
+		}
+		if warning == "" {
+			continue
+		}
+		if _, ok := seen[warning]; ok {
+			continue
+		}
+		seen[warning] = struct{}{}
+		warnings = append(warnings, warning)
+	}
+	return warnings
 }
 
 func rebuildLocalDerivations(log io.ReadSeeker) []string {

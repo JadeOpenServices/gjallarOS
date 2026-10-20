@@ -275,6 +275,11 @@ func (o object) Request(sender dbus.Sender, values string) (string, *dbus.Error)
 	return answer(change, err)
 }
 
+func (o object) RequestLocal(sender dbus.Sender, files map[string][]byte) (string, *dbus.Error) {
+	change, err := o.svc.RequestLocal(context.Background(), string(sender), files)
+	return answer(change, err)
+}
+
 func (o object) Apply(sender dbus.Sender, id, colors string) *dbus.Error {
 	return busError(o.svc.Apply(context.Background(), string(sender), id, colors))
 }
@@ -289,6 +294,19 @@ func (o object) Pending(sender dbus.Sender) (string, *dbus.Error) {
 
 func (o object) Cancel(sender dbus.Sender, id string) *dbus.Error {
 	return busError(o.svc.Cancel(context.Background(), string(sender), id))
+}
+
+func (o object) Export(sender dbus.Sender) ([]byte, *dbus.Error) {
+	data, err := o.svc.Export(context.Background(), string(sender))
+	if err != nil {
+		return nil, busError(err)
+	}
+	return data, nil
+}
+
+func (o object) Import(sender dbus.Sender, data []byte) (string, *dbus.Error) {
+	change, err := o.svc.Import(context.Background(), string(sender), data)
+	return answer(change, err)
 }
 
 func answer(value any, err error) (string, *dbus.Error) {

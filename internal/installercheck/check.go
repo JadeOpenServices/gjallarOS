@@ -109,10 +109,11 @@ const (
 var presetSchema = map[string]presetValueType{
 	"hostname": presetString, "username": presetString,
 	"timezone": presetString, "locale": presetString, "keyboardLayout": presetString, "keyboardVariant": presetString,
-	"touchpadWorkspaceSwipe": presetBool, "clamshellEnable": presetBool, "consoleLoginEnable": presetBool, "usbguardEnable": presetBool, "usbTrustEnforce": presetBool, "usbTrustTpmHandle": presetString, "usbReviewTechnicalView": presetBool, "printingEnable": presetBool, "networkPrintingEnable": presetBool,
+	"touchpadWorkspaceSwipe": presetBool, "clamshellEnable": presetBool, "consoleLoginEnable": presetBool, "usbguardEnable": presetBool, "usbTrustEnforce": presetBool, "usbTrustTpmHandle": presetString, "usbTrustLapseDays": presetInt, "usbReviewTechnicalView": presetBool, "printingEnable": presetBool, "networkPrintingEnable": presetBool,
 	"dolphinDriveUsage":         presetBool,
 	"firmwareFlashReadEntry":    presetBool,
 	"allowUnvalidatedODDCModel": presetBool,
+	"developerMode":             presetBool,
 	"unattendedInstall":         presetBool,
 	"name":                      presetString, "email": presetString, "githubUsername": presetString, "dotfilesDir": presetString,
 	"shell": presetString, "editors": presetStringList, "browsers": presetStringList,
@@ -134,7 +135,7 @@ var presetSchema = map[string]presetValueType{
 	"secureBootEnable": presetBool, "secureBootPrompt": presetBool, "firmwarePasswordLock": presetBool, "endpointManagedDevice": presetBool,
 	"jodsEndpoint": presetString, "jodsPolicySigningPublicKey": presetString,
 	"jodsRecoveryCommandSigningPublicKey": presetString, "jodsEnrollmentMode": presetString,
-	"jodsAllowInsecureTls": presetBool, "jodsDeviceClass": presetString, "jodsDesktopProfile": presetString,
+	"jodsAllowInsecureTls": presetBool, "jodsDeviceClass": presetString, "jodsDesktopProfile": presetString, "releaseChannel": presetString,
 	"autoReboot": presetBool, "runUpdateChecks": presetBool, "writeConfig": presetBool, "runRebuild": presetBool, "forceRedeploy": presetBool,
 }
 

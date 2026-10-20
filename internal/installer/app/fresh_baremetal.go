@@ -40,8 +40,8 @@ func runFreshBareMetal(
 	repo string,
 	targetPath string,
 	hostname string,
-	username string,
-	dotfilesDir string,
+	revision string,
+	channel string,
 	hardware discovery.Hardware,
 	resolvedDevice oddc.Resolved,
 	recovery bool,
@@ -267,14 +267,14 @@ func runFreshBareMetal(
 		)
 	}
 
-	fmt.Fprintln(out, "STAGE: copying the checkout into the target")
+	fmt.Fprintln(out, "STAGE: cloning the system checkout into the target")
 
-	if err := copyFreshCheckout(
+	if err := cloneSystemCheckout(
 		ctx,
 		repo,
 		rootResult.MountPoint,
-		dotfilesDir,
-		username,
+		revision,
+		channel,
 		out,
 	); err != nil {
 		return freshBareMetalResult{}, err

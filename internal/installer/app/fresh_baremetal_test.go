@@ -513,6 +513,7 @@ func TestAppDispatchesCanonicalFreshBareMetalPipeline(t *testing.T) {
 
 	for _, want := range []string{
 		"s.user.Hostname",
+		"s.user.Channel()",
 		"hardware",
 		"resolvedDevice",
 		"opt.recovery",

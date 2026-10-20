@@ -283,47 +283,77 @@ let
     lockPref("browser.referrals.enabled", false);
   '';
 
-  package = pkgs.firefox.override {
-    extraPrefs = hardening;
-    extraPolicies = {
-      ExtensionSettings = extensionSettings;
-      DisableTelemetry = true;
-      DisableFirefoxStudies = true;
-      DisablePocket = true;
-      DisableFeedbackCommands = true;
-      DisableFirefoxAccounts = true;
-      DontCheckDefaultBrowser = true;
-      NoDefaultBookmarks = true;
-      OverrideFirstRunPage = "";
-      OverridePostUpdatePage = "";
-      FirefoxHome = {
-        SponsoredTopSites = false;
-        SponsoredPocket = false;
-        SponsoredStories = false;
-        Stories = false;
-        Pocket = false;
-        Locked = true;
-      };
-      FirefoxSuggest = {
-        WebSuggestions = false;
-        SponsoredSuggestions = false;
-        ImproveSuggest = false;
-        Locked = true;
-      };
-      UserMessaging = {
-        ExtensionRecommendations = false;
-        FeatureRecommendations = false;
-        UrlbarInterventions = false;
-        SkipOnboarding = true;
-        MoreFromMozilla = false;
-        FirefoxLabs = false;
-        Locked = true;
-      };
+  policies = {
+    DisableTelemetry = true;
+    DisableFirefoxStudies = true;
+    DisablePocket = true;
+    DisableFeedbackCommands = true;
+    DisableFirefoxAccounts = true;
+    DontCheckDefaultBrowser = true;
+    NoDefaultBookmarks = true;
+    OverrideFirstRunPage = "";
+    OverridePostUpdatePage = "";
+    FirefoxHome = {
+      SponsoredTopSites = false;
+      SponsoredPocket = false;
+      SponsoredStories = false;
+      Stories = false;
+      Pocket = false;
+      Locked = true;
+    };
+    FirefoxSuggest = {
+      WebSuggestions = false;
+      SponsoredSuggestions = false;
+      ImproveSuggest = false;
+      Locked = true;
+    };
+    UserMessaging = {
+      ExtensionRecommendations = false;
+      FeatureRecommendations = false;
+      UrlbarInterventions = false;
+      SkipOnboarding = true;
+      MoreFromMozilla = false;
+      FirefoxLabs = false;
+      Locked = true;
     };
   };
+
+  package = pkgs.firefox.override {
+    extraPrefs = hardening;
+    extraPolicies = policies // {
+      ExtensionSettings = extensionSettings;
+    };
+  };
+
+  # Same Firefox and policies, but no add-ons: the profile is fresh, so they
+  # would only open their welcome pages.
+  loginPackage = pkgs.firefox.override {
+    extraPrefs = hardening;
+    extraPolicies = policies // {
+      ExtensionSettings."*".installation_mode = "blocked";
+    };
+  };
+
+  # Login windows (see user/browsers/login.nix) get a fresh profile that
+  # saves no passwords and is deleted when the login ends.
+  loginRecipe = pkgs.writeShellScript "firefox-login" ''
+    set -eu
+    profile="$1"
+    ${pkgs.coreutils}/bin/install -d -m 0700 "$profile"
+    ${pkgs.coreutils}/bin/cat >"$profile/user.js" <<'EOF'
+    user_pref("signon.rememberSignons", false);
+    user_pref("signon.autofillForms", false);
+    user_pref("signon.generation.enabled", false);
+    user_pref("browser.formfill.enable", false);
+    user_pref("browser.sessionstore.resume_from_crash", false);
+    EOF
+    exec ${lib.getExe loginPackage} \
+      --no-remote --profile "$profile" --name "$2" "$3"
+  '';
 in
 {
   stylix.targets.firefox.profileNames = [ profileName ];
+  gjallar.loginBrowsers.firefox = loginRecipe;
   stylix.targets.firefox.colorTheme.enable = true;
 
   programs.firefox = {

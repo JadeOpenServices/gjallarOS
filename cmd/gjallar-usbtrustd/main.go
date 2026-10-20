@@ -33,7 +33,6 @@ type config struct {
 	enforce        bool
 	socketPath     string
 	ownerUID       uint32
-	oddcRoot       string
 	oddcModel      string
 	stateDir       string
 	tpmHandle      string
@@ -41,6 +40,7 @@ type config struct {
 	cryptsetup     string
 	luksDevices    []string
 	requestTimeout time.Duration
+	lapseDays      int
 }
 
 func main() {
@@ -134,6 +134,7 @@ func run(
 		MountInfo: "/proc/self/mountinfo",
 		Probe:     mediagate.BSG{Dir: "/dev/bsg"},
 		Event:     func(event map[string]any) { _ = json.NewEncoder(stderr).Encode(event) },
+		Kept:      control.KeptAtArming,
 	}
 	control.Media = media
 	loopCtx, stopLoop := context.WithCancel(ctx)
@@ -143,7 +144,12 @@ func run(
 		// as gone before a new one can be pushed in.
 		var last string
 		for loopCtx.Err() == nil {
-			err := media.Sync(control.EnforcementEnabled())
+			// Wait for the first reconcile: an arming it runs decides which
+			// mounted media stay open.
+			var err error
+			if control.Ready() {
+				err = media.Sync(control.EnforcementEnabled())
+			}
 			if text := fmt.Sprint(err); err != nil && text != last {
 				fmt.Fprintf(stderr, "WARN: USB storage media gate: %v\n", err)
 				last = text
@@ -183,6 +189,8 @@ func run(
 
 	server := daemon.Server{
 		SocketPath:     cfg.socketPath,
+		SocketMode:     0600,
+		SocketOwner:    &cfg.ownerUID,
 		RequestTimeout: cfg.requestTimeout,
 		Handler: broker.Handler{
 			OwnerUID: cfg.ownerUID,
@@ -233,6 +241,7 @@ func parseConfig(
 	flags.SetOutput(stderr)
 	flags.StringVar(&cfg.resolvedFile, "oddc-resolved", "", "absolute JSON path of the resolved NixOS ODDC view")
 	flags.StringVar(&cfg.devicesFile, "oddc-devices", "", "absolute JSON path of `oddc devices --json` for this model; parts with a usbPort are judged by their root port")
+	flags.IntVar(&cfg.lapseDays, "lapse-days", 0, "days an external device may stay unconnected before its permanent trust lapses; 0 never lapses")
 	flags.BoolVar(&cfg.enforce, "enforce", false, "arm USB enforcement; the first arming enrolls internal devices")
 	flags.StringVar(&cfg.cryptsetup, "cryptsetup-binary", "cryptsetup", "cryptsetup CLI binary")
 	flags.Func("luks-device", "LUKS device whose passphrase may disarm enforcement (repeatable)", func(value string) error {
@@ -255,13 +264,6 @@ func parseConfig(
 		"owner-uid",
 		"",
 		"desktop user UID allowed read-only access",
-	)
-
-	flags.StringVar(
-		&cfg.oddcRoot,
-		"oddc-root",
-		"",
-		"absolute ODDC catalog root",
 	)
 
 	flags.StringVar(
@@ -343,22 +345,17 @@ func parseConfig(
 
 	cfg.ownerUID = uint32(ownerUID)
 
-	if strings.TrimSpace(cfg.oddcRoot) == "" && cfg.resolvedFile == "" {
-		return config{}, fmt.Errorf(
-			"--oddc-root is required",
-		)
+	if cfg.resolvedFile == "" {
+		return config{}, fmt.Errorf("--oddc-resolved is required")
 	}
-
-	if cfg.oddcRoot != "" && !filepath.IsAbs(cfg.oddcRoot) {
-		return config{}, fmt.Errorf(
-			"--oddc-root must be absolute",
-		)
-	}
-	if cfg.resolvedFile != "" && !filepath.IsAbs(cfg.resolvedFile) {
+	if !filepath.IsAbs(cfg.resolvedFile) {
 		return config{}, fmt.Errorf("--oddc-resolved must be absolute")
 	}
 	if cfg.devicesFile != "" && !filepath.IsAbs(cfg.devicesFile) {
 		return config{}, fmt.Errorf("--oddc-devices must be absolute")
+	}
+	if cfg.lapseDays < 0 || cfg.lapseDays > 36500 {
+		return config{}, fmt.Errorf("--lapse-days must be between 0 and 36500")
 	}
 
 	if strings.TrimSpace(cfg.oddcModel) == "" {
@@ -411,10 +408,7 @@ func buildReader(
 	}
 
 	reader := readmodel.Reader{
-		Resolved: readmodel.NewCatalogResolvedSource(
-			cfg.oddcRoot,
-			cfg.oddcModel,
-		),
+		Resolved: readmodel.ResolvedFile(cfg.resolvedFile),
 		Observations: usbguardsource.LiveSource{
 			Runner: usbguardsource.ExecRunner{},
 			Binary: cfg.usbguardBinary,
@@ -423,9 +417,7 @@ func buildReader(
 			cfg.stateDir,
 			signer,
 		),
-	}
-	if cfg.resolvedFile != "" {
-		reader.Resolved = readmodel.ResolvedFile(cfg.resolvedFile)
+		LapseAfter: time.Duration(cfg.lapseDays) * 24 * time.Hour,
 	}
 	if cfg.devicesFile != "" {
 		reader.Devices = readmodel.DevicesFile{Path: cfg.devicesFile, Model: cfg.oddcModel}

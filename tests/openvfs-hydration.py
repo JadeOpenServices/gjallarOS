@@ -5,7 +5,8 @@ Run as the desktop user with access to /dev/fuse, cat and fusermount3:
     python3 tests/openvfs-hydration.py /path/to/openvfs [--timeout]
 
 Uses only a fresh temporary mount and a fake local sync socket. The optional
-five-minute timeout check requires no server or Nextcloud account. Logs remain
+five-minute timeout check and the slow download next to it (about six minutes
+together) require no server or Nextcloud account. Logs remain
 in the printed temporary directory. Never mounts the real Nextcloud directory.
 """
 import json
@@ -38,7 +39,7 @@ def pack(x):
 def attrs(name, state):
     return pack(dict(etag='test', fileid=name, size=0 if state == 0 else 7, state=state, pinstate=1))
 os.setxattr(mount, 'user.openvfs.registration', pack(dict(owner='test', version=0)))
-for name in ('duplicate', 'inflight', 'preview', 'error', 'cancel', 'timeout', 'copy', 'real-kio', 'gone'):
+for name in ('duplicate', 'inflight', 'preview', 'error', 'cancel', 'timeout', 'copy', 'real-kio', 'gone', 'slow'):
     p = mount / name
     p.touch()
     os.setxattr(p, 'user.openvfs.data', attrs(name, 2 if name == 'inflight' else 1))
@@ -51,6 +52,21 @@ requests = []
 errors = []
 conn = None
 pending = {}
+
+def slow_download(req):
+    # One byte every 50 s: the whole file takes longer than the deadline, but
+    # no gap between two writes reaches it.
+    try:
+        f = os.open(mount / 'slow', os.O_WRONLY)
+        for b in b'fixture':
+            os.write(f, bytes([b]))
+            time.sleep(50)
+        os.setxattr(f, 'user.openvfs.data', attrs('slow', 0))
+        os.close(f)
+        reply = {'id': req['id'], 'arguments': {'status': 'OK'}}
+        conn.sendall(b'V2/HYDRATE_FILE_RESULT:' + json.dumps(reply).encode() + b'\n')
+    except Exception as e:
+        errors.append(repr(e))
 
 def server():
     global conn
@@ -73,6 +89,9 @@ def server():
                 name = Path(req['arguments']['file']).name
                 requests.append((name, req['id']))
                 if name in ('cancel', 'timeout'):
+                    continue
+                if name == 'slow':
+                    threading.Thread(target=slow_download, args=(req,), daemon=True).start()
                     continue
                 if name == 'gone':
                     # The sync client quits with a hydration still open.
@@ -168,9 +187,13 @@ try:
     if '--timeout' in sys.argv[2:]:
         start = time.monotonic()
         p = cat('timeout')
+        slow = cat('slow')
         p.communicate(timeout=310)
         assert p.returncode != 0 and 295 <= time.monotonic() - start < 310
         print('PASS: unanswered request expires after five minutes', flush=True)
+        assert slow.communicate(timeout=90)[0] == b'fixture' and slow.returncode == 0
+        assert time.monotonic() - start > 340
+        print('PASS: slow download that outlasts the deadline still completes', flush=True)
     # A second mount whose client never answers: SIGTERM must end openvfs
     # and unmount while a reader still waits for hydration.
     mount2.mkdir()

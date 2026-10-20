@@ -16,6 +16,9 @@ const (
 	ActionDisarm            Action = "disarm"
 	// ActionAllowMedia opens the medium that is in an allowed reader now.
 	ActionAllowMedia Action = "allow-media"
+	// ActionRenew restarts the lapse clock of a trusted device that is about
+	// to lapse, without it being connected.
+	ActionRenew Action = "renew"
 )
 
 func (a Action) Valid() bool {
@@ -31,7 +34,8 @@ func (a Action) Valid() bool {
 		ActionAcceptReplacement,
 		ActionEnrollInternal,
 		ActionDisarm,
-		ActionAllowMedia:
+		ActionAllowMedia,
+		ActionRenew:
 		return true
 	default:
 		return false
@@ -49,7 +53,8 @@ func (a Action) Mutation() bool {
 		ActionAcceptReplacement,
 		ActionEnrollInternal,
 		ActionDisarm,
-		ActionAllowMedia:
+		ActionAllowMedia,
+		ActionRenew:
 		return true
 	default:
 		return false

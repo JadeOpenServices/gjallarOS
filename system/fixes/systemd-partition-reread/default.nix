@@ -4,6 +4,9 @@
 # Linked from: system/services/removable-media.nix. Writing images to sticks
 # is what hits it; any disk written as a whole can.
 # Written 2026-10-18 against nixpkgs 5dfba623, systemd 260.2.
+# Checked 2026-10-20 for nixpkgs 8ce73368, systemd 260.5:
+# reread-partition-table.c, udev-watch.c, blockdev-util.c and the test are
+# unchanged since 260.2.
 # Test: tests/nix/systemd-partition-reread-fix.nix (flake check
 # systemd-partition-reread-fix).
 #
@@ -34,7 +37,8 @@
 #   test-reread-partition-table with both overlap cases. Only systemd itself
 #   is rebuilt (systemd.package, not an overlay); programs that link
 #   libsystemd keep the cached one. systemd.package also feeds udev and the
-#   initrd.
+#   initrd. package.nix builds it, so the flake's prebuilt set can cache
+#   the same derivation.
 #
 # Upstream
 #   systemd main still has the same order. No systemd issue exists; Bluefin
@@ -45,24 +49,12 @@
 # Remove when
 #   - the test's stock machine shows every new partition and the new disk
 #     properties after a dd: drop the fix.
-#   - systemd is no longer 260.2 (the assertion below stops the build):
-#     check whether reread-partition-table.c still adds before it removes
-#     and still skips the disk "change". If it does, rebase the patch and
-#     update the version; if not, drop the fix.
-{
-  lib,
-  pkgs,
-  ...
-}:
+#   - systemd is no longer 260.5 (the assertion in package.nix stops the
+#     build): check whether reread-partition-table.c still adds before it
+#     removes and still skips the disk "change". If it does, rebase the
+#     patch and update the version; if not, drop the fix.
+{ pkgs, ... }:
 
-let
-  systemd = pkgs.systemd;
-in
 {
-  systemd.package =
-    assert lib.assertMsg (systemd.version == "260.2")
-      "system/fixes/systemd-partition-reread was written for systemd 260.2; check whether ${systemd.version} still adds partitions before it removes the ones in the way, then update or remove the fix.";
-    systemd.overrideAttrs (old: {
-      patches = (old.patches or [ ]) ++ [ ./remove-before-add.patch ];
-    });
+  systemd.package = import ./package.nix { inherit pkgs; };
 }

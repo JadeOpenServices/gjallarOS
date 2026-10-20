@@ -115,8 +115,10 @@ probe_tools=(
     nixpkgs#sops
 )
 # Questions open as GTK dialogs when a desktop session is running. Before the
-# first rebuild the system has no zenity, so bring it along.
-if [[ -n "${WAYLAND_DISPLAY:-}${DISPLAY:-}" && -z "${SSH_CONNECTION:-}" ]]; then
+# first rebuild the system has no zenity, so bring it along. A sudo run asks
+# in the terminal (prompt.go sudoFromDesktop).
+if [[ -n "${WAYLAND_DISPLAY:-}${DISPLAY:-}" && -z "${SSH_CONNECTION:-}" &&
+    ! ( $EUID -eq 0 && -n "${SUDO_USER:-}" ) ]]; then
     probe_tools+=(nixpkgs#zenity)
 fi
 

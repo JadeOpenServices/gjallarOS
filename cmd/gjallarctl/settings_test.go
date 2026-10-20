@@ -4,11 +4,15 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/config"
+	"github.com/JadeOpenServices/gjallarOS/internal/localchanges"
 	"github.com/JadeOpenServices/gjallarOS/internal/settings"
 )
 
@@ -21,9 +25,13 @@ type fakeSettingsBus struct {
 	missing  bool
 	requests []string
 	applied  []string
+	applyErr error
 	rebuilds int
 	result   string
 	notes    []string
+	exported []byte
+	imported [][]byte
+	folders  []map[string][]byte
 }
 
 var settingsTestNow = time.Date(2026, 10, 19, 12, 0, 0, 0, time.UTC)
@@ -71,16 +79,50 @@ func (b *fakeSettingsBus) Call(_ context.Context, method string, args ...any) (s
 		}
 		b.pending = append(b.pending, change)
 		return answer(change)
+	case "Import":
+		b.imported = append(b.imported, args[0].([]byte))
+		change := settings.Pending{
+			Change: settings.Change{
+				ID: "f11e0000" + strings.Repeat("0", 24), Tier: config.TierEveryday, Asked: settingsTestNow,
+				Keys: []settings.KeyChange{{Key: "timezone", Old: json.RawMessage(`"Etc/UTC"`), New: json.RawMessage(`"UTC"`)}},
+			},
+			ReadyAt: settingsTestNow,
+			Notes:   b.notes,
+		}
+		b.pending = append(b.pending, change)
+		return answer(change)
+	case "RequestLocal":
+		files := args[0].(map[string][]byte)
+		b.folders = append(b.folders, files)
+		tree, err := localchanges.Check(files)
+		if err != nil {
+			return "", err
+		}
+		change, err := settings.PlanLocal(localchanges.Tree{}, tree)
+		if err != nil {
+			return "", err
+		}
+		change.Asked = settingsTestNow
+		pending := settings.Pending{Change: change, ReadyAt: settingsTestNow.Add(b.readyIn)}
+		b.pending = append(b.pending, pending)
+		return answer(pending)
 	case "Pending":
 		return answer(b.pending)
 	case "Apply":
 		b.applied = append(b.applied, args[0].(string))
-		return "", nil
+		return "", b.applyErr
 	case "Cancel":
 		b.pending = nil
 		return "", nil
 	}
 	return "", nil
+}
+
+func (b *fakeSettingsBus) Export(context.Context) ([]byte, error) {
+	if b.missing {
+		return nil, errSettingsMissing
+	}
+	return b.exported, nil
 }
 
 func (b *fakeSettingsBus) Rebuild(context.Context) (bool, string, error) {
@@ -295,5 +337,144 @@ func TestSettingsGetShowsControlCharacters(t *testing.T) {
 	}
 	if strings.ContainsRune(stdout.String(), 0x202e) {
 		t.Fatalf("raw escape in %q", stdout.String())
+	}
+}
+
+func TestSettingsExportWritesNewPrivateFile(t *testing.T) {
+	bus := &fakeSettingsBus{exported: []byte("gjallaros-settings-v1\nSYNTHETIC\n")}
+	useFakeSettings(t, bus)
+	path := filepath.Join(t.TempDir(), "settings.gjs")
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"settings", "export", path}, &stdout, &stderr); code != 0 {
+		t.Fatalf("code %d, stderr %s", code, stderr.String())
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(data, bus.exported) {
+		t.Errorf("file = %q", data)
+	}
+	if info, err := os.Stat(path); err != nil || info.Mode().Perm() != 0o600 {
+		t.Errorf("file mode = %v, %v", info.Mode(), err)
+	}
+	stdout.Reset()
+	if code := run([]string{"settings", "export", path}, &stdout, &stderr); code != 1 {
+		t.Fatalf("export over an existing file: code %d", code)
+	}
+}
+
+func TestSettingsImportSendsFileAndApplies(t *testing.T) {
+	bus := &fakeSettingsBus{notes: []string{"from a file tester made on this device on 2026-10-16 12:00:00, 3 days ago"}}
+	useFakeSettings(t, bus)
+	path := filepath.Join(t.TempDir(), "settings.gjs")
+	content := []byte("gjallaros-settings-v1\nSYNTHETIC\n")
+	if err := os.WriteFile(path, content, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"settings", "import", path}, &stdout, &stderr); code != 0 {
+		t.Fatalf("code %d, stderr %s", code, stderr.String())
+	}
+	if len(bus.imported) != 1 || !bytes.Equal(bus.imported[0], content) {
+		t.Fatalf("imported %q", bus.imported)
+	}
+	for _, want := range []string{`timezone: "Etc/UTC" -> "UTC"`, "Note: from a file tester made", "the change is live"} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Errorf("stdout lacks %q:\n%s", want, stdout.String())
+		}
+	}
+
+	big := filepath.Join(t.TempDir(), "big.gjs")
+	if err := os.WriteFile(big, make([]byte, settings.MaxFileBytes+1), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if code := run([]string{"settings", "import", big}, &stdout, &stderr); code != 1 || len(bus.imported) != 1 {
+		t.Fatalf("import of an oversized file: code %d, sent %d", code, len(bus.imported))
+	}
+}
+
+// onTheSystemCheckout makes every config path count as the system
+// checkout's.
+func onTheSystemCheckout(t *testing.T) {
+	t.Helper()
+	old := onSystemCheckout
+	onSystemCheckout = func(string) bool { return true }
+	t.Cleanup(func() { onSystemCheckout = old })
+}
+
+func TestAddonsOnSystemCheckoutAskTheService(t *testing.T) {
+	bus := &fakeSettingsBus{readyIn: settings.SecurityDelay, values: map[string]settings.KeyValue{
+		"firefoxAddons": {Key: "firefoxAddons", Tier: config.TierSecurity, Value: json.RawMessage(`{}`)},
+	}}
+	useFakeSettings(t, bus)
+	onTheSystemCheckout(t)
+	path := addonsConfig(t)
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if err := addonsSet(path, []string{"passwords.passbolt", "locked"}, &out); err != nil {
+		t.Fatalf("%v\n%s", err, out.String())
+	}
+	if len(bus.requests) != 1 || !strings.HasPrefix(bus.requests[0], `{"firefoxAddons":{`) ||
+		!strings.Contains(bus.requests[0], `"passbolt":"locked"`) {
+		t.Fatalf("requests %q", bus.requests)
+	}
+	if len(bus.applied) != 0 || !strings.Contains(out.String(), "gjallarctl settings apply c0ffee00") {
+		t.Fatalf("applied %q, out %s", bus.applied, out.String())
+	}
+	if after, _ := os.ReadFile(path); !bytes.Equal(before, after) {
+		t.Fatal("the command wrote user.config.json itself")
+	}
+}
+
+func TestAddonsOnSystemCheckoutStopAsRoot(t *testing.T) {
+	bus := &fakeSettingsBus{}
+	useFakeSettings(t, bus)
+	onTheSystemCheckout(t)
+	settingsEUID = func() int { return 0 }
+	var out bytes.Buffer
+	if err := addonsSet(addonsConfig(t), []string{"passwords.passbolt", "locked"}, &out); !errors.Is(err, errShown) {
+		t.Fatalf("err %v", err)
+	}
+	if len(bus.requests) != 0 {
+		t.Fatalf("requests %q", bus.requests)
+	}
+}
+
+func TestUSBReviewTickOnSystemCheckoutAppliesWithoutWatching(t *testing.T) {
+	bus := &fakeSettingsBus{}
+	useFakeSettings(t, bus)
+	onTheSystemCheckout(t)
+	if err := applySystemSettingNow(usbReviewConfigKey, true); err != nil {
+		t.Fatal(err)
+	}
+	if len(bus.requests) != 1 || bus.requests[0] != `{"usbReviewTechnicalView":true}` {
+		t.Fatalf("requests %q", bus.requests)
+	}
+	if len(bus.applied) != 1 || bus.rebuilds != 0 {
+		t.Fatalf("applied %q, rebuild polls %d", bus.applied, bus.rebuilds)
+	}
+}
+
+func TestUSBReviewTickNotAuthorisedIsDropped(t *testing.T) {
+	bus := &fakeSettingsBus{applyErr: errors.New("not authorised")}
+	useFakeSettings(t, bus)
+	if err := applySystemSettingNow(usbReviewConfigKey, true); err == nil {
+		t.Fatal("a refused tick reported success")
+	}
+	if len(bus.pending) != 0 {
+		t.Fatalf("the refused tick stayed pending: %+v", bus.pending)
+	}
+}
+
+func TestUSBReviewTickThatWaitsIsNotApplied(t *testing.T) {
+	bus := &fakeSettingsBus{readyIn: settings.SecurityDelay}
+	useFakeSettings(t, bus)
+	err := applySystemSettingNow(usbReviewConfigKey, true)
+	if err == nil || !strings.Contains(err.Error(), "gjallarctl settings apply c0ffee00") || len(bus.applied) != 0 {
+		t.Fatalf("err %v, applied %q", err, bus.applied)
 	}
 }

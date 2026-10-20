@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -66,6 +67,12 @@ const None = "none"
 // LocalFits reports whether any automatic profile fits ramGB.
 func LocalFits(ramGB int) bool {
 	return ramGB >= modelProfiles[len(modelProfiles)-1].MinRAMGB
+}
+
+// Automatic reports whether model is one the automatic selection picks, so
+// a model outside the table came from an override.
+func Automatic(model string) bool {
+	return slices.ContainsFunc(modelProfiles, func(p modelProfile) bool { return p.Model == model })
 }
 
 // MemoryGB returns this machine's MemTotal in whole GiB, rounded down.

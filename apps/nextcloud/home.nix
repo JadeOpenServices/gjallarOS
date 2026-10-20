@@ -11,219 +11,104 @@ let
   enable = settings.nextcloudEnable or false;
   host = settings.nextcloudHost or "";
   preferredBrowser = settings.preferredBrowser or "firefox";
-  browserExe = lib.getExe config.programs.${preferredBrowser}.finalPackage;
-  browserArgs = [ "--new-window" ];
-  browserNeedles = [ preferredBrowser ];
+  loginRecipe =
+    config.gjallar.loginBrowsers.${preferredBrowser}
+      or (throw "Nextcloud login needs gjallar.loginBrowsers.${preferredBrowser}; add it in user/browsers/${preferredBrowser}.nix");
+  # Hyprland floats and centres windows of this class (see below).
+  loginClass = "gjallar-nextcloud-login";
 
   inherit (import ./package.nix { inherit pkgs; }) openvfs client;
 
-  nextcloudBrowserCloser = pkgs.writeShellScript "nextcloud-browser-close" ''
-    session="''${NEXTCLOUD_AUTH_SESSION:-}"
-
-    if [ -z "$session" ]; then
-      exit 0
-    fi
-
+  # The login window is its own browser with a throwaway profile in
+  # $XDG_RUNTIME_DIR/nextcloud-login/<session>, run in the scope
+  # nextcloud-login-<session>. Stopping the scope closes the window.
+  loginSession = ''
     if ! printf '%s\n' "$session" \
-      | ${pkgs.gnugrep}/bin/grep -Eq '^[A-Za-z0-9._-]+$'
+      | ${pkgs.gnugrep}/bin/grep -Eqx '[A-Za-z0-9._-]+'
     then
       echo "invalid Nextcloud auth session identifier." >&2
       exit 64
     fi
-
     runtime="''${XDG_RUNTIME_DIR:-/run/user/$(${pkgs.coreutils}/bin/id -u)}"
-    state_dir="$runtime/nextcloud-auth"
-    state="$state_dir/$session.window"
-
-    if [ ! -f "$state" ]; then
-      exit 0
-    fi
-
-    IFS= read -r address < "$state" || address=""
-    ${pkgs.coreutils}/bin/rm -f "$state"
-
-    if ! printf '%s\n' "$address" \
-      | ${pkgs.gnugrep}/bin/grep -Eq '^0x[[:xdigit:]]+$'
-    then
-      exit 0
-    fi
-
-    if [ -z "''${HYPRLAND_INSTANCE_SIGNATURE:-}" ]; then
-      exit 0
-    fi
-
-    hyprctl=${lib.getExe' pkgs.hyprland "hyprctl"}
-    python=${lib.getExe pkgs.python3}
-
-    valid="$($hyprctl clients -j 2>/dev/null \
-      | $python -c '
-import json, sys
-
-target = sys.argv[1]
-needles = [value.lower() for value in sys.argv[2:] if value]
-
-try:
-    clients = json.load(sys.stdin)
-except Exception:
-    raise SystemExit(0)
-
-for client in clients:
-    if client.get("address") != target:
-        continue
-
-    identity = " ".join(str(client.get(key, "")) for key in (
-        "class", "initialClass", "title", "initialTitle"
-    )).lower()
-
-    if needles and not any(needle in identity for needle in needles):
-        raise SystemExit(0)
-
-    print(target)
-    break
-' "$address" ${lib.escapeShellArgs browserNeedles} 2>/dev/null || true)"
-
-    if [ "$valid" = "$address" ]; then
-      $hyprctl dispatch closewindow "address:$address" \
-        >/dev/null 2>&1 || true
-    fi
-
-    ${pkgs.coreutils}/bin/rmdir "$state_dir" 2>/dev/null || true
+    base="$runtime/nextcloud-login"
+    unit="nextcloud-login-$session.scope"
+    systemctl=${pkgs.systemd}/bin/systemctl
   '';
 
+  nextcloudLoginRun = pkgs.writeShellScript "nextcloud-login-run" ''
+    set -eu
+    session="''${1:-}"
+    ${loginSession}
+    IFS= read -r url <"$base/$session/url"
+    exec ${pkgs.systemd}/bin/systemd-run --user --scope --collect --quiet \
+      --unit "$unit" -- ${loginRecipe} "$base/$session/profile" ${loginClass} "$url"
+  '';
+
+  nextcloudBrowserCloser = pkgs.writeShellScript "nextcloud-browser-close" ''
+    set -u
+    session="''${NEXTCLOUD_AUTH_SESSION:-}"
+    ${loginSession}
+    if $systemctl --user --quiet is-active "$unit"; then
+      $systemctl --user stop "$unit"
+    fi
+    ${pkgs.coreutils}/bin/rm -rf "$base/$session"
+    ${pkgs.coreutils}/bin/rmdir --ignore-fail-on-non-empty "$base" 2>/dev/null
+    exit 0
+  '';
+
+  # The client sends every link it opens here while it runs. Only the login
+  # page of the configured server goes to the login window.
   nextcloudBrowserOpener = pkgs.writeShellScript "nextcloud-browser-open" ''
+    set -u
     if [ "$#" -ne 1 ]; then
       echo "Nextcloud browser opener expects exactly one URL." >&2
       exit 64
     fi
 
     url="$1"
+    host=${lib.escapeShellArg host}
     case "$url" in
-      https://*) ;;
+      "$host"/login/v2/flow/* | "$host"/index.php/login/v2/flow/*) ;;
+      https://*)
+        exec ${pkgs.xdg-utils}/bin/xdg-open "$url"
+        ;;
       *)
         echo "Nextcloud browser opener rejected non-HTTPS URL." >&2
         exit 64
         ;;
     esac
 
-    hyprctl=${lib.getExe' pkgs.hyprland "hyprctl"}
-    python=${lib.getExe pkgs.python3}
+    session="''${NEXTCLOUD_AUTH_SESSION:-}"
+    ${loginSession}
+    ${pkgs.coreutils}/bin/install -d -m 0700 "$base"
+
+    # Logins whose window the user closed leave their profile behind.
+    for dir in "$base"/*/; do
+      [ -d "$dir" ] || continue
+      name="$(${pkgs.coreutils}/bin/basename "$dir")"
+      if ! $systemctl --user --quiet is-active "nextcloud-login-$name.scope"; then
+        ${pkgs.coreutils}/bin/rm -rf "$dir"
+      fi
+    done
+
+    # A second login in the same client run replaces the first window.
+    if $systemctl --user --quiet is-active "$unit"; then
+      $systemctl --user stop "$unit"
+    fi
+    ${pkgs.coreutils}/bin/rm -rf "$base/$session"
+    ${pkgs.coreutils}/bin/install -d -m 0700 "$base/$session"
+    printf '%s\n' "$url" >"$base/$session/url"
+
     workspace="''${NEXTCLOUD_WORKSPACE:-}"
-
     if [ -n "''${HYPRLAND_INSTANCE_SIGNATURE:-}" ]; then
-      nextcloud_workspace="$($hyprctl clients -j 2>/dev/null \
-        | $python -c '
-import json, sys
-try:
-    clients = json.load(sys.stdin)
-except Exception:
-    clients = []
-
-candidates = []
-for client in clients:
-    identity = " ".join(str(client.get(key, "")) for key in (
-        "class", "initialClass", "title", "initialTitle"
-    )).lower()
-    if "nextcloud" not in identity:
-        continue
-    workspace = client.get("workspace") or {}
-    wid = workspace.get("id")
-    if not isinstance(wid, int) or wid <= 0:
-        continue
-    focus = client.get("focusHistoryID")
-    candidates.append((focus if isinstance(focus, int) else 999999, wid))
-
-if candidates:
-    candidates.sort()
-    print(candidates[0][1])
-' 2>/dev/null || true)"
-
-      if [ -n "$nextcloud_workspace" ]; then
-        workspace="$nextcloud_workspace"
+      rule=""
+      if printf '%s\n' "$workspace" | ${pkgs.gnugrep}/bin/grep -Eqx '[1-9][0-9]*'; then
+        rule="[workspace $workspace] "
       fi
+      exec ${lib.getExe' pkgs.hyprland "hyprctl"} dispatch exec \
+        "$rule${nextcloudLoginRun} $session" >/dev/null
     fi
-
-    before="$(${pkgs.coreutils}/bin/mktemp)"
-    trap '${pkgs.coreutils}/bin/rm -f "$before"' EXIT
-
-    if [ -n "''${HYPRLAND_INSTANCE_SIGNATURE:-}" ]; then
-      $hyprctl clients -j 2>/dev/null \
-        | $python -c '
-import json, sys
-try:
-    clients = json.load(sys.stdin)
-except Exception:
-    clients = []
-for client in clients:
-    address = client.get("address")
-    if address:
-        print(address)
-' >"$before" 2>/dev/null || true
-    fi
-
-    ${lib.escapeShellArgs ([ browserExe ] ++ browserArgs)} "$url" \
-      >/dev/null 2>&1 &
-
-    if [ -n "''${HYPRLAND_INSTANCE_SIGNATURE:-}" ] && [ -n "$workspace" ]; then
-      address=""
-      attempts=0
-      while [ "$attempts" -lt 50 ] && [ -z "$address" ]; do
-        address="$($hyprctl clients -j 2>/dev/null \
-          | $python -c '
-import json, sys
-before_path = sys.argv[1]
-needles = [value.lower() for value in sys.argv[2:] if value]
-try:
-    with open(before_path, encoding="utf-8") as handle:
-        before = {line.strip() for line in handle if line.strip()}
-    clients = json.load(sys.stdin)
-except Exception:
-    raise SystemExit(0)
-
-candidates = []
-for client in clients:
-    address = client.get("address")
-    if not address or address in before:
-        continue
-    identity = " ".join(str(client.get(key, "")) for key in (
-        "class", "initialClass", "title", "initialTitle"
-    )).lower()
-    if needles and not any(needle in identity for needle in needles):
-        continue
-    focus = client.get("focusHistoryID")
-    candidates.append((focus if isinstance(focus, int) else 999999, address))
-
-if candidates:
-    candidates.sort()
-    print(candidates[0][1])
-' "$before" ${lib.escapeShellArgs browserNeedles} 2>/dev/null || true)"
-
-        if [ -z "$address" ]; then
-          ${pkgs.coreutils}/bin/sleep 0.1
-        fi
-        attempts=$((attempts + 1))
-      done
-
-      if [ -n "$address" ]; then
-        $hyprctl dispatch movetoworkspacesilent "$workspace,address:$address" >/dev/null 2>&1 || true
-        $hyprctl dispatch focuswindow "address:$address" >/dev/null 2>&1 || true
-
-        session="''${NEXTCLOUD_AUTH_SESSION:-}"
-        if [ -n "$session" ] \
-          && printf '%s\n' "$session" \
-            | ${pkgs.gnugrep}/bin/grep -Eq '^[A-Za-z0-9._-]+$'
-        then
-          runtime="''${XDG_RUNTIME_DIR:-/run/user/$(${pkgs.coreutils}/bin/id -u)}"
-          state_dir="$runtime/nextcloud-auth"
-
-          ${pkgs.coreutils}/bin/install -d -m 0700 "$state_dir"
-
-          printf '%s\n' "$address" >"$state_dir/$session.window"
-          ${pkgs.coreutils}/bin/chmod 0600 "$state_dir/$session.window"
-        fi
-      else
-        echo "browser opened, but its new Hyprland window could not be identified." >&2
-      fi
-    fi
+    exec ${nextcloudLoginRun} "$session"
   '';
 
   nextcloudConfigPolicy = pkgs.writeShellScript "nextcloud-config-policy" ''
@@ -559,10 +444,17 @@ if isinstance(wid, int) and wid > 0:
         chmod u+w "$desktop"
       fi
 
-      if [ -f "$desktop" ]; then
-        sed -i \
-          "0,/^Exec=/{s|^Exec=.*|Exec=$out/bin/nextcloud|}" \
-          "$desktop"
+      # The menu entry must start the wrapper, or enrollment is skipped.
+      if [ ! -f "$desktop" ]; then
+        echo "nextcloud: $desktop is missing" >&2
+        exit 1
+      fi
+      sed -i \
+        "0,/^Exec=/{s|^Exec=.*|Exec=$out/bin/nextcloud|}" \
+        "$desktop"
+      if ! grep -qx "Exec=$out/bin/nextcloud" "$desktop"; then
+        echo "nextcloud: no Exec line in $desktop" >&2
+        exit 1
       fi
     '';
   };
@@ -598,7 +490,13 @@ if isinstance(wid, int) and wid > 0:
     exec ${managedClient}/bin/nextcloud --background
   '';
 in
-lib.mkIf config.gjallar.apps.nextcloud.enable {
+lib.mkMerge [
+{
+  warnings = lib.optional (enable && !config.gjallar.apps.nextcloud.enable)
+    "nextcloudEnable is on, but \"nextcloud\" is not in apps, so the Nextcloud client is not installed. Add \"nextcloud\" to apps, or turn nextcloudEnable off.";
+}
+
+(lib.mkIf config.gjallar.apps.nextcloud.enable {
   assertions = lib.optionals enable [
     {
       assertion = host != "";
@@ -613,6 +511,11 @@ lib.mkIf config.gjallar.apps.nextcloud.enable {
   home.packages = lib.optionals enable [
     managedClient
     enrollmentLauncher
+  ];
+
+  wayland.windowManager.hyprland.settings.windowrule = lib.optionals enable [
+    "match:class ^(${loginClass})$, float on, center on, size (monitor_w*0.5) (monitor_h*0.75)"
+    "match:class ^([Nn]extcloud|com\\.nextcloud\\.desktopclient\\.nextcloud)$, focus_on_activate on"
   ];
 
 
@@ -650,4 +553,5 @@ lib.mkIf config.gjallar.apps.nextcloud.enable {
     ];
   };
 
-}
+})
+]

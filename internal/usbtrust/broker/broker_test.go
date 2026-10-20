@@ -246,3 +246,21 @@ func TestAllowMediaValidation(t *testing.T) {
 		t.Fatal("owner may not open media without root")
 	}
 }
+
+func TestRenewValidation(t *testing.T) {
+	if err := ValidateRequest(Request{Action: ActionRenew, TrustedID: "device:synthetic"}); err != nil {
+		t.Fatalf("valid renew rejected: %v", err)
+	}
+	for name, request := range map[string]Request{
+		"no trusted id": {Action: ActionRenew},
+		"connection":    {Action: ActionRenew, TrustedID: "device:synthetic", RuntimeID: "1", Connection: "token"},
+		"portable":      {Action: ActionRenew, TrustedID: "device:synthetic", Portable: new(bool)},
+	} {
+		if err := ValidateRequest(request); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+	if err := AuthorizePeer(1000, ActionRenew, 1000); err == nil {
+		t.Fatal("owner may not renew without root")
+	}
+}

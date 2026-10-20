@@ -179,19 +179,27 @@ func TestCollectProjectToolsDefaultsDisabled(t *testing.T) {
 	err := collectProjectTools(
 		context.Background(),
 		prompt.New(strings.NewReader("\n\n\n\n"), &output),
+		nil,
 		&u,
 	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if u.PlaneEnable || u.DrawioEnable || u.NextcloudEnable {
+	if len(u.WebApplications) != 0 || u.NextcloudEnable {
 		t.Fatalf("project tools should default disabled: %+v", u)
 	}
-	if u.PlaneHost != "" ||
-		u.DrawioHost != "" ||
-		u.NextcloudHost != "" {
-		t.Fatalf("disabled project tools unexpectedly received hosts: %+v", u)
+	if u.NextcloudHost != "" {
+		t.Fatalf("disabled Nextcloud unexpectedly received a host: %q", u.NextcloudHost)
 	}
+}
+
+func webApplication(u config.User, id string) (config.WebApplicationIntent, bool) {
+	for _, application := range u.WebApplications {
+		if application.ID == id {
+			return application, true
+		}
+	}
+	return config.WebApplicationIntent{}, false
 }
 
 func TestCollectProjectToolsSupportsIndependentSelection(t *testing.T) {
@@ -199,7 +207,6 @@ func TestCollectProjectToolsSupportsIndependentSelection(t *testing.T) {
 		name                      string
 		input                     string
 		planeEnable, drawioEnable bool
-		drawioSelfHosted          bool
 		planeHost, drawioHost     string
 	}{
 		{
@@ -209,20 +216,18 @@ func TestCollectProjectToolsSupportsIndependentSelection(t *testing.T) {
 			planeHost:   "https://plane.example.test",
 		},
 		{
-			name:             "drawio only",
-			input:            "no\nyes\nyes\nhttps://drawio.example.test\nno\nno\n",
-			drawioEnable:     true,
-			drawioSelfHosted: true,
-			drawioHost:       "https://drawio.example.test",
+			name:         "drawio only",
+			input:        "no\nyes\nyes\nhttps://drawio.example.test\nno\nno\n",
+			drawioEnable: true,
+			drawioHost:   "https://drawio.example.test",
 		},
 		{
-			name:             "both",
-			input:            "yes\nplane.internal:3000\nyes\nyes\ndrawio.internal:8080\nno\nno\n",
-			planeEnable:      true,
-			drawioEnable:     true,
-			drawioSelfHosted: true,
-			planeHost:        "http://plane.internal:3000",
-			drawioHost:       "http://drawio.internal:8080",
+			name:         "both",
+			input:        "yes\nplane.internal:3000\nyes\nyes\ndrawio.internal:8080\nno\nno\n",
+			planeEnable:  true,
+			drawioEnable: true,
+			planeHost:    "http://plane.internal:3000",
+			drawioHost:   "http://drawio.internal:8080",
 		},
 	}
 
@@ -234,25 +239,20 @@ func TestCollectProjectToolsSupportsIndependentSelection(t *testing.T) {
 			err := collectProjectTools(
 				context.Background(),
 				prompt.New(strings.NewReader(tt.input), &output),
+				nil,
 				&u,
 			)
 			if err != nil {
 				t.Fatal(err)
 			}
 
-			if u.PlaneEnable != tt.planeEnable ||
-				u.DrawioEnable != tt.drawioEnable ||
-				u.DrawioSelfHosted != tt.drawioSelfHosted ||
-				u.PlaneHost != tt.planeHost ||
-				u.DrawioHost != tt.drawioHost {
-				t.Fatalf(
-					"unexpected project-tool selection: plane=%t host=%q drawio=%t selfHosted=%t host=%q",
-					u.PlaneEnable,
-					u.PlaneHost,
-					u.DrawioEnable,
-					u.DrawioSelfHosted,
-					u.DrawioHost,
-				)
+			plane, planeEnable := webApplication(u, config.WebApplicationPlane)
+			drawio, drawioEnable := webApplication(u, config.WebApplicationDrawio)
+			if planeEnable != tt.planeEnable ||
+				drawioEnable != tt.drawioEnable ||
+				plane.Endpoint != tt.planeHost ||
+				drawio.Endpoint != tt.drawioHost {
+				t.Fatalf("unexpected project-tool selection: %#v", u.WebApplications)
 			}
 		})
 	}
@@ -273,6 +273,7 @@ func TestCollectProjectToolsSupportsNextcloud(t *testing.T) {
 			),
 			&output,
 		),
+		nil,
 		&u,
 	)
 	if err != nil {
@@ -305,13 +306,15 @@ func TestCollectProjectToolsReasksInvalidEndpoints(t *testing.T) {
 			),
 			&output,
 		),
+		nil,
 		&u,
 	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if u.PlaneHost != "https://plane.example.test" || u.NextcloudHost != "https://cloud.example.test" {
-		t.Fatalf("plane=%q nextcloud=%q", u.PlaneHost, u.NextcloudHost)
+	plane, _ := webApplication(u, config.WebApplicationPlane)
+	if plane.Endpoint != "https://plane.example.test" || u.NextcloudHost != "https://cloud.example.test" {
+		t.Fatalf("plane=%q nextcloud=%q", plane.Endpoint, u.NextcloudHost)
 	}
 	for _, want := range []string{"unsupported external service endpoint scheme", "HTTPS is required"} {
 		if !strings.Contains(output.String(), want) {
@@ -332,16 +335,17 @@ func TestCollectProjectToolsBlankEndpointSkips(t *testing.T) {
 			strings.NewReader("yes\n\nyes\nyes\n\nno\nyes\n\n"),
 			&output,
 		),
+		nil,
 		&u,
 	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if u.PlaneEnable || u.PlaneHost != "" {
-		t.Fatalf("plane enabled=%t host=%q", u.PlaneEnable, u.PlaneHost)
+	if plane, ok := webApplication(u, config.WebApplicationPlane); ok {
+		t.Fatalf("plane enabled with host %q", plane.Endpoint)
 	}
-	if !u.DrawioEnable || u.DrawioSelfHosted || u.DrawioHost != "" {
-		t.Fatalf("drawio enabled=%t selfHosted=%t host=%q", u.DrawioEnable, u.DrawioSelfHosted, u.DrawioHost)
+	if drawio, ok := webApplication(u, config.WebApplicationDrawio); !ok || drawio.Endpoint != "" {
+		t.Fatalf("drawio enabled=%t host=%q", ok, drawio.Endpoint)
 	}
 	if u.NextcloudEnable || u.NextcloudHost != "" {
 		t.Fatalf("nextcloud enabled=%t host=%q", u.NextcloudEnable, u.NextcloudHost)
@@ -353,7 +357,7 @@ func TestCollectProjectToolsBlankEndpointSkips(t *testing.T) {
 func TestCollectRecoverySkipsPartitionOnUnencryptedRoot(t *testing.T) {
 	var output bytes.Buffer
 	u := config.User{}
-	if err := collectRecovery(context.Background(), prompt.New(strings.NewReader("yes\n"), &output), false, &u); err != nil {
+	if err := collectRecovery(context.Background(), prompt.New(strings.NewReader("yes\n"), &output), false, true, &u); err != nil {
 		t.Fatal(err)
 	}
 	if !u.RecoveryEnable || u.RecoveryPartitionEnable {
@@ -367,7 +371,7 @@ func TestCollectRecoverySkipsPartitionOnUnencryptedRoot(t *testing.T) {
 func TestCollectRecoveryAsksPartitionWhenPossible(t *testing.T) {
 	var output bytes.Buffer
 	u := config.User{}
-	if err := collectRecovery(context.Background(), prompt.New(strings.NewReader("yes\nyes\n"), &output), true, &u); err != nil {
+	if err := collectRecovery(context.Background(), prompt.New(strings.NewReader("yes\nyes\n"), &output), true, true, &u); err != nil {
 		t.Fatal(err)
 	}
 	if !u.RecoveryEnable || !u.RecoveryPartitionEnable {
@@ -375,10 +379,26 @@ func TestCollectRecoveryAsksPartitionWhenPossible(t *testing.T) {
 	}
 }
 
+// Jade 2026-10-19: no recovery partition and no shrink without GjallarOS
+// Secure Boot; the partition question is not even asked.
+func TestCollectRecoverySkipsPartitionWithoutSecureBoot(t *testing.T) {
+	var output bytes.Buffer
+	u := config.User{RecoveryPartitionEnable: true}
+	if err := collectRecovery(context.Background(), prompt.New(strings.NewReader("yes\nyes\n"), &output), true, false, &u); err != nil {
+		t.Fatal(err)
+	}
+	if !u.RecoveryEnable || u.RecoveryPartitionEnable {
+		t.Fatalf("recovery=%t partition=%t", u.RecoveryEnable, u.RecoveryPartitionEnable)
+	}
+	if strings.Contains(output.String(), "recovery partition (recommended)") || !strings.Contains(output.String(), "Secure Boot") {
+		t.Fatalf("output:\n%s", output.String())
+	}
+}
+
 func TestCollectUSBTrustSkippedWithoutODDCModel(t *testing.T) {
 	var output bytes.Buffer
 	u := config.User{USBGuardEnable: true, USBTrustEnforce: true, USBTrustTPMHandle: config.DefaultUSBTrustTPMHandle}
-	if err := collectUSBTrust(context.Background(), prompt.New(strings.NewReader("yes\nyes\n"), &output), false, true, true, &u); err != nil {
+	if err := collectUSBTrust(context.Background(), prompt.New(strings.NewReader("yes\nyes\n"), &output), false, true, true, nil, &u); err != nil {
 		t.Fatal(err)
 	}
 	if u.USBGuardEnable || u.USBTrustEnforce || u.USBTrustTPMHandle != "" || strings.Contains(output.String(), "Enable USB trust review") {
@@ -396,18 +416,18 @@ func TestCollectUSBTrust(t *testing.T) {
 		wantBlockQuestion       bool
 	}{
 		{name: "review declined", encryptedRoot: true, tpm2: true, input: "no\n"},
-		{name: "blocking asked, default no", encryptedRoot: true, tpm2: true, input: "yes\n\n",
+		{name: "blocking asked, default no", encryptedRoot: true, tpm2: true, input: "yes\n\n\n",
 			wantReview: true, wantHandle: config.DefaultUSBTrustTPMHandle, wantBlockQuestion: true},
-		{name: "blocking chosen", encryptedRoot: true, tpm2: true, input: "yes\nyes\n",
+		{name: "blocking chosen", encryptedRoot: true, tpm2: true, input: "yes\nyes\n\n",
 			wantReview: true, wantEnforce: true, wantHandle: config.DefaultUSBTrustTPMHandle, wantBlockQuestion: true},
 		{name: "no TPM2: review only, no key", encryptedRoot: true, input: "yes\nyes\n", wantReview: true},
-		{name: "plain root: key, no blocking", tpm2: true, input: "yes\nyes\n",
+		{name: "plain root: key, no blocking", tpm2: true, input: "yes\n\n",
 			wantReview: true, wantHandle: config.DefaultUSBTrustTPMHandle},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			var output bytes.Buffer
 			u := config.User{}
-			if err := collectUSBTrust(context.Background(), prompt.New(strings.NewReader(test.input), &output), true, test.encryptedRoot, test.tpm2, &u); err != nil {
+			if err := collectUSBTrust(context.Background(), prompt.New(strings.NewReader(test.input), &output), true, test.encryptedRoot, test.tpm2, nil, &u); err != nil {
 				t.Fatal(err)
 			}
 			if u.USBGuardEnable != test.wantReview || u.USBTrustEnforce != test.wantEnforce || u.USBTrustTPMHandle != test.wantHandle {
@@ -420,13 +440,42 @@ func TestCollectUSBTrust(t *testing.T) {
 	}
 }
 
+func TestCollectUSBTrustLapse(t *testing.T) {
+	for _, test := range []struct {
+		name         string
+		tpm2         bool
+		input        string
+		want         int
+		wantQuestion bool
+	}{
+		{name: "default off", tpm2: true, input: "yes\n\n\n", wantQuestion: true},
+		{name: "on with the default 30", tpm2: true, input: "yes\n\nyes\n\n", want: 30, wantQuestion: true},
+		{name: "any N, asked again until valid", tpm2: true, input: "yes\n\nyes\n0\nmany\n36501\n400\n", want: 400, wantQuestion: true},
+		{name: "no TPM2: nothing stored, nothing to expire", input: "yes\nyes\n"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var output bytes.Buffer
+			u := config.User{USBTrustLapseDays: 9}
+			if err := collectUSBTrust(context.Background(), prompt.New(strings.NewReader(test.input), &output), true, true, test.tpm2, nil, &u); err != nil {
+				t.Fatal(err)
+			}
+			if u.USBTrustLapseDays != test.want {
+				t.Fatalf("lapse days = %d, want %d; output:\n%s", u.USBTrustLapseDays, test.want, output.String())
+			}
+			if strings.Contains(output.String(), "expire when unused") != test.wantQuestion {
+				t.Fatalf("lapse question shown=%t output:\n%s", !test.wantQuestion, output.String())
+			}
+		})
+	}
+}
+
 // Galaxy Book 12-like VM (2026-10-10): no ODDC model, the managed path ran
 // the whole interview and then failed the Secure Boot check.
 func TestCollectJODSManagementSkippedWithoutSecureBootSupport(t *testing.T) {
 	var output bytes.Buffer
 	u := config.User{EndpointManagedDevice: true}
 	blocker := jodsManagementBlocker(false, true)
-	if err := collectJODSManagement(context.Background(), prompt.New(strings.NewReader("yes\n"), &output), blocker, &u); err != nil {
+	if err := collectJODSManagement(context.Background(), prompt.New(strings.NewReader("yes\n"), &output), blocker, nil, &u); err != nil {
 		t.Fatal(err)
 	}
 	if u.EndpointManagedDevice || strings.Contains(output.String(), "Manage this machine with JODS?") ||
@@ -447,7 +496,7 @@ func TestJODSManagementBlockerNamesTPM2(t *testing.T) {
 func TestCollectJODSManagementAskedWhenSupported(t *testing.T) {
 	var output bytes.Buffer
 	u := config.User{}
-	if err := collectJODSManagement(context.Background(), prompt.New(strings.NewReader("yes\n"), &output), "", &u); err != nil {
+	if err := collectJODSManagement(context.Background(), prompt.New(strings.NewReader("yes\n"), &output), "", nil, &u); err != nil {
 		t.Fatal(err)
 	}
 	if !u.EndpointManagedDevice {

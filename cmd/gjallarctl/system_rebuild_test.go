@@ -1,9 +1,14 @@
 package main
 
 import (
+	"bytes"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/flakesource"
 )
 
 func TestSystemRebuildArgsRoundTrip(t *testing.T) {
@@ -63,5 +68,38 @@ func TestParseSystemRebuildArgsIsStrict(t *testing.T) {
 	opts, err := parseSystemRebuildArgs(nil)
 	if err != nil || !opts.cleanup || opts.rebuildArgs != nil {
 		t.Fatalf("no arguments: %+v, %v", opts, err)
+	}
+}
+
+func TestStageLocalChanges(t *testing.T) {
+	saved := localChangesPath
+	t.Cleanup(func() { localChangesPath = saved })
+	localChangesPath = filepath.Join(t.TempDir(), "local")
+	if err := os.MkdirAll(filepath.Join(localChangesPath, "system"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(localChangesPath, "system", "a.nix"), []byte("{ }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	facts := &flakesource.BuildSource{}
+	if _, status := stageLocalChanges(false, true, facts, &stdout, &stderr); status != 0 || facts.Local != nil {
+		t.Fatalf("development checkout staged the folder: %d %v", status, facts.Local)
+	}
+	if _, status := stageLocalChanges(true, false, facts, &stdout, &stderr); status != 0 || facts.Local != nil {
+		t.Fatalf("developer mode off staged the folder: %d %v", status, facts.Local)
+	}
+	if !strings.Contains(stdout.String(), "Developer mode is off") {
+		t.Fatalf("no note with developer mode off: %q", stdout.String())
+	}
+	// The test user owns the folder, so root's copy check refuses it.
+	if _, status := stageLocalChanges(true, true, facts, &stdout, &stderr); status != 1 || facts.Local != nil {
+		t.Fatalf("a folder not owned by root was staged: %d %v", status, facts.Local)
+	}
+	localChangesPath = filepath.Join(t.TempDir(), "missing")
+	stdout.Reset()
+	if _, status := stageLocalChanges(true, true, facts, &stdout, &stderr); status != 0 || facts.Local != nil ||
+		!strings.Contains(stdout.String(), "holds no .nix file") {
+		t.Fatalf("missing folder: %d %v %q", status, facts.Local, stdout.String())
 	}
 }

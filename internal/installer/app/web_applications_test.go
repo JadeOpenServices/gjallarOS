@@ -25,6 +25,7 @@ func TestCollectProjectToolsSupportsTeamsWebApplication(t *testing.T) {
 			),
 			&output,
 		),
+		nil,
 		&user,
 	)
 	if err != nil {
@@ -55,8 +56,7 @@ func TestCollectProjectToolsSupportsTeamsWebApplication(t *testing.T) {
 		)
 	}
 
-	if user.PlaneEnable ||
-		user.DrawioEnable ||
+	if len(user.WebApplications) != 1 ||
 		user.NextcloudEnable {
 		t.Fatalf(
 			"Teams selection changed unrelated integrations: %+v",
@@ -82,6 +82,7 @@ func TestCollectProjectToolsProducesCanonicalWebApplicationIntent(t *testing.T) 
 			),
 			&output,
 		),
+		nil,
 		&user,
 	)
 	if err != nil {
@@ -118,22 +119,5 @@ func TestCollectProjectToolsProducesCanonicalWebApplicationIntent(t *testing.T) 
 				want[index],
 			)
 		}
-	}
-
-	if !user.PlaneEnable ||
-		user.PlaneHost != "http://plane.example.test" {
-		t.Fatalf(
-			"Plane compatibility bridge incorrect: %+v",
-			user,
-		)
-	}
-
-	if !user.DrawioEnable ||
-		user.DrawioSelfHosted ||
-		user.DrawioHost != "" {
-		t.Fatalf(
-			"Draw.io compatibility bridge incorrect: %+v",
-			user,
-		)
 	}
 }

@@ -9,13 +9,9 @@ let
   webApplication = import ../lib/web-application.nix { inherit lib pkgs; };
 
   webApplications = settings.webApplications or [ ];
-  teamsEnable =
-    if settings ? webApplications then
-      builtins.any (
-        application: (application.id or "") == "teams"
-      ) webApplications
-    else
-      true;
+  teamsEnable = builtins.any (
+    application: (application.id or "") == "teams"
+  ) webApplications;
 
   teamsHosts = [
     "teams.microsoft.com"

@@ -1,0 +1,24 @@
+diff --git a/src/gui/application.cpp b/src/gui/application.cpp
+--- a/src/gui/application.cpp
++++ b/src/gui/application.cpp
+@@ -927,7 +927,7 @@
+         _checkConnectionTimer.start();
+         slotCheckConnection();
+ 
+-        Utility::setLaunchOnStartup(_theme->appName(), _theme->appNameGUI(), true);
++        Utility::setLaunchOnStartup(_theme->appName(), _theme->appNameGUI(), false);
+ 
+         Systray::instance()->showTrayPopup();
+     }
+diff --git a/src/libsync/configfile.cpp b/src/libsync/configfile.cpp
+--- a/src/libsync/configfile.cpp
++++ b/src/libsync/configfile.cpp
+@@ -1254,7 +1254,7 @@
+ bool ConfigFile::launchOnSystemStartup() const
+ {
+     QSettings settings(configFile(), QSettings::IniFormat);
+-    return settings.value(launchOnSystemStartupC, true).toBool();
++    return settings.value(launchOnSystemStartupC, false).toBool();
+ }
+ 
+ void ConfigFile::setLaunchOnSystemStartup(const bool autostart)

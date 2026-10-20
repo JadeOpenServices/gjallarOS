@@ -114,6 +114,15 @@ func TestRenderIncludesOrientationSensorSetting(t *testing.T) {
 	}
 }
 
+// The bar notice reads developerMode from the generated state.
+func TestRenderIncludesDeveloperMode(t *testing.T) {
+	rendered := string(Render(FromUser(config.User{DeveloperMode: true})))
+
+	if !strings.Contains(rendered, "developerMode = true;") {
+		t.Fatalf("developer mode missing from render: %s", rendered)
+	}
+}
+
 func TestRenderThemeDetailsUsesRepositoryThemeDirectory(t *testing.T) {
 	got := string(Render(Settings{Theme: "noctalia"}))
 	want := `themeDetails = import (./. + "/../themes/${theme}.nix") {inherit pkgs;};`
@@ -239,6 +248,7 @@ rec {
 		Theme:              "noctalia",
 		AIAgentMode:        "workspace",
 		JODSEnrollmentMode: "manual",
+		DeveloperMode:      true,
 	}
 
 	if err := SyncUserIntent(path, user); err != nil {
@@ -258,6 +268,7 @@ rec {
 		`webApplications = [ { id = "plane"; endpoint = "https://plane.example.test"; } ];`,
 		`aiModel = "derived-model";`,
 		`theme = "noctalia";`,
+		`developerMode = true;`,
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("missing %q after sync:\n%s", want, got)

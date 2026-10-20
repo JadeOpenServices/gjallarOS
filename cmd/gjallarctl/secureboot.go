@@ -129,17 +129,33 @@ func runSecureBootSetup(ctx context.Context, repo string, stdout, stderr io.Writ
 		if err := secureboot.Prepare(ctx, stdout); err != nil {
 			return fail(err)
 		}
-		if err := config.SetBool(configPath, "secureBootEnable", true); err != nil {
-			return fail(err)
-		}
-		fmt.Fprintln(stdout, "secureBootEnable is on in user.config.json; building the signed boot files.")
-		if err := deploy.Apply(ctx, repo, user.Hostname); err != nil {
-			// The running system and its config stay in step; the keys and
-			// the pending record stay for the next run.
-			if revert := config.SetBool(configPath, "secureBootEnable", false); revert != nil {
-				fmt.Fprintf(stderr, "ERROR: turn secureBootEnable off again: %v\n", revert)
+		if onSystemCheckout(configPath) {
+			// Root writes the system checkout's settings, and a critical
+			// change waits an hour; the keys and the pending record stay,
+			// so the next run goes on from here.
+			if code := askSystemSettings(map[string]any{"secureBootEnable": true}, stdout, stderr); code != 0 {
+				return code
 			}
-			return fail(err)
+			if user, err = config.Load(configPath); err != nil {
+				return fail(err)
+			}
+			if !user.SecureBootEnable {
+				fmt.Fprintln(stdout, "Once the change is applied and the rebuild is done, run gjallarctl secureboot setup again to finish.")
+				return 0
+			}
+		} else {
+			if err := config.SetBool(configPath, "secureBootEnable", true); err != nil {
+				return fail(err)
+			}
+			fmt.Fprintln(stdout, "secureBootEnable is on in user.config.json; building the signed boot files.")
+			if err := deploy.Apply(ctx, repo, user.Hostname); err != nil {
+				// The running system and its config stay in step; the keys and
+				// the pending record stay for the next run.
+				if revert := config.SetBool(configPath, "secureBootEnable", false); revert != nil {
+					fmt.Fprintf(stderr, "ERROR: turn secureBootEnable off again: %v\n", revert)
+				}
+				return fail(err)
+			}
 		}
 	} else if err := secureboot.Prepare(ctx, stdout); err != nil {
 		return fail(err)

@@ -53,6 +53,188 @@ and only the disk encryption passphrase can turn blocking off again.
     (i8042/i2c, not USB) in mind, and test in a VM before flipping on new
     hardware.
 
+### A mounted card at the first arming
+
+Found in the fw13 VM on 2026-10-19: the rebuild that switches
+from audit to blocking pulled a mounted card (SYNTHETIC image). Jade's rule
+(2026-10-19): the first arming keeps only a device that has nothing but
+mass-storage interfaces and whose medium is mounted. Everything else asks.
+Boot and a broker restart still block everything.
+
+**Why it broke.** The nixpkgs module writes `ImplicitPolicyTarget` into the
+daemon config in the store, so switching `enforce` changes usbguard's
+`ExecStart`, and the rebuild restarts usbguard. On start, usbguard applies
+`PresentDevicePolicy=apply-policy` to every device already plugged in
+([RHEL 7 Security Guide](https://docs.redhat.com/en/documentation/Red_Hat_Enterprise_Linux/7/html/Security_Guide/sec-Using-USBGuard.html)).
+With no rules and the block fallback, that blocks the reader before the
+broker or the media gate get a say. The gate's own keep never ran on a live
+reader. It also logs `kept-open` after every broker restart, because it
+treats the first poll of a process as an arming.
+
+**How others do it.** RHEL tells admins to run `usbguard generate-policy`
+before enforcing, which allows every present device for good, keyboards
+included ([RHEL 7](https://docs.redhat.com/en/documentation/Red_Hat_Enterprise_Linux/7/html/Security_Guide/sec-Using-USBGuard.html),
+[Red Hat blog](https://www.redhat.com/en/blog/usbguard-improvements-red-hat-enterprise-linux-83)).
+GNOME's USB protection only blocks devices plugged in later
+([gsd MR 75](https://gitlab.gnome.org/GNOME/gnome-settings-daemon/-/merge_requests/75),
+[Arch wiki](https://wiki.archlinux.org/title/USBGuard)). Jade's rule is
+narrower than both: one mounted storage device, for this connection only.
+
+**Security pass.**
+- What a kept device can do: it has only class 08 interfaces, so it cannot
+  type or act as a network card. Its contents were already mounted and
+  read during audit, so keeping it adds no new exposure.
+- How storage turned hostile in practice: BadUSB firmware made a stick
+  pose as a keyboard ([SR Labs, Black Hat 2014](https://techxplore.com/news/2014-07-sr-labs-expose-badusb-week.html)).
+  A device that adds interfaces has to enumerate again, and usbguard then
+  treats it as a new insertion, which is blocked once armed. Composite
+  devices with storage plus anything else are never kept.
+- The keep grants nothing the owner could not grant by hand: only devices
+  whose review offers "Allow until unplugged" qualify, never debug-class
+  parts. The allow lives in broker memory. Unplug, reboot or broker restart
+  ends it.
+- Fail closed: the keep is part of the signed arm step. If arming fails
+  (no TPM key, a failed check) nothing is kept and everything is blocked
+  as before. If the gate cannot list mounts, nothing is kept.
+- A new gap from not restarting usbguard: until the new broker's first
+  pass, usbguard still runs with the audit fallback. The broker therefore
+  sets the block fallback before it does anything else, and present devices
+  keep their audit state only until the same pass applies the policy.
+- A medium swapped in a kept reader is closed and asks, as before.
+
+**Decision.**
+- [x] usbguard reads its daemon config from `/etc/usbguard`, and only the
+      fallback line depends on `enforce`. Every other line is a restart
+      trigger, so real config changes still restart usbguard. The mode
+      switch no longer does: the broker already sets the fallback at runtime.
+- [x] The arm step keeps a present device when all its interfaces are
+      class 08, the gate reports one of its LUNs mounted, and its review
+      offers "Allow until unplugged". It gets that choice for this
+      connection.
+- [x] The media gate keeps open only on the controller's real arm in this
+      process, never on its first poll after a restart.
+- [x] fw13 VM: disarm, audit rebuild, mount a SYNTHETIC card, enforce
+      rebuild → card stays mounted; reinsert asks; broker restart blocks it
+      with no `kept-open`; a keyboard present at arming is blocked.
+      PASS fw13 VM 2026-10-19: rebuild arm 16:38 and the delayed
+      `gjallarctl settings apply` arm 19:10 both kept the SYNTHA card mounted
+      (`kept-open`), usbguard not restarted; the keyboard was blocked; a
+      broker restart and a reinsert both blocked the card and asked.
+- Open: booting with `enforce` off while the signed state is still armed
+  starts usbguard with the allow fallback until the broker blocks
+  (loophole 23).
+
+### Trust lapse after N days unused
+
+Permanently trusted external devices can lapse. A device that has not been
+connected for N days asks again on its next connection. It is off by
+default for standalone machines; the installer asks, and N is 30 when it is
+on. JODS will set it for managed machines later.
+
+How others do it:
+
+- Android revokes a remembered adb host after 7 days without a connection
+  (`DEFAULT_ADB_ALLOWED_CONNECTION_TIME`). The clock restarts on every
+  connection, a daily job removes expired keys, and 0 turns it off.
+  [AdbDebuggingManager.java](https://android.googlesource.com/platform/frameworks/base/+/refs/heads/main/services/core/java/com/android/server/adb/AdbDebuggingManager.java)
+- macOS on Apple silicon asks before a new accessory connects. Approved
+  accessories keep working on a locked Mac for three days after it was last
+  locked; after that the Mac asks to be unlocked first.
+  [Apple deployment guide](https://support.apple.com/guide/deployment/depf8a4cb051/web)
+- GrapheneOS blocks new USB connections once the phone is locked
+  ("Charging-only when locked" is the default); connections that already
+  exist keep working until they end.
+  [GrapheneOS features](https://grapheneos.org/features)
+- USBGuard and bolt keep allow rules until someone removes them. Neither
+  has an expiry, and the USBGuard tracker has no request for one.
+  [usbguard(1)](https://man.archlinux.org/man/usbguard.1.en),
+  [boltctl(1)](https://manpath.be/f39/1/boltctl)
+- NIST SP 800-53 AC-2(3) disables accounts, device identifiers included,
+  after a set time without use. Agencies pick 15 to 35 days.
+  [AC-2(3)](https://csf.tools/reference/nist-sp-800-53/r5/ac/ac-2/ac-2-3/),
+  [DISA STIG V-223584](https://www.stigviewer.com/stigs/ibm_zos_acf2_v9/2025-06-24/finding/V-223584)
+
+Jade decisions (2026-10-19):
+
+- N counts from the last time the device was connected, not from the last
+  approval. Devices in daily use never ask, forgotten ones lapse, and there
+  is no monthly "click Allow" habit to train.
+- A device whose trust lapses while it is plugged in keeps working until it
+  is unplugged or the machine restarts.
+- Three days before a device lapses, a notification offers to renew it.
+- Only external devices lapse. Built-ins enrolled from ODDC never lapse;
+  they are checked against ODDC on every boot.
+- The clock starts when lapse is turned on (`lapseSince` in the signed
+  record). Turning it on does not make every old device ask at once.
+- Turning lapse on or lowering N applies at once. Turning it off or raising
+  N waits out the security delay.
+- Without a trusted built-in USB keyboard, the most recently used external
+  keyboard and mouse (boot interfaces 03:01:01 and 03:01:02) never lapse.
+  Other input devices do. With a built-in USB keyboard, every external
+  device lapses.
+
+Security pass:
+
+- **What it protects against.** Stale trust: a stick or dock trusted once
+  and forgotten, then lost, lent out, or copied later. It does not stop a
+  copy of a device that is in daily use; identity strength covers that.
+- **Where the time comes from.** Each record carries a TPM-signed
+  `lastUsed`. The broker refreshes it at most once a day while the device is
+  connected and matches its trust. Old records without it use
+  `lastAccepted`. Nobody can move it without the signing key.
+- **Clock set back.** A `lastUsed` more than a day in the future means the
+  clock went back or the record is wrong. That device lapses and asks; it
+  does not get extra days. Setting the clock back by less than a day buys
+  at most that day. Setting the clock needs root or an admin's polkit
+  approval; a spoofed NTP reply is the remote path, which the VPN-aware NTP
+  work is meant to close.
+- **Clock set forward.** Devices lapse early and ask again. That fails
+  closed. Re-allowing writes the real time, so a bad clock does not poison
+  later records.
+- **Broken signing.** If the TPM key cannot sign, `lastUsed` stops moving
+  and devices lapse. That fails closed, and the broker logs why.
+- **Re-allowing.** A lapsed device gets the same review as a changed one:
+  keep blocked, allow once, or renew. Renewing keeps the record and its
+  first-accepted time and needs the same fingerprint or password as any
+  other trust change. Allowing it once does not renew it.
+- **Renewing ahead.** The three-day notice renews a device that is not
+  connected. The broker accepts that only inside the last three days before
+  the lapse, never after it, and only with the same fingerprint or password
+  as any other trust change. A device that has lapsed has to be connected
+  and reviewed, so its identity is checked again.
+- **Turning it off.** Switching lapse off or raising N lowers protection.
+  The settings service holds that change like it holds turning blocking
+  off. Turning it on or lowering N only tightens, so it applies at once. On
+  a JODS-managed machine both directions stay with JODS.
+- **Turn-on time.** `lapseSince` sits in the TPM-signed document, so it
+  cannot be moved back to make devices lapse, or forward to keep them.
+  A `lapseSince` more than a day in the future counts as lapsed, like
+  `lastUsed`.
+- **Lockout.** The kept keyboard and mouse are picked only from devices
+  that are already trusted, so keeping them adds no new trust. A
+  keyboard built in over PS/2 or i2c is not in the USB record, so laptops
+  keep their last USB keyboard and mouse too for now. That is the safe side.
+  Asking ODDC whether its device list can name a non-USB built-in keyboard
+  is open; the kernel's own list was ruled out because desktops show a
+  phantom i8042 keyboard.
+
+Plan:
+
+- [x] C1: `lastUsed` in the trust record, lapse check in the audit
+      (`trusted-external-lapsed`, offers renew), lapse ignored for a
+      connection that was trusted when it started, broker refreshes
+      `lastUsed` once a day (twice per lapse when shorter).
+- [x] C2: `--lapse-days N`, Nix
+      option `services.gjallar-usbtrust.lapseDays` (null = off), status
+      shows when each device lapses.
+- [x] C3: warning three days ahead (half the lapse when shorter) with a
+      Renew button (`gjallarctl usb renew`, accepted only in that window);
+      no warning while the device is plugged in.
+- [x] C4: `usbTrustLapseDays` setting (held when it lowers protection),
+      installer question (default off, 30 when on, any N from 1), clock
+      starts at turn-on, last-used keyboard and mouse kept.
+- [x] C5: fw13 VM test (2026-10-19, 388245b0).
+
 ## 2. USB review UX
 
 - [x] Plain verdict with colour dots, and an optional technical view.
@@ -212,6 +394,18 @@ Ideas worth taking:
         without the Secure Boot result, so ODDC still grows from many
         installs, and someone can turn a working attempt into a real setup
         later.
+      - Jade decisions (2026-10-19): only on machines with TPM2. The try
+        keeps the firmware's keys and adds ours, runs the option ROM check
+        from the event log, and shows generic setup-mode steps. The recovery
+        partition and the disk shrink happen only after the first verified
+        Secure Boot start, with the same marker for the first run and a
+        rerun. On failure Secure Boot goes off, and `gjallarctl secure-boot
+        setup` can try again later. Research flow and security pass first.
+- [x] **Secure Boot before recovery.** The installer asks about Secure Boot
+      first and about the recovery partition only when Secure Boot is on.
+      Without it there is no recovery partition and no shrink, for presets
+      too. ODDC models default to yes. Saying no lists what the install goes
+      without in plain words.
 - [ ] **Desktop notice for Secure Boot state.** Keys enrolled but firmware
       enforcement still off shows only in the journal today. Show it like the
       low-battery warning.
@@ -246,12 +440,14 @@ Ideas worth taking:
 
 ## 11. Releases and channels
 
-Plan agreed 2026-10-10. Nothing in this section is built yet.
+Plan agreed 2026-10-10. Channels decided 2026-10-20 (Q16): `main` became
+`dev`, the GitHub default branch is `stable`, new installs follow `stable`.
 
-- [ ] **Three channels.** `dev` is `main`. `staging` and `stable` are
-      branches that only ever fast-forward to a signed, annotated tag
-      `vYYYY.MM.N` (N counts the releases in that month). A tag never moves;
-      a fix found in staging gets a new tag.
+- [x] **Three channels.** `dev` replaced `main`. `staging` and `stable` are
+      branches that only ever fast-forward to a tag `vYYYY.MM.N` (N counts
+      the releases in that month). A tag never moves; a fix found in
+      staging gets a new tag. Tags are signed and annotated once the key
+      talk (Q4) is done; until then they are lightweight.
 - [ ] **Release flow.**
       1. A branch bumps all flake inputs (nixpkgs, Home Manager, Noctalia,
          the ODDC pin and the rest).
@@ -260,14 +456,20 @@ Plan agreed 2026-10-10. Nothing in this section is built yet.
       4. `staging` moves to the tag. The Framework 13 and the ZBook x2 G4
          run it for a while.
       5. `stable` moves to the same tag.
-- [ ] **Picking a channel.** `user.config.json` gets `releaseChannel`
-      (`dev`, `staging` or `stable`). `rebuild --update` fetches that branch
-      and only fast-forwards from the commit that is checked out, after the
-      signature check below. The bar shows a notice when the channel is
-      ahead. `deployment/release-policy.json` (today `updateEndpoint: null`,
-      `updatePolicy: review-and-lock`) is where the channel defaults live.
-      Open: the default channel for new installs, and what existing installs
-      on `main` move to.
+- [x] **Picking a channel.** `user.config.json` has `releaseChannel`
+      (`dev`, `staging` or `stable`; a critical setting, except that a move
+      to `stable` applies at once). New installs and older configurations
+      get `stable`. The installer clones the installed commit, which must be
+      on one of the three branches, onto a local branch that tracks the
+      chosen channel. `rebuild --update` fetches origin and only
+      fast-forwards to the channel. A checkout ahead of its channel stays
+      where it is until the channel catches up, so a move to an older
+      channel never downgrades. A checkout on the old `main` branch or on
+      another channel's branch moves to the channel's branch on its next
+      update; any other branch stops the update.
+- [ ] **Channel follow-ups.** The signature check below before the
+      fast-forward. A bar notice when the channel is ahead. JODS sets the
+      channel on managed devices.
 - [ ] **ODDC stays separate.** A release carries whatever ODDC commit its
       `flake.lock` pins; the next item keeps that pin current. `rebuild --hardware-update --channel stable|staging`
       keeps working as it does today and is not tied to the GjallarOS
@@ -684,12 +886,12 @@ way to root.
       partial clone (`/var/cache/gjallar/oddc-official.git`, or the user's
       cache for development checkouts) with lazy fetch off, so a commit that
       exists only in a fork is never fetched. Fails closed in both modes.
-      Still open: the built revision in `system.configurationRevision`,
-      applied local changes (3b), the 169 notice while the deployed oddc is
-      not the pinned one, and the user-side writers of `user.config.json`
-      (add-ons, USB, Secure Boot), which fail on a system checkout until
-      checkpoint 3. Creating the checkout is checkpoint 4.
-      Done in 0bf0c1be and 76b1646b, tested on the fw13 VM.
+      Each build records its revision in `system.configurationRevision`
+      and in `/etc/gjallar/build-source.json` with the deployed and pinned
+      oddc commits. While they differ, a notice comes at every login until
+      a plain rebuild returns to the pin. Still open: applied local changes
+      (3b). Creating the checkout is checkpoint 4 (done).
+      Done in 0bf0c1be, 76b1646b and job 169, tested on the fw13 VM.
 - [ ] **Checkpoint 3: settings service.** Root service with a typed
       D-Bus API over the `user.config.json` schema, tiers, reading and
       security delay, signed export and import, per-user device keys, key
@@ -699,12 +901,28 @@ way to root.
       Done: the palette as checked colours (d6f94109), a tier on every
       `user.config.json` key (34ea9a04), the service itself with its
       `gjallarctl settings` front end (3.3, 887c1c5b) and the unique
-      hostname check. Next: signed export and import (3.4), then the
-      user-side writers (3.5).
-- [ ] **Checkpoint 3b: developer mode.** `~/GjallarOS-local/`, the copy
-      into `/etc/gjallar/local`, the `local` flake input, notice, boot
-      entry name and the recovery exit.
-- [ ] **Checkpoint 4: installer, README, migration.** New installs clone
+      hostname check, signed export and import for the device's own users
+      (3.4a), key wipe on user removal (3.4b), and the user-side writers
+      (add-ons, USB review, Secure Boot) asking the service on a system
+      checkout, with each inner value of a change listed (3.5, e511f5cb).
+      Next: pairing and the installer opt-out (rest of 3.4). Factory reset
+      waits for a recovery mode that does one.
+- [x] **Checkpoint 3b: developer mode.** `~/GjallarOS-local/`, the copy
+      into `/etc/gjallar/developer/local`, the staged `.gjallar-local/`, notice,
+      boot entry name and the recovery exit. Steps: 3b.1 the
+      `developerMode` key (critical on, everyday off, refused with JODS),
+      the folder checks and the staged import with hash check and
+      `local-changes` tag; 3b.2 the root copy through the settings
+      service with the file diff; 3b.3 the CLI, template and status
+      listing; 3b.4 the bar notice; 3b.5 the recovery exit. Done: 3b.1
+      (81cac146, 68eed82a), 3b.2 (b1a07ba9), 3b.3 (d949e67c), 3b.4
+      (8415af43; the key reaches `state.nix` ecaca469, whole tooltip
+      6a70e39d), 3b.5 (47731eb4: `gjallar-recover developer-off` runs
+      the root-only `gjallarctl system developer-off`, which passes only
+      when the next boot holds no local files, 0b1704c7; rebuilds in the
+      recovery entry start with the next boot). fw13 VM template run
+      2026-10-20 (e8c6543e).
+- [x] **Checkpoint 4: installer, README, migration.** New installs clone
       into `/etc/gjallar/system`. Existing installs: one privileged step
       re-clones the official origin at the revision the system runs,
       carries `generated/` and `user.config.json` over after a check, and
@@ -713,6 +931,15 @@ way to root.
       `/etc/gjallar/repository` names an empty or missing path, say "The
       checkout at <path> is empty or missing" and how to fix it. Tested on
       the fw13 VM first.
+      Done: 4.1 installer clone (cb6de68f), shared clone code (e192375c),
+      4.3 `gjallarctl system move` (user, lists what stays behind) and
+      `sudo gjallarctl system clone --from DIR` (root, clones the running
+      commit, copies the machine-local files as data, never runs git in
+      DIR) in f3822087, 4.2 missing-checkout message (77525b5c), 4.4
+      README. Tested on the fw13 VM (2026-10-20, 0b1704c7): missing
+      checkout message, move, clone, second clone refused, the rebuild
+      switching the pointer. The live install moves after its commits
+      are on origin (Q9).
 
 ### Editing on standalone devices
 
@@ -1003,13 +1230,92 @@ profiles show "not signed" but still install, which is what phishing uses.
   (recommended)". Saying no lets the person add their own public key (for
   example an SSH or hardware key) as the only signer instead.
 - **Nothing is locked behind the key.** Login, disk unlock, applying
-  settings in the editor and recovery never need it. Losing it only makes
-  old exports unimportable.
+  settings in the editor and recovery never need it. Losing it only stops
+  export until a new one is made; old exports still import, because the
+  public keys stay.
 - **Reset and recovery.** Removing a user (editor or recovery) deletes
   that user's key and the pairings made for them. A factory reset from
   recovery deletes all keys, pairings and the `systemd-creds` host secret,
   so a copied key file cannot be unsealed later. A new user always starts
   with a fresh key. Leaving JODS removes the organisation key.
+
+How 3.4a does it (`internal/settings/signed.go`,
+`cmd/gjallar-settingsd/keys.go`):
+
+- **File.** Three header lines, `gjallaros-settings-v1`, `key <public
+  key>` and `sig <signature>`, then the JSON. The signature covers every
+  byte but the sig line. Only Ed25519; the format has no algorithm field.
+  The key line only names which trusted key to check with: a key that is
+  not one of this device's users' keys is refused before the signature is
+  looked at. The payload holds schema, device, user, uid, time and the
+  settings: every `user.config.json` key except installer keys.
+- **Host key.** `gjallar-settings-key.service` makes 32 random bytes once
+  and seals them with `systemd-creds encrypt --with-key=auto` into
+  `/etc/credstore.encrypted/gjallar-settings-key`: TPM2 plus the host
+  secret where there is a TPM, no PCR binding, so turning on Secure Boot
+  keeps it. systemd hands it to the service with `LoadCredentialEncrypted=`;
+  the service never touches the TPM. Without it export is off and import
+  still works.
+- **User keys.** Made on the first export. Each user's Ed25519 seed is
+  HKDF-SHA256 of the host key with a random salt and the uid and name.
+  `/var/lib/gjallarOS/settings/keys/<uid>.json` (root, 0600) holds the salt
+  and public key; without the host key it is only a public key. A key
+  stops counting once its uid has another name, so a new account on an old
+  uid starts fresh. When the host key changes (a cleared TPM) the next
+  export makes a new key and keeps the old public key, so earlier files
+  still import.
+- **Device.** The file names the device by HMAC-SHA256 of the machine id
+  over a fixed app id, as `sd_id128_get_app_specific` does, so it never
+  carries the machine id.
+- **Export.** `gjallarctl settings export FILE`. polkit action
+  `org.gjallaros.settings.export` asks for the user's own password
+  (`auth_self`). The service signs what it reads itself from the checkout,
+  never bytes the caller sends, so it cannot be used to sign anything
+  else. The command writes the file as the user, 0600, never over an
+  existing file.
+- **Import.** `gjallarctl settings import FILE`. Size cap, signature over
+  the raw bytes, then the strict parse. The signer's uid and name must be
+  the ones in the file, the device must be this one, and the caller must be
+  the account that made it. The change then goes the way of `settings set`,
+  with a note saying who made the file and how many days ago.
+- **Removed users (3.4b).** Each time the service reads the trusted keys,
+  and once at start, it deletes the record of a uid that has no account
+  or now has another name. Only a clear "no such account" counts: when the
+  lookup itself fails the record stays and is not trusted for that check.
+  A file of a removed user is then refused for good, even when an account
+  of the same name comes back. Recovery has no factory reset yet (modes
+  are repair, reinstall and fresh); one that is added must delete the key
+  records, `/etc/credstore.encrypted/gjallar-settings-key` and the
+  `systemd-creds` host secret.
+
+Security pass (2026-10-19). What went wrong elsewhere, and what this
+design does about it:
+
+- Trusting the algorithm or key a message names:
+  [CVE-2015-9235](https://nvd.nist.gov/vuln/detail/CVE-2015-9235)
+  (jsonwebtoken). Here the algorithm is fixed and the key must already be
+  trusted.
+- Checking one reading of the bytes and acting on another: SAML comment
+  handling, [CVE-2017-11427](https://nvd.nist.gov/vuln/detail/CVE-2017-11427)
+  ([Duo PSA-2017-003](https://duo.com/blog/duo-finds-saml-vulnerabilities-affecting-multiple-implementations),
+  [CERT VU#475445](https://www.kb.cert.org/vuls/id/475445)). Here the
+  signature is checked over the raw bytes, and those same bytes are
+  parsed; nothing is canonicalized.
+- Parsers that disagree on repeated JSON names:
+  [CVE-2017-12635](https://nvd.nist.gov/vuln/detail/CVE-2017-12635)
+  (CouchDB). The parser refuses repeated names, unknown fields, text that
+  is not UTF-8 and anything after the object.
+- Signature checks that accept zero values:
+  [CVE-2022-21449](https://neilmadden.blog/2022/04/19/psychic-signatures-in-java/).
+  Go's `crypto/ed25519` is used as is, and a test checks that an all-zero
+  signature is refused.
+- Rollback: TUF names replaying old signed data as its own attack
+  ([specification](https://theupdateframework.github.io/specification/latest/),
+  [go-tuf CVE-2022-29173](https://nvd.nist.gov/vuln/detail/CVE-2022-29173)).
+  Residual: an old file of the same user on the same device stays valid.
+  It only ever brings back that user's own earlier settings, as a draft
+  with the tier rules and the password, and the note shows its age.
+  Logged on the security review page.
 
 ### Developer mode and the local folder
 
@@ -1025,18 +1331,38 @@ a problem.
   a README. Every `.nix` file there is imported; a name starting with `_`
   is skipped. No git needed, and the official checkout is never touched,
   so pulls never conflict.
-- **Apply.** `gjallarctl system apply` (or the editor button) copies the
-  folder as data into root-owned `/etc/gjallar/local`: `.nix` files and a
-  short list of asset types only, no links, no hidden files, a size cap.
-  It shows the file diff with the security-tier rules, then builds with
-  the flake's `local` input pointed there. With developer mode off, that
-  input is an empty stub in the repository.
-- **Visible everywhere.** Each generation records the folder's hash; the
+- **Apply.** `gjallarctl system apply` (or the editor button) reads the
+  folder as the user and sends it as data to gjallar-settingsd
+  (`RequestLocal`), which copies it into root-owned
+  `/etc/gjallar/developer/local`: `.nix` files and a short list of asset
+  types only, no links, no hidden files, a size cap. Root never reads the
+  home folder. The command shows each file's diff against root's copy
+  (characters that do not print as escapes) and the new folder hash; the
+  change then waits like a security setting, and the password dialog
+  lists the files and the same hash. Apply refuses when developer mode
+  went off or root's copy changed since the request, swaps the folder
+  whole (`RENAME_EXCHANGE` in its own parent, the only part of `/etc` the
+  service may write besides the checkout) and rebuilds. The
+  root rebuild checks `/etc/gjallar/developer/local` again (root-owned, nothing
+  writable by group or others, no links) and stages it as
+  `.gjallar-local/` next to the official source; the flake imports it
+  from there. No extra flake input, so `flake.lock` stays the official
+  one. With developer mode off the folder is not read or staged, and a
+  checkout's own `.gjallar-local/` never is.
+- **Limits** (internal/localchanges): `README.md`, and below `system/`
+  or `home/` files ending in .nix .json .toml .yaml .yml .conf .txt .md
+  .png .jpg .jpeg .svg; letters, digits and `. _ + -` in names, nothing
+  hidden; at most 4 levels, 256 files, 1 MiB per file, 4 MiB in all.
+- **Visible everywhere.** Each generation records the folder's hash
+  (the sha256sum manifest, also in `/etc/gjallar/build-source.json`;
+  the build stops when the staged copy does not match it); the
   boot entry says "local changes"; `gjallarctl system status` lists the
   files. Later: compare the security-relevant options of the official and
   the local build and list what local code changed (firewall, sshd, ...).
 - **Getting out.** If a local module breaks the system, the previous
-  generation boots; recovery offers "Turn off developer mode and rebuild
+  generation boots. Recovery and the other extra boot entries never hold
+  the local modules (they are disabled in every specialisation); recovery
+  offers "Turn off developer mode and rebuild
   the official system". Turning it off keeps `~/GjallarOS-local/`.
 - **Adding an app does not need it.** Extra nixpkgs packages are an
   everyday setting (attribute names checked against the pinned nixpkgs).
@@ -1052,3 +1378,236 @@ new value, ask the password every time and wait; imports only signed, with
 GjallarOS managing the keys by default; Nix code only in developer mode
 with a local folder. Migration on the one existing install: whatever does
 not break the running system. New installs get no `~/Documents` clone.
+
+## 15. Snapshots (draft, to discuss)
+
+Draft written 2026-10-20 for Plane GJALLAROS-198. Nothing is built yet; the
+open choices are questions 18 to 22 on the questionnaire. Jade's frame:
+read-only snapshots, root-only, retention, rollback through recovery, no
+secrets in snapshots.
+
+Today a fresh install puts everything on the top level of one encrypted
+Btrfs (no subvolumes). NixOS generations already roll back the system
+itself: the store is read-only and every rebuild is a boot entry. What no
+generation brings back is mutable state: `/home`, `/var/lib`, `/etc/gjallar`.
+Snapshots are for that.
+
+### How others handle it
+
+- openSUSE keeps `/` on a subvolume and puts paths that must survive a
+  rollback (`/home`, `/opt`, `/srv`, parts of `/var`) on their own
+  subvolumes, because a snapshot never includes a nested subvolume
+  ([openSUSE reference, Snapper](https://doc.opensuse.org/documentation/leap/reference/html/book-reference/cha-snapper.html)).
+  The same guide warns not to place snapshots inside the snapshotted
+  subvolume, or they can no longer be deleted after a rollback.
+- Fedora guides add snapper plus grub-btrfs: booting a snapshot is a
+  read-only preview; making it permanent is a separate step from the
+  running system
+  ([Fedora discussion](https://discussion.fedoraproject.org/t/btrfs-snapshots-in-fedora-the-definitive-step-by-step-easy-and-safe-guide/194483)).
+- The NixOS wiki documents btrbk: root timers create read-only snapshots
+  into a directory on the top-level volume; restore is manual, and local
+  snapshots are no backup when the disk dies
+  ([NixOS wiki, Btrbk](https://wiki.nixos.org/wiki/Btrbk)). Snapper is also
+  packaged as a NixOS module and runs `snapperd` on D-Bus.
+
+### Security pass
+
+- **Old files stay readable.** A snapshot keeps each file with the
+  permissions it had then: a file made private later, or a setuid program
+  that was fixed later, is still there in its old form. The Fedora security
+  list concluded unprivileged users must not reach snapshot contents
+  ([Fedora security list](https://lists.pagure.io/archives/list/security@lists.fedoraproject.org/message/SV63LDF5Y77PGPDFUJ7JMR6WNKSZFD52/));
+  snapper denies traversal of `.snapshots` to non-root by default
+  ([vfs_snapper](https://man.archlinux.org/man/extra/samba/vfs_snapper.8.en)).
+  Design: snapshot directory root-only (0700), never mounted for users,
+  and when mounted at all then `nosuid,nodev,noexec`.
+- **Deleted secrets stay too.** Btrfs never overwrites data in place, so a
+  removed or rotated key lives on in every older snapshot until that
+  snapshot is deleted
+  ([openSUSE forum](https://forums.opensuse.org/t/secure-remove-from-btrfs/152004)).
+  Design: machine secrets (`/var/lib/sbctl`, sealed tokens and keys under
+  `/var/lib/gjallar`) sit on a subvolume that is never snapshotted. Home
+  data cannot be split like that, so a rotation the system performs on a
+  user's behalf says which snapshots still hold the old key and offers to
+  delete them.
+- **Privileged helpers broke in practice.** qSnapper took a config name
+  from the caller without checking it (CVE-2026-41046, path traversal to
+  root) and reused one polkit result for a different, stronger action
+  (CVE-2026-41048, delete permission used for restore). Design: fixed
+  snapshot sets with built-in names, nothing taken from the caller as a
+  path; each action asks polkit on its own, and deleting snapshots or a
+  rollback asks the password every time (§14 rule). Restoring a user's own
+  file resolves the path beneath that user's home inside the snapshot,
+  follows no symlinks, writes as the user under a new name, and never
+  overwrites.
+- **Disk filling.** Snapshots of `/nix` would keep every garbage-collected
+  store path alive. `/nix` gets its own subvolume and is never
+  snapshotted; a free-space floor drops the oldest timeline snapshots
+  first.
+- Snapshots stay inside the LUKS volume, so nothing new is stored in the
+  clear. They are not a backup.
+
+### Proposed design
+
+1. New installs: subvolumes `@` (`/`), `@home`, `@nix`, `@keys` (machine
+   secrets, never snapshotted), `@snapshots` on the top level, mounted at
+   `/.snapshots` root-only.
+2. Snapshots by root timers (btrbk, no D-Bus service), read-only. Sets:
+   `home` hourly, `state` (`/var/lib`, `/etc/gjallar`) before every
+   rebuild and daily.
+3. Users restore their own files through the settings service
+   (`gjallarctl snapshots list`, `gjallarctl snapshots restore PATH`);
+   only their own home, copied next to the original.
+4. A full state rollback runs only from the recovery boot entry, offline,
+   and keeps the replaced state as a snapshot.
+5. Existing installs keep their layout until a decision on migration
+   (question 19).
+
+## 16. VPN: exit node down (draft, to discuss)
+
+Draft written 2026-10-20 for Plane GJALLAROS-190: tell the user when the
+exit node is down and offer a pause that holds only for this network.
+Nothing is built yet; the open choices are questions 23 to 25 on the
+questionnaire.
+
+Today `gjallar-vpn-trust.service` (root) decides on every network change.
+On an untrusted network a named exit node that is offline stays set, so
+Tailscale blocks the internet. The only sign is a `WARN:` line in the
+journal and in `gjallarctl vpn status`; the desktop shows nothing, so the
+user sees a dead network with no reason. With `exitNode = "auto"` and no
+exit node online, the service clears the exit node instead and the
+untrusted network carries the traffic in the clear (loophole 24, below).
+
+### How others handle it
+
+- Mullvad's lockdown mode blocks all traffic outside the tunnel while the
+  app is disconnected, except the app's own connection attempts; the user
+  turns lockdown off in the app to get out
+  ([Mullvad app docs, kill switch](https://mintlify.com/mullvad/mullvadvpn-app/security/kill-switch),
+  [lockdown command](https://www.mintlify.com/mullvad/mullvadvpn-app/cli/commands/lockdown)).
+- Proton VPN's permanent kill switch keeps the device offline unless it is
+  connected to a Proton server, also across manual disconnects and
+  restarts; leaving it means turning it off in settings
+  ([Proton VPN blog](https://protonvpn.com/blog/permanent-kill-switch)).
+- Tailscale documents exit nodes and LAN access
+  (`--exit-node-allow-lan-access`), but no behaviour for an offline exit
+  node; community reports describe exactly our case, internet gone until
+  the node is back
+  ([Tailscale exit nodes](https://tailscale.com/docs/features/exit-nodes),
+  [GL.iNet forum](https://forum.gl-inet.com/t/gl-mt3000-beryl-ax-tailscale-exit-node-breaks-internet-connection/68235)).
+- None of the three offers a pause tied to one network: it is all or
+  nothing, and "off" stays off until the user turns it back on.
+
+### Security pass
+
+- **The network can cause the prompt.** A hostile network can block the
+  tunnel on purpose, so "exit node down" is something an attacker can
+  produce at will. Every pause offer is a chance to train people to click
+  it. TunnelVision (CVE-2024-3661, DHCP option 121) shows the same goal
+  from the other side: get the user off the tunnel. Firewall-style kill
+  switches resist it; a user who switches the kill switch off does not
+  ([Help Net Security](https://www.helpnetsecurity.com/2024/05/08/tunnelvision-cve-2024-3661/),
+  [Zscaler](https://www.zscaler.com/it/blogs/security-research/cve-2024-3661-k-tunnelvision-exposes-vpn-bypass-vulnerability)).
+  So the notice is shown once per network join, never repeats, never
+  counts down, and the pause asks the password every time (ROADMAP §14
+  rule for security changes).
+- **Say which side failed.** When the tailnet still reports the exit node
+  offline, the node is down (the network is not to blame). When this
+  device cannot reach the Tailscale servers at all, the network is
+  blocking the tunnel, and the notice says so in plain words. Both texts
+  say what a pause exposes: traffic on this network goes out without the
+  tunnel.
+- **Bound to this network.** An SSID alone can be cloned. The pause keys
+  on device, SSID, key management, gateway hardware address and subnet.
+  Any change, a disconnect, suspend or reboot ends it. It lives in `/run`
+  only and is never written to the override file or `state.nix`.
+- **Who may pause.** Only the user at the local seat, through the settings
+  service with the password; never over SSH, never from an app. Managed
+  (JODS) devices get a policy switch to forbid it later.
+- **Visible while it lasts.** The bar shows "VPN paused on NETWORK" until
+  it ends; `gjallarctl vpn status` shows the same plus the end time.
+- **Logged.** Start, end, user and the network key go to the journal; no
+  SSID list or address history is kept beyond that.
+- **Loophole 24, auto fails open.** `exitNode = "auto"` with no exit node
+  online clears the exit node, so the untrusted network carries the
+  traffic in the clear. A named node fails closed in the same situation.
+  Proposed fix: `auto` keeps the last exit node set (blocked) and raises
+  the same notice; with no exit node ever chosen the firewall blocks
+  outbound traffic outside the tunnel and the LAN. This changes what users
+  see (no internet instead of plain internet), so it goes with this
+  design (question 25).
+
+### Proposed design
+
+1. `gjallar-vpn-trust` writes a `blocked` reason into
+   `/run/gjallar/vpn-trust.json`: `exit-node-offline` or
+   `tunnel-unreachable`, plus the network key.
+2. A user service watches that file and shows one desktop notice per
+   network join, with a "Pause VPN on this network" action.
+3. The action asks the settings service, which shows old and new value,
+   asks the password and writes `/run/gjallar/vpn-pause.json`.
+4. `gjallarctl vpn apply` honours the pause only while the network key
+   matches and the time limit has not passed (question 24), and clears it
+   otherwise.
+5. `gjallarctl vpn pause` / `gjallarctl vpn resume` for the terminal, with
+   zsh completion; the bar shows the paused state.
+6. Loophole 24 fixed as above, once question 25 is answered.
+
+## 17. Nextcloud: what syncs first on a new machine (draft, to discuss)
+
+Job 173. On a fresh book12 install the client went through about 2100
+Music files before `claude/` (lower case sorts last), and ODDC work waited
+over half an hour. Jade: a new machine syncs only the folders the user
+picks first; everything else is opt-in. Folder names come from the user,
+never from this repository.
+
+### Today
+
+- New accounts start in virtual-files mode (OpenVFS, patch
+  `nextcloud-vfs-default.patch`). Files are placeholders until opened.
+- Upstream turns "Choose what to sync" off when virtual files are on:
+  `Folder::supportsSelectiveSync()` returns false for VFS folders
+  (`src/gui/folder.cpp`). The sync engine still reads the exclude list
+  from the folder's journal database on every run (`SyncEngine::startSync`
+  in `src/libsync/syncengine.cpp`); upstream uses that for end-to-end
+  encrypted folders even with VFS on.
+- The list lives in the journal database (`.sync_*.db` in the sync
+  folder), not in `nextcloud.cfg`. Writing it from outside while the
+  client runs races with the client, so it has to go through the client.
+- Open fact (asked ODDC b12, answer 11.2): was book12 in virtual-files
+  mode during that sync? With placeholders only, half an hour means the
+  first listing is slow, which a folder list fixes the same way.
+
+### How others handle it
+
+- Nextcloud: folder selection only with virtual files off
+  ([forum](https://help.nextcloud.com/t/choose-what-to-sync-not-available/243421)).
+- OneDrive: "Choose folders" and Files On-Demand work together; unticked
+  folders stay in the cloud and per device
+  ([UW guide](https://asais.uw.edu/kb/onedrive-file-status-sync-settings)).
+
+### Security pass
+
+- Folder names are private data. They stay in the user's own config and
+  the client database; no logs with names, no handoff copies.
+- Taking a folder out of sync removes its local copy. A folder with local
+  changes that have not been uploaded must never be taken out silently:
+  the client refuses and says which folder still has changes. (Upstream
+  behaviour here still needs a VM check before the patch.)
+- New top-level folders made on another device follow the opt-in rule:
+  they wait for a yes instead of syncing on their own (question 28).
+- No change to the server side; the list only limits what this device
+  fetches.
+
+### Proposed design
+
+1. Client patch: under OpenVFS, "Choose what to sync" works like without
+   virtual files, using the engine's existing exclude list.
+2. First login on a new machine: right after the account wizard, the
+   folder picker opens with the real server folders, nothing ticked
+   except what the user picks. Sync starts after the pick.
+3. The picked list is saved in the user config so a reinstall or a second
+   machine of the same user can offer it again (question 27).
+4. Later changes go through the same picker; a terminal form
+   `gjallarctl nextcloud folders` with zsh completion is optional
+   (question 27).

@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -83,6 +85,19 @@ func TestTPM2FollowsRequestOnFreshInstalls(t *testing.T) {
 		if got := tpm2FollowsRequest(test.managed, test.persistent); got != test.want {
 			t.Errorf("tpm2FollowsRequest(managed=%t, persistent=%t) = %t, want %t",
 				test.managed, test.persistent, got, test.want)
+		}
+	}
+}
+
+// A rerun on an installed host must hand the Startup unlock answer to the
+// check, not ask again: the old second question defaulted to no and Enter
+// rendered luksTpm2Enable = false (e2e-fw13, 2026-10-20).
+func TestInstalledHostTPM2CheckGetsTheRequest(t *testing.T) {
+	for _, requested := range []bool{true, false} {
+		args := installerTPM2Args("/repo", "/repo/generated/hardware.nix", requested)
+		want := []string{"installer", "tpm2", "--repo", "/repo", "--hardware", "/repo/generated/hardware.nix", "--requested=" + strconv.FormatBool(requested)}
+		if !slices.Equal(args, want) {
+			t.Errorf("installerTPM2Args(requested=%t) = %q, want %q", requested, args, want)
 		}
 	}
 }

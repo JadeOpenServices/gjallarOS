@@ -1,6 +1,6 @@
 --- a/src/openvfsfuse/openvfsfuse.cpp
 +++ b/src/openvfsfuse/openvfsfuse.cpp
-@@ -19,17 +19,20 @@
+@@ -19,16 +19,19 @@
  #include "sharedmap.h"
  #include "socketthread.h"
  
@@ -16,12 +16,11 @@
  #include <grp.h>
  #include <iostream>
  #include <pwd.h>
- #include <sstream>
 +#include <string_view>
  #include <stdarg.h>
  #include <stdio.h>
  #include <unistd.h>
-@@ -96,10 +99,30 @@
+@@ -95,10 +98,30 @@ public:
  
      static auto &instance() { return *_instance; }
  
@@ -55,7 +54,7 @@
      }
  
      bool debugEnabled() const { return _debugEnabled; }
-@@ -180,7 +203,7 @@
+@@ -179,7 +202,7 @@ std::string getcallername(fuse_context *context)
  static SharedMap _jobs;
  static SocketThread _socketThread("SocketThread", _jobs);
  
@@ -64,16 +63,16 @@
  
  
  void openvfsfuse_log(const std::string &path, const char *action, int returncode, const char *format, ...)
-@@ -216,6 +239,8 @@
- 
-     // use the system inodes instead of the libfuse generated
-     cfg->use_ino = 1;
+@@ -218,6 +241,8 @@ static void *openVFSfuse_init(struct fuse_conn_info *, fuse_config *cfg)
+     cfg->attr_timeout = 0;
+     cfg->entry_timeout = 0;
+     cfg->negative_timeout = 0;
 +    // Deliver kernel cancellation to fuse_interrupted() in hydration waits.
 +    cfg->intr = 1;
  
      return nullptr;
  }
-@@ -549,12 +574,13 @@
+@@ -551,12 +576,13 @@ static int openVFSfuse_open(const char *orig_path, struct fuse_file_info *fi)
          openvfsfuse_log(path, "open", res, "Desktop client tries to access, bypassing!");
      } else {
          if (const auto attribs = OpenVFS::PlaceHolderAttributes::fromAttributes(path)) {
@@ -89,7 +88,7 @@
                      openvfsfuse_log(path, "open", 0, "blocked hydration for not permitted app %s", opener.c_str());
                      return -EPERM;
                  }
-@@ -570,28 +596,29 @@
+@@ -572,28 +598,29 @@ static int openVFSfuse_open(const char *orig_path, struct fuse_file_info *fi)
                  openvfsfuse_log(path, "open", 0, "Requesting hydration %s: %d", path.c_str(), msgData->id);
  
                  // push hydration request to the thread that handles the communication to the client
@@ -134,7 +133,7 @@
  
                      // check shared map and see if the id has changed to 0, which means success
                      // the value is changed in the other thread and fetched here
-@@ -623,14 +650,12 @@
+@@ -625,17 +652,15 @@ static int openVFSfuse_open(const char *orig_path, struct fuse_file_info *fi)
                  // remove the job regardless of the result
                  _jobs.remove(msgData->id);
  
@@ -145,17 +144,20 @@
 +                if (state != 0) {
                      // Fail, job with ID was errornous
                      openvfsfuse_log(path, "open", 1, "ERROR while retrieving: %d", state);
--                    return -ENOENT;
--                }
--
--                if (cnt >= MaxCnt) {
--                    openvfsfuse_log(path, "open", MaxCnt, "TIMEOUT - no answer from client");
                      return -ENOENT;
                  }
  
+-                if (cnt >= MaxCnt) {
+-                    openvfsfuse_log(path, "open", MaxCnt, "TIMEOUT - no answer from client");
+-                    return -ENOENT;
+-                }
+-
+                 openvfsfuse_log(path, "open", 0, "-- open finished");
+             }
+         } else {
 --- a/src/openvfsfuse/socketthread.cpp
 +++ b/src/openvfsfuse/socketthread.cpp
-@@ -119,6 +119,18 @@
+@@ -128,6 +128,18 @@ int SocketThread::initSocket(const std::string& socketPath)
          return -1;
      }
  
@@ -174,16 +176,16 @@
      /* send  a welcome message to the SocketAPI */
      std::shared_ptr<MsgData> msgData(new MsgData());
      msgData->msg = "VERSION";
-@@ -234,7 +246,7 @@
-             }
-         } else if (msgType == "VERSION") {
-             vector<string> attribs = StrTools::split(msgAttr, ':');
--            if (attribs.size() == 3) {
-+            if (attribs.size() == 3 && _sharedMap.desktopClientPid() <= 0) {
-                 cout << "Got PID of the Desktop Client: " << attribs.at(2) << endl;
-                 _sharedMap.setDesktopClientPid(std::stol(attribs.at(2)));
-             }
-@@ -390,12 +402,7 @@
+@@ -284,7 +296,7 @@ void SocketThread::handleReceivedMsg(const std::string &msg)
+         }
+     } else if (msgType == "VERSION") {
+         vector<string> attribs = StrTools::split(msgAttr, ':');
+-        if (attribs.size() == 3) {
++        if (attribs.size() == 3 && _sharedMap.desktopClientPid() <= 0) {
+             cout << "Got PID of the Desktop Client: " << attribs.at(2) << endl;
+             _sharedMap.setDesktopClientPid(std::stol(attribs.at(2)));
+         }
+@@ -439,12 +451,7 @@ void SocketThread::Process()
  
              if (!socketSendMsg(msgData)) {
                  cout << "Failed to send msg " << msgData->id << ": " << msgData->msg.c_str() << endl;

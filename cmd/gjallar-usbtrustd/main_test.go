@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestParseConfigAllowsUnenrolledWithoutTPMHandle(
@@ -17,7 +18,7 @@ func TestParseConfigAllowsUnenrolledWithoutTPMHandle(
 		[]string{
 			"--socket", filepath.Join(root, "control.sock"),
 			"--owner-uid", "1000",
-			"--oddc-root", root,
+			"--oddc-resolved", filepath.Join(root, "resolved.json"),
 			"--oddc-model", "model/synthetic",
 			"--state-dir", filepath.Join(root, "state"),
 		},
@@ -48,7 +49,7 @@ func TestParseConfigRequiresOwnerUID(t *testing.T) {
 	_, err := parseConfig(
 		[]string{
 			"--socket", filepath.Join(root, "control.sock"),
-			"--oddc-root", root,
+			"--oddc-resolved", filepath.Join(root, "resolved.json"),
 			"--oddc-model", "model/synthetic",
 			"--state-dir", filepath.Join(root, "state"),
 		},
@@ -67,7 +68,7 @@ func TestParseConfigRejectsRelativeSecurityPaths(
 		[]string{
 			"--socket", "control.sock",
 			"--owner-uid", "1000",
-			"--oddc-root", "oddc",
+			"--oddc-resolved", "resolved.json",
 			"--oddc-model", "model/synthetic",
 			"--state-dir", "state",
 		},
@@ -83,7 +84,7 @@ func TestBuildReaderRejectsInvalidTPMHandle(
 	t *testing.T,
 ) {
 	_, err := buildReader(config{
-		oddcRoot:       "/synthetic/oddc",
+		resolvedFile:   "/synthetic/resolved.json",
 		oddcModel:      "model/synthetic",
 		stateDir:       "/synthetic/state",
 		tpmHandle:      "not-a-handle",
@@ -104,7 +105,7 @@ func TestUnenrolledTrustSourceNeedsNoTPMHandle(
 	)
 
 	reader, err := buildReader(config{
-		oddcRoot:       "/synthetic/oddc",
+		resolvedFile:   "/synthetic/resolved.json",
 		oddcModel:      "model/synthetic",
 		stateDir:       stateDir,
 		usbguardBinary: "usbguard",
@@ -153,7 +154,7 @@ func TestExistingStateWithoutTPMHandleFailsClosed(
 	}
 
 	reader, err := buildReader(config{
-		oddcRoot:       "/synthetic/oddc",
+		resolvedFile:   "/synthetic/resolved.json",
 		oddcModel:      "model/synthetic",
 		stateDir:       stateDir,
 		usbguardBinary: "usbguard",
@@ -168,5 +169,27 @@ func TestExistingStateWithoutTPMHandleFailsClosed(
 		t.Fatal(
 			"existing signed state accepted without TPM signer",
 		)
+	}
+}
+
+func TestParseConfigLapseDays(t *testing.T) {
+	root := t.TempDir()
+	args := []string{
+		"--socket", filepath.Join(root, "control.sock"),
+		"--owner-uid", "1000",
+		"--oddc-resolved", filepath.Join(root, "resolved.json"),
+		"--oddc-model", "model/synthetic",
+		"--state-dir", filepath.Join(root, "state"),
+	}
+	cfg, err := parseConfig(append(args, "--lapse-days", "30"), &bytes.Buffer{})
+	if err != nil || cfg.lapseDays != 30 {
+		t.Fatalf("lapse days: %d %v", cfg.lapseDays, err)
+	}
+	reader, err := buildReader(cfg)
+	if err != nil || reader.LapseAfter != 30*24*time.Hour {
+		t.Fatalf("reader lapse: %v %v", reader.LapseAfter, err)
+	}
+	if _, err := parseConfig(append(args, "--lapse-days", "-1"), &bytes.Buffer{}); err == nil {
+		t.Fatal("negative lapse accepted")
 	}
 }

@@ -3,6 +3,7 @@ package flakesource
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -25,6 +26,7 @@ func TestStageKeepsFlakeInputsAndDropsHistoryAndScratch(t *testing.T) {
 	write(t, filepath.Join(repo, "pkgs", "monique", ".git"), "gitdir: ../../.git/modules/monique", 0o644)
 	write(t, filepath.Join(repo, "pkgs", "monique", "default.nix"), "{}", 0o644)
 	write(t, filepath.Join(repo, ".vm", "disk.qcow2"), "vm", 0o644)
+	write(t, filepath.Join(repo, LocalName, "system", "a.nix"), "{}", 0o644)   // only root's copy is staged
 	write(t, filepath.Join(repo, "system", "result", "keep.nix"), "{}", 0o644) // nested "result" is source
 	if err := os.Symlink("/nix/store/x-system", filepath.Join(repo, "result")); err != nil {
 		t.Fatal(err)
@@ -44,7 +46,7 @@ func TestStageKeepsFlakeInputsAndDropsHistoryAndScratch(t *testing.T) {
 			t.Errorf("missing %s: %v", keep, err)
 		}
 	}
-	for _, drop := range []string{".git", "pkgs/monique/.git", ".vm", "result"} {
+	for _, drop := range []string{".git", "pkgs/monique/.git", ".vm", "result", LocalName} {
 		if _, err := os.Lstat(filepath.Join(src.Dir, drop)); !os.IsNotExist(err) {
 			t.Errorf("%s was staged: %v", drop, err)
 		}
@@ -93,5 +95,21 @@ func TestStageCreatesFreshBuildContextWithoutFollowingCheckoutSymlink(t *testing
 	}
 	if data, _ := os.ReadFile(outside); string(data) != "original" {
 		t.Fatal("staging followed the checkout marker symlink")
+	}
+}
+
+func TestStageSourceRecordsFacts(t *testing.T) {
+	repo := t.TempDir()
+	write(t, filepath.Join(repo, "flake.nix"), "{}", 0o644)
+	rev := strings.Repeat("a", 40)
+	source, err := StageSource(repo, t.TempDir(), &BuildSource{Revision: rev + "-dirty", ODDC: rev, ODDCPinned: rev})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer source.Close()
+	data, err := os.ReadFile(filepath.Join(source.Dir, BuildContextName))
+	want := `{"schemaVersion":1,"entrypoint":"gjallarctl","source":{"revision":"` + rev + `-dirty","oddc":"` + rev + `","oddcPinned":"` + rev + `"}}` + "\n"
+	if err != nil || string(data) != want {
+		t.Fatalf("build context %q, %v", data, err)
 	}
 }

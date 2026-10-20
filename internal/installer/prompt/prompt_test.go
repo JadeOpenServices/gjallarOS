@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -351,5 +352,27 @@ func TestTerminalChecklist(t *testing.T) {
 		if err != nil || strings.Join(got, ",") != want {
 			t.Errorf("%q: got %v, %v; want %q", input, got, err, want)
 		}
+	}
+}
+
+func TestSudoRunAsksInTerminal(t *testing.T) {
+	bin := t.TempDir()
+	if err := os.WriteFile(filepath.Join(bin, "zenity"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin)
+	t.Setenv("WAYLAND_DISPLAY", "wayland-1")
+	t.Setenv("SSH_CONNECTION", "")
+	original := geteuid
+	t.Cleanup(func() { geteuid = original })
+	geteuid = func() int { return 0 }
+
+	t.Setenv("SUDO_USER", "tester")
+	if gtkAvailable() {
+		t.Fatal("root run through sudo would open zenity on the user's session")
+	}
+	t.Setenv("SUDO_USER", "")
+	if !gtkAvailable() {
+		t.Fatal("root desktop session lost GTK dialogs")
 	}
 }

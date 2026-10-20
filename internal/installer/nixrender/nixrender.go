@@ -4,6 +4,7 @@ package nixrender
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"maps"
 	"os"
@@ -110,9 +111,10 @@ type Settings struct {
 	ClamshellEnable, USBGuardEnable, USBTrustEnforce, PrintingEnable, NetworkPrintingEnable bool
 	ConsoleLoginEnable, USBReviewTechnical, DolphinDriveUsage, FirmwareFlashReadEntry       bool
 	USBTrustTPMHandle                                                                       string
+	USBTrustLapseDays                                                                       int
 	Name, Email, GitHubUsername, DotfilesDir                                                string
 	RootPasswordFile, UserPasswordFile                                                      string
-	DebugFunctions                                                                          bool
+	DebugFunctions, DeveloperMode                                                           bool
 	Shell                                                                                   string
 	Editors, Browsers                                                                       []string
 	PreferredEditor, PreferredBrowser                                                       string
@@ -164,6 +166,7 @@ func FromUser(user config.User) Settings {
 		USBGuardEnable:                      user.USBGuardEnable,
 		USBTrustEnforce:                     user.USBTrustEnforce,
 		USBTrustTPMHandle:                   user.USBTrustTPMHandle,
+		USBTrustLapseDays:                   user.USBTrustLapseDays,
 		USBReviewTechnical:                  user.USBReviewTechnical,
 		PrintingEnable:                      user.PrintingEnable,
 		NetworkPrintingEnable:               user.NetworkPrintingEnable,
@@ -174,6 +177,7 @@ func FromUser(user config.User) Settings {
 		GitHubUsername:                      user.GitHubUsername,
 		DotfilesDir:                         user.DotfilesDir,
 		DebugFunctions:                      user.DebugFunctions,
+		DeveloperMode:                       user.DeveloperMode,
 		Shell:                               user.Shell,
 		Editors:                             user.Editors,
 		Browsers:                            user.Browsers,
@@ -254,6 +258,7 @@ var userIntentKeys = []string{
 	"usbguardEnable",
 	"usbTrustEnforce",
 	"usbTrustTpmHandle",
+	"usbTrustLapseDays",
 	"usbReviewTechnicalView",
 	"printingEnable",
 	"networkPrintingEnable",
@@ -264,6 +269,7 @@ var userIntentKeys = []string{
 	"githubUsername",
 	"dotfilesDir",
 	"debugFunctions",
+	"developerMode",
 	"shell",
 	"editors",
 	"browsers",
@@ -373,11 +379,16 @@ func SyncUserIntent(path string, user config.User) error {
 		return nil
 	}
 
+	return writeState(path, updated)
+}
+
+// writeState replaces a generated state file atomically, keeping its mode.
+func writeState(path, updated string) error {
 	info, err := os.Stat(path)
 	if err != nil {
 		return fmt.Errorf("stat %s: %w", path, err)
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".state-user-intent-*")
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".state-sync-*")
 	if err != nil {
 		return fmt.Errorf("create temporary generated state: %w", err)
 	}
@@ -403,6 +414,103 @@ func SyncUserIntent(path string, user config.User) error {
 		return fmt.Errorf("replace %s: %w", path, err)
 	}
 	return nil
+}
+
+// aiProfileKeys are the local AI fields picked for this machine's hardware,
+// by the installer or by a rebuild that turns local AI on.
+var aiProfileKeys = []string{"aiModel", "aiAccelerationProfile", "aiContextTokens", "aiVramMB"}
+
+// AIModel returns the aiModel of a generated state file.
+func AIModel(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("read %s: %w", path, err)
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		value, ok := strings.CutPrefix(strings.TrimSpace(line), "aiModel = ")
+		if !ok {
+			continue
+		}
+		value, ok = strings.CutSuffix(value, ";")
+		if model, err := unquote(value); ok && err == nil {
+			return model, nil
+		}
+		return "", fmt.Errorf("%s: aiModel is not a string", path)
+	}
+	return "", fmt.Errorf("%s has no aiModel", path)
+}
+
+// unquote reads a string String wrote.
+func unquote(quoted string) (string, error) {
+	if len(quoted) < 2 || quoted[0] != '"' || quoted[len(quoted)-1] != '"' {
+		return "", errors.New("not a quoted string")
+	}
+	inner := quoted[1 : len(quoted)-1]
+	var b strings.Builder
+	for i := 0; i < len(inner); i++ {
+		c := inner[i]
+		if c == '"' {
+			return "", errors.New("unescaped quote")
+		}
+		if c != '\\' {
+			b.WriteByte(c)
+			continue
+		}
+		if i++; i == len(inner) {
+			return "", errors.New("trailing backslash")
+		}
+		switch inner[i] {
+		case '\\', '"', '$':
+			b.WriteByte(inner[i])
+		case 'n':
+			b.WriteByte('\n')
+		case 'r':
+			b.WriteByte('\r')
+		default:
+			return "", fmt.Errorf("unknown escape \\%c", inner[i])
+		}
+	}
+	return b.String(), nil
+}
+
+// SyncAIProfile replaces the local AI fields of a generated state file with
+// those of s. Every other line stays byte-for-byte as it was.
+func SyncAIProfile(path string, s Settings) error {
+	desired := make(map[string]string, len(aiProfileKeys))
+	for _, line := range strings.Split(string(Render(s)), "\n") {
+		for _, key := range aiProfileKeys {
+			if strings.HasPrefix(strings.TrimSpace(line), key+" = ") {
+				desired[key] = line
+			}
+		}
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("read %s: %w", path, err)
+	}
+	lines := strings.Split(string(data), "\n")
+	seen := make(map[string]bool, len(aiProfileKeys))
+	for i, line := range lines {
+		for _, key := range aiProfileKeys {
+			if !strings.HasPrefix(strings.TrimSpace(line), key+" = ") {
+				continue
+			}
+			if seen[key] {
+				return fmt.Errorf("sync %s: duplicate generated assignment", key)
+			}
+			lines[i], seen[key] = desired[key], true
+		}
+	}
+	for _, key := range aiProfileKeys {
+		if !seen[key] {
+			return fmt.Errorf("%s has no %s", path, key)
+		}
+	}
+	updated := strings.Join(lines, "\n")
+	if updated == string(data) {
+		return nil
+	}
+	return writeState(path, updated)
 }
 
 func Render(s Settings) []byte {
@@ -432,6 +540,7 @@ func Render(s Settings) []byte {
 	boolean("usbguardEnable", s.USBGuardEnable)
 	boolean("usbTrustEnforce", s.USBTrustEnforce)
 	str("usbTrustTpmHandle", s.USBTrustTPMHandle)
+	integer("usbTrustLapseDays", s.USBTrustLapseDays)
 	boolean("usbReviewTechnicalView", s.USBReviewTechnical)
 	boolean("printingEnable", s.PrintingEnable)
 	boolean("networkPrintingEnable", s.NetworkPrintingEnable)
@@ -444,6 +553,7 @@ func Render(s Settings) []byte {
 	str("rootPasswordFile", s.RootPasswordFile)
 	str("userPasswordFile", s.UserPasswordFile)
 	boolean("debugFunctions", s.DebugFunctions)
+	boolean("developerMode", s.DeveloperMode)
 	str("shell", s.Shell)
 	list("editors", s.Editors)
 	list("browsers", s.Browsers)

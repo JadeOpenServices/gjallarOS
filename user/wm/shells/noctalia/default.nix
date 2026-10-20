@@ -20,6 +20,10 @@ let
   hasTouchKeyboard = settings.touchscreenEnable or false;
   # The shield until disk protection is set up (system/security/disk-unlock.nix).
   hasEncryptedDisk = lib.attrByPath [ "boot" "initrd" "luks" "devices" ] { } osConfig != { };
+  # The notice that stays while developer mode is on (ROADMAP section 14).
+  # Turning it on or off rebuilds, so the build knows.
+  hasDeveloperMode = settings.developerMode or false;
+  gjallarctlPackage = pkgs.callPackage ../../../../pkgs/gjallarctl { };
 
   palette = {
     dark = {
@@ -127,7 +131,8 @@ in
         plugins.enabled =
           lib.optional hasQuickKeys "gjallar/quick-keys"
           ++ lib.optional hasTouchKeyboard "gjallar/osk"
-          ++ lib.optional hasEncryptedDisk "gjallar/disk-protection";
+          ++ lib.optional hasEncryptedDisk "gjallar/disk-protection"
+          ++ lib.optional hasDeveloperMode "gjallar/developer-mode";
         shell = {
           clipboard_enabled = false;
           corner_radius_scale = 2.0;
@@ -290,6 +295,11 @@ in
             scale = 0.98;
           };
 
+          developer_mode = {
+            type = "gjallar/developer-mode:status";
+            scale = 0.98;
+          };
+
           quick_keys = {
             type = "gjallar/quick-keys:preset";
             scale = 0.98;
@@ -372,6 +382,7 @@ in
             "tray"
             "network"
           ]
+          ++ lib.optional hasDeveloperMode "developer_mode"
           ++ lib.optional hasEncryptedDisk "disk_protection"
           ++ lib.optional hasQuickKeys "quick_keys"
           ++ lib.optional hasTouchKeyboard "touch_keyboard"
@@ -411,6 +422,35 @@ in
   };
   xdg.dataFile."noctalia/plugins/gjallar-disk-protection" = lib.mkIf hasEncryptedDisk {
     source = ./plugins/disk-protection;
+  };
+  xdg.dataFile."noctalia/plugins/gjallar-developer-mode" = lib.mkIf hasDeveloperMode {
+    source = ./plugins/developer-mode;
+  };
+  # Noctalia loads plugin scripts once at start; a changed plugin restarts
+  # the bar like a changed config.toml does.
+  systemd.user.services.noctalia.Unit.X-Restart-Triggers =
+    lib.optional hasQuickKeys "${./plugins/quick-keys}"
+    ++ lib.optional hasTouchKeyboard "${./plugins/osk}"
+    ++ lib.optional hasEncryptedDisk "${./plugins/disk-protection}"
+    ++ lib.optional hasDeveloperMode "${./plugins/developer-mode}";
+
+  # The developer-mode notice's click: the status in a terminal, readable
+  # until Enter.
+  systemd.user.services.developer-mode-status = lib.mkIf hasDeveloperMode {
+    Unit.Description = "Developer mode status";
+    Service = {
+      Type = "exec";
+      ExecStart = lib.escapeShellArgs [
+        "${pkgs.ghostty}/bin/ghostty"
+        "--title=GjallarOS developer mode"
+        "-e"
+        (pkgs.writeShellScript "developer-mode-status" ''
+          ${gjallarctlPackage}/bin/gjallarctl system status
+          printf '\nPress Enter to close. '
+          read -r _
+        '')
+      ];
+    };
   };
 
   xdg.configFile."noctalia/templates/hyprland.conf".text = ''

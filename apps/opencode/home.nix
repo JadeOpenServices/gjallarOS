@@ -193,51 +193,8 @@ printf '\r\033[2K🔐  gjallarCode · Authentication\n'
           "$unit" ||
       die "failed to start controlled AI system session"
 
-    ready=false
-
-    for i in $(${pkgs.coreutils}/bin/seq 1 1800); do
-      if [ -S "$socket" ]; then
-        ready=true
-        break
-      fi
-
-      state="$(
-        systemctl show \
-          "$unit" \
-          --property=ActiveState \
-          --value \
-          2>/dev/null ||
-          true
-      )"
-
-      case "$state" in
-        failed|inactive)
-          systemctl status \
-            "$unit" \
-            --no-pager \
-            >&2 ||
-            true
-
-          die \
-            "controlled AI session exited before console startup"
-          ;;
-      esac
-
-      case $((i % 4)) in
-        0) frame="◐" ;;
-        1) frame="◓" ;;
-        2) frame="◑" ;;
-        3) frame="◒" ;;
-      esac
-
-      printf \
-        '\r\033[2K%s  gjallarCode · Starting local AI…' \
-        "$frame"
-
-      ${pkgs.coreutils}/bin/sleep 0.1
-    done
-
-    if [ "$ready" != true ]; then
+    # ai-session@ is Type=notify: the start above returns once tmux runs.
+    if [ ! -S "$socket" ]; then
       systemctl status \
         "$unit" \
         --no-pager \

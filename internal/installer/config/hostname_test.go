@@ -29,3 +29,26 @@ func TestValidateHostname(t *testing.T) {
 		}
 	}
 }
+
+func TestValidateReleaseChannel(t *testing.T) {
+	user, err := Defaults()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, channel := range []string{"", "dev", "staging", "stable"} {
+		user.ReleaseChannel = channel
+		if err := Validate(user); err != nil {
+			t.Fatalf("channel %q rejected: %v", channel, err)
+		}
+	}
+	for _, channel := range []string{"main", "Stable", "stable ", "../dev"} {
+		user.ReleaseChannel = channel
+		if err := Validate(user); err == nil {
+			t.Fatalf("channel %q accepted", channel)
+		}
+	}
+	user.ReleaseChannel = ""
+	if user.Channel() != "stable" {
+		t.Fatalf("default channel = %q", user.Channel())
+	}
+}
