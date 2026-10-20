@@ -22,6 +22,13 @@
 # was pasted until a plain Ctrl+V had put v in Hyprland's keycode cache.
 # The patch looks keys up in the state that only tracks the layout. Open
 # upstream as of 2026-10-13.
+#
+# A new floating window that asked for a spot (a file dialog centred on its
+# parent) only had to have its middle on screen, so a dialog over a window on
+# the right half ran past the screen edge and hid its Select button. Hyprland
+# main (PR #15492, not in 0.56.x) centres new floating windows on the screen
+# and keeps them fully on it (misc:new_float_force_onscreen = 2). Drop this
+# when nixpkgs ships a release with it.
 final: prev:
 
 let
@@ -30,13 +37,14 @@ in
 {
   hyprland =
     assert lib.assertMsg (prev.hyprland.version == "0.55.4")
-      "GjallarOS hyprland overlay patches 0.55.4; drop pkgs/patches/hyprland-stale-cursor.patch if ${prev.hyprland.version} has Hyprland PR #15376, pkgs/patches/hyprland-permission-client-destroy.patch if it has PR #16353, pkgs/patches/hyprland-axis-relative-direction.patch if onMouseWheel passes e.relativeDirection, and pkgs/patches/hyprland-sendshortcut-unshifted.patch if sendshortcut no longer reads KB->m_xkbState.";
+      "GjallarOS hyprland overlay patches 0.55.4; drop pkgs/patches/hyprland-stale-cursor.patch if ${prev.hyprland.version} has Hyprland PR #15376, pkgs/patches/hyprland-permission-client-destroy.patch if it has PR #16353, pkgs/patches/hyprland-axis-relative-direction.patch if onMouseWheel passes e.relativeDirection, pkgs/patches/hyprland-sendshortcut-unshifted.patch if sendshortcut no longer reads KB->m_xkbState, and pkgs/patches/hyprland-float-onscreen.patch if it has misc:new_float_force_onscreen.";
     prev.hyprland.overrideAttrs (old: {
       patches = (old.patches or [ ]) ++ [
         ../patches/hyprland-stale-cursor.patch
         ../patches/hyprland-permission-client-destroy.patch
         ../patches/hyprland-axis-relative-direction.patch
         ../patches/hyprland-sendshortcut-unshifted.patch
+        ../patches/hyprland-float-onscreen.patch
       ];
     });
 }
