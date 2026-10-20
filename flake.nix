@@ -129,6 +129,9 @@
         "nextcloud-client-openvfs" = (import ./apps/nextcloud/package.nix { inherit pkgs; }).client;
         openvfs = (import ./apps/nextcloud/package.nix { inherit pkgs; }).openvfs;
         "gjallar-opencode" = import ./apps/ai/opencode.nix { inherit pkgs; };
+        "systemd-partition-reread" = import ./system/fixes/systemd-partition-reread/package.nix {
+          inherit pkgs;
+        };
         inherit (pkgs.qt6Packages) qt6ct;
         inherit (pkgs.kdePackages) dolphin;
         inherit (pkgs)
@@ -152,6 +155,7 @@
           nextcloud-client-openvfs
           openvfs
           gjallar-opencode
+          systemd-partition-reread
           qt6ct
           _nemu
           _wine
