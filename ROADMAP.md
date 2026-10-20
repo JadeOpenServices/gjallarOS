@@ -1453,3 +1453,93 @@ Snapshots are for that.
    and keeps the replaced state as a snapshot.
 5. Existing installs keep their layout until a decision on migration
    (question 19).
+
+## 16. VPN: exit node down (draft, to discuss)
+
+Draft written 2026-10-20 for Plane GJALLAROS-190: tell the user when the
+exit node is down and offer a pause that holds only for this network.
+Nothing is built yet; the open choices are questions 23 to 25 on the
+questionnaire.
+
+Today `gjallar-vpn-trust.service` (root) decides on every network change.
+On an untrusted network a named exit node that is offline stays set, so
+Tailscale blocks the internet. The only sign is a `WARN:` line in the
+journal and in `gjallarctl vpn status`; the desktop shows nothing, so the
+user sees a dead network with no reason. With `exitNode = "auto"` and no
+exit node online, the service clears the exit node instead and the
+untrusted network carries the traffic in the clear (loophole 24, below).
+
+### How others handle it
+
+- Mullvad's lockdown mode blocks all traffic outside the tunnel while the
+  app is disconnected, except the app's own connection attempts; the user
+  turns lockdown off in the app to get out
+  ([Mullvad app docs, kill switch](https://mintlify.com/mullvad/mullvadvpn-app/security/kill-switch),
+  [lockdown command](https://www.mintlify.com/mullvad/mullvadvpn-app/cli/commands/lockdown)).
+- Proton VPN's permanent kill switch keeps the device offline unless it is
+  connected to a Proton server, also across manual disconnects and
+  restarts; leaving it means turning it off in settings
+  ([Proton VPN blog](https://protonvpn.com/blog/permanent-kill-switch)).
+- Tailscale documents exit nodes and LAN access
+  (`--exit-node-allow-lan-access`), but no behaviour for an offline exit
+  node; community reports describe exactly our case, internet gone until
+  the node is back
+  ([Tailscale exit nodes](https://tailscale.com/docs/features/exit-nodes),
+  [GL.iNet forum](https://forum.gl-inet.com/t/gl-mt3000-beryl-ax-tailscale-exit-node-breaks-internet-connection/68235)).
+- None of the three offers a pause tied to one network: it is all or
+  nothing, and "off" stays off until the user turns it back on.
+
+### Security pass
+
+- **The network can cause the prompt.** A hostile network can block the
+  tunnel on purpose, so "exit node down" is something an attacker can
+  produce at will. Every pause offer is a chance to train people to click
+  it. TunnelVision (CVE-2024-3661, DHCP option 121) shows the same goal
+  from the other side: get the user off the tunnel. Firewall-style kill
+  switches resist it; a user who switches the kill switch off does not
+  ([Help Net Security](https://www.helpnetsecurity.com/2024/05/08/tunnelvision-cve-2024-3661/),
+  [Zscaler](https://www.zscaler.com/it/blogs/security-research/cve-2024-3661-k-tunnelvision-exposes-vpn-bypass-vulnerability)).
+  So the notice is shown once per network join, never repeats, never
+  counts down, and the pause asks the password every time (ROADMAP §14
+  rule for security changes).
+- **Say which side failed.** When the tailnet still reports the exit node
+  offline, the node is down (the network is not to blame). When this
+  device cannot reach the Tailscale servers at all, the network is
+  blocking the tunnel, and the notice says so in plain words. Both texts
+  say what a pause exposes: traffic on this network goes out without the
+  tunnel.
+- **Bound to this network.** An SSID alone can be cloned. The pause keys
+  on device, SSID, key management, gateway hardware address and subnet.
+  Any change, a disconnect, suspend or reboot ends it. It lives in `/run`
+  only and is never written to the override file or `state.nix`.
+- **Who may pause.** Only the user at the local seat, through the settings
+  service with the password; never over SSH, never from an app. Managed
+  (JODS) devices get a policy switch to forbid it later.
+- **Visible while it lasts.** The bar shows "VPN paused on NETWORK" until
+  it ends; `gjallarctl vpn status` shows the same plus the end time.
+- **Logged.** Start, end, user and the network key go to the journal; no
+  SSID list or address history is kept beyond that.
+- **Loophole 24, auto fails open.** `exitNode = "auto"` with no exit node
+  online clears the exit node, so the untrusted network carries the
+  traffic in the clear. A named node fails closed in the same situation.
+  Proposed fix: `auto` keeps the last exit node set (blocked) and raises
+  the same notice; with no exit node ever chosen the firewall blocks
+  outbound traffic outside the tunnel and the LAN. This changes what users
+  see (no internet instead of plain internet), so it goes with this
+  design (question 25).
+
+### Proposed design
+
+1. `gjallar-vpn-trust` writes a `blocked` reason into
+   `/run/gjallar/vpn-trust.json`: `exit-node-offline` or
+   `tunnel-unreachable`, plus the network key.
+2. A user service watches that file and shows one desktop notice per
+   network join, with a "Pause VPN on this network" action.
+3. The action asks the settings service, which shows old and new value,
+   asks the password and writes `/run/gjallar/vpn-pause.json`.
+4. `gjallarctl vpn apply` honours the pause only while the network key
+   matches and the time limit has not passed (question 24), and clears it
+   otherwise.
+5. `gjallarctl vpn pause` / `gjallarctl vpn resume` for the terminal, with
+   zsh completion; the bar shows the paused state.
+6. Loophole 24 fixed as above, once question 25 is answered.
