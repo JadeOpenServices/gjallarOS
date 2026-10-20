@@ -8,7 +8,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"regexp"
 	"slices"
 	"strings"
 
@@ -19,8 +18,6 @@ import (
 // officialOrigin is what a new install clones; tests point it at a local
 // repository.
 var officialOrigin = systemcheckout.Origins[0]
-
-var commitPattern = regexp.MustCompile(`^[0-9a-f]{40}$`)
 
 // machineLocal are the checkout entries the installer writes for this
 // machine. git does not track them; they are copied into the clone.
@@ -41,54 +38,18 @@ func cloneSystemCheckout(
 	revision string,
 	out io.Writer,
 ) error {
-	revision = strings.TrimPrefix(revision, "git:")
-	if !commitPattern.MatchString(revision) {
-		return fmt.Errorf(
-			"this installer was built from %q, which is not a commit of the official repository; "+
-				"build the installer from a pushed commit without local changes",
-			revision,
-		)
-	}
 	dest := filepath.Join(targetRoot, systemcheckout.Path)
+	branch, err := systemcheckout.Clone(ctx, systemcheckout.Runner(privilegedCommand), officialOrigin, dest, revision)
+	if err != nil {
+		return fmt.Errorf("the installer cannot set up %s: %w", systemcheckout.Path, err)
+	}
+	revision, _ = systemcheckout.Commit(revision)
 	git := func(args ...string) ([]byte, error) {
 		return privilegedCommand(ctx, append([]string{"env", "GIT_TERMINAL_PROMPT=0", "git", "-C", dest}, args...)...)
-	}
-
-	if _, err := privilegedCommand(ctx, "mkdir", "-p", "-m", "0755", "--", filepath.Dir(dest)); err != nil {
-		return fmt.Errorf("create %s: %w", filepath.Dir(systemcheckout.Path), err)
-	}
-	// git clone refuses a directory that is not empty, so nothing is ever
-	// merged into an old checkout.
-	if _, err := privilegedCommand(ctx,
-		"env", "GIT_TERMINAL_PROMPT=0", "git", "clone", "--quiet", "--no-checkout", "--", officialOrigin, dest,
-	); err != nil {
-		return fmt.Errorf("clone %s into %s: %w", officialOrigin, systemcheckout.Path, err)
 	}
 	fail := func(err error) error {
 		_, _ = privilegedCommand(context.WithoutCancel(ctx), "rm", "-rf", "--", dest)
 		return err
-	}
-
-	head, err := git("symbolic-ref", "--short", "refs/remotes/origin/HEAD")
-	if err != nil {
-		return fail(fmt.Errorf("read the default branch of %s: %w", officialOrigin, err))
-	}
-	upstream := strings.TrimSpace(string(head))
-	branch := strings.TrimPrefix(upstream, "origin/")
-	if _, err := git("merge-base", "--is-ancestor", revision, upstream); err != nil {
-		return fail(fmt.Errorf(
-			"%s is not on %s of %s; build the installer from a pushed commit: %w",
-			revision, branch, officialOrigin, err,
-		))
-	}
-	for _, step := range [][]string{
-		{"checkout", "--quiet", "--no-track", "-B", branch, revision},
-		{"branch", "--quiet", "--set-upstream-to=" + upstream, branch},
-		{"-c", "protocol.file.allow=never", "submodule", "update", "--quiet", "--init", "--recursive"},
-	} {
-		if _, err := git(step...); err != nil {
-			return fail(fmt.Errorf("check out %s in %s: %w", revision, systemcheckout.Path, err))
-		}
 	}
 	if err := compareCheckout(repo, dest, git); err != nil {
 		return fail(err)
