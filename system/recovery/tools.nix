@@ -49,6 +49,7 @@ let
           '  gjallar-recover rollback ROOT GENERATION' \
           '  gjallar-recover repair-boot ROOT' \
           '  gjallar-recover rebuild ROOT FLAKE#HOST' \
+          '  gjallar-recover developer-off' \
           '  gjallar-recover jods {repair|reinstall|fresh}' \
           '  gjallar-recover install'
       }
@@ -294,6 +295,31 @@ let
           host="''${flake##*#}"
           nixos-enter --root "$root" -- /run/current-system/sw/bin/gjallarctl \
             installer deploy --repo "$repo" --hostname "$host" --apply
+          ;;
+        developer-off)
+          # The way back when local modules broke the system (ROADMAP
+          # section 14). This entry never holds them, so its settings
+          # service and rebuild are the official ones.
+          require_root
+          [ -e /etc/gjallar/recovery ] || {
+            printf '%s\n' \
+              'ERROR: run this in the trusted recovery boot entry.' \
+              'In the running system: gjallarctl settings set developerMode=false' >&2
+            exit 1
+          }
+          printf '%s\n' \
+            'This turns developer mode off and builds the official system for the next boot.' \
+            'Your ~/GjallarOS-local folder is kept.'
+          confirm_phrase DEVELOPER-OFF
+          if [ "$(gjallarctl settings get developerMode)" = true ]; then
+            gjallarctl settings set developerMode=false
+          else
+            # Off already, but the last rebuild may have failed and left the
+            # local build as the next boot.
+            printf '%s\n' 'Developer mode is already off; rebuilding the official system.'
+            /run/current-system/sw/bin/gjallar-system-rebuild
+          fi
+          printf '%s\n' 'PASS: the official system starts with the next boot. Restart with: systemctl reboot'
           ;;
         jods-execute)
           require_root

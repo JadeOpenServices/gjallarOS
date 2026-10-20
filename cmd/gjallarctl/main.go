@@ -2168,6 +2168,11 @@ func rebuildCheckout(repo string, opts rebuildOptions, system bool, stdout, stde
 		}
 	}
 	plan := newRebuildPlan(source.Dir, host, colors, debug, rebuildArgs)
+	if inRecoveryEntry() {
+		// The generation running now stays until the new one has booted.
+		cleanup = false
+		fmt.Fprintln(stdout, "[GjallarOS] Recovery entry: the rebuilt system starts with the next boot")
+	}
 
 	var status int
 	if debug {
@@ -2303,6 +2308,11 @@ func newRebuildPlan(
 		// of itself from <nixpkgs/nixos> even for --store-path, which fails
 		// on a flake system and has nothing to offer for a prebuilt one.
 		activate: slices.Concat([]string{"nixos-rebuild", "switch", "--no-reexec"}, switchArgs),
+	}
+	// The trusted recovery entry runs without the desktop, and its tty is the
+	// only login; switching the rebuilt system in would stop both.
+	if inRecoveryEntry() {
+		plan.activate[1] = "boot"
 	}
 
 	// Pure evaluation is the default. The only current impure input is the

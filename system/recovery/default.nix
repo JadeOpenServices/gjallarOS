@@ -124,6 +124,8 @@ lib.mkMerge [
         Trusted GjallarOS recovery entry.
         Sign in locally and run: sudo gjallar-recover audit
         Root disks need the disk recovery key or passphrase.
+        Developer mode off and back to the official system:
+        sudo gjallar-recover developer-off
       '';
     }
     // lib.optionalAttrs settings.endpointManagedDevice {

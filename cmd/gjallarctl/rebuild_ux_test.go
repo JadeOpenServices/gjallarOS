@@ -467,3 +467,22 @@ const testNoctaliaColors = "base00=101010,base01=111111,base02=121212,base03=131
 	"base04=141414,base05=151515,base06=161616,base07=171717," +
 	"base08=181818,base09=191919,base0A=1a1a1a,base0B=1b1b1b," +
 	"base0C=1c1c1c,base0D=1d1d1d,base0E=1e1e1e,base0F=1f1f1f"
+
+// The trusted recovery entry has no desktop and one tty login; a rebuilt
+// system starts with the next boot instead of replacing it.
+func TestRebuildPlanBootsNextInRecoveryEntry(t *testing.T) {
+	marker := filepath.Join(t.TempDir(), "recovery")
+	old := recoveryEntryPath
+	recoveryEntryPath = marker
+	t.Cleanup(func() { recoveryEntryPath = old })
+
+	if plan := newRebuildPlan("/repo", "host", "", false, nil); plan.activate[1] != "switch" {
+		t.Fatalf("activate = %q, want switch outside recovery", plan.activate)
+	}
+	if err := os.WriteFile(marker, []byte("Trusted GjallarOS recovery entry.\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if plan := newRebuildPlan("/repo", "host", "", false, nil); plan.activate[1] != "boot" {
+		t.Fatalf("activate = %q, want boot in the recovery entry", plan.activate)
+	}
+}

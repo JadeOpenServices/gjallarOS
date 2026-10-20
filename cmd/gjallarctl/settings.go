@@ -544,7 +544,11 @@ func settingsApply(ctx context.Context, bus settingsBus, change settings.Change,
 				fmt.Fprintf(stderr, "ERROR: the rebuild failed (%s); the change stays in %s. Its log: journalctl -b -u %s\n", result, written, settings.RebuildUnit)
 				return 1
 			}
-			fmt.Fprintf(stdout, "Rebuild finished after %s; the change is live.\n", settingsNow().Sub(started).Round(time.Second))
+			live := "the change is live"
+			if inRecoveryEntry() {
+				live = "the change starts with the next boot"
+			}
+			fmt.Fprintf(stdout, "Rebuild finished after %s; %s.\n", settingsNow().Sub(started).Round(time.Second), live)
 			offerLocalFolder(change, stdout, stderr)
 			return 0
 		}

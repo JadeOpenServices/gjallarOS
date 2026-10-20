@@ -23,5 +23,10 @@ password. `gjallarctl system status` shows what the running system was
 built with.
 
 Code in this folder runs as root. If a change breaks the system, pick the
-previous generation in the boot menu. Turning developer mode off keeps
-this folder.
+previous generation in the boot menu. If that does not help, boot the
+trusted recovery entry, sign in and run
+
+    sudo gjallar-recover developer-off
+
+It turns developer mode off and builds the official system for the next
+boot. Turning developer mode off keeps this folder.

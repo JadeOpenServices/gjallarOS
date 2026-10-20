@@ -31,6 +31,15 @@ type rebuildOptions struct {
 // localChangesPath is root's copy of the developer-mode folder.
 var localChangesPath = localchanges.Path
 
+// recoveryEntryPath exists only in the trusted recovery boot entry; tests
+// replace it.
+var recoveryEntryPath = "/etc/gjallar/recovery"
+
+func inRecoveryEntry() bool {
+	_, err := os.Lstat(recoveryEntryPath)
+	return err == nil
+}
+
 // stageLocalChanges reads root's copy of the developer-mode folder for a
 // system rebuild with developer mode on and records it in facts; the caller
 // stages the returned tree next to the source. Development checkouts change
