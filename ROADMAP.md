@@ -899,7 +899,7 @@ way to root.
       checkout, with each inner value of a change listed (3.5, e511f5cb).
       Next: pairing and the installer opt-out (rest of 3.4). Factory reset
       waits for a recovery mode that does one.
-- [ ] **Checkpoint 3b: developer mode.** `~/GjallarOS-local/`, the copy
+- [x] **Checkpoint 3b: developer mode.** `~/GjallarOS-local/`, the copy
       into `/etc/gjallar/developer/local`, the staged `.gjallar-local/`, notice,
       boot entry name and the recovery exit. Steps: 3b.1 the
       `developerMode` key (critical on, everyday off, refused with JODS),
@@ -912,7 +912,8 @@ way to root.
       6a70e39d), 3b.5 (47731eb4: `gjallar-recover developer-off` runs
       the root-only `gjallarctl system developer-off`, which passes only
       when the next boot holds no local files, 0b1704c7; rebuilds in the
-      recovery entry start with the next boot).
+      recovery entry start with the next boot). fw13 VM template run
+      2026-10-20 (e8c6543e).
 - [x] **Checkpoint 4: installer, README, migration.** New installs clone
       into `/etc/gjallar/system`. Existing installs: one privileged step
       re-clones the official origin at the revision the system runs,
