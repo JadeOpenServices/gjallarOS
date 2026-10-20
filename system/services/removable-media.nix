@@ -274,10 +274,9 @@ in
               Environment = [
                 "PATH=${lib.makeBinPath [ pkgs.zenity ]}"
                 "SUDO_ASKPASS=${usbTrustAskpass}"
-                # Fallback start view; the review reads user.config.json itself.
-                "GJALLAR_USB_REVIEW_VIEW=${
-                  if settings.usbReviewTechnicalView or false then "technical" else "simple"
-                }"
+                # No usbReviewTechnicalView here: the review reads
+                # user.config.json itself, and a unit that changes with the
+                # box is restarted by the rebuild, closing the open review.
               ];
               Restart = "on-failure";
               RestartSec = 3;

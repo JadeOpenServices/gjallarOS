@@ -232,21 +232,9 @@ func TestUSBReviewAlwaysTechnicalPreference(t *testing.T) {
 	}
 	t.Setenv("GJALLAROS_REPO", repo)
 
-	t.Setenv(usbReviewViewEnv, "")
 	if usbReviewAlwaysTechnical() {
 		t.Fatal("review must start in the simple view by default")
 	}
-	t.Setenv(usbReviewViewEnv, usbReviewTechnicalV)
-	if !usbReviewAlwaysTechnical() {
-		t.Fatal("built default was ignored while the key is missing")
-	}
-	if err := setUSBReviewAlwaysTechnical(false); err != nil {
-		t.Fatal(err)
-	}
-	if usbReviewAlwaysTechnical() {
-		t.Fatal("unticking the box must override the built default")
-	}
-	t.Setenv(usbReviewViewEnv, "")
 	if err := setUSBReviewAlwaysTechnical(true); err != nil {
 		t.Fatal(err)
 	}

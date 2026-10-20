@@ -792,12 +792,10 @@ func usbReviewFacts(d usbtrust.Decision) []usbFact {
 // user.config.json, which makes the techy view the start view until it is
 // unticked. Neither changes the decision itself.
 const (
-	usbTechyView        = "Techy view"
-	usbSimpleView       = "Simple view"
-	usbAlwaysTechyOff   = "☐ Always techy view"
-	usbAlwaysTechyOn    = "☑ Always techy view"
-	usbReviewViewEnv    = "GJALLAR_USB_REVIEW_VIEW"
-	usbReviewTechnicalV = "technical"
+	usbTechyView      = "Techy view"
+	usbSimpleView     = "Simple view"
+	usbAlwaysTechyOff = "☐ Always techy view"
+	usbAlwaysTechyOn  = "☑ Always techy view"
 )
 
 // usbReviewDialog shows the review until an action is chosen or the dialog
@@ -871,14 +869,16 @@ func usbReviewConfigPath() (string, error) {
 
 // usbReviewAlwaysTechnical reports whether the review starts in the techy
 // view. user.config.json is read at every review so a tick applies at once;
-// the service environment carries the built value if the file is unreadable.
+// if it cannot be read the review starts simple. The value stays out of the
+// service unit: a unit that changed with the tick was restarted by the
+// rebuild the tick starts, which closed the review that was open.
 func usbReviewAlwaysTechnical() bool {
 	if path, err := usbReviewConfigPath(); err == nil {
 		if on, ok := usbReviewConfigValue(path); ok {
 			return on
 		}
 	}
-	return os.Getenv(usbReviewViewEnv) == usbReviewTechnicalV
+	return false
 }
 
 func usbReviewConfigValue(path string) (bool, bool) {
