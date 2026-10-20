@@ -40,6 +40,13 @@ interactive installer from that checkout. Re-running it reuses the checkout.
 `GJALLAR_CLONE_ONLY=1` stops after the clone. From an existing checkout,
 run `./scripts/installation/install.sh` directly.
 
+That checkout only runs the installer. The installed system gets its own
+clone of the official repository in `/etc/gjallar/system`, owned by root,
+at the commit the installer was built from, with this machine's
+`generated/` and `user.config.json` copied in. An installer built from a
+commit that is not pushed to `main`, or with local changes, stops before
+the clone.
+
 For automated non-secret answers:
 
 ```bash
@@ -396,6 +403,36 @@ When `dotfilesDir` is `/etc/gjallar/system`, root owns the checkout and
 builds it only as it is on the official origin. `--repo`, `--host`,
 `--update-inputs` and other `nixos-rebuild` arguments are refused there; the
 oddc pin may move only to a commit of an official ODDC branch (ROADMAP §14).
+
+### Moving an older install to `/etc/gjallar/system`
+
+Installs made before the system checkout build from a checkout in your home
+folder. To move one over, run as your own user:
+
+```sh
+gjallarctl system move
+```
+
+It shows the commit the system runs, and lists local commits and changes in
+your checkout that the move leaves behind. Your checkout keeps them; local
+`.nix` changes go into the developer-mode folder instead (see
+`gjallarctl system apply`). The running commit must be on the official
+`main`; a system built with local changes refuses until you rebuild from a
+pushed commit. Then, as root:
+
+```sh
+sudo gjallarctl system clone --from ~/Documents/gjallarOS
+sudo gjallar-system-rebuild
+```
+
+`system clone` clones the official repository at the running commit and
+copies `generated/` and `user.config.json` from the old checkout as files.
+It never runs git in the old checkout. The rebuild switches
+`/etc/gjallar/repository` to the new checkout; plain `rebuild` uses it from
+then on. The old checkout stays where it is.
+
+When `/etc/gjallar/system` is missing or broken, `rebuild` says so and names
+the same `system clone` step.
 
 To try a `gjallarctl` change before rebuilding, run it from the checkout with
 `go run ./cmd/gjallarctl rebuild` (or any other command). It uses the sudo

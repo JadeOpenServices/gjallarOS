@@ -882,7 +882,7 @@ way to root.
       and in `/etc/gjallar/build-source.json` with the deployed and pinned
       oddc commits. While they differ, a notice comes at every login until
       a plain rebuild returns to the pin. Still open: applied local changes
-      (3b). Creating the checkout is checkpoint 4.
+      (3b). Creating the checkout is checkpoint 4 (done).
       Done in 0bf0c1be, 76b1646b and job 169, tested on the fw13 VM.
 - [ ] **Checkpoint 3: settings service.** Root service with a typed
       D-Bus API over the `user.config.json` schema, tiers, reading and
@@ -919,6 +919,13 @@ way to root.
       `/etc/gjallar/repository` names an empty or missing path, say "The
       checkout at <path> is empty or missing" and how to fix it. Tested on
       the fw13 VM first.
+      Done: 4.1 installer clone (cb6de68f), shared clone code (e192375c),
+      4.3 `gjallarctl system move` (user, lists what stays behind) and
+      `sudo gjallarctl system clone --from DIR` (root, clones the running
+      commit, copies the machine-local files as data, never runs git in
+      DIR) in f3822087, 4.2 missing-checkout message (77525b5c), 4.4
+      README. fw13 VM test open; the live install moves after its
+      commits are on origin (Q9).
 
 ### Editing on standalone devices
 
