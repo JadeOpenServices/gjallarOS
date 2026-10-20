@@ -1369,3 +1369,87 @@ new value, ask the password every time and wait; imports only signed, with
 GjallarOS managing the keys by default; Nix code only in developer mode
 with a local folder. Migration on the one existing install: whatever does
 not break the running system. New installs get no `~/Documents` clone.
+
+## 15. Snapshots (draft, to discuss)
+
+Draft written 2026-10-20 for Plane GJALLAROS-198. Nothing is built yet; the
+open choices are questions 18 to 22 on the questionnaire. Jade's frame:
+read-only snapshots, root-only, retention, rollback through recovery, no
+secrets in snapshots.
+
+Today a fresh install puts everything on the top level of one encrypted
+Btrfs (no subvolumes). NixOS generations already roll back the system
+itself: the store is read-only and every rebuild is a boot entry. What no
+generation brings back is mutable state: `/home`, `/var/lib`, `/etc/gjallar`.
+Snapshots are for that.
+
+### How others handle it
+
+- openSUSE keeps `/` on a subvolume and puts paths that must survive a
+  rollback (`/home`, `/opt`, `/srv`, parts of `/var`) on their own
+  subvolumes, because a snapshot never includes a nested subvolume
+  ([openSUSE reference, Snapper](https://doc.opensuse.org/documentation/leap/reference/html/book-reference/cha-snapper.html)).
+  The same guide warns not to place snapshots inside the snapshotted
+  subvolume, or they can no longer be deleted after a rollback.
+- Fedora guides add snapper plus grub-btrfs: booting a snapshot is a
+  read-only preview; making it permanent is a separate step from the
+  running system
+  ([Fedora discussion](https://discussion.fedoraproject.org/t/btrfs-snapshots-in-fedora-the-definitive-step-by-step-easy-and-safe-guide/194483)).
+- The NixOS wiki documents btrbk: root timers create read-only snapshots
+  into a directory on the top-level volume; restore is manual, and local
+  snapshots are no backup when the disk dies
+  ([NixOS wiki, Btrbk](https://wiki.nixos.org/wiki/Btrbk)). Snapper is also
+  packaged as a NixOS module and runs `snapperd` on D-Bus.
+
+### Security pass
+
+- **Old files stay readable.** A snapshot keeps each file with the
+  permissions it had then: a file made private later, or a setuid program
+  that was fixed later, is still there in its old form. The Fedora security
+  list concluded unprivileged users must not reach snapshot contents
+  ([Fedora security list](https://lists.pagure.io/archives/list/security@lists.fedoraproject.org/message/SV63LDF5Y77PGPDFUJ7JMR6WNKSZFD52/));
+  snapper denies traversal of `.snapshots` to non-root by default
+  ([vfs_snapper](https://man.archlinux.org/man/extra/samba/vfs_snapper.8.en)).
+  Design: snapshot directory root-only (0700), never mounted for users,
+  and when mounted at all then `nosuid,nodev,noexec`.
+- **Deleted secrets stay too.** Btrfs never overwrites data in place, so a
+  removed or rotated key lives on in every older snapshot until that
+  snapshot is deleted
+  ([openSUSE forum](https://forums.opensuse.org/t/secure-remove-from-btrfs/152004)).
+  Design: machine secrets (`/var/lib/sbctl`, sealed tokens and keys under
+  `/var/lib/gjallar`) sit on a subvolume that is never snapshotted. Home
+  data cannot be split like that, so a rotation the system performs on a
+  user's behalf says which snapshots still hold the old key and offers to
+  delete them.
+- **Privileged helpers broke in practice.** qSnapper took a config name
+  from the caller without checking it (CVE-2026-41046, path traversal to
+  root) and reused one polkit result for a different, stronger action
+  (CVE-2026-41048, delete permission used for restore). Design: fixed
+  snapshot sets with built-in names, nothing taken from the caller as a
+  path; each action asks polkit on its own, and deleting snapshots or a
+  rollback asks the password every time (§14 rule). Restoring a user's own
+  file resolves the path beneath that user's home inside the snapshot,
+  follows no symlinks, writes as the user under a new name, and never
+  overwrites.
+- **Disk filling.** Snapshots of `/nix` would keep every garbage-collected
+  store path alive. `/nix` gets its own subvolume and is never
+  snapshotted; a free-space floor drops the oldest timeline snapshots
+  first.
+- Snapshots stay inside the LUKS volume, so nothing new is stored in the
+  clear. They are not a backup.
+
+### Proposed design
+
+1. New installs: subvolumes `@` (`/`), `@home`, `@nix`, `@keys` (machine
+   secrets, never snapshotted), `@snapshots` on the top level, mounted at
+   `/.snapshots` root-only.
+2. Snapshots by root timers (btrbk, no D-Bus service), read-only. Sets:
+   `home` hourly, `state` (`/var/lib`, `/etc/gjallar`) before every
+   rebuild and daily.
+3. Users restore their own files through the settings service
+   (`gjallarctl snapshots list`, `gjallarctl snapshots restore PATH`);
+   only their own home, copied next to the original.
+4. A full state rollback runs only from the recovery boot entry, offline,
+   and keeps the replaced state as a snapshot.
+5. Existing installs keep their layout until a decision on migration
+   (question 19).
