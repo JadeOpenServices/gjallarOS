@@ -73,6 +73,7 @@ type state struct {
 	orientationSensor        bool
 	recoveryDisk             string
 	recoveryPartition        string
+	recoveryDeclined         bool
 	recoverySigningKey       string
 	recoverySigningPublicKey string
 	secureBootFirmware       oddc.EffectiveSecureBootFirmwarePolicy
@@ -1113,9 +1114,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 		if persistentInstalledHost {
 			maintenanceRequired := false
 
-			if s.user.RecoveryEnable &&
-				s.user.RecoveryPartitionEnable &&
-				s.recoveryPartition == "" {
+			if needsRecoveryStorage(s) {
 				fmt.Fprintln(
 					out,
 					"STAGE: inspecting existing encrypted-Btrfs layout for recovery storage",
@@ -2603,6 +2602,7 @@ func configureRecoveryProvisioning(ctx context.Context, ui prompt.UI, opt option
 		}
 		if !yes {
 			s.recoveryPartition = ""
+			s.recoveryDeclined = true
 			if s.user.EndpointManagedDevice && !s.existing {
 				return errors.New("managed fresh installation requires an independent recovery partition")
 			}
@@ -2972,6 +2972,17 @@ var findRecoveryPartition = func(ctx context.Context) string {
 		}
 	}
 	return ""
+}
+
+// needsRecoveryStorage says whether the rebuild still has to find or make
+// the recovery partition. A "no" to the recovery question also leaves
+// recoveryPartition empty, and the storage check would then find the
+// partition again and format it (e2e-fw13 2026-10-20).
+func needsRecoveryStorage(s state) bool {
+	return s.user.RecoveryEnable &&
+		s.user.RecoveryPartitionEnable &&
+		s.recoveryPartition == "" &&
+		!s.recoveryDeclined
 }
 
 func provisionRecoveryPartition(ctx context.Context, root string, s state) error {

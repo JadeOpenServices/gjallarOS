@@ -396,6 +396,11 @@ func TestRecoveryAfterMaintenanceNeedsNoAnswers(t *testing.T) {
 			if s.recoveryPartition != tc.want {
 				t.Fatalf("recovery partition %q; want %q", s.recoveryPartition, tc.want)
 			}
+			// Neither answer may send the rebuild back to the storage
+			// check: after a "no" it would find /dev/vda3 and format it.
+			if needsRecoveryStorage(s) {
+				t.Fatal("rebuild would look for recovery storage again")
+			}
 			if strings.Contains(out.String(), "signing key") {
 				t.Fatalf("asked for release signing keys:\n%s", out.String())
 			}
