@@ -23,8 +23,6 @@ in
     ./patches/nextcloud-openvfs-in-sync.patch
     # No sync loop from conflict-file pins; no re-upload after hydration.
     ./patches/nextcloud-openvfs-sync-loop.patch
-    # Keep the Fusion QML style; qt6ct's KDE patch breaks the account wizard.
-    ./patches/nextcloud-qml-style.patch
     # New accounts start as virtual-files folders on Linux too.
     ./patches/nextcloud-vfs-default.patch
     # Windows, menus and popups follow the Qt palette (Noctalia via qt6ct,

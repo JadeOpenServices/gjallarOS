@@ -22,6 +22,17 @@ let
             prev.kdePackages.kcolorscheme
             prev.kdePackages.kiconthemes
           ];
+
+          # The patch switches QML apps to the org.kde.desktop style, so that
+          # style has to sit next to qt6ct in the profile, as Arch's qt6ct-kde
+          # depends on qqc2-desktop-style. Kirigami and Sonnet are its QML
+          # imports; nixpkgs propagates neither into a user profile, and its
+          # kirigami attribute is a build-time wrapper without the QML files.
+          propagatedUserEnvPkgs = (old.propagatedUserEnvPkgs or [ ]) ++ [
+            prev.kdePackages.qqc2-desktop-style
+            prev.kdePackages.kirigami.unwrapped
+            prev.kdePackages.sonnet
+          ];
         });
     }
   );
