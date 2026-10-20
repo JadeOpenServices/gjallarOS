@@ -12,6 +12,7 @@ buildGoModule {
     fileset = lib.fileset.unions [
       ../../go.mod
       ../../go.sum
+      ../../cmd/gjallar-usbguard-boot
       ../../cmd/gjallar-usbtrustd
       ../../internal/usbtrust
     ];
@@ -21,6 +22,7 @@ buildGoModule {
   proxyVendor = true;
 
   subPackages = [
+    "cmd/gjallar-usbguard-boot"
     "cmd/gjallar-usbtrustd"
   ];
 

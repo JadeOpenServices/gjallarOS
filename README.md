@@ -584,9 +584,12 @@ and review devices first.
 With an encrypted root, the installer also asks "Block unknown USB devices from
 the first boot?" (default no). Say no on a desktop with a USB keyboard: it is
 not built in, so it stays blocked until approved. Enforcement can be turned on
-later with `"usbTrustEnforce": true` in `user.config.json` and a `rebuild`. To turn it off, set it back to `false`, `rebuild`, then run
-`sudo gjallarctl usb disarm` and enter the disk encryption passphrase. Disarm
-alone is temporary: the broker re-arms from the config on its next restart.
+later with `"usbTrustEnforce": true` in `user.config.json` and a `rebuild`. To
+turn it off, run `sudo gjallarctl usb disarm` first and enter the disk
+encryption passphrase, then set it back to `false` and `rebuild`. Disarm alone
+is temporary: the broker re-arms from the config on its next restart. The other
+order is refused by `gjallarctl settings`; done by hand, USBGuard keeps
+blocking unknown devices at boot while the stored state still says armed.
 
 On a machine with TPM2 the installer also asks "Let approved USB devices expire
 when unused?" (default no). With it on, an approved external device that was

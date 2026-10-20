@@ -38,6 +38,8 @@ type fakeSystem struct {
 	taken      map[string]netip.Addr
 	probed     []string
 	usbDisk    string
+	usbArmed   bool
+	usbErr     error
 }
 
 func (f *fakeSystem) Caller(_ context.Context, sender string) (caller, error) {
@@ -67,6 +69,7 @@ func (f *fakeSystem) NameTaken(_ context.Context, device, name string) (netip.Ad
 }
 func (f *fakeSystem) Rebuilding(context.Context) (bool, error) { return f.rebuilding, nil }
 func (f *fakeSystem) SystemDiskOnUSB() string                  { return f.usbDisk }
+func (f *fakeSystem) USBArmed() (bool, error)                  { return f.usbArmed, f.usbErr }
 func (f *fakeSystem) StartRebuild(_ context.Context, colors string) error {
 	f.rebuilt = append(f.rebuilt, colors)
 	return nil
@@ -389,6 +392,41 @@ func TestUSBBlockingRefusedOnUSBSystemDisk(t *testing.T) {
 	f.sys.usbDisk = ""
 	if _, err := f.svc.Request(ctx, ":1.11", `{`+review+`,"usbTrustEnforce":true}`); err != nil {
 		t.Fatalf("blocking on an internal system disk: %v", err)
+	}
+}
+
+func TestUSBBlockingStaysOnWhileArmed(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	data, err := os.ReadFile(f.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fields map[string]any
+	if err := json.Unmarshal(data, &fields); err != nil {
+		t.Fatal(err)
+	}
+	fields["usbguardEnable"], fields["usbTrustEnforce"], fields["usbTrustTpmHandle"] = true, true, config.DefaultUSBTrustTPMHandle
+	if data, err = json.Marshal(fields); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(f.path, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	f.sys.usbArmed = true
+	for _, request := range []string{`{"usbTrustEnforce":false}`, `{"usbguardEnable":false,"usbTrustEnforce":false}`} {
+		if _, err := f.svc.Request(ctx, ":1.10", request); !errors.Is(err, errRefused) || !strings.Contains(err.Error(), "gjallarctl usb disarm") {
+			t.Fatalf("%s while armed: %v", request, err)
+		}
+	}
+	f.sys.usbArmed, f.sys.usbErr = false, errors.New("decode USB trust state")
+	if _, err := f.svc.Request(ctx, ":1.10", `{"usbTrustEnforce":false}`); !errors.Is(err, errRefused) || !strings.Contains(err.Error(), "cannot be read") {
+		t.Fatalf("unreadable state: %v", err)
+	}
+	f.sys.usbErr = nil
+	if _, err := f.svc.Request(ctx, ":1.10", `{"usbTrustEnforce":false}`); err != nil {
+		t.Fatalf("after the disarm: %v", err)
 	}
 }
 

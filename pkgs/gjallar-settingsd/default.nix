@@ -25,6 +25,7 @@ buildGoModule {
       ../../internal/nettrust
       ../../internal/noctalia
       ../../internal/settings
+      ../../internal/usbtrust
     ];
   };
 

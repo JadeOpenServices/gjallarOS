@@ -19,6 +19,7 @@ import (
 	"github.com/JadeOpenServices/gjallarOS/internal/namecheck"
 	"github.com/JadeOpenServices/gjallarOS/internal/nettrust"
 	"github.com/JadeOpenServices/gjallarOS/internal/settings"
+	"github.com/JadeOpenServices/gjallarOS/internal/usbtrust"
 )
 
 const (
@@ -40,6 +41,9 @@ var vpnTrustPath = "/run/gjallar/vpn-trust.json"
 
 // systemDiskPath is where gjallar-system-disk writes its boot check.
 var systemDiskPath = "/run/gjallar/system-disk.json"
+
+// usbTrustDir holds the USB trust state gjallar-usbtrustd signs.
+const usbTrustDir = "/var/lib/gjallar-usbtrust"
 
 type busSystem struct{ conn *dbus.Conn }
 
@@ -192,6 +196,11 @@ func readVerdict(path string, now time.Time) (nettrust.Verdict, bool) {
 // (gjallar-system-disk).
 func (busSystem) SystemDiskOnUSB() string {
 	return readSystemDisk(systemDiskPath)
+}
+
+// USBArmed reads the stored USB trust state (gjallar-usbtrustd).
+func (busSystem) USBArmed() (bool, error) {
+	return usbtrust.StoredArmed(usbTrustDir)
 }
 
 // readSystemDisk returns the reason in root's boot check. Without a check

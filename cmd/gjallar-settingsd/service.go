@@ -69,6 +69,9 @@ type system interface {
 	// SystemDiskOnUSB says why USB blocking must stay off because of the
 	// disk the system runs from; "" when that disk is not on USB.
 	SystemDiskOnUSB() string
+	// USBArmed reports whether the stored USB trust state says blocking is
+	// armed.
+	USBArmed() (bool, error)
 }
 
 type service struct {
@@ -248,6 +251,9 @@ func (s *service) keep(ctx context.Context, sender string, who caller, change se
 	}
 	notes = append(notes, nameNotes...)
 	if err := s.checkUSBSystemDisk(change); err != nil {
+		return settings.Pending{}, err
+	}
+	if err := s.checkUSBDisarmed(change); err != nil {
 		return settings.Pending{}, err
 	}
 	if change.Tier == config.TierCritical {
@@ -597,6 +603,27 @@ func (s *service) checkUSBSystemDisk(change settings.Change) error {
 		}
 		if reason := s.sys.SystemDiskOnUSB(); reason != "" {
 			return fmt.Errorf("%w: USB blocking stays off: %s", errRefused, reason)
+		}
+	}
+	return nil
+}
+
+// checkUSBDisarmed refuses turning USB blocking or USBGuard off while the
+// stored trust state says blocking is armed, or cannot be read. Turned off
+// first, the machine would boot without the stage 1 card gate before anyone
+// disarmed it (loophole 23, Plane 194).
+func (s *service) checkUSBDisarmed(change settings.Change) error {
+	for _, key := range change.Keys {
+		var on bool
+		if (key.Key != "usbTrustEnforce" && key.Key != "usbguardEnable") || json.Unmarshal(key.New, &on) != nil || on {
+			continue
+		}
+		armed, err := s.sys.USBArmed()
+		if err != nil {
+			return fmt.Errorf("%w: %s stays on: the stored USB blocking state cannot be read (%v)", errRefused, key.Key, err)
+		}
+		if armed {
+			return fmt.Errorf("%w: %s stays on: USB blocking is still armed; run sudo gjallarctl usb disarm first, then turn it off", errRefused, key.Key)
 		}
 	}
 	return nil
