@@ -1696,7 +1696,9 @@ lib.mkIf config.gjallar.apps.ai.enable (
           UMask = "0077";
 
           PrivateNetwork = true;
-          PrivateTmp = true;
+          # JoinsNamespaceOf would also join the socket's /tmp, which has
+          # none, leaving /tmp read-only. A fresh tmpfs is never shared.
+          PrivateTmp = "disconnected";
           PrivateDevices = true;
           PrivateMounts = true;
 
