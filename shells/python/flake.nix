@@ -20,7 +20,7 @@
       {
         devShells.default = pkgs.mkShell {
           packages = [
-            (pkgs.python311.withPackages (python-pkgs: [
+            (pkgs.python3.withPackages (python-pkgs: [
               python-pkgs.pip
               python-pkgs.numpy
               python-pkgs.graphviz
