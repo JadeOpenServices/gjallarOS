@@ -1,0 +1,135 @@
+--- a/src/gui/folder.cpp
++++ b/src/gui/folder.cpp
+@@ -357,7 +357,7 @@ bool Folder::syncPaused() const
+ 
+ bool Folder::canSync() const
+ {
+-    return !syncPaused() && accountState()->isConnected() && _syncResult.status() != SyncResult::SetupError;
++    return !syncPaused() && accountState()->isConnected() && _syncResult.status() != SyncResult::SetupError && _vfsReady;
+ }
+ 
+ void Folder::setSyncPaused(bool paused)
+@@ -603,6 +603,28 @@ void Folder::startVfs()
+     connect(&_engine->syncFileStatusTracker(), &SyncFileStatusTracker::fileStatusChanged,
+             _vfs.data(), &Vfs::fileStatusChanged);
+ 
++    // OpenVFS reports when its FUSE mount is up. Until then the folder is a
++    // plain directory: placeholders read empty and edits are never uploaded,
++    // so it must not sync. A failed start (for example a sync root claimed by
++    // another account) is a setup error, never a fallback to the bare folder.
++    _vfsReady = _vfs->mode() != Vfs::OpenVFS;
++    connect(_vfs.data(), &Vfs::error, this, [this](const QString &message) {
++        qCWarning(lcFolder) << "VFS setup failed for" << path() << message;
++        _vfsReady = false;
++        _syncResult.appendErrorString(message);
++        _syncResult.setStatus(SyncResult::SetupError);
++        Q_EMIT syncStateChange();
++        Q_EMIT canSyncChanged();
++    });
++    connect(_vfs.data(), &Vfs::started, this, [this] {
++        qCInfo(lcFolder) << "VFS started for" << path();
++        _vfsReady = true;
++        Q_EMIT canSyncChanged();
++        if (canSync()) {
++            FolderMan::instance()->scheduleFolder(this);
++        }
++    });
++
+     connect(_vfs.get(), &Vfs::needSync, this, [this] {
+         if (canSync()) {
+             // the vfs plugin detected that its metadata is out of sync and requests a new sync
+--- a/src/gui/folder.h
++++ b/src/gui/folder.h
+@@ -627,6 +627,9 @@ private:
+      */
+     bool _hasSwitchedToVfs = false;
+ 
++    /// False while an OpenVFS mount is not confirmed, see startVfs().
++    bool _vfsReady = true;
++
+     bool _silenceErrorsUntilNextSync = false;
+ 
+ #ifdef Q_OS_MACOS
+--- a/src/libsync/vfs/openvfs/vfs_openvfs.cpp
++++ b/src/libsync/vfs/openvfs/vfs_openvfs.cpp
+@@ -22,10 +22,12 @@
+ #include <QFile>
+ #include <QLoggingCategory>
+ #include <QString>
++#include <QTimer>
+ #include <QUuid>
+ #include <QStandardPaths>
+ 
+ #include <filesystem>
++#include <memory>
+ 
+ using namespace std::chrono_literals;
+ using namespace Qt::StringLiterals;
+@@ -172,6 +174,25 @@ QByteArray parseMangledPath(QByteArrayView path)
+     ret.resize(dst - ret.data());
+     return ret;
+ }
++
++// True once the kernel lists an openvfs FUSE mount exactly at path.
++bool isOpenVfsMountPoint(const QString &path)
++{
++    QFile file(u"/proc/self/mountinfo"_s);
++    if (!file.open(QIODevice::ReadOnly)) {
++        qCWarning(lcOpenVFS) << "Failed to read /proc/self/mountinfo" << file.errorString();
++        return false;
++    }
++    const auto lines = file.readAll().split('\n');
++    for (const auto &line : lines) {
++        const auto fields = line.split(' ');
++        if (fields.size() >= 9 && fields[8] == "fuse.openvfs"
++            && OCC::FileSystem::isChildPathOf2(path, QString::fromUtf8(parseMangledPath(fields[4]))).testFlag(OCC::FileSystem::ChildResult::IsEqual)) {
++            return true;
++        }
++    }
++    return false;
++}
+ #endif
+ }
+ 
+@@ -212,13 +233,39 @@ void OpenVFS::startImpl(const VfsSetupParams &params)
+     _openVfsProcess->setProcessChannelMode(QProcess::ForwardedChannels);
+     const auto logPrefix = [path = params.filesystemPath, this] { return u"[%1 %2] "_s.arg(QString::number(_openVfsProcess->processId()), path); };
+     connect(_openVfsProcess, &QProcess::finished, this, [logPrefix, this] { qCFatal(lcOpenVFS) << logPrefix() << "finished" << _openVfsProcess->exitCode(); });
+-    connect(_openVfsProcess, &QProcess::started, this, [logPrefix, this] {
++    connect(_openVfsProcess, &QProcess::started, this, [logPrefix, path = params.filesystemPath, this] {
+         qCInfo(lcOpenVFS) << logPrefix() << u"started";
++#ifdef Q_OS_LINUX
++        // Report started only once the mount is really there, and report an
++        // error if it never shows up, so the folder does not sync the bare
++        // directory below the mount point.
++        auto *poll = new QTimer(this);
++        poll->setInterval(100ms);
++        auto waited = std::make_shared<Utility::ChronoElapsedTimer>();
++        connect(poll, &QTimer::timeout, this, [logPrefix, path, poll, waited, this] {
++            if (isOpenVfsMountPoint(path)) {
++                poll->deleteLater();
++                qCInfo(lcOpenVFS) << logPrefix() << u"mounted after" << *waited;
++                Q_EMIT started();
++            } else if (waited->duration() > 30s) {
++                poll->deleteLater();
++                qCWarning(lcOpenVFS) << logPrefix() << u"no mount after" << *waited;
++                Q_EMIT error(tr("The files on demand mount for %1 did not come up").arg(path));
++            }
++        });
++        poll->start();
++#else
+         // TODO:
+         // give it time to mount
+         QTimer::singleShot(1s, this, &Vfs::started);
++#endif
++    });
++    connect(_openVfsProcess, &QProcess::errorOccurred, this, [logPrefix, this](QProcess::ProcessError processError) {
++        qCWarning(lcOpenVFS) << logPrefix() << _openVfsProcess->errorString();
++        if (processError == QProcess::FailedToStart) {
++            Q_EMIT error(tr("Unable to start files on demand: %1").arg(_openVfsProcess->errorString()));
++        }
+     });
+-    connect(_openVfsProcess, &QProcess::errorOccurred, this, [logPrefix, this] { qCWarning(lcOpenVFS) << logPrefix() << _openVfsProcess->errorString(); });
+ 
+     QStringList pparams{u"-f"_s, u"-i"_s, openVFSConfigFilePath().toString(), u"-o"_s, xattrOwnerString(params.account->uuid()), u"-s"_s, params.socketPath,
+         params.filesystemPath};

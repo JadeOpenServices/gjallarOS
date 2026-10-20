@@ -23,6 +23,9 @@ in
     ./patches/nextcloud-openvfs-in-sync.patch
     # No sync loop from conflict-file pins; no re-upload after hydration.
     ./patches/nextcloud-openvfs-sync-loop.patch
+    # A folder syncs only once the OpenVFS mount is confirmed; a failed
+    # start is a setup error, not a sync on the bare directory.
+    ./patches/nextcloud-openvfs-start-gate.patch
     # New accounts start as virtual-files folders on Linux too.
     ./patches/nextcloud-vfs-default.patch
     # Windows, menus and popups follow the Qt palette (Noctalia via qt6ct,
