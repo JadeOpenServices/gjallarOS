@@ -212,15 +212,18 @@ func (s *service) pairOffer(ctx context.Context, sender string, data []byte) (ca
 	if err != nil {
 		return caller{}, "", pairing{}, settings.PairOffer{}, fmt.Errorf("%w: %v", errRefused, err)
 	}
-	if file.Device == s.device {
-		return caller{}, "", pairing{}, settings.PairOffer{}, fmt.Errorf("%w: this pairing file was made on this device; use the file of the other device", errRefused)
-	}
 	local, err := s.keys.trusted()
 	if err != nil {
 		return caller{}, "", pairing{}, settings.PairOffer{}, err
 	}
 	if _, ok := local[string(public)]; ok {
-		return caller{}, "", pairing{}, settings.PairOffer{}, fmt.Errorf("%w: this pairing file carries a key of this device", errRefused)
+		return caller{}, "", pairing{}, settings.PairOffer{}, fmt.Errorf("%w: this pairing file was made on this device; use the file of the other device", errRefused)
+	}
+	// Another key with this device's id: both systems came from one disk
+	// image and share /etc/machine-id. Imports tell devices apart by that
+	// id, so such a pair cannot work until one of them gets its own.
+	if file.Device == s.device {
+		return caller{}, "", pairing{}, settings.PairOffer{}, fmt.Errorf("%w: the other device has the same device id as this one; the two systems were copied from one disk image and share /etc/machine-id. Give one of them a new machine id, then make new pairing files", errRefused)
 	}
 	own, name, err := s.keys.own(who.UID)
 	if err != nil {

@@ -162,8 +162,9 @@ func TestPairAddRefuses(t *testing.T) {
 		t.Fatal(err)
 	}
 	b.svc.device = otherDevice
-	if _, err := a.svc.PairCheck(ctx, ":1.10", sameDevice); !errors.Is(err, errRefused) {
-		t.Errorf("file that names this device: %v", err)
+	if _, err := a.svc.PairCheck(ctx, ":1.10", sameDevice); !errors.Is(err, errRefused) ||
+		!strings.Contains(err.Error(), "same device id") {
+		t.Errorf("file of a copied system with this device id: %v", err)
 	}
 	if _, err := a.svc.PairCheck(ctx, ":1.10", []byte("SYNTHETIC not a pairing file")); !errors.Is(err, errRefused) {
 		t.Errorf("not a pairing file: %v", err)
