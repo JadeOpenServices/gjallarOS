@@ -8,7 +8,7 @@
  #include <grp.h>
  #include <iostream>
  #include <pwd.h>
-@@ -612,6 +613,13 @@ static int openVFSfuse_open(const char *orig_path, struct fuse_file_info *fi)
+@@ -614,6 +615,13 @@ static int openVFSfuse_open(const char *orig_path, struct fuse_file_info *fi)
                          _jobs.remove(msgData->id);
                          return -EINTR;
                      }
@@ -53,15 +53,7 @@
      void setDesktopClientPid(long pid);
 --- a/src/openvfsfuse/socketthread.cpp
 +++ b/src/openvfsfuse/socketthread.cpp
-@@ -24,6 +24,7 @@
- #include "sharedmap.h"
- #include "strtools.h"
- 
-+#include <cerrno>
- #include <cstring>
- #include <fcntl.h>
- #include <iostream>
-@@ -159,10 +160,14 @@ bool SocketThread::socketSendMsg(std::shared_ptr<MsgData> msgData)
+@@ -168,10 +168,14 @@ bool SocketThread::socketSendMsg(std::shared_ptr<MsgData> msgData)
      // send message
      ssize_t value;
  
@@ -76,27 +68,54 @@
          return false;
      }
  
-@@ -175,9 +180,22 @@ std::string SocketThread::readSocket()
+@@ -182,7 +186,9 @@ bool SocketThread::socketSendMsg(std::shared_ptr<MsgData> msgData)
+ 
+ void SocketThread::processSocketInput()
  {
-     // read answer FIXME: Split messages by \n and keep the rest
-     char buf[1024];
-+    if (_socket < 0)
-+        return std::string();
-     ssize_t n = read(_socket, buf, sizeof(buf) - 1);
--    if (n <= 0)
-+    if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR))
-         return std::string();
-+    if (n <= 0) {
+-    assert(_socket >= 0);
++    if (_socket < 0) {
++        return;
++    }
+ 
+     // The socket is a SOCK_STREAM and carries no message boundaries: a single
+     // read may return a fragment of a message, several messages at once, or
+@@ -190,6 +196,7 @@ void SocketThread::processSocketInput()
+     char buf[SingleReadBufferSize];
+ 
+     bool contRead{true};
++    bool peerGone{false};
+     ssize_t n;
+     while (contRead) {
+         n = read(_socket, buf, sizeof(buf));
+@@ -202,6 +209,7 @@ void SocketThread::processSocketInput()
+             // be interpreted - and remaining incompleted reads will be erased.
+             std::cerr << "Socket closed by peer" << std::endl;
+             contRead = false;
++            peerGone = true;
+         } else if (n < 0) {
+             // error condition
+             if (errno == EINTR) {
+@@ -219,6 +227,7 @@ void SocketThread::processSocketInput()
+                 ) {
+                     // a serious errno was set
+                     perror("socket read");
++                    peerGone = true;
+                 }
+             }
+         }
+@@ -239,6 +248,15 @@ void SocketThread::processSocketInput()
+         std::cerr << "Discarding " << _rxBuffer.size() << " bytes from the socket API" << std::endl;
+         _rxBuffer.clear();
+     }
++
++    if (peerGone) {
 +        // The client is gone and no answer can come. Release the waiters,
 +        // and new requests fail in socketSendMsg().
-+        if (n < 0)
-+            perror("read");
 +        std::cerr << "Sync client closed the socket, failing pending hydrations" << std::endl;
 +        close(_socket);
 +        _socket = -1;
 +        _sharedMap.failPending();
-+        return std::string();
 +    }
-     return std::string(buf, n);
  }
  
+ void SocketThread::handleReceivedMsg(const std::string &msg)

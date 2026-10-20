@@ -14,8 +14,8 @@ let
     src = pkgs.fetchFromGitHub {
       owner = "opencloud-eu";
       repo = "openvfs";
-      rev = "2fdf61c8a7c1bb57d78b618ac17eaed12208db7d";
-      sha256 = "1nh1pbdb96zyyjsbjf2hfg5whxjdzf5w67yygb2z8rdzzj0chvq4";
+      rev = "4c2317b2cf73a28503d4c5f190bd3f1dd8355cf5";
+      sha256 = "071kc5w2d52835np2k2xan0pk6vc3kbf98w4klxlrvp8wja54ksv";
     };
 
     # Bound hydration waits, deliver cancellation, and recognize Nix-wrapped KIO.
