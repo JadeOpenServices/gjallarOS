@@ -162,8 +162,14 @@ cp "$image" "$mount_dir/gjallar-recovery.iso"
 # Sign the boot executable with this endpoint's key so firmware starts it
 # under Secure Boot. No --save: sbctl would keep the temporary mount path in
 # its file database, and every later `sbctl verify` reported it missing. Each
-# recovery install signs again with the current key.
+# recovery install signs again with the current key. Installs before that
+# change left those temporary paths in the database; drop them here.
 if $sign; then
+  if [ -r /var/lib/sbctl/files.json ]; then
+    while IFS= read -r stale; do
+      sbctl remove-file "$stale" >/dev/null
+    done < <(grep -oE '"/tmp/tmp\.[A-Za-z0-9]+/EFI/Linux/gjallar-recovery\.efi"' /var/lib/sbctl/files.json | tr -d '"' | sort -u)
+  fi
   while IFS= read -r -d '' executable; do
     sbctl sign "$executable" >/dev/null
     sbctl verify "$executable" >/dev/null
