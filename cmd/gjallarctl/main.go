@@ -2781,6 +2781,11 @@ func runRebuildQuiet(stdout, stderr io.Writer, host string, messages []string, s
 			fmt.Fprintf(stdout, "[rebuild] Downloads failed and were retried: %s\n", retriedError)
 		}
 	}
+	if status == 0 {
+		for _, warning := range rebuildEvalWarnings(log) {
+			fmt.Fprintf(stderr, "[rebuild] Warning: %s\n", warning)
+		}
+	}
 	if status != 0 {
 		keepLog = true
 		if _, err := log.Seek(0, io.SeekStart); err == nil {
@@ -2831,6 +2836,39 @@ func rebuildNetworkError(log io.ReadSeeker, retries bool) string {
 		}
 	}
 	return ""
+}
+
+// rebuildEvalWarnings returns the module warnings of a rebuild, once each.
+// A quiet rebuild that succeeds drops its log, so without this a warning
+// such as nextcloudEnable without the nextcloud app never reached the user
+// (fw13 VM, 2026-10-20).
+func rebuildEvalWarnings(log io.ReadSeeker) []string {
+	if _, err := log.Seek(0, io.SeekStart); err != nil {
+		return nil
+	}
+	seen := map[string]struct{}{}
+	var warnings []string
+	scanner := bufio.NewScanner(log)
+	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		var warning string
+		for _, prefix := range []string{"evaluation warning:", "trace: warning:"} {
+			if rest, ok := strings.CutPrefix(line, prefix); ok {
+				warning = strings.TrimSpace(rest)
+				break
+			}
+		}
+		if warning == "" {
+			continue
+		}
+		if _, ok := seen[warning]; ok {
+			continue
+		}
+		seen[warning] = struct{}{}
+		warnings = append(warnings, warning)
+	}
+	return warnings
 }
 
 func rebuildLocalDerivations(log io.ReadSeeker) []string {
