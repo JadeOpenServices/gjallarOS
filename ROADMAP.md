@@ -1997,3 +1997,96 @@ All passed on the fw13 VM against a local SYNTHETIC test server.
   at most. Quit stays quit (27c1646f).
 - Q44: the settings window floats at its own size instead of being cut
   off, and the folder list is titled "Sync folders" (74f1fb25).
+
+## 18. Time sync: authenticated, the same on every network (draft, to discuss)
+
+Draft written 2026-10-20 for Plane GJALLAROS-200 ("time sync follows the
+VPN"). Nothing is built yet; the open choices are questions 30 to 33 on
+the questionnaire.
+
+Today `system/default.nix` turns on chrony with
+`server 192.168.8.1 iburst prefer` plus the NixOS default pool
+(`0-3.nixos.pool.ntp.org`). All of it is plain NTP: nothing proves who
+answered. The router line is the same on every install and every network,
+and 192.168.8.0/24 is a common router default, so a laptop on a foreign
+network with its own 192.168.8.1 prefers that box's time (loophole 25).
+The clock matters here: USB and Thunderbolt approvals lapse by time
+(section on `lastUsed`, above), TLS checks certificate dates, and logs and
+snapshots are ordered by it.
+
+### How others handle it
+
+- Ubuntu 25.10 and later ship chrony with NTS on by default: four
+  `ntp.ubuntu.com` NTS pools, plus a bootstrap server
+  `ntp-bootstrap.ubuntu.com` whose certificate comes from Ubuntu's own CA
+  so a machine with a badly wrong clock can still start. Time from DHCP is
+  commented out. If NTS-KE (TCP 4460) is blocked, there is no sync
+  ([Ubuntu chrony client docs](https://ubuntu.com/server/docs/how-to/networking/chrony-client/),
+  [Phoronix](https://www.phoronix.com/news/Ubuntu-25.10-Chrony),
+  [OMG! Ubuntu](https://www.omgubuntu.co.uk/2025/06/ubuntu-chrony-nts-default-25-10)).
+- Fedora ships chrony with the plain pool; NTS is opt-in. Fedora Magazine
+  and the Fedora NTS change page show NTS servers such as
+  `time.cloudflare.com` and Netnod's `nts.netnod.se`
+  ([Fedora Magazine](https://fedoramagazine.org/secure-ntp-with-nts/),
+  [Fedora change page](https://fedoraproject.org/wiki/Changes/NetworkTimeSecurity)).
+- GrapheneOS does not use NTP at all, NTS included; it reads the time from
+  an HTTPS response header of its own server
+  ([GrapheneOS forum](https://discuss.grapheneos.org/d/2609-ntphtpdate-and-other-servers/24)).
+- Hardening guides for chrony say the same three things: NTS sources only,
+  more than one operator, no DHCP-supplied servers
+  ([dev.to guide](https://dev.to/lyraalishaikh/stop-trusting-plain-ntp-practical-network-time-security-with-chrony-on-linux-2g5a)).
+
+### Security pass
+
+- **Plain NTP can be moved by anyone on the path.** A café network, a
+  hotel or anything between the laptop and the pool can answer with any
+  time. With the router line, the attacker does not even need to be on the
+  path: owning a 192.168.8.1 on the local network is enough.
+- **NTS stops forged time, not blocked or delayed time.** chrony's own
+  manual: with authenticated sources an attacker can drop or delay
+  packets, up to the `maxdelay` and `maxdistance` limits, but cannot change
+  the timestamps; the damage is a limited slew or step. It also says the
+  unauthenticated sources must go, or they become the way in
+  (chrony.conf(5), `authselectmode`).
+- **One operator should not set the clock alone.** `minsources 2` with
+  sources from different operators means a single wrong or hostile server
+  cannot move the clock; with one source left, chrony holds the clock
+  instead (chrony.conf(5), `minsources`).
+- **A wrong clock breaks NTS itself.** NTS-KE is TLS, so a clock far off
+  rejects every certificate. chrony offers `nocerttimecheck N`, which skips
+  the date check for the first N updates; its manual calls this a last
+  resort with "important security implications" because an expired, leaked
+  key would be accepted while the check is off. Ubuntu avoids it with its
+  own bootstrap CA, which we do not have. Most laptops keep a working RTC,
+  so the window is small, but it is a real trade (question 33).
+- **Blocked port means no time.** A network that blocks TCP 4460 stops NTS.
+  On an untrusted network the exit node carries the traffic, so the block
+  only bites on trusted networks or with the VPN off. Falling back to plain
+  NTP would hand the attacker the clock again, so the fallback is "keep
+  the current clock and say so" (question 32).
+- **Privacy.** Each NTS operator sees the laptop's address and that it runs
+  NTS. On untrusted networks that is the exit node's address.
+- **What the VPN adds.** The tunnel is already authenticated: a router
+  reached at its tailnet address over WireGuard is a source nobody on the
+  local network can forge. That is the one place where "follows the VPN"
+  helps, if the router serves time there (question 31).
+
+### Proposed design
+
+1. Drop `server 192.168.8.1 iburst prefer` and the plain NixOS pool from
+   every install. This closes loophole 25.
+2. chrony with NTS sources from at least three operators
+   (`services.chrony.enableNTS = true`, which also sets `ntsdumpdir` so
+   cookies survive a restart), `authselectmode require`, `minsources 2`
+   (question 30 for the list).
+3. Router time only through the tunnel, at the router's tailnet address,
+   only when the router serves NTP there; otherwise no router source
+   (question 31).
+4. No source from DHCP, on any network.
+5. When no NTS source answers, the clock stays where it is;
+   `gjallarctl system status` and the time line in the settings app say
+   "time not confirmed since <time>" (question 32).
+6. Bootstrap for a badly wrong clock (question 33).
+7. Tests: a NixOS VM test with a fake NTS-less server on the LAN that the
+   client must ignore, and one where only one source answers and the clock
+   must not move.
