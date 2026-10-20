@@ -129,6 +129,8 @@ lib.mkIf (settings.dotfilesDir == "/etc/gjallar/system") {
     '';
   };
 
+  systemd.tmpfiles.rules = [ "d /etc/gjallar/developer 0755 root root -" ];
+
   systemd.services.gjallar-settingsd = {
     description = "GjallarOS settings service";
     wants = [ "gjallar-settings-key.service" ];
@@ -148,7 +150,12 @@ lib.mkIf (settings.dotfilesDir == "/etc/gjallar/system") {
       # The rebuild unit reads its environment file after this service
       # may have stopped.
       RuntimeDirectoryPreserve = true;
-      ReadWritePaths = [ "-/etc/gjallar/system" ];
+      # The checkout's user.config.json, and the parent of root's copy of
+      # the developer-mode folder, which Apply swaps as a whole.
+      ReadWritePaths = [
+        "-/etc/gjallar/system"
+        "-/etc/gjallar/developer"
+      ];
       # Users' signing key records (keys/<uid>.json).
       StateDirectory = "gjallarOS/settings";
       StateDirectoryMode = "0700";

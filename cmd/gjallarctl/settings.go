@@ -331,7 +331,7 @@ func settingsAsked(ctx context.Context, bus settingsBus, answer string, stdout, 
 			return 0
 		}
 	}
-	return settingsApply(ctx, bus, change.ID, stdout, stderr)
+	return settingsApply(ctx, bus, change.Change, stdout, stderr)
 }
 
 // settingsExport saves a signed file of the settings. The service signs
@@ -398,10 +398,8 @@ func readSettingsFile(path string) ([]byte, error) {
 }
 
 func printKeyChanges(stdout io.Writer, change settings.Change) {
-	for _, key := range change.Keys {
-		for _, line := range key.Lines() {
-			fmt.Fprintf(stdout, "  %s\n", line)
-		}
+	for _, line := range change.Lines() {
+		fmt.Fprintf(stdout, "  %s\n", line)
 	}
 }
 
@@ -508,12 +506,17 @@ func settingsApplyCommand(ctx context.Context, bus settingsBus, args []string, s
 		fmt.Fprintf(stderr, "ERROR: %v\n", err)
 		return 1
 	}
-	return settingsApply(ctx, bus, change.ID, stdout, stderr)
+	return settingsApply(ctx, bus, change.Change, stdout, stderr)
 }
 
 // settingsApply hands the change and this session's colors to root, then
 // follows the rebuild it starts.
-func settingsApply(ctx context.Context, bus settingsBus, id string, stdout, stderr io.Writer) int {
+func settingsApply(ctx context.Context, bus settingsBus, change settings.Change, stdout, stderr io.Writer) int {
+	id := change.ID
+	written := "user.config.json"
+	if change.Local != nil {
+		written = localChangesPath
+	}
 	colors := rebuildColors(stderr)
 	fmt.Fprintln(stdout, "The password dialog shows the change root will write.")
 	if _, err := bus.Call(ctx, "Apply", id, colors); err != nil {
@@ -537,7 +540,7 @@ func settingsApply(ctx context.Context, bus settingsBus, id string, stdout, stde
 		}
 		if !running {
 			if result != "success" {
-				fmt.Fprintf(stderr, "ERROR: the rebuild failed (%s); the change stays in user.config.json. Its log: journalctl -b -u %s\n", result, settings.RebuildUnit)
+				fmt.Fprintf(stderr, "ERROR: the rebuild failed (%s); the change stays in %s. Its log: journalctl -b -u %s\n", result, written, settings.RebuildUnit)
 				return 1
 			}
 			fmt.Fprintf(stdout, "Rebuild finished after %s; the change is live.\n", settingsNow().Sub(started).Round(time.Second))

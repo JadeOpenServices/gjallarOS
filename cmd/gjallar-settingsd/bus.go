@@ -275,6 +275,11 @@ func (o object) Request(sender dbus.Sender, values string) (string, *dbus.Error)
 	return answer(change, err)
 }
 
+func (o object) RequestLocal(sender dbus.Sender, files map[string][]byte) (string, *dbus.Error) {
+	change, err := o.svc.RequestLocal(context.Background(), string(sender), files)
+	return answer(change, err)
+}
+
 func (o object) Apply(sender dbus.Sender, id, colors string) *dbus.Error {
 	return busError(o.svc.Apply(context.Background(), string(sender), id, colors))
 }

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/config"
+	"github.com/JadeOpenServices/gjallarOS/internal/localchanges"
 	"github.com/JadeOpenServices/gjallarOS/internal/settings"
 )
 
@@ -30,6 +31,7 @@ type fakeSettingsBus struct {
 	notes    []string
 	exported []byte
 	imported [][]byte
+	folders  []map[string][]byte
 }
 
 var settingsTestNow = time.Date(2026, 10, 19, 12, 0, 0, 0, time.UTC)
@@ -89,6 +91,21 @@ func (b *fakeSettingsBus) Call(_ context.Context, method string, args ...any) (s
 		}
 		b.pending = append(b.pending, change)
 		return answer(change)
+	case "RequestLocal":
+		files := args[0].(map[string][]byte)
+		b.folders = append(b.folders, files)
+		tree, err := localchanges.Check(files)
+		if err != nil {
+			return "", err
+		}
+		change, err := settings.PlanLocal(localchanges.Tree{}, tree)
+		if err != nil {
+			return "", err
+		}
+		change.Asked = settingsTestNow
+		pending := settings.Pending{Change: change, ReadyAt: settingsTestNow.Add(b.readyIn)}
+		b.pending = append(b.pending, pending)
+		return answer(pending)
 	case "Pending":
 		return answer(b.pending)
 	case "Apply":

@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 )
 
@@ -135,5 +136,60 @@ func TestReadRootRefuses(t *testing.T) {
 	writeTree(t, dir, map[string]string{"system/a.nix": "{ }\n"})
 	if _, err := ReadRoot(dir); err == nil {
 		t.Error("a folder not owned by root was accepted")
+	}
+}
+
+func TestReadDir(t *testing.T) {
+	rootUID = uint32(os.Getuid()) + 1
+	t.Cleanup(func() { rootUID = 0 })
+	dir := filepath.Join(t.TempDir(), "GjallarOS-local")
+	writeTree(t, dir, map[string]string{"system/a.nix": "{ }\n"})
+	os.Chmod(filepath.Join(dir, "system", "a.nix"), 0o664)
+	if tree, err := ReadDir(dir); err != nil || strings.Join(tree.Paths(), ",") != "system/a.nix" {
+		t.Fatalf("own folder: %v %v", tree, err)
+	}
+	os.Symlink("/etc/passwd", filepath.Join(dir, "system", "x.nix"))
+	if _, err := ReadDir(dir); err == nil {
+		t.Error("a symlink was accepted")
+	}
+	if _, err := ReadDir(filepath.Join(t.TempDir(), "missing")); err == nil {
+		t.Error("a missing folder read as empty")
+	}
+}
+
+func TestReplace(t *testing.T) {
+	ownedByMe(t)
+	old := syscall.Umask(0o077)
+	t.Cleanup(func() { syscall.Umask(old) })
+	dir := filepath.Join(t.TempDir(), "local")
+	first, _ := Check(map[string][]byte{"system/a.nix": []byte("{ }\n"), "home/x/b.nix": []byte("{ }\n")})
+	if err := Replace(dir, first); err != nil {
+		t.Fatal(err)
+	}
+	for name, want := range map[string]os.FileMode{"": 0o755, "home": 0o755, "home/x": 0o755, "home/x/b.nix": 0o644} {
+		info, err := os.Stat(filepath.Join(dir, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if info.Mode().Perm() != want {
+			t.Errorf("%q has mode %v, want %v", name, info.Mode().Perm(), want)
+		}
+	}
+	second, _ := Check(map[string][]byte{"system/c.nix": []byte("{ }\n")})
+	if err := Replace(dir, second); err != nil {
+		t.Fatal(err)
+	}
+	got, err := ReadRoot(dir)
+	if err != nil || got.Hash() != second.Hash() {
+		t.Fatalf("after the swap: %v %v", got.Paths(), err)
+	}
+	if _, err := os.Lstat(dir + ".new"); err == nil {
+		t.Error("the old folder was left next to the new one")
+	}
+	if err := Replace(dir, Tree{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(dir); err == nil {
+		t.Error("an empty tree left the folder")
 	}
 }

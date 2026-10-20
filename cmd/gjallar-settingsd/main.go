@@ -28,6 +28,10 @@ const introspection = `<node>
       <arg name="values" type="s" direction="in"/>
       <arg name="change" type="s" direction="out"/>
     </method>
+    <method name="RequestLocal">
+      <arg name="files" type="a{say}" direction="in"/>
+      <arg name="change" type="s" direction="out"/>
+    </method>
     <method name="Apply">
       <arg name="id" type="s" direction="in"/>
       <arg name="colors" type="s" direction="in"/>

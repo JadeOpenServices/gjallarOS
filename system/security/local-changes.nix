@@ -1,5 +1,5 @@
 # Developer mode: the owner's own Nix files. A system rebuild stages root's
-# copy (/etc/gjallar/local, checked by internal/localchanges) at
+# copy (/etc/gjallar/developer/local, checked by internal/localchanges) at
 # .gjallar-local next to the official source and records its hash. Files
 # below system/ are NixOS modules, files below home/ home-manager modules of
 # the owner; a name starting with _ is skipped. A staged folder that does

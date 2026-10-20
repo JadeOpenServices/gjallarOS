@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/config"
+	"github.com/JadeOpenServices/gjallarOS/internal/localchanges"
 	"github.com/JadeOpenServices/gjallarOS/internal/namecheck"
 	"github.com/JadeOpenServices/gjallarOS/internal/nettrust"
 	"github.com/JadeOpenServices/gjallarOS/internal/noctalia"
@@ -73,6 +74,10 @@ type service struct {
 	checkoutPath string
 	checkout     func(string) error
 	now          func() time.Time
+	// localPath is root's copy of the developer-mode folder, readLocal
+	// reads it.
+	localPath string
+	readLocal func(string) (localchanges.Tree, error)
 
 	// keys signs and checks settings files; device is this machine's
 	// app-specific id in them. Without keys, Export and Import refuse.
@@ -90,6 +95,8 @@ func newService(sys system, checkoutPath string, checkout func(string) error) *s
 		checkoutPath: checkoutPath,
 		checkout:     checkout,
 		now:          time.Now,
+		localPath:    localchanges.Path,
+		readLocal:    localchanges.ReadRoot,
 		pending:      map[string]settings.Change{},
 	}
 }
@@ -164,18 +171,72 @@ func (s *service) request(ctx context.Context, sender string, who caller, wanted
 	if err != nil {
 		return settings.Pending{}, fmt.Errorf("%w: %v", errRefused, err)
 	}
+	return s.keep(ctx, sender, who, change, notes)
+}
+
+// RequestLocal checks a new developer-mode folder, sent as data by the
+// owner's session, against root's copy and keeps the change. Root never
+// reads the folder in the user's home itself.
+func (s *service) RequestLocal(ctx context.Context, sender string, files map[string][]byte) (settings.Pending, error) {
+	who, err := s.sys.Caller(ctx, sender)
+	if err != nil {
+		return settings.Pending{}, err
+	}
+	if err := s.developerMode(); err != nil {
+		return settings.Pending{}, err
+	}
+	wanted, err := localchanges.Check(files)
+	if err != nil {
+		return settings.Pending{}, fmt.Errorf("%w: %v", errRefused, err)
+	}
+	current, err := s.readLocal(s.localPath)
+	if err != nil {
+		return settings.Pending{}, err
+	}
+	change, err := settings.PlanLocal(current, wanted)
+	if err != nil {
+		return settings.Pending{}, fmt.Errorf("%w: %v", errRefused, err)
+	}
+	return s.keep(ctx, sender, who, change, nil)
+}
+
+// developerMode refuses unless the configuration turns developer mode on.
+func (s *service) developerMode() error {
+	data, _, err := s.readConfig()
+	if err != nil {
+		return err
+	}
+	current, err := config.Parse(data)
+	if err != nil {
+		return fmt.Errorf("the current configuration does not load: %w", err)
+	}
+	if !current.DeveloperMode {
+		return fmt.Errorf("%w: developer mode is off; turn it on with gjallarctl settings set developerMode=true", errRefused)
+	}
+	return nil
+}
+
+// keep stores a planned change for who.
+func (s *service) keep(ctx context.Context, sender string, who caller, change settings.Change, notes []string) (settings.Pending, error) {
 	change.UID, change.Session = who.UID, who.Session
 
 	s.mu.Lock()
 	count := 0
+	local := ""
 	for _, other := range s.pending {
 		if other.UID == who.UID {
 			count++
+			if other.Local != nil {
+				local = other.ID
+			}
 		}
 	}
 	s.mu.Unlock()
 	if count >= maxPendingPerUser {
 		return settings.Pending{}, fmt.Errorf("%w: %d changes already wait; apply or cancel one first", errRefused, count)
+	}
+	if change.Local != nil && local != "" {
+		return settings.Pending{}, fmt.Errorf("%w: folder change %s already waits; apply or cancel it first", errRefused, local[:min(len(local), 8)])
 	}
 
 	nameNotes, err := s.checkHostname(ctx, change)
@@ -385,22 +446,65 @@ func (s *service) Apply(ctx context.Context, sender, id, colors string) error {
 	if err := s.checkout(s.checkoutPath); err != nil {
 		return fmt.Errorf("%w: %v; nothing written", errRefused, err)
 	}
-	data, _, err := s.readConfig()
-	if err != nil {
-		return err
-	}
-	updated, err := change.Apply(data)
-	if err != nil {
-		delete(s.pending, id)
-		return fmt.Errorf("%w: %v", errRefused, err)
-	}
-	if err := config.WriteText(s.configPath, updated); err != nil {
+	if change.Local != nil {
+		if err := s.writeLocal(change); err != nil {
+			if errors.Is(err, errRefused) {
+				delete(s.pending, id)
+			}
+			return err
+		}
+	} else if err := s.writeConfig(change); err != nil {
+		if errors.Is(err, errRefused) {
+			delete(s.pending, id)
+		}
 		return err
 	}
 	delete(s.pending, id)
 	log.Printf("uid %d applied %s change %s: %s", who.UID, change.Tier, id, change.KeyNames())
 	if err := s.sys.StartRebuild(ctx, colors); err != nil {
 		return fmt.Errorf("the change is written, but the rebuild did not start: %w; run rebuild", err)
+	}
+	return nil
+}
+
+// writeConfig writes a change of keys into user.config.json. It is
+// errRefused when a key no longer holds the value the change was asked
+// against. The caller holds s.mu.
+func (s *service) writeConfig(change settings.Change) error {
+	data, _, err := s.readConfig()
+	if err != nil {
+		return err
+	}
+	updated, err := change.Apply(data)
+	if err != nil {
+		return fmt.Errorf("%w: %v", errRefused, err)
+	}
+	return config.WriteText(s.configPath, updated)
+}
+
+// writeLocal makes the change's folder root's copy. It is errRefused when
+// developer mode is off by now or the copy is no longer the one the change
+// was asked against. The caller holds s.mu.
+func (s *service) writeLocal(change settings.Change) error {
+	if err := s.developerMode(); err != nil {
+		return err
+	}
+	current, err := s.readLocal(s.localPath)
+	if err != nil {
+		return err
+	}
+	if current.Hash() != change.Local.OldHash {
+		return fmt.Errorf("%w: %s changed since this change was asked; ask again", errRefused, s.localPath)
+	}
+	if err := localchanges.Replace(s.localPath, change.Local.Tree); err != nil {
+		return fmt.Errorf("write %s: %w", s.localPath, err)
+	}
+	written, err := s.readLocal(s.localPath)
+	if err != nil {
+		return fmt.Errorf("read back %s: %w", s.localPath, err)
+	}
+	if written.Hash() != change.Local.NewHash {
+		return fmt.Errorf("%s does not hold the folder that was asked after writing it", s.localPath)
 	}
 	return nil
 }

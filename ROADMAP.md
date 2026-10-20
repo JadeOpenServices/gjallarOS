@@ -900,13 +900,14 @@ way to root.
       Next: pairing and the installer opt-out (rest of 3.4). Factory reset
       waits for a recovery mode that does one.
 - [ ] **Checkpoint 3b: developer mode.** `~/GjallarOS-local/`, the copy
-      into `/etc/gjallar/local`, the staged `.gjallar-local/`, notice,
+      into `/etc/gjallar/developer/local`, the staged `.gjallar-local/`, notice,
       boot entry name and the recovery exit. Steps: 3b.1 the
       `developerMode` key (critical on, everyday off, refused with JODS),
       the folder checks and the staged import with hash check and
       `local-changes` tag; 3b.2 the root copy through the settings
       service with the file diff; 3b.3 the CLI, template and status
-      listing; 3b.4 the bar notice; 3b.5 the recovery exit.
+      listing; 3b.4 the bar notice; 3b.5 the recovery exit. Done: 3b.1
+      (81cac146, 68eed82a), 3b.2.
 - [ ] **Checkpoint 4: installer, README, migration.** New installs clone
       into `/etc/gjallar/system`. Existing installs: one privileged step
       re-clones the official origin at the revision the system runs,
@@ -1307,11 +1308,19 @@ a problem.
   a README. Every `.nix` file there is imported; a name starting with `_`
   is skipped. No git needed, and the official checkout is never touched,
   so pulls never conflict.
-- **Apply.** `gjallarctl system apply` (or the editor button) copies the
-  folder as data into root-owned `/etc/gjallar/local`: `.nix` files and a
-  short list of asset types only, no links, no hidden files, a size cap.
-  It shows the file diff with the security-tier rules, then rebuilds. The
-  root rebuild checks `/etc/gjallar/local` again (root-owned, nothing
+- **Apply.** `gjallarctl system apply` (or the editor button) reads the
+  folder as the user and sends it as data to gjallar-settingsd
+  (`RequestLocal`), which copies it into root-owned
+  `/etc/gjallar/developer/local`: `.nix` files and a short list of asset
+  types only, no links, no hidden files, a size cap. Root never reads the
+  home folder. The command shows each file's diff against root's copy
+  (characters that do not print as escapes) and the new folder hash; the
+  change then waits like a security setting, and the password dialog
+  lists the files and the same hash. Apply refuses when developer mode
+  went off or root's copy changed since the request, swaps the folder
+  whole (`RENAME_EXCHANGE` in its own parent, the only part of `/etc` the
+  service may write besides the checkout) and rebuilds. The
+  root rebuild checks `/etc/gjallar/developer/local` again (root-owned, nothing
   writable by group or others, no links) and stages it as
   `.gjallar-local/` next to the official source; the flake imports it
   from there. No extra flake input, so `flake.lock` stays the official

@@ -21,10 +21,14 @@ import (
 	"sort"
 	"strings"
 	"syscall"
+
+	"golang.org/x/sys/unix"
 )
 
-// Path is root's copy of the folder, the one a rebuild builds.
-const Path = "/etc/gjallar/local"
+// Path is root's copy of the folder, the one a rebuild builds. It has a
+// parent of its own, so the settings service can swap it without write
+// access to the rest of /etc/gjallar.
+const Path = "/etc/gjallar/developer/local"
 
 const (
 	MaxFiles      = 256
@@ -170,12 +174,40 @@ func ReadRoot(dir string) (Tree, error) {
 			break
 		}
 	}
-	files := map[string][]byte{}
-	err = filepath.WalkDir(dir, func(name string, entry fs.DirEntry, err error) error {
+	return read(dir, checkOwned)
+}
+
+// ReadDir reads the owner's own folder at dir, as that user, so the folder
+// can be sent to root as data. It takes the same files as ReadRoot but does
+// not ask who owns them; symlinks and anything but plain files and
+// directories still fail.
+func ReadDir(dir string) (Tree, error) {
+	info, err := os.Lstat(dir)
+	if err != nil {
+		return Tree{}, err
+	}
+	if !info.IsDir() {
+		return Tree{}, fmt.Errorf("%s is not a directory", dir)
+	}
+	return read(dir, func(name string) error {
+		info, err := os.Lstat(name)
 		if err != nil {
 			return err
 		}
-		if err := checkOwned(name); err != nil {
+		if info.Mode()&fs.ModeSymlink != 0 {
+			return fmt.Errorf("%s is a symlink", name)
+		}
+		return nil
+	})
+}
+
+func read(dir string, check func(string) error) (Tree, error) {
+	files := map[string][]byte{}
+	err := filepath.WalkDir(dir, func(name string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if err := check(name); err != nil {
 			return err
 		}
 		if name == dir || entry.IsDir() {
@@ -213,21 +245,36 @@ func ReadRoot(dir string) (Tree, error) {
 	return tree, nil
 }
 
-// Write creates the tree under dir, which must not exist yet.
+// Write creates the tree under dir, which must not exist yet. Directories
+// get mode 0755 and files 0644 whatever the umask, so a rebuild can read a
+// copy the settings service wrote with umask 0077.
 func Write(dir string, tree Tree) error {
-	if err := os.Mkdir(dir, 0o755); err != nil {
+	if err := mkdir(dir); err != nil {
 		return err
 	}
 	for _, file := range tree.Files {
-		target := filepath.Join(dir, filepath.FromSlash(file.Path))
-		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-			return err
+		target := dir
+		parts := strings.Split(file.Path, "/")
+		for _, part := range parts[:len(parts)-1] {
+			target = filepath.Join(target, part)
+			if err := mkdir(target); err != nil && !errors.Is(err, fs.ErrExist) {
+				return err
+			}
 		}
-		out, err := os.OpenFile(target, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+		target = filepath.Join(target, parts[len(parts)-1])
+		out, err := os.OpenFile(target, os.O_WRONLY|os.O_CREATE|os.O_EXCL|syscall.O_NOFOLLOW, 0o644)
 		if err != nil {
 			return err
 		}
+		if err := out.Chmod(0o644); err != nil {
+			out.Close()
+			return err
+		}
 		if _, err := out.Write(file.Data); err != nil {
+			out.Close()
+			return err
+		}
+		if err := out.Sync(); err != nil {
 			out.Close()
 			return err
 		}
@@ -236,6 +283,43 @@ func Write(dir string, tree Tree) error {
 		}
 	}
 	return nil
+}
+
+func mkdir(dir string) error {
+	if err := os.Mkdir(dir, 0o755); err != nil {
+		return err
+	}
+	return os.Chmod(dir, 0o755)
+}
+
+// Replace makes tree the folder at dir in one step: it writes the tree next
+// to dir and swaps the two, so a rebuild reads the old folder or the new
+// one, never a mix. A tree without files removes the folder.
+func Replace(dir string, tree Tree) error {
+	next := dir + ".new"
+	if err := os.RemoveAll(next); err != nil {
+		return err
+	}
+	if len(tree.Files) == 0 {
+		return os.RemoveAll(dir)
+	}
+	if err := Write(next, tree); err != nil {
+		os.RemoveAll(next)
+		return err
+	}
+	if _, err := os.Lstat(dir); errors.Is(err, fs.ErrNotExist) {
+		if err := os.Rename(next, dir); err != nil {
+			os.RemoveAll(next)
+			return err
+		}
+		return nil
+	}
+	if err := unix.Renameat2(unix.AT_FDCWD, next, unix.AT_FDCWD, dir, unix.RENAME_EXCHANGE); err != nil {
+		os.RemoveAll(next)
+		return fmt.Errorf("swap %s: %w", dir, err)
+	}
+	// next now holds the old folder.
+	return os.RemoveAll(next)
 }
 
 func checkOwned(name string) error {

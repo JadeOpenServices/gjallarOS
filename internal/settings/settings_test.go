@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/config"
+	"github.com/JadeOpenServices/gjallarOS/internal/localchanges"
 )
 
 func configText(t *testing.T, user config.User) []byte {
@@ -236,5 +237,49 @@ func TestLinesShowWhatChangesInsideLongValues(t *testing.T) {
 	}
 	if m := (Change{Keys: []KeyChange{key}}).Message(); strings.Contains(m, long) || !strings.Contains(m, "passbolt") {
 		t.Fatalf("message %q", m)
+	}
+}
+
+func TestPlanLocalListsFiles(t *testing.T) {
+	current, _ := localchanges.Check(map[string][]byte{"system/a.nix": []byte("{ }\n"), "system/b.nix": []byte("{ }\n")})
+	wanted, _ := localchanges.Check(map[string][]byte{"system/a.nix": []byte("{ x = 1; }\n"), "home/c.nix": []byte("{ }\n"), "system/b.nix": []byte("{ }\n")})
+	change, err := PlanLocal(current, wanted)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if change.Tier != config.TierSecurity || change.ID == "" || change.Local.OldHash != current.Hash() || change.Local.NewHash != wanted.Hash() {
+		t.Fatalf("change %+v", change)
+	}
+	if got := strings.Join(change.Lines(), "; "); got != "local home/c.nix: added; local system/a.nix: changed" {
+		t.Fatalf("lines %q", got)
+	}
+	if change.KeyNames() != "local" || !strings.Contains(change.Message(), ShortHash(wanted.Hash())) {
+		t.Fatalf("message %q, keys %q", change.Message(), change.KeyNames())
+	}
+	removed, err := PlanLocal(wanted, localchanges.Tree{})
+	if err != nil || len(removed.Local.Files) != 3 || removed.Local.Files[0].New != "" {
+		t.Fatalf("removing the folder: %+v %v", removed.Local, err)
+	}
+	if _, err := PlanLocal(wanted, wanted); err == nil {
+		t.Fatal("a folder that changes nothing was planned")
+	}
+	if _, err := change.Apply([]byte("{}")); err == nil {
+		t.Fatal("a local change wrote the configuration")
+	}
+}
+
+func TestLocalMessageCapsFiles(t *testing.T) {
+	files := map[string][]byte{}
+	for i := range MaxShownFiles + 5 {
+		files["system/f"+strconv.Itoa(i)+".nix"] = []byte("{ }\n")
+	}
+	wanted, _ := localchanges.Check(files)
+	change, err := PlanLocal(localchanges.Tree{}, wanted)
+	if err != nil {
+		t.Fatal(err)
+	}
+	message := change.Message()
+	if strings.Count(message, "\nlocal ") != MaxShownFiles || !strings.HasSuffix(message, "\nand 5 more") {
+		t.Fatalf("message %q", message)
 	}
 }
