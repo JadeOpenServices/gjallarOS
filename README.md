@@ -563,6 +563,23 @@ file, as `notes.restored-20261021T030000.txt`; your current file is never
 touched. If the folder is gone too, add `--to FOLDER`. Only plain files in
 your own home can be restored, one at a time.
 
+To put all of `/home` or the settings back, start the trusted recovery boot
+entry and run the lines below. From the recovery partition, unlock with
+`gjallar-recover open-root DEVICE` first and use `/mnt` instead of `/`.
+
+```bash
+sudo gjallar-recover snapshots /
+sudo gjallar-recover snapshot-rollback / home.20261021T030000+0200
+```
+
+It asks you to type `ROLLBACK-HOME` (or `ROLLBACK-CONFIG` for a `config.`
+snapshot). The snapshot itself stays as it was; the current `/home` is kept
+as a read-only copy in the list under "replaced by a rollback". When `/home`
+is in use, the change takes effect at the next start. After a settings
+rollback, run `rebuild` once the system is up so the system matches the
+settings again. `sudo gjallar-recover snapshot-drop / NAME` deletes a kept
+copy once you no longer need it.
+
 > [!WARNING]
 > A file you delete from `/home` stays in older snapshots until they age
 > out. Snapshots live on the same disk, so they are not a backup.

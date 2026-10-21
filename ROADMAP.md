@@ -1510,7 +1510,7 @@ GjallarOS managing the keys by default; Nix code only in developer mode
 with a local folder. Migration on the one existing install: whatever does
 not break the running system. New installs get no `~/Documents` clone.
 
-## 15. Snapshots (in progress)
+## 15. Snapshots (done)
 
 Plane GJALLAROS-198. Jade decided questions 18 to 22 and 22a on the
 questionnaire (2026-10-20 and 2026-10-21): read-only snapshots, root-only,
