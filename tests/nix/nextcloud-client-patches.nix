@@ -25,7 +25,7 @@ pkgs.stdenvNoCC.mkDerivation {
     # write woke the watcher, and the client synced every 5 s; hydrated files
     # got the download time as mtime and were uploaded again (2026-10-09).
     grep -A12 'void OpenVFS::fileStatusChanged' "$f" | grep -Fq 'Utility::isConflictFile(systemFileName)'
-    grep -A12 'bool OpenVFS::setPinState' "$f" | grep -Fq 'if (attribs.pinState == convertPinState(state)) {'
+    grep -A12 'bool OpenVFS::setPinState' "$f" | grep -Fq 'if (attribs.pinState != convertPinState(state)) {'
     grep -B8 'Q_EMIT finished();' src/libsync/hydrationjob.cpp | grep -Fq '_device->close();'
     # A sync root claimed by an earlier account made OpenVFS fail to start;
     # nothing listened, so the client synced the bare folder: placeholders
@@ -93,6 +93,11 @@ pkgs.stdenvNoCC.mkDerivation {
     grep -A14 'QString openVfsAvailabilitySocketSuffix' src/gui/socketapi/socketapi.cpp \
       | grep -Fq 'AvailabilityRecursivity::RecursiveAvailability'
     ! grep -Fq 'VFS_HYDRATING' src/gui/socketapi/socketapi.cpp
+    # Freeing up a folder kept a subfolder pinned on its own on disk, so the
+    # subfolder stayed downloaded (2026-10-21). A folder pin resets the pins
+    # below it, as the other backends do.
+    grep -A24 'bool OpenVFS::setPinState' "$f" | grep -Fq 'resetPinsBelow(folderPath);'
+    grep -A12 'void OpenVFS::resetPinsBelow' "$f" | grep -Fq 'params().journal->getFilesBelowPath(path,'
     touch $out
   '';
 }

@@ -23,6 +23,14 @@ Client behaviour patches:
   there before the client starts its own openvfs is a setup error. The start
   gate took such a mount for its own, and the second openvfs's exit aborted
   the client.
+- `nextcloud-openvfs-folder-availability.patch`: a folder reports what the
+  sync database knows about the files below it, so the file manager shows
+  the cloud until every file is local.
+- `nextcloud-openvfs-folder-pin-below.patch`: "Always available locally" or
+  "Free up space" on a folder resets the pins of everything below it to
+  inherited, as the other VFS backends do. Before, a
+  subfolder kept its own earlier pin on disk and stayed downloaded.
+  Excluded pins follow the ignore list and stay.
 - `nextcloud-keep-local-picker.patch`: after the wizard a virtual-files
   account opens "Keep on this device" with nothing ticked. Ticked folders get
   the "always available locally" pin; closing or "Not now" leaves everything
