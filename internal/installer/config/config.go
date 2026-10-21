@@ -44,6 +44,9 @@ type User struct {
 	NetworkPrintingEnable  bool                   `json:"networkPrintingEnable" tier:"security"`
 	DolphinDriveUsage      bool                   `json:"dolphinDriveUsage" tier:"everyday"`
 	FirmwareFlashReadEntry bool                   `json:"firmwareFlashReadEntry" tier:"critical" scope:"device"`
+	SnapshotsEnable        bool                   `json:"snapshotsEnable" tier:"security" scope:"device"`
+	SnapshotsKeepHours     int                    `json:"snapshotsKeepHours" tier:"security" scope:"device"`
+	SnapshotsKeepDays      int                    `json:"snapshotsKeepDays" tier:"security" scope:"device"`
 	Name                   string                 `json:"name" tier:"everyday"`
 	Email                  string                 `json:"email" tier:"everyday"`
 	GitHubUsername         string                 `json:"githubUsername" tier:"everyday"`
@@ -147,6 +150,9 @@ func Defaults() (User, error) {
 		JODSDeviceClass:         "laptop",
 		JODSDesktopProfile:      "headless",
 		ReleaseChannel:          DefaultReleaseChannel,
+		SnapshotsEnable:         true,
+		SnapshotsKeepHours:      DefaultSnapshotsKeepHours,
+		SnapshotsKeepDays:       DefaultSnapshotsKeepDays,
 		WriteConfig:             true,
 		RunRebuild:              true,
 	}, nil
@@ -241,6 +247,17 @@ const DefaultUSBTrustTPMHandle = "0x81000042"
 // accepts. 0 means permanent USB trust never lapses.
 const MaxUSBTrustLapseDays = 36500
 
+// Snapshot retention: hourly snapshots of /home are kept this many hours,
+// daily ones of /home and the system settings this many days. Short by
+// default, because a file deleted from /home lives on in old snapshots
+// until they age out.
+const (
+	DefaultSnapshotsKeepHours = 24
+	MaxSnapshotsKeepHours     = 168
+	DefaultSnapshotsKeepDays  = 7
+	MaxSnapshotsKeepDays      = 365
+)
+
 // DefaultReleaseChannel is the channel of new installs and of configurations
 // written before channels existed.
 const DefaultReleaseChannel = "stable"
@@ -301,6 +318,16 @@ func Parse(contents []byte) (User, error) {
 	if user.ReleaseChannel == "" {
 		user.ReleaseChannel = DefaultReleaseChannel
 	}
+	// Configurations written before snapshots existed get the defaults.
+	if _, ok := fields["snapshotsEnable"]; !ok {
+		user.SnapshotsEnable = true
+	}
+	if _, ok := fields["snapshotsKeepHours"]; !ok {
+		user.SnapshotsKeepHours = DefaultSnapshotsKeepHours
+	}
+	if _, ok := fields["snapshotsKeepDays"]; !ok {
+		user.SnapshotsKeepDays = DefaultSnapshotsKeepDays
+	}
 	if err := NormalizeProjectTools(&user); err != nil {
 		return User{}, err
 	}
@@ -342,6 +369,15 @@ func Validate(user User) error {
 	}
 	if user.USBTrustLapseDays < 0 || user.USBTrustLapseDays > MaxUSBTrustLapseDays {
 		return fmt.Errorf("invalid usbTrustLapseDays: %d; use 0 (never) or 1 to %d", user.USBTrustLapseDays, MaxUSBTrustLapseDays)
+	}
+	// Retention only counts while snapshots are on.
+	if user.SnapshotsEnable {
+		if user.SnapshotsKeepHours < 0 || user.SnapshotsKeepHours > MaxSnapshotsKeepHours {
+			return fmt.Errorf("invalid snapshotsKeepHours: %d; use 0 to %d", user.SnapshotsKeepHours, MaxSnapshotsKeepHours)
+		}
+		if user.SnapshotsKeepDays < 1 || user.SnapshotsKeepDays > MaxSnapshotsKeepDays {
+			return fmt.Errorf("invalid snapshotsKeepDays: %d; use 1 to %d", user.SnapshotsKeepDays, MaxSnapshotsKeepDays)
+		}
 	}
 	if user.USBTrustEnforce {
 		if !user.USBGuardEnable {

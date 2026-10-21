@@ -1516,7 +1516,8 @@ Plane GJALLAROS-198. Jade decided questions 18 to 22 and 22a on the
 questionnaire (2026-10-20 and 2026-10-21): read-only snapshots, root-only,
 btrbk-style retention, rollback only through recovery, no secrets and no
 `/nix` in snapshots, settings in `user.config.json`, and only new installs
-get the layout. Step 1 (installer subvolumes) is built.
+get the layout. Step 1 (installer subvolumes) and step 2 (snapshot
+units, settings, rebuild snapshots) are built; the VM test is open.
 
 Today a fresh install puts everything on the top level of one encrypted
 Btrfs (no subvolumes). NixOS generations already roll back the system
@@ -1574,8 +1575,9 @@ Snapshots are for that.
   overwrites.
 - **Disk filling.** Snapshots of `/nix` would keep every garbage-collected
   store path alive. `/nix` gets its own subvolume and is never
-  snapshotted; a free-space floor drops the oldest timeline snapshots
-  first.
+  snapshotted. Below a free-space floor (10% of the disk, at most 10 GiB)
+  a run makes no new snapshot and says so in the journal; old ones still
+  age out.
 - **The NixOS btrbk module is too wide.** In the pinned nixpkgs it runs
   btrbk as its own user with a sudo rule for any `btrfs` command. `btrfs`
   with free arguments can write or delete anywhere, so that user is root
@@ -1610,6 +1612,9 @@ store anyway.
 2. Snapshots by hardened root timers (btrbk retention rules:
    `snapshot_create onchange`, `preserve_min` plus `preserve`, long ISO
    timestamps, a lock file, a free-space floor before each run).
+   `snapshotsEnable` (on), `snapshotsKeepHours` (24) and
+   `snapshotsKeepDays` (7) in `user.config.json` set them; a config
+   without the keys gets these values.
 3. Users restore their own files through the settings service
    (`gjallarctl snapshots list`, `gjallarctl snapshots restore PATH`);
    only their own home, copied next to the original.

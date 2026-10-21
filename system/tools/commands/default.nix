@@ -49,7 +49,22 @@ let
       ${pkgs.coreutils}/bin/tail -n 3 "$errors" >&2
     fi
     ${pkgs.coreutils}/bin/rm -f "$errors"
-    exec "$ctl" system rebuild "$@"
+    # On the subvolume layout the system settings get a snapshot before the
+    # rebuild and after a good one, so the last built state can be restored.
+    # The rebuild may turn snapshots off, so the check runs each time.
+    snapshot_settings() {
+      if [ -e /etc/gjallar/snapshots/config.conf ] &&
+        ! ${pkgs.systemd}/bin/systemctl start gjallar-snapshot-config.service; then
+        echo "[GjallarOS] Warning: no snapshot of the system settings; see journalctl -u gjallar-snapshot-config" >&2
+      fi
+    }
+    snapshot_settings
+    status=0
+    "$ctl" system rebuild "$@" || status=$?
+    if [ "$status" = 0 ]; then
+      snapshot_settings
+    fi
+    exit "$status"
   '';
   systemRebuild = pkgs.writeShellScriptBin "gjallar-system-rebuild" ''
     exec ${pkgs.coreutils}/bin/env -i \

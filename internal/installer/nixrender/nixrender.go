@@ -112,6 +112,8 @@ type Settings struct {
 	ConsoleLoginEnable, USBReviewTechnical, DolphinDriveUsage, FirmwareFlashReadEntry       bool
 	USBTrustTPMHandle                                                                       string
 	USBTrustLapseDays                                                                       int
+	SnapshotsEnable                                                                         bool
+	SnapshotsKeepHours, SnapshotsKeepDays                                                   int
 	Name, Email, GitHubUsername, DotfilesDir                                                string
 	RootPasswordFile, UserPasswordFile                                                      string
 	DebugFunctions, DeveloperMode                                                           bool
@@ -167,6 +169,9 @@ func FromUser(user config.User) Settings {
 		USBTrustEnforce:                     user.USBTrustEnforce,
 		USBTrustTPMHandle:                   user.USBTrustTPMHandle,
 		USBTrustLapseDays:                   user.USBTrustLapseDays,
+		SnapshotsEnable:                     user.SnapshotsEnable,
+		SnapshotsKeepHours:                  user.SnapshotsKeepHours,
+		SnapshotsKeepDays:                   user.SnapshotsKeepDays,
 		USBReviewTechnical:                  user.USBReviewTechnical,
 		PrintingEnable:                      user.PrintingEnable,
 		NetworkPrintingEnable:               user.NetworkPrintingEnable,
@@ -264,6 +269,9 @@ var userIntentKeys = []string{
 	"networkPrintingEnable",
 	"dolphinDriveUsage",
 	"firmwareFlashReadEntry",
+	"snapshotsEnable",
+	"snapshotsKeepHours",
+	"snapshotsKeepDays",
 	"name",
 	"email",
 	"githubUsername",
@@ -546,6 +554,9 @@ func Render(s Settings) []byte {
 	boolean("networkPrintingEnable", s.NetworkPrintingEnable)
 	boolean("dolphinDriveUsage", s.DolphinDriveUsage)
 	boolean("firmwareFlashReadEntry", s.FirmwareFlashReadEntry)
+	boolean("snapshotsEnable", s.SnapshotsEnable)
+	integer("snapshotsKeepHours", s.SnapshotsKeepHours)
+	integer("snapshotsKeepDays", s.SnapshotsKeepDays)
 	str("name", s.Name)
 	str("email", s.Email)
 	str("githubUsername", s.GitHubUsername)

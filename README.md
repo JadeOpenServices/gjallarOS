@@ -531,6 +531,29 @@ GjallarOS. If the ESP itself is broken, boot the recovery ISO from USB.
 > boot entry, the recovery-maintenance initrd and the recovery ISO. A reinstall
 > or reset therefore needs a deliberate boot into recovery.
 
+### Snapshots
+
+Installs made with the subvolume layout keep read-only Btrfs snapshots of
+`/home` (hourly) and of the system settings in `/etc/gjallar/system` (daily,
+and before and after each rebuild). `/`, `/nix` and `/var/lib` never get
+snapshots: generations bring the system back, and the machine keys in
+`/var/lib` must not live on in old copies. Older installs get no snapshots
+until they are reinstalled.
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `snapshotsEnable` | `true` | turn the snapshot timers on or off |
+| `snapshotsKeepHours` | `24` | hours of hourly `/home` snapshots to keep (0 to 168) |
+| `snapshotsKeepDays` | `7` | days of daily snapshots to keep (1 to 365) |
+
+Only root can reach the snapshots; they are mounted nowhere on the running
+system. When the disk is nearly full, no new snapshot is made and the
+journal says so (`journalctl -u gjallar-snapshot-home`).
+
+> [!WARNING]
+> A file you delete from `/home` stays in older snapshots until they age
+> out. Snapshots live on the same disk, so they are not a backup.
+
 ### Secure Boot
 
 The installer offers Secure Boot on models whose ODDC entry has a Secure Boot
