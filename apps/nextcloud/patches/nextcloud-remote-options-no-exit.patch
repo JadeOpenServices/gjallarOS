@@ -1,0 +1,62 @@
+diff --git a/src/gui/application.h b/src/gui/application.h
+--- a/src/gui/application.h
++++ b/src/gui/application.h
+@@ -150,6 +150,8 @@
+ 
+     bool _helpOnly = false;
+     bool _versionOnly = false;
++    bool _remoteCommand = false;
++    bool _remoteOptionsInvalid = false;
+ 
+     QElapsedTimer _startedAt;
+ 
+diff --git a/src/gui/application.cpp b/src/gui/application.cpp
+--- a/src/gui/application.cpp
++++ b/src/gui/application.cpp
+@@ -733,7 +733,16 @@
+ void Application::parseOptionsRemoteCommand(const QStringList &options)
+ {
+     _showLogWindow = false;
++    // Another start only forwards its options. A bad one must not exit
++    // this client: sync would stop and the OpenVFS mount would go away.
++    _remoteCommand = true;
++    _remoteOptionsInvalid = false;
+     parseOptions(options);
++    _remoteCommand = false;
++    if (_remoteOptionsInvalid) {
++        AccountSetupCommandLineManager::destroy();
++        return;
++    }
+     setupLogging();
+     if (_showLogWindow) {
+         _gui->slotToggleLogBrowser(); // _showLogWindow is set in parseOptions.
+@@ -1007,7 +1016,7 @@
+     bool shouldExit = false;
+ 
+     //parse options; if help or bad option exit
+-    while (it.hasNext()) {
++    while (it.hasNext() && !_remoteOptionsInvalid) {
+         QString option = it.next();
+         if (option == QLatin1String("--help") || option == QLatin1String("-h")) {
+             setHelp();
+@@ -1112,7 +1121,7 @@
+             }
+         }
+     }
+-    if (shouldExit) {
++    if (shouldExit && !_remoteCommand) {
+         std::exit(0);
+     }
+ }
+@@ -1186,6 +1195,11 @@
+ 
+ void Application::showHint(std::string errorHint)
+ {
++    if (_remoteCommand) {
++        qCWarning(lcApplication) << "Ignored options from another start:" << QString::fromStdString(errorHint);
++        _remoteOptionsInvalid = true;
++        return;
++    }
+     static QString binName = QFileInfo(QCoreApplication::applicationFilePath()).fileName();
+     std::cerr << errorHint << std::endl;
+     std::cerr << "Try '" << binName.toStdString() << " --help' for more information" << std::endl;

@@ -77,6 +77,12 @@ pkgs.stdenvNoCC.mkDerivation {
     grep -A2 'slotDisableVfsCurrentFolder);' src/gui/accountsettings.cpp | grep -Fq 'setDisabled(Theme::instance()->enforceVirtualFilesSyncFolder());'
     # Folder names stay out of the log.
     grep -Fq '"Keep-local picks: pinned" << pinned << "dropped" << dropped << "pending" << pending.size();' src/gui/folder.cpp
+    # A second start forwards its options to the running client. An unknown
+    # one ran the exit meant for a fresh start, so sync stopped and the
+    # OpenVFS mount went away (2026-10-21).
+    grep -A6 'void Application::showHint' src/gui/application.cpp | grep -Fq 'if (_remoteCommand) {'
+    grep -Fq 'if (shouldExit && !_remoteCommand) {' src/gui/application.cpp
+    grep -A12 'void Application::parseOptionsRemoteCommand' src/gui/application.cpp | grep -Fq 'if (_remoteOptionsInvalid) {'
     touch $out
   '';
 }

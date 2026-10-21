@@ -51,5 +51,8 @@ in
     # After the wizard, pick folders to keep on this device; everything
     # else, new top-level folders too, stays online-only.
     ./patches/nextcloud-keep-local-picker.patch
+    # A bad option from a second start is logged and ignored; it no longer
+    # exits the running client.
+    ./patches/nextcloud-remote-options-no-exit.patch
   ];
 }

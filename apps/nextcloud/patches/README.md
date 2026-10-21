@@ -34,6 +34,11 @@ Client behaviour patches:
   available locally"; the patch shows it again in Dolphin and in the folder
   settings, so folders can be picked later. Turning virtual files off stays
   locked.
+- `nextcloud-remote-options-no-exit.patch`: a second `nextcloud` start
+  forwards its options to the running client. Upstream checked them with the
+  code meant for a fresh start, so a typo or unknown option exited the
+  running client: sync stopped and the OpenVFS mount went away. The running
+  client now logs a warning and does not act on that command.
 
 Hydration patches:
 
