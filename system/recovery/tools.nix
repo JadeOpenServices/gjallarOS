@@ -195,7 +195,7 @@ let
           fi
 
           source="$(
-            findmnt -nro SOURCE --mountpoint "$target"
+            findmnt -nvro SOURCE --mountpoint "$target"
           )"
 
           options="$(
@@ -217,6 +217,19 @@ let
               exit 1
               ;;
           esac
+
+          # Installs since snapshots (ROADMAP section 15) keep / on the
+          # default subvolume @ and the rest on their own; generations and
+          # nixos-enter need /nix. The snapshots stay unmounted.
+          if [ "$(findmnt -nro FSROOT --mountpoint "$target")" = /@ ]; then
+            for sub in @nix:nix @home:home @config:etc/gjallar/system; do
+              if ! mount -o rw,subvol="''${sub%%:*}" "$mapping" "$target/''${sub#*:}"; then
+                umount -R "$target" >/dev/null 2>&1 || true
+                printf '%s\n' "ERROR: subvolume ''${sub%%:*} could not be mounted at $target/''${sub#*:}." >&2
+                exit 1
+              fi
+            done
+          fi
 
           cleanup_mapping=false
           trap - EXIT

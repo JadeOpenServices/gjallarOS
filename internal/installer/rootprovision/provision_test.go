@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -117,7 +118,7 @@ func runner(fs string) *fakeRunner {
 	partition := "/dev/nvme1n1p2"
 	stable := "/dev/disk/by-partuuid/" + testPartUUID
 
-	return &fakeRunner{
+	r := &fakeRunner{
 		outputs: map[string][]byte{
 			commandKey("readlink", "-f", stable): []byte(partition + "\n"),
 			commandKey(
@@ -139,10 +140,6 @@ func runner(fs string) *fakeRunner {
 				testPartUUID,
 			)),
 			commandKey(
-				"findmnt", "-nvro", "SOURCE",
-				"--mountpoint", "/mnt",
-			): []byte("/dev/mapper/cryptroot\n"),
-			commandKey(
 				"sudo", "cryptsetup", "luksUUID", partition,
 			): []byte(testLUKSUUID + "\n"),
 		},
@@ -152,6 +149,13 @@ func runner(fs string) *fakeRunner {
 			): exitCodeError{1},
 		},
 	}
+	for _, sub := range Subvolumes {
+		r.outputs[commandKey(
+			"findmnt", "-nvro", "SOURCE,FSROOT",
+			"--mountpoint", filepath.Join("/mnt", sub.Path),
+		)] = []byte("/dev/mapper/cryptroot /" + sub.Name + "\n")
+	}
+	return r
 }
 
 type exitCodeError struct{ code int }
@@ -191,7 +195,17 @@ func TestProvisionLUKS2BtrfsRoot(t *testing.T) {
 		"cryptsetup luksFormat --type luks2 --batch-mode --key-file - /dev/nvme1n1p2",
 		"cryptsetup open --type luks2 --key-file - /dev/nvme1n1p2 cryptroot",
 		"mkfs.btrfs -f -L GJALLAROS /dev/mapper/cryptroot",
-		"mount /dev/mapper/cryptroot /mnt",
+		"mount -o subvolid=5 /dev/mapper/cryptroot /mnt",
+		"btrfs subvolume create /mnt/@home",
+		"btrfs subvolume create /mnt/@config",
+		"umount /mnt",
+		"mount -o subvol=@ /dev/mapper/cryptroot /mnt",
+		"mount -o subvol=@home /dev/mapper/cryptroot /mnt/home",
+		"mount -o subvol=@nix /dev/mapper/cryptroot /mnt/nix",
+		"mount -o subvol=@config /dev/mapper/cryptroot /mnt/etc/gjallar/system",
+		"mount -o subvol=@snapshots,nosuid,nodev,noexec /dev/mapper/cryptroot /mnt/.snapshots",
+		"btrfs subvolume set-default /mnt",
+		"chmod 0700 /mnt/.snapshots",
 	} {
 		if !strings.Contains(joined, required) {
 			t.Fatalf("missing command %q:\n%s", required, joined)
@@ -343,5 +357,29 @@ func TestExt4RootRejectedBeforeMutation(t *testing.T) {
 				joined,
 			)
 		}
+	}
+}
+
+func TestWrongSubvolumeStopsAndUnmounts(t *testing.T) {
+	r := runner("btrfs")
+	r.outputs[commandKey(
+		"findmnt", "-nvro", "SOURCE,FSROOT", "--mountpoint", "/mnt/home",
+	)] = []byte("/dev/mapper/cryptroot /@\n")
+	var out bytes.Buffer
+
+	_, err := provision(
+		context.Background(),
+		Input{Plan: testPlan("btrfs"), Passphrase: []byte("correct horse battery staple"), Out: &out},
+		r,
+	)
+	if err == nil || !strings.Contains(err.Error(), "/mnt/home mismatch") {
+		t.Fatalf("expected subvolume mismatch, got %v", err)
+	}
+	joined := callsText(r.calls)
+	if strings.Contains(joined, "/mnt/nix") {
+		t.Fatalf("mounted on after the mismatch:\n%s", joined)
+	}
+	if !strings.HasSuffix(joined, "sudo umount -R /mnt\nsudo cryptsetup close cryptroot") {
+		t.Fatalf("expected cleanup, got:\n%s", joined)
 	}
 }

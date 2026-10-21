@@ -1510,12 +1510,13 @@ GjallarOS managing the keys by default; Nix code only in developer mode
 with a local folder. Migration on the one existing install: whatever does
 not break the running system. New installs get no `~/Documents` clone.
 
-## 15. Snapshots (draft, to discuss)
+## 15. Snapshots (in progress)
 
-Draft written 2026-10-20 for Plane GJALLAROS-198. Nothing is built yet; the
-open choices are questions 18 to 22 on the questionnaire. Jade's frame:
-read-only snapshots, root-only, retention, rollback through recovery, no
-secrets in snapshots.
+Plane GJALLAROS-198. Jade decided questions 18 to 22 and 22a on the
+questionnaire (2026-10-20 and 2026-10-21): read-only snapshots, root-only,
+btrbk-style retention, rollback only through recovery, no secrets and no
+`/nix` in snapshots, settings in `user.config.json`, and only new installs
+get the layout. Step 1 (installer subvolumes) is built.
 
 Today a fresh install puts everything on the top level of one encrypted
 Btrfs (no subvolumes). NixOS generations already roll back the system
@@ -1557,7 +1558,7 @@ Snapshots are for that.
   snapshot is deleted
   ([openSUSE forum](https://forums.opensuse.org/t/secure-remove-from-btrfs/152004)).
   Design: machine secrets (`/var/lib/sbctl`, sealed tokens and keys under
-  `/var/lib/gjallar`) sit on a subvolume that is never snapshotted. Home
+  `/var/lib/gjallar`) stay on `@`, which is never snapshotted. Home
   data cannot be split like that, so a rotation the system performs on a
   user's behalf says which snapshots still hold the old key and offers to
   delete them.
@@ -1575,24 +1576,47 @@ Snapshots are for that.
   store path alive. `/nix` gets its own subvolume and is never
   snapshotted; a free-space floor drops the oldest timeline snapshots
   first.
+- **The NixOS btrbk module is too wide.** In the pinned nixpkgs it runs
+  btrbk as its own user with a sudo rule for any `btrfs` command. `btrfs`
+  with free arguments can write or delete anywhere, so that user is root
+  in all but name. Design: own root oneshot units with no sudo rule,
+  `ProtectSystem=strict`, write access only to the snapshot paths, no
+  network, `NoNewPrivileges`, and a narrow capability set. A note for
+  upstream goes to the human-session queue.
 - Snapshots stay inside the LUKS volume, so nothing new is stored in the
   clear. They are not a backup.
 
-### Proposed design
+### Design (decided)
 
-1. New installs: subvolumes `@` (`/`), `@home`, `@nix`, `@keys` (machine
-   secrets, never snapshotted), `@snapshots` on the top level, mounted at
-   `/.snapshots` root-only.
-2. Snapshots by root timers (btrbk, no D-Bus service), read-only. Sets:
-   `home` hourly, `state` (`/var/lib`, `/etc/gjallar`) before every
-   rebuild and daily.
+Only what is listed gets snapshots (question 22a). `/` and `/var/lib` never
+do: NixOS generations bring the system back, and the secrets live there.
+
+| Subvolume | Mounted at | Snapshots |
+| --- | --- | --- |
+| `@` | `/` | never; default subvolume, so a plain mount of the disk (recovery tools) lands here |
+| `@home` | `/home` | hourly |
+| `@nix` | `/nix` | never |
+| `@config` | `/etc/gjallar/system` (the checkout: `user.config.json`, state, hardware) | daily and before every rebuild |
+| `@snapshots` | `/.snapshots` | holds the snapshots; 0700 root, `nosuid,nodev,noexec` |
+
+`/etc/gjallar` itself stays on `@`, because NixOS writes its own links
+there. The checkout holds no secrets: its content is in the world-readable
+store anyway.
+
+1. New installs get the layout above. The recovery `open-root` command
+   mounts `@nix`, `@home` and `@config` below `/mnt` when it finds it,
+   never `@snapshots`.
+2. Snapshots by hardened root timers (btrbk retention rules:
+   `snapshot_create onchange`, `preserve_min` plus `preserve`, long ISO
+   timestamps, a lock file, a free-space floor before each run).
 3. Users restore their own files through the settings service
    (`gjallarctl snapshots list`, `gjallarctl snapshots restore PATH`);
    only their own home, copied next to the original.
-4. A full state rollback runs only from the recovery boot entry, offline,
-   and keeps the replaced state as a snapshot.
-5. Existing installs keep their layout until a decision on migration
-   (question 19).
+4. A rollback of `@home` or `@config` runs only from the recovery boot
+   entry, offline, as a new read-write snapshot (never a read-only one made
+   writable), and keeps the replaced one as a snapshot.
+5. Existing installs keep their layout and get no snapshots until they
+   are reinstalled (question 19).
 
 ## 16. VPN: exit node down (draft, to discuss)
 
