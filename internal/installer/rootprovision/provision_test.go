@@ -198,18 +198,22 @@ func TestProvisionLUKS2BtrfsRoot(t *testing.T) {
 		"mount -o subvolid=5 /dev/mapper/cryptroot /mnt",
 		"btrfs subvolume create /mnt/@home",
 		"btrfs subvolume create /mnt/@config",
+		"btrfs subvolume create /mnt/@snapshots",
+		"chmod 0700 /mnt/@snapshots",
 		"umount /mnt",
 		"mount -o subvol=@ /dev/mapper/cryptroot /mnt",
 		"mount -o subvol=@home /dev/mapper/cryptroot /mnt/home",
 		"mount -o subvol=@nix /dev/mapper/cryptroot /mnt/nix",
 		"mount -o subvol=@config /dev/mapper/cryptroot /mnt/etc/gjallar/system",
-		"mount -o subvol=@snapshots,nosuid,nodev,noexec /dev/mapper/cryptroot /mnt/.snapshots",
 		"btrfs subvolume set-default /mnt",
-		"chmod 0700 /mnt/.snapshots",
 	} {
 		if !strings.Contains(joined, required) {
 			t.Fatalf("missing command %q:\n%s", required, joined)
 		}
+	}
+
+	if strings.Contains(joined, "subvol=@snapshots") {
+		t.Fatalf("snapshots must stay unmounted in the new system:\n%s", joined)
 	}
 
 	if len(r.inputSizes) != 2 {

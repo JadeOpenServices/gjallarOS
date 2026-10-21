@@ -1597,7 +1597,7 @@ do: NixOS generations bring the system back, and the secrets live there.
 | `@home` | `/home` | hourly |
 | `@nix` | `/nix` | never |
 | `@config` | `/etc/gjallar/system` (the checkout: `user.config.json`, state, hardware) | daily and before every rebuild |
-| `@snapshots` | `/.snapshots` | holds the snapshots; 0700 root, `nosuid,nodev,noexec` |
+| `@snapshots` | nowhere | holds the snapshots; 0700 root; only the snapshot units mount it, in their own mount namespace, `nosuid,nodev,noexec` |
 
 `/etc/gjallar` itself stays on `@`, because NixOS writes its own links
 there. The checkout holds no secrets: its content is in the world-readable
@@ -1605,7 +1605,8 @@ store anyway.
 
 1. New installs get the layout above. The recovery `open-root` command
    mounts `@nix`, `@home` and `@config` below `/mnt` when it finds it,
-   never `@snapshots`.
+   never `@snapshots`. The snapshot units turn themselves on only where
+   `/home` is `@home`.
 2. Snapshots by hardened root timers (btrbk retention rules:
    `snapshot_create onchange`, `preserve_min` plus `preserve`, long ISO
    timestamps, a lock file, a free-space floor before each run).

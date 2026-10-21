@@ -20,14 +20,15 @@ import (
 
 const mountPoint = "/mnt"
 
-// snapshotsPath holds the read-only snapshots of @home and @config.
-const snapshotsPath = "/.snapshots"
+// SnapshotsSubvolume holds the read-only snapshots of @home and @config. It
+// is in no fstab: only the snapshot units mount it, in their own mount
+// namespace, so the running system never shows it.
+const SnapshotsSubvolume = "@snapshots"
 
 // Subvolume is one btrfs subvolume of a new install and where it is mounted.
 type Subvolume struct {
-	Name    string
-	Path    string
-	Options []string
+	Name string
+	Path string
 }
 
 // Subvolumes is the layout of a new install, parents before children (ROADMAP
@@ -41,7 +42,6 @@ var Subvolumes = []Subvolume{
 	{Name: "@home", Path: "/home"},
 	{Name: "@nix", Path: "/nix"},
 	{Name: "@config", Path: "/etc/gjallar/system"},
-	{Name: "@snapshots", Path: snapshotsPath, Options: []string{"nosuid", "nodev", "noexec"}},
 }
 
 type Input struct {
@@ -253,8 +253,7 @@ func provision(
 				return Result{}, fmt.Errorf("create mount point %s: %w", target, err)
 			}
 		}
-		options := strings.Join(append([]string{"subvol=" + sub.Name}, sub.Options...), ",")
-		if err := privilegedRun(ctx, runner, "mount", "-o", options, mapperPath, target); err != nil {
+		if err := privilegedRun(ctx, runner, "mount", "-o", "subvol="+sub.Name, mapperPath, target); err != nil {
 			cleanup()
 			return Result{}, fmt.Errorf("mount subvolume %s at %s: %w", sub.Name, target, err)
 		}
@@ -270,13 +269,6 @@ func provision(
 	if err := privilegedRun(ctx, runner, "btrfs", "subvolume", "set-default", mountPoint); err != nil {
 		cleanup()
 		return Result{}, fmt.Errorf("make @ the default subvolume: %w", err)
-	}
-
-	// Only root may look into the snapshots: a snapshot keeps the modes
-	// files had when it was taken.
-	if err := privilegedRun(ctx, runner, "chmod", "0700", filepath.Join(mountPoint, snapshotsPath)); err != nil {
-		cleanup()
-		return Result{}, fmt.Errorf("restrict %s: %w", snapshotsPath, err)
 	}
 
 	uuidRaw, err := runner.Output(
@@ -312,7 +304,8 @@ func provision(
 	}, nil
 }
 
-// makeSubvolumes creates every subvolume at the top level of the new file
+// makeSubvolumes creates every subvolume and SnapshotsSubvolume at the top
+// level of the new file
 // system, mounted at mountPoint only for that.
 func makeSubvolumes(ctx context.Context, runner commandRunner, mapperPath string) error {
 	if err := privilegedRun(ctx, runner, "mount", "-o", "subvolid=5", mapperPath, mountPoint); err != nil {
@@ -322,6 +315,15 @@ func makeSubvolumes(ctx context.Context, runner commandRunner, mapperPath string
 		if err := privilegedRun(ctx, runner, "btrfs", "subvolume", "create", filepath.Join(mountPoint, sub.Name)); err != nil {
 			_ = privilegedRun(ctx, runner, "umount", mountPoint)
 			return fmt.Errorf("create subvolume %s: %w", sub.Name, err)
+		}
+	}
+	// Only root may look into the snapshots: a snapshot keeps the modes
+	// files had when it was taken.
+	snapshots := filepath.Join(mountPoint, SnapshotsSubvolume)
+	for _, args := range [][]string{{"btrfs", "subvolume", "create", snapshots}, {"chmod", "0700", snapshots}} {
+		if err := privilegedRun(ctx, runner, args...); err != nil {
+			_ = privilegedRun(ctx, runner, "umount", mountPoint)
+			return fmt.Errorf("create subvolume %s: %w", SnapshotsSubvolume, err)
 		}
 	}
 	if err := privilegedRun(ctx, runner, "umount", mountPoint); err != nil {
