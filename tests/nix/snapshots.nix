@@ -5,7 +5,7 @@
 }:
 let
   evaluate =
-    homeOptions: extraSettings:
+    homeOptions: configOptions: extraSettings:
     (nixpkgs.lib.nixosSystem {
       inherit system;
       modules = [
@@ -21,15 +21,22 @@ let
             fsType = "btrfs";
             options = homeOptions;
           };
+          fileSystems."/etc/gjallar/system" = {
+            device = "/dev/null";
+            fsType = "btrfs";
+            options = configOptions;
+          };
           boot.loader.grub.enable = false;
         }
       ];
       specialArgs.settings = extraSettings;
     }).config;
-  layout = evaluate [ "subvol=@home" ] { };
-  old = evaluate [ "defaults" ] { };
-  off = evaluate [ "subvol=@home" ] { snapshotsEnable = false; };
-  noHourly = evaluate [ "subvol=@home" ] { snapshotsKeepHours = 0; };
+  layout = evaluate [ "subvol=@home" ] [ "subvol=@config" ] { };
+  old = evaluate [ "defaults" ] [ "defaults" ] { };
+  # Installs from before 2026-10-21 have @home but no @config or @snapshots.
+  oldSubvolumes = evaluate [ "subvol=@home" ] [ "defaults" ] { };
+  off = evaluate [ "subvol=@home" ] [ "subvol=@config" ] { snapshotsEnable = false; };
+  noHourly = evaluate [ "subvol=@home" ] [ "subvol=@config" ] { snapshotsKeepHours = 0; };
   home = layout.systemd.services.gjallar-snapshot-home;
   homeConf = layout.environment.etc."gjallar/snapshots/home.conf".source;
   btrbk = nixpkgs.legacyPackages.${system}.btrbk;
@@ -45,6 +52,9 @@ assert layout.systemd.services ? gjallar-snapshot-config;
 assert layout.systemd.timers ? gjallar-snapshot-home;
 assert !(old.systemd.services ? gjallar-snapshot-home);
 assert !(old.environment.etc ? "gjallar/snapshots/config.conf");
+# Without @snapshots both units failed every hour (2026-10-21).
+assert !(oldSubvolumes.systemd.services ? gjallar-snapshot-home);
+assert !(oldSubvolumes.systemd.services ? gjallar-snapshotd);
 assert !(off.systemd.services ? gjallar-snapshot-home);
 # @snapshots stays out of fstab.
 assert !(layout.fileSystems ? "/.snapshots");

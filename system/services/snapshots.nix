@@ -9,7 +9,11 @@ let
   # Only installs made with the subvolume layout have @home, @config and
   # @snapshots; nixos-generate-config writes the subvol= option into
   # hardware.nix. Older installs get no snapshots until they reinstall.
-  layout = lib.elem "subvol=@home" (config.fileSystems."/home".options or [ ]);
+  # Installs from before 2026-10-21 already had @home but no @snapshots,
+  # so @config marks the layout (both units failed on them).
+  mountedFrom =
+    path: subvolume: lib.elem "subvol=${subvolume}" (config.fileSystems.${path}.options or [ ]);
+  layout = mountedFrom "/home" "@home" && mountedFrom "/etc/gjallar/system" "@config";
   enable = layout && (settings.snapshotsEnable or true);
   keepHours = settings.snapshotsKeepHours or 24;
   keepDays = settings.snapshotsKeepDays or 7;
