@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/config"
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/diskcrypto"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/prompt"
 )
 
@@ -117,13 +118,28 @@ const (
 	unlockPIN       = "PIN at startup"
 )
 
-const startupUnlockText = `How should the disk unlock at startup?
+// startupUnlockText explains both choices. On a separate or unconfirmed
+// TPM, only a PIN keeps the disk key in the chip against someone who has the
+// device (ROADMAP section 19), so the PIN is the recommended choice there.
+func startupUnlockText(kind diskcrypto.TPMKind) string {
+	automatic, pin := " (recommended for most)", " (more security)"
+	note := ""
+	if kind.PINRecommended() {
+		automatic, pin = "", " (recommended on this device)"
+		note = `
+  The security chip in this device is a separate part on the board, or
+  GjallarOS could not confirm that it sits inside the processor. Without a
+  PIN, someone who has the device and special tools can get the disk key
+  out of such a chip.
+`
+	}
+	return `How should the disk unlock at startup?
 
-  Automatic (recommended for most): nothing to type at startup; the security
+  Automatic` + automatic + `: nothing to type at startup; the security
   chip unlocks the disk only when the boot files are unchanged. This protects
   a stolen, switched-off device against reading the disk directly.
-
-  PIN at startup (more security): you type a PIN of 6 or more characters at
+` + note + `
+  PIN at startup` + pin + `: you type a PIN of 6 or more characters at
   every startup; the security chip checks it and the boot files, and blocks
   guessing after too many wrong tries. The disk stays locked even when someone
   starts the device, until the PIN is typed.
@@ -131,6 +147,7 @@ const startupUnlockText = `How should the disk unlock at startup?
 You set the PIN at the first startup. Either way you get a recovery key
 there, for when the chip cannot unlock the disk.
 `
+}
 
 // keyboardOnlyAtStartup reports a tablet or detachable (SMBIOS chassis 30 or
 // 32) where no on-screen keyboard can show at the disk prompt. Convertibles
@@ -141,15 +158,16 @@ func keyboardOnlyAtStartup(chassisType string, touchscreen bool) bool {
 
 // collectStartupUnlock asks how the disk unlocks once GjallarOS Secure Boot
 // is chosen. Both choices use the security chip.
-func collectStartupUnlock(ctx context.Context, ui prompt.UI, chassisType string, touchscreen bool, u *config.User) error {
+func collectStartupUnlock(ctx context.Context, ui prompt.UI, kind diskcrypto.TPMKind, chassisType string, touchscreen bool, u *config.User) error {
+	text := startupUnlockText(kind)
 	label := "Startup unlock"
 	if ui.GTK {
-		label = startupUnlockText
+		label = text
 	} else {
-		fmt.Fprint(ui.Out, startupUnlockText)
+		fmt.Fprint(ui.Out, text)
 	}
 	def := unlockAutomatic
-	if u.LUKSTPM2Enable && u.LUKSTPM2PIN {
+	if kind.PINRecommended() || u.LUKSTPM2Enable && u.LUKSTPM2PIN {
 		def = unlockPIN
 	}
 	choice, err := ui.Choice(ctx, label, def, []string{unlockAutomatic, unlockPIN})

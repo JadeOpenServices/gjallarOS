@@ -74,7 +74,7 @@ func provisionTPM(ctx context.Context, dir, handle string, signer Signer, comman
 		if err := ValidateSigner(ctx, signer); err != nil {
 			return fmt.Errorf("existing key at %s failed the self-test: %w", handle, err)
 		}
-		return nil
+		return pinProvisionedKey(ctx, dir, signer)
 	}
 	if err := run("tpm2_evictcontrol", "-Q", "-C", "o", "-c", object, handle); err != nil {
 		return err
@@ -94,7 +94,23 @@ func provisionTPM(ctx context.Context, dir, handle string, signer Signer, comman
 	if err := ValidateSigner(ctx, signer); err != nil {
 		return fmt.Errorf("key provisioned at %s but self-test failed: %w", handle, err)
 	}
+	if err := pinProvisionedKey(ctx, dir, signer); err != nil {
+		return err
+	}
 	committed = true
+	return nil
+}
+
+// pinProvisionedKey records the key just created or adopted. It replaces a
+// pin left without signed state: provisioning is where the trust starts.
+func pinProvisionedKey(ctx context.Context, dir string, signer Signer) error {
+	tpm, ok := signer.(*TPMSigner)
+	if !ok {
+		return nil
+	}
+	if err := PinKey(ctx, dir, tpm); err != nil {
+		return fmt.Errorf("pin USB trust key: %w", err)
+	}
 	return nil
 }
 
