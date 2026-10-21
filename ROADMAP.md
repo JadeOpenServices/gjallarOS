@@ -1998,13 +1998,13 @@ All passed on the fw13 VM against a local SYNTHETIC test server.
 - Q44: the settings window floats at its own size instead of being cut
   off, and the folder list is titled "Sync folders" (74f1fb25).
 
-## 18. Time sync: authenticated, the same on every network (draft, to discuss)
+## 18. Time sync: authenticated, the same on every network
 
-Draft written 2026-10-20 for Plane GJALLAROS-200 ("time sync follows the
-VPN"). Nothing is built yet; the open choices are questions 30 to 33 on
-the questionnaire.
+Written 2026-10-20 for Plane GJALLAROS-200 ("time sync follows the VPN").
+Jade answered questions 30 to 33 on 2026-10-20; step 1 is built, steps 2
+and 3 are next.
 
-Today `system/default.nix` turns on chrony with
+Until step 1, `system/default.nix` turns on chrony with
 `server 192.168.8.1 iburst prefer` plus the NixOS default pool
 (`0-3.nixos.pool.ntp.org`). All of it is plain NTP: nothing proves who
 answered. The router line is the same on every install and every network,
@@ -2071,22 +2071,96 @@ snapshots are ordered by it.
   local network can forge. That is the one place where "follows the VPN"
   helps, if the router serves time there (question 31).
 
-### Proposed design
+### Decisions (questions 30 to 33)
 
-1. Drop `server 192.168.8.1 iburst prefer` and the plain NixOS pool from
-   every install. This closes loophole 25.
-2. chrony with NTS sources from at least three operators
-   (`services.chrony.enableNTS = true`, which also sets `ntsdumpdir` so
-   cookies survive a restart), `authselectmode require`, `minsources 2`
-   (question 30 for the list).
-3. Router time only through the tunnel, at the router's tailnet address,
-   only when the router serves NTP there; otherwise no router source
-   (question 31).
-4. No source from DHCP, on any network.
-5. When no NTS source answers, the clock stays where it is;
-   `gjallarctl system status` and the time line in the settings app say
-   "time not confirmed since <time>" (question 32).
-6. Bootstrap for a badly wrong clock (question 33).
-7. Tests: a NixOS VM test with a fake NTS-less server on the LAN that the
-   client must ignore, and one where only one source answers and the clock
-   must not move.
+- **Q30:** four operators: Cloudflare, Netnod, PTB, time.nl.
+- **Q31:** the router is a fallback only when no NTS server works, and
+  only on a proven home network (its tailnet address if the router serves
+  time there).
+- **Q32:** plain NTP fallback only on a proven home or site network, with
+  small corrections only; elsewhere keep the clock and show "time not
+  confirmed since ...".
+- **Q33:** no own bootstrap server and no manual setting. Research further
+  (JODS as a time server later, maybe); if the first-update exception
+  stays, harden it.
+
+### Research for question 33 (2026-10-21)
+
+- All four operators answered NTS-KE on TCP 4460 with a certificate that
+  verified: `time.cloudflare.com`, `nts.netnod.se`, `ptbtime1.ptb.de` to
+  `ptbtime4.ptb.de` and `ntspool.time.nl`. Netnod, PTB and time.nl use
+  90-day Let's Encrypt certificates, Cloudflare a one-year certificate.
+  A clock that is behind fails a certificate only when it is earlier than
+  the certificate's start date, so with renewals every 60 days or so the
+  clock has to be about two months or more behind to break NTS.
+- Three things keep the clock close without any exception: the RTC, which
+  works on most laptops; `chronyd -s`, which starts from the time chronyd
+  last stopped when that is later than the RTC; and the NixOS clock floor
+  (`time-epoch`, the release date of the build). NTS cookies saved in
+  `ntsdumpdir` let chronyd skip the TLS key exchange after a restart, so a
+  clock that starts wrong can still be corrected with saved cookies.
+- The cases left are a dead RTC on a machine that was off for months, or a
+  machine that comes back from storage. There the only tools are
+  `nocerttimecheck` or a second time protocol.
+- Roughtime (RFC 10049, Experimental) gives signed time without
+  certificates: the client knows the server's long-term key and needs no
+  date check. time.nl runs a pilot at `rough.time.nl` port 2002. There is
+  no Roughtime client in nixpkgs and chrony does not speak it. It fits
+  "JODS as a time server later": a JODS server could answer Roughtime with
+  a key that ships with the install. Not built now.
+
+### Design
+
+**Step 1, built 2026-10-21 (`system/services/time.nix`):**
+
+- The router line and the NixOS pool are gone from every install. This
+  closes loophole 25.
+- One NTS source per operator: `time.cloudflare.com`, `nts.netnod.se`,
+  `ptbtime1.ptb.de`, and `ntspool.time.nl` as a pool with
+  `maxsources 1`. With `minsources 2`, one operator alone never moves the
+  clock.
+- `authselectmode require`: chrony selects authenticated sources only.
+- No servers from DHCP: the NixOS chrony dispatcher only switches sources
+  on and off line.
+- `chronyd -s` and `enableNTS` (which sets `ntsdumpdir`) keep a clock that
+  starts wrong within reach of NTS.
+- `gjallarctl system status` shows `Time: confirmed by NTS at <time>`, or
+  `Time: not confirmed since <time>` when no source updated the clock in
+  the last two hours or chronyd lost sync. Read from `chronyc tracking`,
+  which every user may run.
+- Nix check `checks.time` reads the chrony.conf the module generates and
+  runs `chronyd -p` on it.
+
+**Step 2, the hardened first-update exception (Q33):**
+
+- Off by default; strict NTS is what runs.
+- A helper looks at chronyd shortly after start. Only when no NTS source
+  got past the key exchange and the reason is the certificate date, it
+  writes a config under `/run` with `nocerttimecheck 1` and restarts
+  chronyd once.
+- `minsources 2` stays: two operators have to agree on the first update,
+  so one bad key alone cannot set the clock.
+- The exception is used up by that first update (N = 1), lives only in
+  `/run`, is logged, and `gjallarctl system status` says the time was set
+  with the date check off until a normal NTS update confirms it.
+
+**Step 3, router fallback on a proven home or site network (Q31, Q32):**
+
+- Only when no NTS source works and the VPN verdict is home or site (a
+  router proven by its signed answer, see `internal/nettrust`).
+- The router's tailnet address when it serves NTP there; otherwise its
+  proven local address.
+- chronyd restarts with a fallback config that allows that one
+  unauthenticated source, with small corrections only: no steps, and a
+  low limit on how fast and how far the clock may move.
+- When the network stops being home or site, or an NTS source works
+  again, the strict config comes back.
+- Status says the time came from the router, not from NTS.
+
+**Later:** the time line in the settings app, and a notice when the time
+has not been confirmed for a long time.
+
+**Tests:** step 1 has the Nix check and the e2e-fw13 run. Steps 2 and 3
+need NixOS VM tests: a plain NTP server on the LAN that the client must
+ignore, only one source answering (the clock must not move), and a clock
+months behind with the exception.

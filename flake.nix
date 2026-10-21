@@ -203,6 +203,11 @@
           snapshotsModule = ./system/services/snapshots.nix;
         };
 
+        time = import ./tests/nix/time.nix {
+          inherit nixpkgs system;
+          timeModule = ./system/services/time.nix;
+        };
+
         secure-boot-lifecycle = import ./tests/nix/secure-boot-lifecycle.nix {
           inherit nixpkgs system;
           lifecycleModule = ./system/security/secure-boot/lifecycle.nix;
