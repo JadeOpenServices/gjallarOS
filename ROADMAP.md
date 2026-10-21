@@ -1516,8 +1516,9 @@ Plane GJALLAROS-198. Jade decided questions 18 to 22 and 22a on the
 questionnaire (2026-10-20 and 2026-10-21): read-only snapshots, root-only,
 btrbk-style retention, rollback only through recovery, no secrets and no
 `/nix` in snapshots, settings in `user.config.json`, and only new installs
-get the layout. Step 1 (installer subvolumes) and step 2 (snapshot
-units, settings, rebuild snapshots) are built; the VM test is open.
+get the layout. Step 1 (installer subvolumes), step 2 (snapshot
+units, settings, rebuild snapshots) and step 3 (restoring your own
+files) are built; the VM test is open.
 
 Today a fresh install puts everything on the top level of one encrypted
 Btrfs (no subvolumes). NixOS generations already roll back the system
@@ -1615,9 +1616,21 @@ store anyway.
    `snapshotsEnable` (on), `snapshotsKeepHours` (24) and
    `snapshotsKeepDays` (7) in `user.config.json` set them; a config
    without the keys gets these values.
-3. Users restore their own files through the settings service
-   (`gjallarctl snapshots list`, `gjallarctl snapshots restore PATH`);
-   only their own home, copied next to the original.
+3. Users restore their own files (`gjallarctl snapshots list`,
+   `gjallarctl snapshots restore PATH [--from SNAPSHOT] [--to FOLDER]`);
+   only their own home, copied next to the original. This is not the
+   settings service but its own bus-started service, gjallar-snapshotd
+   (`org.gjallaros.Snapshots1`), so `gjallar-settingsd` keeps an empty
+   capability set; the restore service holds only `CAP_SYS_ADMIN` (to
+   mount `@snapshots` read-only in its own mount namespace) and
+   `CAP_DAC_READ_SEARCH`, and exits after two idle minutes. It checks the
+   snapshot name and that the path is in the caller's home before it asks
+   the caller's password, every time. It opens the file beneath that home
+   in the snapshot with `openat2` (no symlinks, no `..`, no other mount),
+   only a regular file the caller owned, and hands back a read-only
+   descriptor. `gjallarctl` writes the copy as the user under a new name
+   (`notes.restored-20261021T0300.txt`) and never overwrites. Folders
+   are a later step: a folder descriptor would let `..` out of the home.
 4. A rollback of `@home` or `@config` runs only from the recovery boot
    entry, offline, as a new read-write snapshot (never a read-only one made
    writable), and keeps the replaced one as a snapshot.

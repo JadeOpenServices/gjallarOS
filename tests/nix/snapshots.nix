@@ -34,6 +34,11 @@ let
   homeConf = layout.environment.etc."gjallar/snapshots/home.conf".source;
   btrbk = nixpkgs.legacyPackages.${system}.btrbk;
   configConf = layout.environment.etc."gjallar/snapshots/config.conf".source;
+  restore = layout.systemd.services.gjallar-snapshotd.serviceConfig;
+  polkitPolicy = nixpkgs.lib.findFirst (
+    p: p.name or "" == "org.gjallaros.snapshots.policy"
+  ) (throw "no snapshots polkit policy") layout.environment.systemPackages;
+  dbusFiles = nixpkgs.lib.concatMapStringsSep " " toString layout.services.dbus.packages;
 in
 # Only the subvolume layout gets snapshot units, and the setting turns them off.
 assert layout.systemd.services ? gjallar-snapshot-config;
@@ -47,6 +52,17 @@ assert !(layout.fileSystems ? "/.snapshots");
 assert home.serviceConfig.PrivateMounts;
 assert home.serviceConfig.ProtectSystem == "strict";
 assert home.serviceConfig.PrivateNetwork;
+# The restore service mounts @snapshots read-only in its own namespace and
+# holds only the mount and read capabilities.
+assert !(old.systemd.services ? gjallar-snapshotd);
+assert restore.PrivateMounts;
+assert restore.ProtectHome;
+assert restore.PrivateNetwork;
+assert
+  restore.CapabilityBoundingSet == [
+    "CAP_SYS_ADMIN"
+    "CAP_DAC_READ_SEARCH"
+  ];
 # Not the nixpkgs btrbk module: it lets its user run any btrfs command as root.
 assert layout.services.btrbk.instances == { };
 nixpkgs.legacyPackages.${system}.runCommand "gjallar-snapshots-check" { } ''
@@ -56,6 +72,13 @@ nixpkgs.legacyPackages.${system}.runCommand "gjallar-snapshots-check" { } ''
   grep -qx 'snapshot_preserve 7d' ${noHourly.environment.etc."gjallar/snapshots/home.conf".source}
   grep -q 'subvol=@snapshots,nosuid,nodev,noexec' ${home.serviceConfig.ExecStart}
   grep -q 'subvol=@snapshots,nosuid,nodev,noexec' ${layout.systemd.services.gjallar-snapshot-config.serviceConfig.ExecStart}
+  # Each restore asks the caller's own password.
+  grep -q '<allow_active>auth_self</allow_active>' ${polkitPolicy}/share/polkit-1/actions/org.gjallaros.snapshots.policy
+  grep -rq 'SystemdService=gjallar-snapshotd.service' ${dbusFiles}
+  # The service binary is built and refuses to start without its arguments.
+  set -- ${restore.ExecStart}
+  if "$1" 2>"$TMPDIR/usage"; then exit 1; fi
+  grep -q 'DEVICE MOUNTPOINT' "$TMPDIR/usage"
   # btrbk itself accepts both files.
   ${btrbk}/bin/btrbk --lockfile="$TMPDIR/lock" -c ${homeConf} config print >/dev/null
   ${btrbk}/bin/btrbk --lockfile="$TMPDIR/lock" -c ${configConf} config print >/dev/null

@@ -550,6 +550,19 @@ Only root can reach the snapshots; they are mounted nowhere on the running
 system. When the disk is nearly full, no new snapshot is made and the
 journal says so (`journalctl -u gjallar-snapshot-home`).
 
+To get an older version of one of your files back:
+
+```bash
+gjallarctl snapshots list
+gjallarctl snapshots restore ~/Documents/notes.txt
+```
+
+`restore` asks your password and takes the newest snapshot that has the
+file, or the one you name with `--from SNAPSHOT`. The copy goes next to the
+file, as `notes.restored-20261021T0300.txt`; your current file is never
+touched. If the folder is gone too, add `--to FOLDER`. Only plain files in
+your own home can be restored, one at a time.
+
 > [!WARNING]
 > A file you delete from `/home` stays in older snapshots until they age
 > out. Snapshots live on the same disk, so they are not a backup.

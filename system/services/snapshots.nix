@@ -53,6 +53,53 @@ let
 
   GiB = 1024 * 1024 * 1024;
 
+  # gjallar-snapshotd lets users copy their own files back (gjallarctl
+  # snapshots restore). It is apart from gjallar-settingsd, which keeps no
+  # capabilities; this one needs the mount and read access to old homes.
+  snapshotd = pkgs.callPackage ../../pkgs/gjallar-settingsd { };
+  busName = "org.gjallaros.Snapshots1";
+  homeDevice = config.fileSystems."/home".device;
+
+  busPolicy = pkgs.writeTextDir "share/dbus-1/system.d/${busName}.conf" ''
+    <!DOCTYPE busconfig PUBLIC "-//freedesktop//DTD D-BUS Bus Configuration 1.0//EN"
+     "http://www.freedesktop.org/standards/dbus/1.0/busconfig.dtd">
+    <busconfig>
+      <policy user="root">
+        <allow own="${busName}"/>
+      </policy>
+      <policy context="default">
+        <allow send_destination="${busName}" send_interface="${busName}"/>
+        <allow send_destination="${busName}" send_interface="org.freedesktop.DBus.Introspectable"/>
+      </policy>
+    </busconfig>
+  '';
+  busActivation = pkgs.writeTextDir "share/dbus-1/system-services/${busName}.service" ''
+    [D-BUS Service]
+    Name=${busName}
+    Exec=/run/current-system/sw/bin/false
+    User=root
+    SystemdService=gjallar-snapshotd.service
+  '';
+  # Each restore asks the caller's own password; the service names the
+  # file in the message.
+  polkitActions = pkgs.writeTextDir "share/polkit-1/actions/org.gjallaros.snapshots.policy" ''
+    <?xml version="1.0" encoding="UTF-8"?>
+    <!DOCTYPE policyconfig PUBLIC "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+     "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
+    <policyconfig>
+      <vendor>GjallarOS</vendor>
+      <action id="org.gjallaros.snapshots.restore">
+        <description>Restore one of your files from a snapshot</description>
+        <message>Authentication is required to restore a file from a snapshot</message>
+        <defaults>
+          <allow_any>no</allow_any>
+          <allow_inactive>no</allow_inactive>
+          <allow_active>auth_self</allow_active>
+        </defaults>
+      </action>
+    </policyconfig>
+  '';
+
   snapshotScript =
     name: kind:
     pkgs.writeShellApplication {
@@ -141,9 +188,62 @@ in
       name: kind: lib.nameValuePair "gjallar/snapshots/${name}.conf" { source = btrbkConf name kind; }
     ) kinds;
 
-    systemd.services = lib.mapAttrs' (
-      name: kind: lib.nameValuePair "gjallar-snapshot-${name}" (service name kind)
-    ) kinds;
+    systemd.services =
+      lib.mapAttrs' (name: kind: lib.nameValuePair "gjallar-snapshot-${name}" (service name kind)) kinds
+      // {
+        gjallar-snapshotd = {
+          description = "GjallarOS snapshot restore service";
+          unitConfig.RequiresMountsFor = [ "/home" ];
+          serviceConfig = {
+            Type = "dbus";
+            BusName = busName;
+            # @snapshots is mounted read-only in this unit's own mount
+            # namespace; the service exits when idle and the mount with it.
+            ExecStart = "${lib.getExe' snapshotd "gjallar-snapshotd"} ${homeDevice} /run/gjallar-snapshotd/snapshots";
+            RuntimeDirectory = "gjallar-snapshotd";
+            RuntimeDirectoryMode = "0700";
+            UMask = "0077";
+
+            PrivateMounts = true;
+            ProtectSystem = "strict";
+            ProtectHome = true;
+            PrivateTmp = true;
+            PrivateNetwork = true;
+            RestrictAddressFamilies = [ "AF_UNIX" ];
+            DevicePolicy = "closed";
+            DeviceAllow = [ "${homeDevice} r" ];
+            NoNewPrivileges = true;
+            RestrictSUIDSGID = true;
+            RestrictNamespaces = true;
+            RestrictRealtime = true;
+            LockPersonality = true;
+            MemoryDenyWriteExecute = true;
+            ProtectClock = true;
+            ProtectHostname = true;
+            ProtectKernelLogs = true;
+            ProtectKernelModules = true;
+            ProtectKernelTunables = true;
+            ProtectControlGroups = true;
+            SystemCallArchitectures = "native";
+            SystemCallFilter = [
+              "@system-service"
+              "@mount"
+            ];
+            # The mount, and reading other users' old files to check who
+            # owns them. It never writes.
+            CapabilityBoundingSet = [
+              "CAP_SYS_ADMIN"
+              "CAP_DAC_READ_SEARCH"
+            ];
+          };
+        };
+      };
+
+    services.dbus.packages = [
+      busPolicy
+      busActivation
+    ];
+    environment.systemPackages = [ polkitActions ];
 
     systemd.timers = {
       gjallar-snapshot-home = {

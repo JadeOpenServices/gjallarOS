@@ -17,6 +17,7 @@ buildGoModule {
       ../../apps/firefox-addons.json
       ../../cmd/gjallar-namecheck
       ../../cmd/gjallar-settingsd
+      ../../cmd/gjallar-snapshotd
       ../../cmd/gjallar-system-disk
       ../../internal/installer/config
       ../../internal/installer/systemcheckout
@@ -26,6 +27,7 @@ buildGoModule {
       ../../internal/nettrust
       ../../internal/noctalia
       ../../internal/settings
+      ../../internal/snapshots
       ../../internal/sshsig
       ../../internal/usbtrust
     ];
@@ -37,6 +39,7 @@ buildGoModule {
   subPackages = [
     "cmd/gjallar-namecheck"
     "cmd/gjallar-settingsd"
+    "cmd/gjallar-snapshotd"
     "cmd/gjallar-system-disk"
   ];
 

@@ -248,6 +248,28 @@ _gjallarctl_settings_pair() {
   esac
 }
 
+_gjallarctl_snapshots() {
+  local -a cmds=(
+    'list:show the snapshots of /home, newest first'
+    'restore:copy one of your files back from a snapshot'
+  )
+  if (( CURRENT == 2 )); then
+    _describe -t commands 'snapshots command' cmds
+    return
+  fi
+  shift words
+  (( CURRENT-- ))
+  local -a names
+  case $words[1] in
+    list) _arguments '--names[print only the snapshot names]' ;;
+    restore)
+      names=(${(f)"$(gjallarctl snapshots list --names 2>/dev/null)"})
+      _arguments '1:file:_files' \
+        "--from[snapshot to restore from]:snapshot:(${names[*]})" \
+        '--to[folder for the copy]:folder:_files -/' ;;
+  esac
+}
+
 _gjallarctl_oddc() {
   local -a cmds=(
     'validate-device:check this machine against its ODDC model'
@@ -292,6 +314,7 @@ _gjallarctl() {
     'vpn:VPN and trusted Wi-Fi'
     'addons:Firefox add-ons'
     'settings:change GjallarOS settings'
+    'snapshots:restore your files from the /home snapshots'
     'tpm2:TPM2 disk unlock'
     'luks:system disk unlock methods and recovery key'
     'secure-boot:Secure Boot with GjallarOS keys'
@@ -322,6 +345,7 @@ _gjallarctl() {
         vpn) _gjallarctl_vpn ;;
         addons) _gjallarctl_addons ;;
         settings) _gjallarctl_settings ;;
+        snapshots) _gjallarctl_snapshots ;;
         oddc) _gjallarctl_oddc ;;
         helpme) _arguments '--text[print instead of opening a window]' ;;
         tpm2) _arguments '1:tpm2 command:((reenroll\:"enroll the TPM2 key again"))' ;;
