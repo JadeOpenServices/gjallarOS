@@ -2226,7 +2226,8 @@ Security pass for step 2:
   exception counts it as untrusted until the list is updated; strict NTS
   is not affected.
 
-**Step 3, router fallback on a proven home or site network (Q31, Q32):**
+**Step 3, router fallback on a proven home or site network (Q31, Q32),
+built 2026-10-21:**
 
 - Only when no NTS source works and the VPN verdict is home or site with
   a router proven by its signed answer (`internal/nettrust`). A home
@@ -2296,6 +2297,24 @@ and the e2e-fw13 run on 2026-10-21 at 86b6c787: normal boot, clock months
 behind (exception, then confirmed), clock ahead and port 4460 blocked (no
 exception). The refused step back has unit tests only; it needs a server
 that answers with an older time.
+
+Step 3 has unit tests for the candidate order, the reply check, the
+reachable count, the status lines, and start, keep and end of the
+fallback. The e2e-fw13 run on 2026-10-21 at 7e222547 used an EMULATED
+router (an NTP answerer in a network namespace) with SYNTHETIC home
+verdicts, NTS blocked by an nft table, and the clock 20 s behind:
+
+- Home verdict for the current network: the path unit started the check,
+  all four NTS sources unreachable, fallback on, the router selected,
+  status `Time: set by the home router ...`. The clock was slewed, not
+  stepped.
+- Router 300 s off: chronyd logged the adjustment as over 60 s and
+  ignored it; the clock did not move.
+- Verdict for another network: fallback off, chronyd strict again.
+- Home verdict again, then NTS unblocked: after four NTS sources were
+  reachable the next run ended the fallback ("NTS sources answer again"),
+  NTS stepped the clock to the right time and status showed `Time:
+  confirmed by NTS`.
 
 ## 19. TPM bus protection (parameter encryption)
 
