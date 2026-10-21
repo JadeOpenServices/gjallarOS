@@ -237,3 +237,40 @@ func TestCloneSystemCheckoutNeverMergesIntoExistingCheckout(t *testing.T) {
 		t.Fatalf("existing checkout touched: %q, %v", data, err)
 	}
 }
+
+func TestCloneSystemCheckoutRefusesUnpushedCommit(t *testing.T) {
+	// The installer was built from a local commit origin never got.
+	repo, target, _ := cloneFixture(t)
+	runGit(t, repo, "init", "--quiet", "--initial-branch=dev")
+	runGit(t, repo, "commit", "--quiet", "--allow-empty", "-m", "local only")
+	local := runGit(t, repo, "rev-parse", "HEAD")
+
+	err := cloneSystemCheckout(context.Background(), repo, target, local, "stable", io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "build from a pushed commit") {
+		t.Fatalf("unpushed commit: %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(target, "etc", "gjallar", "system")); !os.IsNotExist(err) {
+		t.Fatalf("refused clone left behind: %v", err)
+	}
+}
+
+func TestCheckReleasedRevision(t *testing.T) {
+	repo, _, revision := cloneFixture(t)
+	if err := checkReleasedRevision(context.Background(), revision); err != nil {
+		t.Fatalf("pushed commit: %v", err)
+	}
+
+	runGit(t, officialOrigin, "checkout", "--quiet", "-b", "side")
+	runGit(t, officialOrigin, "commit", "--quiet", "--allow-empty", "-m", "side")
+	side := runGit(t, officialOrigin, "rev-parse", "HEAD")
+	runGit(t, officialOrigin, "checkout", "--quiet", "dev")
+	runGit(t, repo, "init", "--quiet", "--initial-branch=dev")
+	runGit(t, repo, "commit", "--quiet", "--allow-empty", "-m", "local only")
+	local := runGit(t, repo, "rev-parse", "HEAD")
+	for name, bad := range map[string]string{"side branch": side, "unpushed": local, "dirty": "git:" + revision + "-dirty"} {
+		err := checkReleasedRevision(context.Background(), bad)
+		if err == nil || !strings.Contains(err.Error(), "pushed commit") {
+			t.Fatalf("%s: %v", name, err)
+		}
+	}
+}

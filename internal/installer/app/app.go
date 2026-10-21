@@ -596,6 +596,11 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 	// knows whether the system will run from a USB drive (wiki 752 Q11).
 	freshTarget := ""
 	if !persistentInstalledHost && !opt.noRebuild && (!s.preset || s.user.RunRebuild || opt.forceRedeploy) {
+		// The install ends with a clone of this commit; an unpushed one
+		// stops here, before a disk is wiped.
+		if err := checkReleasedRevision(ctx, sourceRevision); err != nil {
+			return fail(errOut, fmt.Errorf("the installer cannot set up %s: %w", systemcheckout.Path, err))
+		}
 		freshTarget, err = selectFreshTargetDisk(ctx, ui, out, opt.targetDisk)
 		if err != nil {
 			return fail(errOut, fmt.Errorf("select fresh installation target: %w", err))
