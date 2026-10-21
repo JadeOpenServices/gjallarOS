@@ -584,13 +584,22 @@ lib.mkMerge [
       Description = "Nextcloud synchronization";
       After = [ "graphical-session.target" ];
       PartOf = [ "graphical-session.target" ];
+      # Five starts in five minutes, then it stays stopped instead of looping
+      # on a client that crashes at every start.
+      StartLimitIntervalSec = 300;
+      StartLimitBurst = 5;
     };
 
     Service = {
       Type = "simple";
       ExecStart = syncRunner;
 
-      Restart = "no";
+      # A crashed client comes back; OpenVFS unmounted when it died (wiki 752
+      # Q43). Quit from the tray exits 0 and stays quit. 64 and 78 are policy
+      # errors that a new start would only repeat.
+      Restart = "on-failure";
+      RestartSec = 10;
+      RestartPreventExitStatus = "64 78";
 
     };
 
