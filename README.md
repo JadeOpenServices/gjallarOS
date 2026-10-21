@@ -336,6 +336,31 @@ before `gjallarctl rebuild`. On the next start Firefox keeps uBlock Origin
 with its settings, at the version it had. The Stylix theme comes back on the
 second start. A rollback never downgrades an add-on; Firefox refuses that.
 
+### Nextcloud files
+
+The Nextcloud client is in the default apps. To connect it, set the server in
+`user.config.json` and rebuild:
+
+```json
+"nextcloudEnable": true,
+"nextcloudHost": "https://cloud.example.org"
+```
+
+Only `https` addresses are accepted. Start Nextcloud from the app menu, or run
+`nextcloud-enroll`, and log in. Files appear in `~/Nextcloud` and in Dolphin.
+
+Everything starts as a placeholder: you see every file, but nothing is
+downloaded until you open it. Right after the login a "Keep on this device"
+window lists your top-level folders with nothing ticked. Tick the folders you
+want offline; they download and stay. "Not now" or closing the window keeps
+everything online-only. New top-level folders that show up later are
+placeholders too.
+
+Change it later in Dolphin: right-click a file or folder and pick "Make always
+available locally" or "Free up local space". The folder settings in the
+Nextcloud window have the same two actions. Your picks stay on this device
+only; another device of yours starts with everything online-only again.
+
 <div align="right"><a href="#gjallaros">↑ back to top</a></div>
 
 ## 🧬 Hardware catalog (ODDC)

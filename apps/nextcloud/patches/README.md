@@ -19,6 +19,17 @@ Client behaviour patches:
   availability to file status and the Dolphin plugin maps it to emblems.
   `@onlineOnlyIcon@` and `@localIcon@` come from
   `themes/apps/dolphin/nextcloud-icons.nix` through `replaceVars`.
+- `nextcloud-keep-local-picker.patch`: after the wizard a virtual-files
+  account opens "Keep on this device" with nothing ticked. Ticked folders get
+  the "always available locally" pin; closing or "Not now" leaves everything
+  online-only. The picks live only in this device's sync database (list
+  type 100) until each folder exists and carries its pin, also across an
+  interrupted first sync. A pick the next full sync does not find is
+  dropped. Logs show counts, never folder names. The build enforces
+  virtual files, which upstream also takes to mean hiding "Make always
+  available locally"; the patch shows it again in Dolphin and in the folder
+  settings, so folders can be picked later. Turning virtual files off stays
+  locked.
 
 Hydration patches:
 

@@ -45,5 +45,8 @@ in
       onlineOnlyIcon = dolphinNextcloudIcons.onlineOnly;
       localIcon = dolphinNextcloudIcons.local;
     })
+    # After the wizard, pick folders to keep on this device; everything
+    # else, new top-level folders too, stays online-only.
+    ./patches/nextcloud-keep-local-picker.patch
   ];
 }

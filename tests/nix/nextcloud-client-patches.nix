@@ -57,6 +57,22 @@ pkgs.stdenvNoCC.mkDerivation {
     # first start still wrote ~/.config/autostart (2026-10-20).
     grep -Fq 'settings.value(launchOnSystemStartupC, false)' src/libsync/configfile.cpp
     ! grep -Fq 'appNameGUI(), true);' src/gui/application.cpp
+    # New accounts are all placeholders; only folders picked after the
+    # wizard download. The pick must be pinned before local discovery, or
+    # the OnlineOnly root dehydrates a folder an interrupted sync fetched.
+    grep -Fq 'KeepLocalPickList = 100' src/common/syncjournaldb.h
+    grep -A3 'correctPlaceholderFiles();' src/gui/folder.cpp | grep -Fq 'applyKeepLocalPicks(false);'
+    grep -A8 'void AccountWizardController::openKeepLocalPicker' src/gui/wizard/accountwizardcontroller.cpp \
+      | grep -Fq 'KeepLocalDialog'
+    grep -Fq '_pinState = PinState::AlwaysLocal;' src/libsync/discovery.cpp
+    # Enforced VFS hid "Make always available locally", so folders could
+    # not be picked later in Dolphin or settings. Only turning VFS off stays
+    # locked.
+    ! grep -B2 'MAKE_AVAILABLE_LOCALLY:' src/gui/socketapi/socketapi.cpp | grep -Fq enforceVirtualFilesSyncFolder
+    ! grep -A2 'PinState::AlwaysLocal); });' src/gui/accountsettings.cpp | grep -Fq enforceVirtualFilesSyncFolder
+    grep -A2 'slotDisableVfsCurrentFolder);' src/gui/accountsettings.cpp | grep -Fq 'setDisabled(Theme::instance()->enforceVirtualFilesSyncFolder());'
+    # Folder names stay out of the log.
+    grep -Fq '"Keep-local picks: pinned" << pinned << "dropped" << dropped << "pending" << pending.size();' src/gui/folder.cpp
     touch $out
   '';
 }
