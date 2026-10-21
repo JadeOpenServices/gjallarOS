@@ -1424,7 +1424,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 				hardware,
 				resolvedDevice,
 				opt.recovery,
-				s.user.RecoveryEnable,
+				freshRecoveryPartition(s.user),
 				freshPasswordFiles(s.render),
 				hostOverlayToCommit,
 				out,
@@ -1971,6 +1971,13 @@ func collectInteractive(ctx context.Context, ui prompt.UI, root string, partitio
 // image is signed with this machine's Secure Boot key, and without that key
 // nothing checks it before it starts.
 const noRecoveryPartitionNotice = "No recovery partition: it needs GjallarOS Secure Boot, which is off for this install. The disk is not shrunk."
+
+// freshRecoveryPartition says whether a fresh disk gets JODS-RECOVERY. The
+// boot entry alone needs no partition; the partition comes only with
+// GjallarOS Secure Boot (collectRecovery).
+func freshRecoveryPartition(u config.User) bool {
+	return u.RecoveryEnable && u.RecoveryPartitionEnable
+}
 
 // collectRecovery asks for the recovery boot entry and, where the root can
 // take one and GjallarOS Secure Boot is on, the recovery partition.

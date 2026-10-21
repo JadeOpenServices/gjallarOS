@@ -395,6 +395,26 @@ func TestCollectRecoverySkipsPartitionWithoutSecureBoot(t *testing.T) {
 	}
 }
 
+// A fresh disk without GjallarOS Secure Boot got JODS-RECOVERY anyway: the
+// plan followed the boot entry answer, not the partition answer.
+func TestFreshDiskGetsRecoveryPartitionOnlyWhenChosen(t *testing.T) {
+	var output bytes.Buffer
+	u := config.User{}
+	if err := collectRecovery(context.Background(), prompt.New(strings.NewReader("yes\n"), &output), true, false, &u); err != nil {
+		t.Fatal(err)
+	}
+	if freshRecoveryPartition(u) {
+		t.Fatal("fresh disk plan gets a recovery partition without Secure Boot")
+	}
+	u = config.User{}
+	if err := collectRecovery(context.Background(), prompt.New(strings.NewReader("yes\nyes\n"), &output), true, true, &u); err != nil {
+		t.Fatal(err)
+	}
+	if !freshRecoveryPartition(u) {
+		t.Fatal("fresh disk plan lost the chosen recovery partition")
+	}
+}
+
 func TestCollectUSBTrustSkippedWithoutODDCModel(t *testing.T) {
 	var output bytes.Buffer
 	u := config.User{USBGuardEnable: true, USBTrustEnforce: true, USBTrustTPMHandle: config.DefaultUSBTrustTPMHandle}
