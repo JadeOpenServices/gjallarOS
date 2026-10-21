@@ -63,6 +63,9 @@ assert
     "CAP_SYS_ADMIN"
     "CAP_DAC_READ_SEARCH"
   ];
+assert home.serviceConfig.CapabilityBoundingSet == [ "CAP_SYS_ADMIN" ];
+# Restore opens files with openat2; without it every restore fails.
+assert nixpkgs.lib.elem "openat2" restore.SystemCallFilter;
 # Not the nixpkgs btrbk module: it lets its user run any btrfs command as root.
 assert layout.services.btrbk.instances == { };
 nixpkgs.legacyPackages.${system}.runCommand "gjallar-snapshots-check" { } ''

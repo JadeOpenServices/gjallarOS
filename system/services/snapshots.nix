@@ -223,9 +223,12 @@ in
             ProtectKernelTunables = true;
             ProtectControlGroups = true;
             SystemCallArchitectures = "native";
+            # Restore opens paths in the snapshot with openat2, which is in
+            # neither group (systemd 260).
             SystemCallFilter = [
               "@system-service"
               "@mount"
+              "openat2"
             ];
             # The mount, and reading other users' old files to check who
             # owns them. It never writes.
