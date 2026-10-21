@@ -354,6 +354,13 @@ PY
     root="$HOME/Nextcloud"
     logdir="''${XDG_STATE_HOME:-$HOME/.local/state}/nextcloud"
 
+    # A running client takes over a second start's options. Start options
+    # would hide a plain launch (no window) and restart its logging, and the
+    # policies already ran for it.
+    if ${lib.getExe' pkgs.systemd "busctl"} --user status com.nextcloud.desktopclient.nextcloud >/dev/null 2>&1; then
+      exec ${lib.getExe client} "$@"
+    fi
+
     ${pkgs.coreutils}/bin/install -d -m 0700 "$logdir"
     ${nextcloudConfigPolicy} "$config"
 
