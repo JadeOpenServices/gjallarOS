@@ -2246,8 +2246,10 @@ has not been confirmed for a long time.
 need NixOS VM tests: a plain NTP server on the LAN that the client must
 ignore, only one source answering (the clock must not move), and a clock
 months behind with the exception. Step 2 has unit tests for every decision
-and the e2e-fw13 run (clock months behind, port 4460 blocked, normal
-boot).
+and the e2e-fw13 run on 2026-10-21 at 86b6c787: normal boot, clock months
+behind (exception, then confirmed), clock ahead and port 4460 blocked (no
+exception). The refused step back has unit tests only; it needs a server
+that answers with an older time.
 
 ## 19. TPM bus protection (parameter encryption)
 
