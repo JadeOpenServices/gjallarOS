@@ -25,6 +25,14 @@ var (
 		return exec.Command("systemctl", "restart", "gjallar-vpn-trust.service").Run()
 	}
 	vpnEUID = os.Geteuid
+	vpnNow  = time.Now
+	// vpnPauseTimer runs the trust decision again when a pause runs out.
+	vpnPauseTimer = func(after time.Duration) error {
+		exec.Command("systemctl", "stop", "gjallar-vpn-pause-end.timer").Run()
+		return exec.Command("systemd-run", "--quiet", "--collect", "--unit=gjallar-vpn-pause-end",
+			fmt.Sprintf("--on-active=%ds", int(after.Seconds())+1), "--timer-property=AccuracySec=1s",
+			"systemctl", "restart", "--no-block", "gjallar-vpn-trust.service").Run()
+	}
 )
 
 const vpnUsage = `usage: gjallarctl vpn status
@@ -34,6 +42,12 @@ const vpnUsage = `usage: gjallarctl vpn status
                                            through NODE
        gjallarctl vpn untrust-wifi [NAME]
        gjallarctl vpn exit-node NAME|auto|off|default
+       gjallarctl vpn pause                let a network the VPN blocks reach the
+                                           internet without the tunnel, for up to
+                                           1 hour; asks an administrator's password
+       gjallarctl vpn resume               end the pause now
+       gjallarctl vpn notice               the desktop notice when the VPN blocks
+                                           a network (runs in the session)
        gjallarctl vpn export               print the state.nix line for these changes
        gjallarctl vpn apply --policy FILE [--override FILE]`
 
@@ -51,6 +65,12 @@ func runVPN(args []string, stdout, stderr io.Writer) int {
 		return runVPNOverride(args[0], args[1:], stdout, stderr)
 	case "export":
 		return runVPNExport(stdout, stderr)
+	case "pause":
+		return runVPNPause(args[1:], stdout, stderr)
+	case "resume":
+		return runVPNResume(args[1:], stdout, stderr)
+	case "notice":
+		return runVPNNotice(args[1:], stderr)
 	default:
 		fmt.Fprintf(stderr, "ERROR: unknown vpn command %q\n", args[0])
 		return 2
@@ -109,6 +129,9 @@ func runVPNApply(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
+	verdict.Network = nettrust.NetworkKey(network)
+	applyVPNPause(&verdict, stdout, stderr)
+
 	for _, warning := range verdict.Warnings {
 		fmt.Fprintf(stderr, "WARN: %s\n", warning)
 	}
@@ -124,12 +147,26 @@ func runVPNApply(args []string, stdout, stderr io.Writer) int {
 		case err != nil:
 			fmt.Fprintf(stderr, "ERROR: set exit node: %v\n", err)
 			verdict.ExitNodeError = err.Error()
+			if verdict.ExitNode != "" {
+				verdict.Blocked = nettrust.BlockNoExitNode
+			}
 			code = 1
 		case changed && verdict.ExitNode == "":
 			fmt.Fprintln(stdout, "VPN: exit node off")
 		case changed:
 			fmt.Fprintf(stdout, "VPN: exit node %s on\n", verdict.ExitNode)
 		}
+	}
+
+	// Without a network the block stays as it is, like the exit node.
+	if network != nil {
+		if err := sys.ApplyBlock(ctx, network, verdict.Blocked != ""); err != nil {
+			fmt.Fprintf(stderr, "ERROR: apply internet block: %v\n", err)
+			code = 1
+		}
+	}
+	if verdict.Blocked != "" {
+		fmt.Fprintf(stderr, "WARN: %s\n", nettrust.BlockText(verdict.Blocked))
 	}
 
 	fmt.Fprintf(stdout, "network %s: %s; bypass [%s]\n",
@@ -139,6 +176,38 @@ func runVPNApply(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "WARN: write %s: %v\n", vpnStatusPath, err)
 	}
 	return code
+}
+
+// applyVPNPause lets a pause from the settings service carry a blocked
+// network's traffic without the tunnel, and ends a pause that no longer
+// holds: another network, past its end, or nothing blocked any more.
+func applyVPNPause(v *nettrust.Verdict, stdout, stderr io.Writer) {
+	pause, ok, err := nettrust.LoadPause(nettrust.PausePath)
+	if err != nil {
+		fmt.Fprintf(stderr, "WARN: ignoring VPN pause: %v\n", err)
+	}
+	if !ok {
+		if err != nil {
+			nettrust.RemovePause(nettrust.PausePath)
+		}
+		return
+	}
+	now := vpnNow()
+	if v.Blocked != "" && pause.Holds(v.Network, now) {
+		v.Paused = &nettrust.PauseState{User: pause.User, Until: pause.Until, Blocked: v.Blocked}
+		fmt.Fprintf(stdout, "VPN: paused by %s on network %s until %s\n", pause.User, v.Network, pause.Until.Local().Format("15:04"))
+		v.Blocked = ""
+		v.ExitNode = ""
+		if err := vpnPauseTimer(pause.Until.Sub(now)); err != nil {
+			fmt.Fprintf(stderr, "WARN: schedule the end of the VPN pause: %v\n", err)
+		}
+		return
+	}
+	if err := nettrust.RemovePause(nettrust.PausePath); err != nil {
+		fmt.Fprintf(stderr, "WARN: end VPN pause: %v\n", err)
+		return
+	}
+	fmt.Fprintf(stdout, "VPN: pause by %s on network %s ended\n", pause.User, pause.Network)
 }
 
 func runVPNStatus(stdout, stderr io.Writer) int {
@@ -169,7 +238,18 @@ func runVPNStatus(stdout, stderr io.Writer) int {
 			exit += " (NOT ACTIVE: " + v.ExitNodeError + ")"
 		}
 	}
-	fmt.Fprintf(stdout, "exit node: %s\nlocal:     %s\n", exit, strings.Join(v.Bypass, " "))
+	local := strings.Join(v.Bypass, " ")
+	if local == "" {
+		local = "none"
+	}
+	fmt.Fprintf(stdout, "exit node: %s\nlocal:     %s\n", exit, local)
+	if v.Blocked != "" {
+		fmt.Fprintf(stdout, "blocked:   %s (gjallarctl vpn pause lets this network through for up to 1 hour)\n", nettrust.BlockText(v.Blocked))
+	}
+	if p := v.Paused; p != nil {
+		fmt.Fprintf(stdout, "paused:    by %s until %s; traffic on this network goes out without the tunnel\n",
+			p.User, p.Until.Local().Format("15:04"))
+	}
 	if o, err := nettrust.LoadOverride(vpnOverridePath); err != nil {
 		fmt.Fprintf(stdout, "override:  unreadable: %v\n", err)
 	} else if !o.Empty() {
@@ -179,6 +259,76 @@ func runVPNStatus(stdout, stderr io.Writer) int {
 		fmt.Fprintf(stdout, "warning:   %s\n", w)
 	}
 	return 0
+}
+
+// runVPNPause asks the settings service to pause the block. The service
+// asks an administrator's password in this login session, and only on the
+// local seat, so root has no session to ask in.
+func runVPNPause(args []string, stdout, stderr io.Writer) int {
+	if len(args) != 0 {
+		fmt.Fprintln(stderr, vpnUsage)
+		return 2
+	}
+	if vpnEUID() == 0 {
+		fmt.Fprintln(stderr, "ERROR: run gjallarctl vpn pause as your own user at this machine; it asks an administrator's password there")
+		return 1
+	}
+	answer, err := vpnSettingsCall("PauseVPN")
+	if err != nil {
+		fmt.Fprintf(stderr, "ERROR: %v\n", err)
+		return 1
+	}
+	var state nettrust.PauseState
+	if err := json.Unmarshal([]byte(answer), &state); err != nil {
+		fmt.Fprintf(stderr, "ERROR: read the service's answer: %v\n", err)
+		return 1
+	}
+	fmt.Fprintf(stdout, "VPN paused on this network until %s. Apps here reach the internet without the tunnel.\n"+
+		"It ends when the network changes or the device sleeps; gjallarctl vpn resume ends it now.\n",
+		state.Until.Local().Format("15:04"))
+	return 0
+}
+
+// runVPNResume ends a pause. Root removes the file itself: the sleep hook
+// runs this, and the block must be back before the device sleeps.
+func runVPNResume(args []string, stdout, stderr io.Writer) int {
+	if len(args) != 0 {
+		fmt.Fprintln(stderr, vpnUsage)
+		return 2
+	}
+	if vpnEUID() != 0 {
+		if _, err := vpnSettingsCall("ResumeVPN"); err != nil {
+			fmt.Fprintf(stderr, "ERROR: %v\n", err)
+			return 1
+		}
+		fmt.Fprintln(stdout, "VPN pause ended")
+		return 0
+	}
+	if _, err := os.Lstat(nettrust.PausePath); os.IsNotExist(err) {
+		fmt.Fprintln(stdout, "the VPN is not paused")
+		return 0
+	}
+	if err := nettrust.RemovePause(nettrust.PausePath); err != nil {
+		fmt.Fprintf(stderr, "ERROR: %v\n", err)
+		return 1
+	}
+	if err := vpnReapply(); err != nil {
+		fmt.Fprintf(stderr, "ERROR: the pause is gone, but the VPN decision did not run again: %v\n", err)
+		return 1
+	}
+	fmt.Fprintln(stdout, "VPN pause ended")
+	return 0
+}
+
+func vpnSettingsCall(method string) (string, error) {
+	bus, err := settingsConnect()
+	if err != nil {
+		return "", fmt.Errorf("system bus: %w", err)
+	}
+	defer bus.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), settingsCallTimeout)
+	defer cancel()
+	return bus.Call(ctx, method)
 }
 
 func describeOverride(o nettrust.Override) string {

@@ -61,3 +61,41 @@ func TestTierOf(t *testing.T) {
 		t.Error("TierOf accepted a key user.config.json does not have")
 	}
 }
+
+func TestDeviceScoped(t *testing.T) {
+	for key, want := range map[string]bool{
+		"hostname":          true,
+		"usbTrustTpmHandle": true,
+		"tailscale":         true,
+		"releaseChannel":    true,
+		"theme":             false,
+		"aiEndpoint":        false,
+		"nextcloudHost":     false,
+	} {
+		got, err := DeviceScoped(key)
+		if err != nil || got != want {
+			t.Errorf("DeviceScoped(%q) = %t, %v; want %t", key, got, err, want)
+		}
+	}
+	if _, err := DeviceScoped("backgroundNormal"); err == nil {
+		t.Error("DeviceScoped accepted a key user.config.json does not have")
+	}
+}
+
+// Critical keys guard the disk, boot and management of this device. A new
+// one must say whether it may come from another device; until then it may
+// not.
+func TestCriticalKeysAreDeviceScoped(t *testing.T) {
+	tiers, err := Tiers()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for key, tier := range tiers {
+		if tier != TierCritical {
+			continue
+		}
+		if device, err := DeviceScoped(key); err != nil || !device {
+			t.Errorf("%s is critical but not scope:\"device\"", key)
+		}
+	}
+}

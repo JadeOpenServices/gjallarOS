@@ -36,7 +36,7 @@ func trustOnly(key ed25519.PrivateKey) func(ed25519.PublicKey) bool {
 func resign(t *testing.T, key ed25519.PrivateKey, payload string) []byte {
 	t.Helper()
 	public := key.Public().(ed25519.PublicKey)
-	sig := ed25519.Sign(key, signedBytes(public, []byte(payload)))
+	sig := ed25519.Sign(key, signedBytes(fileMagic, public, []byte(payload)))
 	return []byte(fileMagic + keyPrefix + base64.StdEncoding.EncodeToString(public) + "\n" +
 		sigPrefix + base64.StdEncoding.EncodeToString(sig) + "\n" + payload)
 }
@@ -124,5 +124,46 @@ func TestOpenAsksTrustBeforeVerify(t *testing.T) {
 	_, _, err = Open(sealed, func(ed25519.PublicKey) bool { asked++; return false })
 	if !errors.Is(err, ErrUnknownSigner) || asked != 1 {
 		t.Errorf("Open: %v after %d trust checks, want ErrUnknownSigner after 1", err, asked)
+	}
+}
+
+func TestOpenSSH(t *testing.T) {
+	data, err := Unsigned(testFile())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !IsUnsigned(data) || IsUnsigned(append([]byte("x"), data...)) {
+		t.Fatal("IsUnsigned does not tell own-key files apart")
+	}
+	var checked []byte
+	file, err := OpenSSH(data, func(message []byte) error { checked = message; return nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(checked, data) {
+		t.Error("the signature is not checked over the whole file")
+	}
+	if file.User != "tester" || string(file.Settings["hostname"]) != `"example-host"` {
+		t.Errorf("file = %+v", file)
+	}
+
+	bad := errors.New("SYNTHETIC bad signature")
+	parsed := false
+	if _, err := OpenSSH([]byte(sshFileMagic+"{"), func([]byte) error { parsed = true; return bad }); !errors.Is(err, bad) || !parsed {
+		t.Errorf("a failed check: %v; the payload must not be parsed first", err)
+	}
+	sealed, err := Seal(testKey(t, 1), testFile())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ok := func([]byte) error { return nil }
+	if _, err := OpenSSH(sealed, ok); !errors.Is(err, ErrNotSettingsFile) {
+		t.Errorf("a managed file: %v", err)
+	}
+	if _, err := OpenSSH(append(data, bytes.Repeat([]byte(" "), MaxFileBytes)...), ok); !errors.Is(err, ErrNotSettingsFile) {
+		t.Errorf("a large file: %v", err)
+	}
+	if _, err := OpenSSH([]byte(sshFileMagic+`{"schema":1,"schema":1}`), ok); err == nil {
+		t.Error("a repeated name is accepted")
 	}
 }

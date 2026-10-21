@@ -244,6 +244,23 @@ your account, and refuses a file that was changed after it was made. It
 asks for the change the way `set` does, with the same tiers and waits, and
 says how old the file is.
 
+To sign these files with your own OpenSSH key instead (an `ssh-ed25519` key
+file or a FIDO `sk-ssh-ed25519` key), answer No to "Let GjallarOS sign your
+settings files for you?" in the installer, or set `settingsSigningKey` to
+your public key line later (critical tier). Export then writes a file you
+sign yourself, and import needs that signature next to the file:
+
+```sh
+gjallarctl settings export ~/settings.gjallar
+ssh-keygen -Y sign -n gjallaros-settings -f ~/.ssh/id_ed25519 ~/settings.gjallar
+gjallarctl settings import ~/settings.gjallar
+```
+
+The second line writes `~/settings.gjallar.sig`. With an own key, only that
+key counts for your account: files GjallarOS signed are refused, and pairing
+is off. A file made on another device brings your personal settings, not
+that device's (hostname, disk, boot and the like).
+
 ### App catalogue
 
 Optional applications live in `apps/<id>/`: `meta.json` (name, description,
@@ -318,6 +335,35 @@ Upgrading from a version that linked add-ons into the profile: close Firefox
 before `gjallarctl rebuild`. On the next start Firefox keeps uBlock Origin
 with its settings, at the version it had. The Stylix theme comes back on the
 second start. A rollback never downgrades an add-on; Firefox refuses that.
+
+### Nextcloud files
+
+The Nextcloud client is in the default apps. To connect it, set the server in
+`user.config.json` and rebuild:
+
+```json
+"nextcloudEnable": true,
+"nextcloudHost": "https://cloud.example.org"
+```
+
+Only `https` addresses are accepted. Start Nextcloud from the app menu, or run
+`nextcloud-enroll`, and log in. Files appear in `~/Nextcloud` and in Dolphin.
+
+Everything starts as a placeholder: you see every file, but nothing is
+downloaded until you open it. Right after the login a "Keep on this device"
+window lists your top-level folders with nothing ticked. Tick the folders you
+want offline; they download and stay. "Not now" or closing the window keeps
+everything online-only. New top-level folders that show up later are
+placeholders too.
+
+Change it later in Dolphin: right-click a file or folder and pick "Make always
+available locally" or "Free up local space". The folder settings in the
+Nextcloud window have the same two actions. Your picks stay on this device
+only; another device of yours starts with everything online-only again.
+
+If the client crashes, it starts again after ten seconds. After five starts in
+five minutes it stays off, and Quit in the tray stops it as well; open
+Nextcloud from the app menu or log in again to bring it back.
 
 <div align="right"><a href="#gjallaros">↑ back to top</a></div>
 
@@ -425,9 +471,10 @@ gjallarctl system move
 It shows the commit the system runs, and lists local commits and changes in
 your checkout that the move leaves behind. Your checkout keeps them; local
 `.nix` changes go into the developer-mode folder instead (see
-`gjallarctl system apply`). The running commit must be on the official
-`main`; a system built with local changes refuses until you rebuild from a
-pushed commit. Then, as root:
+`gjallarctl system apply`). The running commit must be on an official
+release channel (`dev`, `staging` or `stable`); a system built with local
+changes refuses until you rebuild from a pushed commit. Set `releaseChannel`
+first: the new checkout follows that channel. Then, as root:
 
 ```sh
 sudo gjallarctl system clone --from ~/Documents/gjallarOS
@@ -513,6 +560,59 @@ GjallarOS. If the ESP itself is broken, boot the recovery ISO from USB.
 > boot entry, the recovery-maintenance initrd and the recovery ISO. A reinstall
 > or reset therefore needs a deliberate boot into recovery.
 
+### Snapshots
+
+Installs made with the subvolume layout keep read-only Btrfs snapshots of
+`/home` (hourly) and of the system settings in `/etc/gjallar/system` (daily,
+and before and after each rebuild). `/`, `/nix` and `/var/lib` never get
+snapshots: generations bring the system back, and the machine keys in
+`/var/lib` must not live on in old copies. Older installs get no snapshots
+until they are reinstalled.
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `snapshotsEnable` | `true` | turn the snapshot timers on or off |
+| `snapshotsKeepHours` | `24` | hours of hourly `/home` snapshots to keep (0 to 168) |
+| `snapshotsKeepDays` | `7` | days of daily snapshots to keep (1 to 365) |
+
+Only root can reach the snapshots; they are mounted nowhere on the running
+system. When the disk is nearly full, no new snapshot is made and the
+journal says so (`journalctl -u gjallar-snapshot-home`).
+
+To get an older version of one of your files back:
+
+```bash
+gjallarctl snapshots list
+gjallarctl snapshots restore ~/Documents/notes.txt
+```
+
+`restore` asks your password and takes the newest snapshot that has the
+file, or the one you name with `--from SNAPSHOT`. The copy goes next to the
+file, as `notes.restored-20261021T030000.txt`; your current file is never
+touched. If the folder is gone too, add `--to FOLDER`. Only plain files in
+your own home can be restored, one at a time.
+
+To put all of `/home` or the settings back, start the trusted recovery boot
+entry and run the lines below. From the recovery partition, unlock with
+`gjallar-recover open-root DEVICE` first and use `/mnt` instead of `/`.
+
+```bash
+sudo gjallar-recover snapshots /
+sudo gjallar-recover snapshot-rollback / home.20261021T030000+0200
+```
+
+It asks you to type `ROLLBACK-HOME` (or `ROLLBACK-CONFIG` for a `config.`
+snapshot). The snapshot itself stays as it was; the current `/home` is kept
+as a read-only copy in the list under "replaced by a rollback". When `/home`
+is in use, the change takes effect at the next start. After a settings
+rollback, run `rebuild` once the system is up so the system matches the
+settings again. `sudo gjallar-recover snapshot-drop / NAME` deletes a kept
+copy once you no longer need it.
+
+> [!WARNING]
+> A file you delete from `/home` stays in older snapshots until they age
+> out. Snapshots live on the same disk, so they are not a backup.
+
 ### Secure Boot
 
 The installer offers Secure Boot on models whose ODDC entry has a Secure Boot
@@ -583,9 +683,12 @@ and review devices first.
 With an encrypted root, the installer also asks "Block unknown USB devices from
 the first boot?" (default no). Say no on a desktop with a USB keyboard: it is
 not built in, so it stays blocked until approved. Enforcement can be turned on
-later with `"usbTrustEnforce": true` in `user.config.json` and a `rebuild`. To turn it off, set it back to `false`, `rebuild`, then run
-`sudo gjallarctl usb disarm` and enter the disk encryption passphrase. Disarm
-alone is temporary: the broker re-arms from the config on its next restart.
+later with `"usbTrustEnforce": true` in `user.config.json` and a `rebuild`. To
+turn it off, run `sudo gjallarctl usb disarm` first and enter the disk
+encryption passphrase, then set it back to `false` and `rebuild`. Disarm alone
+is temporary: the broker re-arms from the config on its next restart. The other
+order is refused by `gjallarctl settings`; done by hand, USBGuard keeps
+blocking unknown devices at boot while the stored state still says armed.
 
 On a machine with TPM2 the installer also asks "Let approved USB devices expire
 when unused?" (default no). With it on, an approved external device that was
@@ -646,9 +749,20 @@ when its owner allows that, so a friend's exit node works too.
 `exitNode` is a tailnet host name or 100.x address; `auto` picks an
 online exit node, preferring one that routes a home subnet; `off` keeps it off
 everywhere; empty leaves the exit node to you unless `wifiExitNodes` is set.
-An exit node that is offline stays set, so Tailscale blocks the internet
-instead of sending it around the tunnel; `gjallarctl vpn status` warns about
-it. `auto` with no exit node online leaves the internet open.
+On an untrusted network the VPN fails closed: when the exit node is offline,
+none can be set or Tailscale is not running, the internet is blocked outside
+the tunnel instead of going around it. The local network and DHCP still work;
+DNS does not, so the network cannot see what you look up. A notice says which
+side failed, and the shield in the bar shows the block.
+
+To get online anyway, for example to sign in to a captive portal or to
+Tailscale again, pause the VPN on that network from the notice, the bar or
+`gjallarctl vpn pause`. It asks for an administrator's password every time and
+ends after one hour, on a network change, before sleep or on a restart, or
+when you click the shield again (`gjallarctl vpn resume`). While paused, the
+network sees where apps connect. `gjallarctl vpn status` shows the block or
+the pause.
+
 LAN access stays on while an exit node is active so captive portals and
 printers keep working. DNS then goes to the exit node, so a home router's
 filtering also applies away from home unless the tailnet's admin console

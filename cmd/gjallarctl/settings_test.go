@@ -31,7 +31,20 @@ type fakeSettingsBus struct {
 	notes    []string
 	exported []byte
 	imported [][]byte
+	sigs     [][]byte
 	folders  []map[string][]byte
+	pairFile []byte
+	pairs    []settings.PairOffer
+	checked  [][]byte
+	asked    []string
+}
+
+// fakeOffer is the SYNTHETIC offer the fake bus makes of any pairing file.
+var fakeOffer = settings.PairOffer{
+	ID:       "12345-67890",
+	Code:     "11111 22222 33333 44444 55555 66666 77777 88888 99999 00000 12121 34343",
+	Hostname: "example-host",
+	User:     "tester",
 }
 
 var settingsTestNow = time.Date(2026, 10, 19, 12, 0, 0, 0, time.UTC)
@@ -79,8 +92,11 @@ func (b *fakeSettingsBus) Call(_ context.Context, method string, args ...any) (s
 		}
 		b.pending = append(b.pending, change)
 		return answer(change)
-	case "Import":
+	case "Import", "ImportSigned":
 		b.imported = append(b.imported, args[0].([]byte))
+		if method == "ImportSigned" {
+			b.sigs = append(b.sigs, args[1].([]byte))
+		}
 		change := settings.Pending{
 			Change: settings.Change{
 				ID: "f11e0000" + strings.Repeat("0", 24), Tier: config.TierEveryday, Asked: settingsTestNow,
@@ -114,13 +130,44 @@ func (b *fakeSettingsBus) Call(_ context.Context, method string, args ...any) (s
 	case "Cancel":
 		b.pending = nil
 		return "", nil
+	case "PairCheck":
+		b.checked = append(b.checked, args[0].([]byte))
+		return answer(fakeOffer)
+	case "PairAdd":
+		if args[1].(string) != fakeOffer.Code {
+			return "", errors.New("SYNTHETIC: wrong code")
+		}
+		offer := fakeOffer
+		offer.Code, offer.Added = "", settingsTestNow
+		b.pairs = append(b.pairs, offer)
+		return answer(offer)
+	case "PauseVPN":
+		b.asked = append(b.asked, method)
+		return answer(map[string]any{"user": "tester", "until": settingsTestNow.Add(time.Hour), "blocked": "exit-node-offline"})
+	case "ResumeVPN":
+		b.asked = append(b.asked, method)
+		return "", nil
+	case "PairList":
+		return answer(b.pairs)
+	case "PairRemove":
+		for i, offer := range b.pairs {
+			if offer.ID == args[0].(string) {
+				b.pairs = append(b.pairs[:i], b.pairs[i+1:]...)
+				return "", nil
+			}
+		}
+		return "", errors.New("SYNTHETIC: no such pairing")
 	}
 	return "", nil
 }
 
-func (b *fakeSettingsBus) Export(context.Context) ([]byte, error) {
+func (b *fakeSettingsBus) Bytes(_ context.Context, method string) ([]byte, error) {
+	b.asked = append(b.asked, method)
 	if b.missing {
 		return nil, errSettingsMissing
+	}
+	if method == "PairExport" {
+		return b.pairFile, nil
 	}
 	return b.exported, nil
 }
@@ -133,9 +180,9 @@ func (b *fakeSettingsBus) Rebuild(context.Context) (bool, string, error) {
 func useFakeSettings(t *testing.T, bus *fakeSettingsBus) {
 	t.Helper()
 	t.Setenv("HOME", t.TempDir())
-	oldConnect, oldNow, oldSleep, oldEUID := settingsConnect, settingsNow, settingsSleep, settingsEUID
+	oldConnect, oldNow, oldSleep, oldEUID, oldStdin := settingsConnect, settingsNow, settingsSleep, settingsEUID, settingsStdin
 	t.Cleanup(func() {
-		settingsConnect, settingsNow, settingsSleep, settingsEUID = oldConnect, oldNow, oldSleep, oldEUID
+		settingsConnect, settingsNow, settingsSleep, settingsEUID, settingsStdin = oldConnect, oldNow, oldSleep, oldEUID, oldStdin
 	})
 	settingsConnect = func() (settingsBus, error) { return bus, nil }
 	settingsNow = func() time.Time { return settingsTestNow }
@@ -362,6 +409,26 @@ func TestSettingsExportWritesNewPrivateFile(t *testing.T) {
 	if code := run([]string{"settings", "export", path}, &stdout, &stderr); code != 1 {
 		t.Fatalf("export over an existing file: code %d", code)
 	}
+	if len(bus.asked) != 1 || strings.Contains(stdout.String(), "password") {
+		t.Errorf("export over an existing file asked the service %v, stdout %q", bus.asked, stdout.String())
+	}
+	if data, _ := os.ReadFile(path); !bytes.Equal(data, bus.exported) {
+		t.Errorf("the existing file changed to %q", data)
+	}
+}
+
+// A refused export leaves no empty file behind.
+func TestSettingsExportFailureRemovesFile(t *testing.T) {
+	bus := &fakeSettingsBus{missing: true}
+	useFakeSettings(t, bus)
+	path := filepath.Join(t.TempDir(), "settings.gjs")
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"settings", "export", path}, &stdout, &stderr); code == 0 {
+		t.Fatal("export without the service succeeded")
+	}
+	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("file after a failed export: %v", err)
+	}
 }
 
 func TestSettingsImportSendsFileAndApplies(t *testing.T) {
@@ -391,6 +458,43 @@ func TestSettingsImportSendsFileAndApplies(t *testing.T) {
 	}
 	if code := run([]string{"settings", "import", big}, &stdout, &stderr); code != 1 || len(bus.imported) != 1 {
 		t.Fatalf("import of an oversized file: code %d, sent %d", code, len(bus.imported))
+	}
+}
+
+func TestSettingsOwnKeyExportAndImport(t *testing.T) {
+	content := []byte("gjallaros-settings-ssh-v1\nSYNTHETIC\n")
+	bus := &fakeSettingsBus{exported: content}
+	useFakeSettings(t, bus)
+	path := filepath.Join(t.TempDir(), "my settings.gjs")
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"settings", "export", path}, &stdout, &stderr); code != 0 {
+		t.Fatalf("code %d, stderr %s", code, stderr.String())
+	}
+	if want := "ssh-keygen -Y sign -n gjallaros-settings -f KEY '" + path + "'"; !strings.Contains(stdout.String(), want) {
+		t.Errorf("stdout lacks %q:\n%s", want, stdout.String())
+	}
+
+	stdout.Reset()
+	if code := run([]string{"settings", "import", path}, &stdout, &stderr); code != 1 || len(bus.imported) != 0 ||
+		!strings.Contains(stderr.String(), ".sig is missing") {
+		t.Fatalf("import without FILE.sig: code %d, sent %d, stderr %s", code, len(bus.imported), stderr.String())
+	}
+	sig := []byte("-----BEGIN SSH SIGNATURE-----\nSYNTHETIC\n-----END SSH SIGNATURE-----\n")
+	if err := os.WriteFile(path+".sig", sig, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if code := run([]string{"settings", "import", path}, &stdout, &stderr); code != 0 {
+		t.Fatalf("code %d, stderr %s", code, stderr.String())
+	}
+	if len(bus.sigs) != 1 || !bytes.Equal(bus.imported[0], content) || !bytes.Equal(bus.sigs[0], sig) {
+		t.Fatalf("imported %q with %q", bus.imported, bus.sigs)
+	}
+
+	if err := os.WriteFile(path+".sig", make([]byte, 5<<10), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if code := run([]string{"settings", "import", path}, &stdout, &stderr); code != 1 || len(bus.imported) != 1 {
+		t.Fatalf("import with an oversized signature: code %d, sent %d", code, len(bus.imported))
 	}
 }
 

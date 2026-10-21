@@ -94,6 +94,9 @@ type Network struct {
 	Subnets []netip.Prefix
 	SSID    string // empty when the device is not Wi-Fi
 	KeyMgmt string // NetworkManager key-mgmt; empty for an open network
+	// GatewayMAC is the gateway's hardware address; empty when it did not
+	// answer.
+	GatewayMAC string
 }
 
 // Secured reports whether joining the Wi-Fi needed a credential the access
@@ -188,9 +191,25 @@ type Verdict struct {
 	ManageExitNode bool `json:"manageExitNode"`
 	// ExitNodeError is why the wanted exit node could not be set; the
 	// tunnel is then not protecting this network.
-	ExitNodeError string   `json:"exitNodeError,omitempty"`
-	Warnings      []string `json:"warnings,omitempty"`
+	ExitNodeError string `json:"exitNodeError,omitempty"`
+	// Blocked says why the internet is cut off on this network: an exit
+	// node is wanted here but cannot carry the traffic. Empty when not.
+	Blocked string `json:"blocked,omitempty"`
+	// Network is the NetworkKey of the network this verdict is for.
+	Network string `json:"network,omitempty"`
+	// Paused is set while a pause lets this network carry the traffic
+	// without the tunnel; Blocked is then empty.
+	Paused   *PauseState `json:"paused,omitempty"`
+	Warnings []string    `json:"warnings,omitempty"`
 }
+
+// Blocked reasons. With BlockExitNodeOffline Tailscale drops the traffic
+// itself; the firewall block in System.ApplyBlock backs up every reason.
+const (
+	BlockExitNodeOffline = "exit-node-offline"
+	BlockNoExitNode      = "no-exit-node"
+	BlockTailscaleDown   = "tailscale-down"
+)
 
 func (v Verdict) Trusted() bool {
 	switch v.Trust {
@@ -275,6 +294,7 @@ func Decide(ctx context.Context, p Policy, net *Network, tn Tailnet, pr Prober) 
 			v.Reason += ", internet through an exit node"
 			v.ExitNode, v.ExitNodeError = pickExitNode(node, tn, home, v.ManageExitNode)
 			v.warnOffline(tn)
+			v.failClosed(node, tn)
 		}
 		return v, nil
 	}
@@ -284,6 +304,7 @@ func Decide(ctx context.Context, p Policy, net *Network, tn Tailnet, pr Prober) 
 	v.Bypass = []string{}
 	v.ExitNode, v.ExitNodeError = pickExitNode(p.ExitNode, tn, home, v.ManageExitNode)
 	v.warnOffline(tn)
+	v.failClosed(p.ExitNode, tn)
 	if len(localHome) > 0 {
 		v.Warnings = append(v.Warnings, fmt.Sprintf(
 			"local subnet collides with home subnet %s; home traffic stays in the tunnel",
@@ -307,31 +328,60 @@ func (v *Verdict) warnOffline(tn Tailnet) {
 	}
 }
 
+// failClosed records why the internet is blocked when choice wants an exit
+// node on this network and none can carry the traffic.
+func (v *Verdict) failClosed(choice string, tn Tailnet) {
+	switch {
+	case choice == "" || choice == ExitNodeOff:
+	case !tn.Running:
+		v.Blocked = BlockTailscaleDown
+	case v.ExitNode == "" || v.ExitNodeError != "":
+		v.Blocked = BlockNoExitNode
+	default:
+		for _, peer := range tn.Peers {
+			if peer.Matches(v.ExitNode) && !peer.Online {
+				v.Blocked = BlockExitNodeOffline
+				return
+			}
+		}
+	}
+}
+
 // pickExitNode resolves a policy exit node choice to the node to use.
 func pickExitNode(choice string, tn Tailnet, home []netip.Prefix, managed bool) (node, failure string) {
 	switch choice {
 	case "", ExitNodeOff:
 		return "", ""
 	case ExitNodeAuto:
-		if peer := autoExitNode(tn, home); peer != nil {
+		if peer := autoExitNode(tn, home, true); peer != nil {
 			return peer.HostName, ""
 		}
-		if managed {
-			return "", "auto: no online exit node in this tailnet"
+		if !managed {
+			return "", ""
 		}
-		return "", ""
+		// Fail closed, as a named node does: keep the exit node that is
+		// set, or set an offline one, so Tailscale blocks the traffic
+		// instead of the untrusted network carrying it.
+		if current := tn.CurrentExitNode(); current != nil {
+			return current.HostName, ""
+		}
+		if peer := autoExitNode(tn, home, false); peer != nil {
+			return peer.HostName, ""
+		}
+		return "", "auto: no exit node in this tailnet"
 	default:
 		return choice, ""
 	}
 }
 
-// autoExitNode picks an online exit node, preferring one that routes a home
-// subnet. Peers are sorted by host name, so the pick is stable.
-func autoExitNode(tn Tailnet, home []netip.Prefix) *Peer {
+// autoExitNode picks an exit node, online only when online is set,
+// preferring one that routes a home subnet. Peers are sorted by host name,
+// so the pick is stable.
+func autoExitNode(tn Tailnet, home []netip.Prefix, online bool) *Peer {
 	var fallback *Peer
 	for i := range tn.Peers {
 		peer := &tn.Peers[i]
-		if !peer.Online || !peer.ExitNodeOption || len(peer.IPs) == 0 {
+		if (online && !peer.Online) || !peer.ExitNodeOption || len(peer.IPs) == 0 {
 			continue
 		}
 		if len(overlapping(home, peer.Routes)) > 0 {

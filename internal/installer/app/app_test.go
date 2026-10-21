@@ -395,10 +395,30 @@ func TestCollectRecoverySkipsPartitionWithoutSecureBoot(t *testing.T) {
 	}
 }
 
+// A fresh disk without GjallarOS Secure Boot got JODS-RECOVERY anyway: the
+// plan followed the boot entry answer, not the partition answer.
+func TestFreshDiskGetsRecoveryPartitionOnlyWhenChosen(t *testing.T) {
+	var output bytes.Buffer
+	u := config.User{}
+	if err := collectRecovery(context.Background(), prompt.New(strings.NewReader("yes\n"), &output), true, false, &u); err != nil {
+		t.Fatal(err)
+	}
+	if freshRecoveryPartition(u) {
+		t.Fatal("fresh disk plan gets a recovery partition without Secure Boot")
+	}
+	u = config.User{}
+	if err := collectRecovery(context.Background(), prompt.New(strings.NewReader("yes\nyes\n"), &output), true, true, &u); err != nil {
+		t.Fatal(err)
+	}
+	if !freshRecoveryPartition(u) {
+		t.Fatal("fresh disk plan lost the chosen recovery partition")
+	}
+}
+
 func TestCollectUSBTrustSkippedWithoutODDCModel(t *testing.T) {
 	var output bytes.Buffer
 	u := config.User{USBGuardEnable: true, USBTrustEnforce: true, USBTrustTPMHandle: config.DefaultUSBTrustTPMHandle}
-	if err := collectUSBTrust(context.Background(), prompt.New(strings.NewReader("yes\nyes\n"), &output), false, true, true, nil, &u); err != nil {
+	if err := collectUSBTrust(context.Background(), prompt.New(strings.NewReader("yes\nyes\n"), &output), false, true, true, "", nil, &u); err != nil {
 		t.Fatal(err)
 	}
 	if u.USBGuardEnable || u.USBTrustEnforce || u.USBTrustTPMHandle != "" || strings.Contains(output.String(), "Enable USB trust review") {
@@ -427,7 +447,7 @@ func TestCollectUSBTrust(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			var output bytes.Buffer
 			u := config.User{}
-			if err := collectUSBTrust(context.Background(), prompt.New(strings.NewReader(test.input), &output), true, test.encryptedRoot, test.tpm2, nil, &u); err != nil {
+			if err := collectUSBTrust(context.Background(), prompt.New(strings.NewReader(test.input), &output), true, test.encryptedRoot, test.tpm2, "", nil, &u); err != nil {
 				t.Fatal(err)
 			}
 			if u.USBGuardEnable != test.wantReview || u.USBTrustEnforce != test.wantEnforce || u.USBTrustTPMHandle != test.wantHandle {
@@ -437,6 +457,22 @@ func TestCollectUSBTrust(t *testing.T) {
 				t.Fatalf("block question shown=%t output:\n%s", !test.wantBlockQuestion, output.String())
 			}
 		})
+	}
+}
+
+func TestCollectUSBTrustUSBSystemDisk(t *testing.T) {
+	var output bytes.Buffer
+	u := config.User{}
+	running := config.User{USBTrustEnforce: true}
+	reason := "the system disk (/dev/sda) is a USB drive, and blocking could cut off the disk the system runs from."
+	if err := collectUSBTrust(context.Background(), prompt.New(strings.NewReader("yes\n\n"), &output), true, true, true, reason, &running, &u); err != nil {
+		t.Fatal(err)
+	}
+	if !u.USBGuardEnable || u.USBTrustEnforce || u.USBTrustTPMHandle != config.DefaultUSBTrustTPMHandle {
+		t.Fatalf("review=%t enforce=%t handle=%q output:\n%s", u.USBGuardEnable, u.USBTrustEnforce, u.USBTrustTPMHandle, output.String())
+	}
+	if strings.Contains(output.String(), "Block unknown USB devices") || !strings.Contains(output.String(), "USB blocking stays off: "+reason) {
+		t.Fatalf("blocking was offered or the reason is missing; output:\n%s", output.String())
 	}
 }
 
@@ -456,7 +492,7 @@ func TestCollectUSBTrustLapse(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			var output bytes.Buffer
 			u := config.User{USBTrustLapseDays: 9}
-			if err := collectUSBTrust(context.Background(), prompt.New(strings.NewReader(test.input), &output), true, true, test.tpm2, nil, &u); err != nil {
+			if err := collectUSBTrust(context.Background(), prompt.New(strings.NewReader(test.input), &output), true, true, test.tpm2, "", nil, &u); err != nil {
 				t.Fatal(err)
 			}
 			if u.USBTrustLapseDays != test.want {

@@ -22,8 +22,10 @@ const (
 	// BypassPriority runs before Tailscale's policy rules (5210-5270).
 	BypassPriority = "2500"
 	// tailscaleBypassMark is the fwmark tailscaled gives its own traffic;
-	// its rules send it to the main table, outside the tunnel.
+	// its rules send it to the main table, outside the tunnel. Tailscale
+	// owns the bits in tailscaleFwmarkMask (util/linuxfw).
 	tailscaleBypassMark = 0x80000
+	tailscaleFwmarkMask = 0xff0000
 )
 
 type runner func(ctx context.Context, name string, args ...string) ([]byte, error)
@@ -69,6 +71,7 @@ func (s System) Network(ctx context.Context) (*Network, error) {
 	}
 
 	n := &Network{Device: dev, Gateway: gateway, Subnets: subnets}
+	n.GatewayMAC = s.gatewayMAC(ctx, n)
 
 	typ, err := s.nmGet(ctx, "device", "show", dev, "GENERAL.TYPE")
 	if err != nil || typ != "wifi" {
@@ -85,6 +88,43 @@ func (s System) Network(ctx context.Context) (*Network, error) {
 	// Open profiles have no security setting; nmcli then fails the field.
 	n.KeyMgmt, _ = s.nmGet(ctx, "connection", "show", "uuid", uuid, "802-11-wireless-security.key-mgmt")
 	return n, nil
+}
+
+// gatewayMAC reads the gateway's hardware address from the neighbour
+// table, after one marked echo when the entry is missing or failed.
+func (s System) gatewayMAC(ctx context.Context, n *Network) string {
+	if !n.Gateway.IsValid() {
+		return ""
+	}
+	for try := 0; try < 2; try++ {
+		out, err := s.run(ctx, "ip", "-j", "neigh", "show", n.Gateway.String(), "dev", n.Device)
+		if err == nil {
+			if mac := parseNeighMAC(out); mac != "" {
+				return mac
+			}
+		}
+		if try == 0 {
+			mark := strconv.Itoa(tailscaleBypassMark)
+			s.run(ctx, "ping", "-n", "-q", "-c", "1", "-W", "1", "-m", mark, "-I", n.Device, n.Gateway.String())
+		}
+	}
+	return ""
+}
+
+func parseNeighMAC(data []byte) string {
+	var entries []struct {
+		LLAddr string   `json:"lladdr"`
+		State  []string `json:"state"`
+	}
+	if json.Unmarshal(data, &entries) != nil {
+		return ""
+	}
+	for _, e := range entries {
+		if e.LLAddr != "" && !slices.Contains(e.State, "FAILED") && !slices.Contains(e.State, "INCOMPLETE") {
+			return e.LLAddr
+		}
+	}
+	return ""
 }
 
 func (s System) nmGet(ctx context.Context, args ...string) (string, error) {
@@ -161,6 +201,19 @@ func parseSubnets(data []byte) ([]netip.Prefix, error) {
 // node unmanaged until the next trigger.
 var tailnetSettle = 30 * time.Second
 
+// tailscaledStarting reports whether systemd may still bring tailscaled up.
+// A stopped or failed unit has no start coming, so waiting for it only
+// delays the decision, a pause among them. Without an answer from systemd
+// it keeps waiting, as before.
+func (s System) tailscaledStarting(ctx context.Context) bool {
+	out, _ := s.run(ctx, "systemctl", "is-active", "tailscaled.service")
+	switch strings.TrimSpace(string(out)) {
+	case "inactive", "failed", "deactivating":
+		return false
+	}
+	return true
+}
+
 func (s System) Tailnet(ctx context.Context) (Tailnet, error) {
 	deadline := time.Now().Add(tailnetSettle)
 	for {
@@ -173,9 +226,11 @@ func (s System) Tailnet(ctx context.Context) (Tailnet, error) {
 		}
 		// No answer yet, NoState and Starting settle by themselves;
 		// Stopped, NeedsLogin and NeedsMachineAuth wait for a person.
-		starting := (err != nil && len(out) == 0) || state == "" || state == "NoState" || state == "Starting"
+		noAnswer := err != nil && len(out) == 0
+		starting := state == "NoState" || state == "Starting" ||
+			(state == "" && (!noAnswer || s.tailscaledStarting(ctx)))
 		if !starting || !time.Now().Before(deadline) {
-			if err != nil && len(out) == 0 {
+			if noAnswer {
 				// A stopped or logged-out tailscaled is not an error for us.
 				return Tailnet{}, nil
 			}

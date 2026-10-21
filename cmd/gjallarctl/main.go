@@ -133,6 +133,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runAddons(args[1:], stdout, stderr)
 	case "settings":
 		return runSettings(args[1:], stdout, stderr)
+	case "snapshots":
+		return runSnapshots(args[1:], stdout, stderr)
 	case "secure-boot":
 		return runSecureBoot(args[1:], stdout, stderr)
 	case "security":
@@ -1795,6 +1797,7 @@ func printUsage(out io.Writer) {
 	fmt.Fprintln(out, "       gjallarctl vpn status")
 	fmt.Fprintln(out, "       gjallarctl addons {list|set|pin|update} [--repo PATH]")
 	fmt.Fprintln(out, "       gjallarctl settings {list|get|set|pending|apply|cancel}")
+	fmt.Fprintln(out, "       gjallarctl snapshots {list|restore PATH}")
 	fmt.Fprintln(out, "       gjallarctl secure-boot {status|setup|update-dbx} [--repo PATH]")
 	fmt.Fprintln(out, "       gjallarctl security notice|oddc-notice")
 	fmt.Fprintln(out, "       gjallarctl hyprland-render-gpu")

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	"encoding/json"
@@ -66,6 +67,16 @@ type system interface {
 	Rebuilding(ctx context.Context) (bool, error)
 	// StartRebuild starts the rebuild unit with the checked colors.
 	StartRebuild(ctx context.Context, colors string) error
+	// SystemDiskOnUSB says why USB blocking must stay off because of the
+	// disk the system runs from; "" when that disk is not on USB.
+	SystemDiskOnUSB() string
+	// USBArmed reports whether the stored USB trust state says blocking is
+	// armed.
+	USBArmed() (bool, error)
+	// Verdict returns root's network verdict when it is fresh.
+	Verdict() (nettrust.Verdict, bool)
+	// ReapplyVPN runs the VPN trust decision again.
+	ReapplyVPN(ctx context.Context) error
 }
 
 type service struct {
@@ -78,11 +89,18 @@ type service struct {
 	// reads it.
 	localPath string
 	readLocal func(string) (localchanges.Tree, error)
+	// pausePath is the VPN pause file; writePause and userName are
+	// nettrust.WritePause and the account lookup.
+	pausePath  string
+	writePause func(string, nettrust.Pause) error
+	userName   func(uint32) (string, error)
 
 	// keys signs and checks settings files; device is this machine's
 	// app-specific id in them. Without keys, Export and Import refuse.
 	keys   *keyStore
 	device string
+	// pairMu keeps pairing writes from losing each other.
+	pairMu sync.Mutex
 
 	mu      sync.Mutex
 	pending map[string]settings.Change
@@ -97,6 +115,9 @@ func newService(sys system, checkoutPath string, checkout func(string) error) *s
 		now:          time.Now,
 		localPath:    localchanges.Path,
 		readLocal:    localchanges.ReadRoot,
+		pausePath:    nettrust.PausePath,
+		writePause:   nettrust.WritePause,
+		userName:     lookupUserName,
 		pending:      map[string]settings.Change{},
 	}
 }
@@ -171,7 +192,20 @@ func (s *service) request(ctx context.Context, sender string, who caller, wanted
 	if err != nil {
 		return settings.Pending{}, fmt.Errorf("%w: %v", errRefused, err)
 	}
-	return s.keep(ctx, sender, who, change, notes)
+	notes = append(notes, slowBuildNotes(change)...)
+	return s.keep(ctx, sender, who, change, append(notes, signingKeyNotes(change)...))
+}
+
+// slowBuildNotes warns when a change makes the rebuild compile large parts
+// of the desktop on the device instead of downloading them.
+func slowBuildNotes(change settings.Change) []string {
+	for _, key := range change.Keys {
+		var on bool
+		if key.Key == "dolphinDriveUsage" && json.Unmarshal(key.New, &on) == nil && on {
+			return []string{"dolphinDriveUsage patches KIO, so KIO, Dolphin and the file dialogs are compiled on this device. The rebuild can take hours, and other changes wait until it has finished."}
+		}
+	}
+	return nil
 }
 
 // RequestLocal checks a new developer-mode folder, sent as data by the
@@ -244,6 +278,12 @@ func (s *service) keep(ctx context.Context, sender string, who caller, change se
 		return settings.Pending{}, err
 	}
 	notes = append(notes, nameNotes...)
+	if err := s.checkUSBSystemDisk(change); err != nil {
+		return settings.Pending{}, err
+	}
+	if err := s.checkUSBDisarmed(change); err != nil {
+		return settings.Pending{}, err
+	}
 	if change.Tier == config.TierCritical {
 		if err := s.authorize(ctx, sender, change); err != nil {
 			return settings.Pending{}, err
@@ -263,18 +303,24 @@ const exportAction = "org.gjallaros.settings.export"
 
 // Export signs the current settings, as root reads them from the checkout,
 // with the caller's key. It never signs bytes the caller sent, so a session
-// can only ever get a file of the settings the device already has.
+// can only ever get a file of the settings the device already has. For an
+// account with its own key, the file is left for the user to sign.
 func (s *service) Export(ctx context.Context, sender string) ([]byte, error) {
 	who, err := s.sys.Caller(ctx, sender)
 	if err != nil {
 		return nil, err
 	}
-	if s.keys == nil || s.keys.hostKey == nil {
+	own, hasOwn, err := s.ownKey(who)
+	if err != nil {
+		return nil, err
+	}
+	message := "Authentication is required to sign and export your GjallarOS settings"
+	if hasOwn {
+		message = "Authentication is required to export your GjallarOS settings for signing with your own key"
+	} else if s.keys.hostKey == nil {
 		return nil, errNoSigningKey
 	}
-	if err := s.sys.Authorize(ctx, sender, exportAction, map[string]string{
-		"polkit.message": "Authentication is required to sign and export your GjallarOS settings",
-	}); err != nil {
+	if err := s.sys.Authorize(ctx, sender, exportAction, map[string]string{"polkit.message": message}); err != nil {
 		return nil, err
 	}
 	_, fields, err := s.readConfig()
@@ -291,18 +337,30 @@ func (s *service) Export(ctx context.Context, sender string) ([]byte, error) {
 			exported[key] = value
 		}
 	}
+	file := settings.File{
+		Schema:   settings.FileSchema,
+		Device:   s.device,
+		UID:      who.UID,
+		Created:  s.now().UTC().Truncate(time.Second),
+		Settings: exported,
+	}
+	if hasOwn {
+		if file.User, err = s.keys.userName(who.UID); err != nil {
+			return nil, err
+		}
+		data, err := settings.Unsigned(file)
+		if err != nil {
+			return nil, err
+		}
+		log.Printf("uid %d exported %d settings to sign with its own key %s", who.UID, len(exported), own.Fingerprint())
+		return data, nil
+	}
 	key, name, err := s.keys.signer(who.UID)
 	if err != nil {
 		return nil, err
 	}
-	data, err := settings.Seal(key, settings.File{
-		Schema:   settings.FileSchema,
-		Device:   s.device,
-		User:     name,
-		UID:      who.UID,
-		Created:  s.now().UTC().Truncate(time.Second),
-		Settings: exported,
-	})
+	file.User = name
+	data, err := settings.Seal(key, file)
 	if err != nil {
 		return nil, err
 	}
@@ -312,7 +370,9 @@ func (s *service) Export(ctx context.Context, sender string) ([]byte, error) {
 
 // Import checks a settings file and asks for the change it makes, as
 // Request does: a valid signature says where the file came from, not that
-// the change is wanted now, so the usual tier, wait and password apply.
+// the change is wanted now, so the usual tier, wait and password apply. A
+// file from a device the caller paired with brings no settings scoped to
+// its device.
 func (s *service) Import(ctx context.Context, sender string, data []byte) (settings.Pending, error) {
 	who, err := s.sys.Caller(ctx, sender)
 	if err != nil {
@@ -321,30 +381,85 @@ func (s *service) Import(ctx context.Context, sender string, data []byte) (setti
 	if s.keys == nil {
 		return settings.Pending{}, errNoSigningKey
 	}
+	if settings.IsUnsigned(data) {
+		return settings.Pending{}, fmt.Errorf("%w: this file is for an own OpenSSH key; import it with its .sig file", errRefused)
+	}
+	if err := s.refuseOwnKey(who, "import files with their .sig file"); err != nil {
+		return settings.Pending{}, err
+	}
 	trusted, err := s.keys.trusted()
 	if err != nil {
 		return settings.Pending{}, err
 	}
+	pairs, err := s.keys.pairs(who.UID)
+	if err != nil {
+		return settings.Pending{}, err
+	}
+	paired := func(key ed25519.PublicKey) (pairing, bool) {
+		for _, p := range pairs {
+			if bytes.Equal(p.Key, key) {
+				return p, true
+			}
+		}
+		return pairing{}, false
+	}
 	file, public, err := settings.Open(data, func(key ed25519.PublicKey) bool {
-		_, ok := trusted[string(key)]
-		return ok
+		_, local := trusted[string(key)]
+		_, other := paired(key)
+		return local || other
 	})
 	if err != nil {
 		return settings.Pending{}, fmt.Errorf("%w: %v", errRefused, err)
 	}
-	owner := trusted[string(public)]
-	if file.UID != owner.UID || file.User != owner.User || file.Device != s.device {
-		return settings.Pending{}, fmt.Errorf("%w: the file's contents do not match the key that signed it", errRefused)
+	created := s.madeOn(file.Created)
+	var note string
+	if owner, ok := trusted[string(public)]; ok {
+		if file.UID != owner.UID || file.User != owner.User || file.Device != s.device {
+			return settings.Pending{}, fmt.Errorf("%w: the file's contents do not match the key that signed it", errRefused)
+		}
+		if who.UID != file.UID {
+			return settings.Pending{}, fmt.Errorf("%w: %s made this file; only that account can import it", errRefused, file.User)
+		}
+		note = fmt.Sprintf("from a file %s made on this device on %s", file.User, created)
+	} else {
+		other, _ := paired(public)
+		if file.UID != other.UID || file.User != other.User || file.Device != other.Device || file.Device == s.device {
+			return settings.Pending{}, fmt.Errorf("%w: the file's contents do not match the paired key that signed it", errRefused)
+		}
+		left := dropDeviceScoped(file.Settings)
+		if len(file.Settings) == 0 {
+			return settings.Pending{}, fmt.Errorf("%w: the file holds only settings that belong to its own device", errRefused)
+		}
+		note = fmt.Sprintf("from a file %s made on the paired device that says it is %q, on %s", file.User, other.Hostname, created)
+		if left > 0 {
+			note += fmt.Sprintf("; %d settings of that device were left out", left)
+		}
 	}
-	if who.UID != file.UID {
-		return settings.Pending{}, fmt.Errorf("%w: %s made this file; only that account can import it", errRefused, file.User)
-	}
-	note := fmt.Sprintf("from a file %s made on this device on %s", file.User, file.Created.In(currentZone()).Format("2006-01-02 15:04:05 MST"))
-	if days := int(s.now().Sub(file.Created).Hours() / 24); days > 0 {
-		note += fmt.Sprintf(", %d days ago", days)
-	}
-	log.Printf("uid %d imports a file of uid %d made %s", who.UID, file.UID, file.Created.Format(time.RFC3339))
+	log.Printf("uid %d imports a file of uid %d on device %s made %s", who.UID, file.UID, file.Device, file.Created.Format(time.RFC3339))
 	return s.request(ctx, sender, who, file.Settings, []string{note})
+}
+
+// madeOn shows when a file was made, in the device's time zone.
+func (s *service) madeOn(created time.Time) string {
+	text := created.In(currentZone()).Format("2006-01-02 15:04:05 MST")
+	if days := int(s.now().Sub(created).Hours() / 24); days > 0 {
+		text += fmt.Sprintf(", %d days ago", days)
+	}
+	return text
+}
+
+// dropDeviceScoped removes the settings that belong to the device a file
+// was made on and returns how many it removed. A key this version does not
+// know stays, so the request refuses it by name.
+func dropDeviceScoped(values map[string]json.RawMessage) int {
+	dropped := 0
+	for key := range values {
+		if device, err := config.DeviceScoped(key); err == nil && device {
+			delete(values, key)
+			dropped++
+		}
+	}
+	return dropped
 }
 
 // currentZone is the device's time zone as it is now. time.Local is read
@@ -579,6 +694,42 @@ func (s *service) checkHostname(ctx context.Context, change settings.Change) ([]
 		return nil, fmt.Errorf("%w: hostname %q is taken on this network by %s; pick another one", errRefused, name, addr)
 	}
 	return notes, nil
+}
+
+// checkUSBSystemDisk refuses turning USB blocking on while the system runs
+// from a USB disk: blocking could cut that disk off (wiki 752 Q11).
+func (s *service) checkUSBSystemDisk(change settings.Change) error {
+	for _, key := range change.Keys {
+		var on bool
+		if key.Key != "usbTrustEnforce" || json.Unmarshal(key.New, &on) != nil || !on {
+			continue
+		}
+		if reason := s.sys.SystemDiskOnUSB(); reason != "" {
+			return fmt.Errorf("%w: USB blocking stays off: %s", errRefused, reason)
+		}
+	}
+	return nil
+}
+
+// checkUSBDisarmed refuses turning USB blocking or USBGuard off while the
+// stored trust state says blocking is armed, or cannot be read. Turned off
+// first, the machine would boot without the stage 1 card gate before anyone
+// disarmed it (loophole 23, Plane 194).
+func (s *service) checkUSBDisarmed(change settings.Change) error {
+	for _, key := range change.Keys {
+		var on bool
+		if (key.Key != "usbTrustEnforce" && key.Key != "usbguardEnable") || json.Unmarshal(key.New, &on) != nil || on {
+			continue
+		}
+		armed, err := s.sys.USBArmed()
+		if err != nil {
+			return fmt.Errorf("%w: %s stays on: the stored USB blocking state cannot be read (%v)", errRefused, key.Key, err)
+		}
+		if armed {
+			return fmt.Errorf("%w: %s stays on: USB blocking is still armed; run sudo gjallarctl usb disarm first, then turn it off", errRefused, key.Key)
+		}
+	}
+	return nil
 }
 
 func peerName(peer nettrust.Peer) string {

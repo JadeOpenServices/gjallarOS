@@ -1,0 +1,503 @@
+diff --git a/src/common/syncjournaldb.h b/src/common/syncjournaldb.h
+index 596d973..9790ba0 100644
+--- a/src/common/syncjournaldb.h
++++ b/src/common/syncjournaldb.h
+@@ -169,6 +169,11 @@ public:
+         SelectiveSyncUndecidedList = 3,
+         /** List of encrypted folders that will need to be removed from the blacklist when E2EE gets set up*/
+         SelectiveSyncE2eFoldersToRemoveFromBlacklist = 4,
++        /** GjallarOS: folders picked "keep on this device" at account setup
++         * whose pin is not written yet. Discovery treats them as AlwaysLocal
++         * until the folder exists and carries the pin itself. A high value,
++         * so a later upstream type cannot clash. */
++        KeepLocalPickList = 100,
+     };
+     /* return the specified list from the database */
+     QStringList getSelectiveSyncList(SelectiveSyncListType type, bool *ok);
+diff --git a/src/gui/accountsettings.cpp b/src/gui/accountsettings.cpp
+index 3ac59d0..34ee004 100644
+--- a/src/gui/accountsettings.cpp
++++ b/src/gui/accountsettings.cpp
+@@ -820,7 +820,6 @@ void AccountSettings::slotCustomContextMenuRequested(const QPoint &pos)
+ 
+         ac = availabilityMenu->addAction(Utility::vfsPinActionText());
+         connect(ac, &QAction::triggered, this, [this]() { slotSetCurrentFolderAvailability(PinState::AlwaysLocal); });
+-        ac->setDisabled(Theme::instance()->enforceVirtualFilesSyncFolder());
+ 
+         ac = availabilityMenu->addAction(Utility::vfsFreeSpaceActionText());
+         connect(ac, &QAction::triggered, this, [this]() { slotSetCurrentFolderAvailability(PinState::OnlineOnly); });
+diff --git a/src/gui/folder.cpp b/src/gui/folder.cpp
+index ae87ff9..d16fbd9 100644
+--- a/src/gui/folder.cpp
++++ b/src/gui/folder.cpp
+@@ -1256,12 +1256,48 @@ void Folder::startSync(const QStringList &pathList)
+     _engine->setFilesystemPermissionsReliable(_folderWatcher->canSetPermissions());
+ 
+     correctPlaceholderFiles();
++    // Before local discovery: a folder downloaded by an interrupted first
++    // sync must carry its pin, or the OnlineOnly root dehydrates it again.
++    applyKeepLocalPicks(false);
+ 
+     QMetaObject::invokeMethod(_engine.data(), "startSync", Qt::QueuedConnection);
+ 
+     Q_EMIT syncStarted();
+ }
+ 
++void Folder::applyKeepLocalPicks(bool dropMissing)
++{
++    if (_definition.virtualFilesMode == Vfs::Off) {
++        return;
++    }
++    bool ok = false;
++    const auto picks = _journal.getSelectiveSyncList(SyncJournalDb::KeepLocalPickList, &ok);
++    if (!ok || picks.isEmpty()) {
++        return;
++    }
++    QStringList pending;
++    int pinned = 0;
++    int dropped = 0;
++    for (const auto &pick : picks) {
++        const auto path = pick.endsWith(QLatin1Char('/')) ? pick.chopped(1) : pick;
++        if (_vfs->setPinState(path, PinState::AlwaysLocal)) {
++            ++pinned;
++            continue;
++        }
++        SyncJournalFileRecord record;
++        if (dropMissing && _journal.getFileRecord(path, &record) && !record.isValid()) {
++            ++dropped;
++            continue;
++        }
++        pending.append(pick);
++    }
++    if (pending.size() != picks.size()) {
++        _journal.setSelectiveSyncList(SyncJournalDb::KeepLocalPickList, pending);
++    }
++    // Counts only: folder names stay out of the log.
++    qCInfo(lcFolder) << "Keep-local picks: pinned" << pinned << "dropped" << dropped << "pending" << pending.size();
++}
++
+ void Folder::correctPlaceholderFiles()
+ {
+     if (_definition.virtualFilesMode == Vfs::Off) {
+@@ -1404,6 +1440,10 @@ void Folder::slotSyncFinished(bool success)
+             _timeSinceLastFullLocalDiscovery.start();
+         }
+     }
++    // Only a clean sync over the whole tree proves a pick is gone; a
++    // single-item sync reads the database for everything else.
++    applyKeepLocalPicks(success && _syncResult.status() == SyncResult::Success
++        && _engine->lastLocalDiscoveryStyle() == LocalDiscoveryStyle::FilesystemOnly);
+ 
+     Q_EMIT syncStateChange();
+ 
+diff --git a/src/gui/folder.h b/src/gui/folder.h
+index db76a31..bd9634c 100644
+--- a/src/gui/folder.h
++++ b/src/gui/folder.h
+@@ -553,6 +553,10 @@ private:
+ 
+     void correctPlaceholderFiles();
+ 
++    // Pin "keep on this device" picks whose folder now exists. With
++    // dropMissing, also forget picks the last full sync did not find.
++    void applyKeepLocalPicks(bool dropMissing);
++
+     void appendPathToSelectiveSyncList(const QString &path, const SyncJournalDb::SelectiveSyncListType listType);
+     void removePathFromSelectiveSyncList(const QString &path, const SyncJournalDb::SelectiveSyncListType listType);
+ 
+diff --git a/src/gui/selectivesyncdialog.cpp b/src/gui/selectivesyncdialog.cpp
+index acc525c..e2b0e32 100644
+--- a/src/gui/selectivesyncdialog.cpp
++++ b/src/gui/selectivesyncdialog.cpp
+@@ -13,6 +13,7 @@
+ #include "networkjobs.h"
+ #include "theme.h"
+ #include <QDialogButtonBox>
++#include <QFileInfo>
+ #include <QFileIconProvider>
+ #include <QHeaderView>
+ #include <QLabel>
+@@ -67,10 +68,10 @@ SelectiveSyncWidget::SelectiveSyncWidget(AccountPtr account, QWidget *parent)
+     auto layout = new QVBoxLayout(this);
+     layout->setContentsMargins(0, 0, 0, 0);
+ 
+-    auto header = new QLabel(this);
+-    header->setText(tr("Deselect remote folders you do not wish to synchronize."));
+-    header->setWordWrap(true);
+-    layout->addWidget(header);
++    _header = new QLabel(this);
++    _header->setText(tr("Deselect remote folders you do not wish to synchronize."));
++    _header->setWordWrap(true);
++    layout->addWidget(_header);
+ 
+     layout->addWidget(_folderTree);
+ 
+@@ -397,6 +398,8 @@ void SelectiveSyncWidget::slotItemChanged(QTreeWidgetItem *item, int col)
+             parent->setCheckState(0, Qt::PartiallyChecked);
+         }
+     }
++
++    Q_EMIT checkStateChanged();
+ }
+ 
+ QStringList SelectiveSyncWidget::createBlackList(QTreeWidgetItem *root) const
+@@ -439,6 +442,69 @@ QStringList SelectiveSyncWidget::oldBlackList() const
+     return _oldBlackList;
+ }
+ 
++QStringList SelectiveSyncWidget::createCheckedList(QTreeWidgetItem *root) const
++{
++    const auto top = _folderTree->topLevelItem(0);
++    if (!root) {
++        root = top;
++    }
++    if (!root) {
++        return {};
++    }
++    if (root != top) {
++        switch (root->checkState(0)) {
++        case Qt::Unchecked:
++            return {};
++        case Qt::Checked:
++            return {root->data(0, Qt::UserRole).toString() + QLatin1Char('/')};
++        case Qt::PartiallyChecked:
++            break;
++        }
++    } else if (root->checkState(0) == Qt::Unchecked) {
++        return {};
++    }
++
++    QStringList result;
++    for (int i = 0; i < root->childCount(); ++i) {
++        result += createCheckedList(root->child(i));
++    }
++    return result;
++}
++
++qint64 SelectiveSyncWidget::checkedFoldersSize(QTreeWidgetItem *root) const
++{
++    const auto top = _folderTree->topLevelItem(0);
++    if (!root) {
++        root = top;
++    }
++    if (!root) {
++        return 0;
++    }
++    if (root != top) {
++        switch (root->checkState(0)) {
++        case Qt::Unchecked:
++            return 0;
++        case Qt::Checked:
++            return root->data(1, Qt::UserRole).toLongLong();
++        case Qt::PartiallyChecked:
++            break;
++        }
++    } else if (root->checkState(0) == Qt::Unchecked) {
++        return 0;
++    }
++
++    qint64 result = 0;
++    for (int i = 0; i < root->childCount(); ++i) {
++        result += checkedFoldersSize(root->child(i));
++    }
++    return result;
++}
++
++void SelectiveSyncWidget::setHeaderText(const QString &text)
++{
++    _header->setText(text);
++}
++
+ qint64 SelectiveSyncWidget::estimatedSize(QTreeWidgetItem *root)
+ {
+     if (!root) {
+@@ -559,4 +625,50 @@ qint64 SelectiveSyncDialog::estimatedSize()
+ {
+     return _selectiveSync->estimatedSize();
+ }
++
++KeepLocalDialog::KeepLocalDialog(AccountPtr account, const QString &folder, const QString &localPath, QWidget *parent, Qt::WindowFlags f)
++    : QDialog(parent, f)
++    , _localPath(localPath)
++{
++    setWindowTitle(tr("Keep on this device"));
++    auto *layout = new QVBoxLayout(this);
++    _selectiveSync = new SelectiveSyncWidget(account, this);
++    _selectiveSync->setHeaderText(tr("Files stay online and download when you open them. "
++                                     "Tick the folders to download now and keep on this device. "
++                                     "New files in a ticked folder download too, also files others add to it."));
++    // Nothing ticked: every top-level folder starts unchecked.
++    _selectiveSync->setFolderInfo(folder, folder, {QStringLiteral("/")});
++    layout->addWidget(_selectiveSync);
++
++    _sizeLabel = new QLabel(this);
++    _sizeLabel->setWordWrap(true);
++    layout->addWidget(_sizeLabel);
++    connect(_selectiveSync, &SelectiveSyncWidget::checkStateChanged, this, &KeepLocalDialog::updateSizeLabel);
++    updateSizeLabel();
++
++    auto *buttonBox = new QDialogButtonBox(Qt::Horizontal);
++    auto *okButton = buttonBox->addButton(QDialogButtonBox::Ok);
++    connect(okButton, &QPushButton::clicked, this, &QDialog::accept);
++    auto *laterButton = buttonBox->addButton(tr("Not now"), QDialogButtonBox::RejectRole);
++    connect(laterButton, &QAbstractButton::clicked, this, &QDialog::reject);
++    layout->addWidget(buttonBox);
++}
++
++QStringList KeepLocalDialog::checkedFolders() const
++{
++    return _selectiveSync->createCheckedList();
++}
++
++void KeepLocalDialog::updateSizeLabel()
++{
++    // The sync folder may not exist yet: ask the nearest existing parent.
++    auto info = QFileInfo(_localPath);
++    while (!_localPath.isEmpty() && !info.exists() && info.absolutePath() != info.absoluteFilePath()) {
++        info = QFileInfo(info.absolutePath());
++    }
++    const auto freeSpace = _localPath.isEmpty() || !info.exists() ? -1 : Utility::freeDiskSpace(info.absoluteFilePath());
++    const auto picked = Utility::octetsToString(_selectiveSync->checkedFoldersSize());
++    _sizeLabel->setText(freeSpace < 0 ? tr("To download: %1").arg(picked)
++                                      : tr("To download: %1, free on this device: %2").arg(picked, Utility::octetsToString(freeSpace)));
++}
+ }
+diff --git a/src/gui/selectivesyncdialog.h b/src/gui/selectivesyncdialog.h
+index 95f3aba..1b91fe3 100644
+--- a/src/gui/selectivesyncdialog.h
++++ b/src/gui/selectivesyncdialog.h
+@@ -40,12 +40,24 @@ public:
+     // Estimates the total size of checked items (recursively)
+     qint64 estimatedSize(QTreeWidgetItem *root = nullptr);
+ 
++    /// Topmost fully checked folders, each with a trailing /. The root is
++    /// never returned: files at the top level are not part of any pick.
++    [[nodiscard]] QStringList createCheckedList(QTreeWidgetItem *root = nullptr) const;
++
++    /// Size of the folders createCheckedList() returns.
++    [[nodiscard]] qint64 checkedFoldersSize(QTreeWidgetItem *root = nullptr) const;
++
++    void setHeaderText(const QString &text);
++
+     // oldBlackList is a list of excluded paths, each including a trailing /
+     void setFolderInfo(const QString &folderPath, const QString &rootName,
+         const QStringList &oldBlackList = QStringList());
+ 
+     [[nodiscard]] QSize sizeHint() const override;
+ 
++Q_SIGNALS:
++    void checkStateChanged();
++
+ private Q_SLOTS:
+     void slotUpdateDirectories(QStringList);
+     void slotUpdateRootFolderFilesSize(const QStringList &subfolders);
+@@ -66,6 +78,7 @@ private:
+ 
+     bool _inserting = false; // set to true when we are inserting new items on the list
+     QLabel *_loading;
++    QLabel *_header = nullptr;
+ 
+     QTreeWidget *_folderTree;
+ 
+@@ -108,4 +121,25 @@ private:
+     Folder *_folder;
+     QPushButton *_okButton = nullptr;
+ };
++
++/**
++ * @brief Picks the folders a new virtual-files account keeps on this device.
++ * Nothing is ticked at first; everything else stays online-only.
++ * @ingroup gui
++ */
++class KeepLocalDialog : public QDialog
++{
++    Q_OBJECT
++public:
++    KeepLocalDialog(AccountPtr account, const QString &folder, const QString &localPath, QWidget *parent = nullptr, Qt::WindowFlags f = {});
++
++    [[nodiscard]] QStringList checkedFolders() const;
++
++private:
++    void updateSizeLabel();
++
++    SelectiveSyncWidget *_selectiveSync = nullptr;
++    QLabel *_sizeLabel = nullptr;
++    QString _localPath;
++};
+ }
+diff --git a/src/gui/socketapi/socketapi.cpp b/src/gui/socketapi/socketapi.cpp
+index ffe7dc7..805a098 100644
+--- a/src/gui/socketapi/socketapi.cpp
++++ b/src/gui/socketapi/socketapi.cpp
+@@ -1599,11 +1599,10 @@ void SocketApi::command_GET_MENU_ITEMS(const QString &argument, OCC::SocketListe
+         auto makePinContextMenu = [&](bool makeAvailableLocally, bool freeSpace) {
+             listener->sendMessage(QLatin1String("MENU_ITEM:CURRENT_PIN:d:")
+                 + Utility::vfsCurrentAvailabilityText(*combined));
+-            if (!Theme::instance()->enforceVirtualFilesSyncFolder()) {
+-                listener->sendMessage(QLatin1String("MENU_ITEM:MAKE_AVAILABLE_LOCALLY:")
+-                    + (makeAvailableLocally ? QLatin1String(":") : QLatin1String("d:")) + Utility::vfsPinActionText());
+-            }
+-            
++            // Enforced VFS still lets users keep picked folders on the device.
++            listener->sendMessage(QLatin1String("MENU_ITEM:MAKE_AVAILABLE_LOCALLY:")
++                + (makeAvailableLocally ? QLatin1String(":") : QLatin1String("d:")) + Utility::vfsPinActionText());
++
+             listener->sendMessage(QLatin1String("MENU_ITEM:MAKE_ONLINE_ONLY:")
+                 + (freeSpace ? QLatin1String(":") : QLatin1String("d:"))
+                 + Utility::vfsFreeSpaceActionText());
+diff --git a/src/gui/wizard/accountwizardcontroller.cpp b/src/gui/wizard/accountwizardcontroller.cpp
+index 32e8fe6..229cd6e 100644
+--- a/src/gui/wizard/accountwizardcontroller.cpp
++++ b/src/gui/wizard/accountwizardcontroller.cpp
+@@ -1129,7 +1129,13 @@ void AccountWizardController::completeAuthentication()
+     if (needsSyncOptions()) {
+         ConfigFile cfg;
+         if (Theme::instance()->forceOverrideServerUrl() && !cfg.overrideLocalDir().isEmpty()) {
+-            QTimer::singleShot(0, this, &AccountWizardController::finish);
++            // No sync options page here, so a virtual-files account gets the
++            // one question that matters on a new machine: what to keep local.
++            if (_syncMode == VirtualFiles) {
++                QTimer::singleShot(0, this, &AccountWizardController::openKeepLocalPicker);
++            } else {
++                QTimer::singleShot(0, this, &AccountWizardController::finish);
++            }
+             return;
+         }
+ 
+@@ -1615,6 +1621,7 @@ bool AccountWizardController::createSyncFolder(AccountState *accountState)
+ 
+     if (folderDefinition.virtualFilesMode != Vfs::Off && _syncMode == VirtualFiles) {
+         folder->setRootPinState(PinState::OnlineOnly);
++        folder->journalDb()->setSelectiveSyncList(SyncJournalDb::KeepLocalPickList, _keepLocalPicks);
+     }
+ 
+     folder->journalDb()->setSelectiveSyncList(SyncJournalDb::SelectiveSyncBlackList, _selectiveSyncBlacklist);
+@@ -1745,6 +1752,29 @@ void AccountWizardController::openSelectiveSync()
+     _selectiveSyncDialog->open();
+ }
+ 
++void AccountWizardController::openKeepLocalPicker()
++{
++    if (!_account) {
++        finish();
++        return;
++    }
++    if (!_keepLocalDialog) {
++        _keepLocalDialog = new KeepLocalDialog(_account, _remoteFolder, _localSyncFolder, nullptr, Qt::Dialog);
++        _keepLocalDialog->setAttribute(Qt::WA_DeleteOnClose);
++        _keepLocalDialog->setWindowModality(Qt::ApplicationModal);
++        connect(_keepLocalDialog, &KeepLocalDialog::finished, this, [this] {
++            if (!_keepLocalDialog) {
++                return;
++            }
++            // "Not now" or closing the window keeps everything online-only.
++            _keepLocalPicks = _keepLocalDialog->result() == QDialog::Accepted ? _keepLocalDialog->checkedFolders() : QStringList();
++            qCInfo(lcAccountWizardController) << "Keep-local picks:" << _keepLocalPicks.size();
++            finish();
++        });
++    }
++    _keepLocalDialog->open();
++}
++
+ void AccountWizardController::openAdvancedOptions()
+ {
+     if (hasAdvancedOptions()) {
+diff --git a/src/gui/wizard/accountwizardcontroller.h b/src/gui/wizard/accountwizardcontroller.h
+index 137af4b..3e49006 100644
+--- a/src/gui/wizard/accountwizardcontroller.h
++++ b/src/gui/wizard/accountwizardcontroller.h
+@@ -26,6 +26,7 @@ class QNetworkReply;
+ namespace OCC {
+ 
+ class SelectiveSyncDialog;
++class KeepLocalDialog;
+ class AccountState;
+ 
+ /**
+@@ -310,6 +311,10 @@ private:
+     LocalNetworkPermissionCheck _localNetworkPermissionCheck;
+     std::unique_ptr<Flow2Auth> _flow2Auth;
+     QPointer<SelectiveSyncDialog> _selectiveSyncDialog;
++    QPointer<KeepLocalDialog> _keepLocalDialog;
++    // Folders picked "keep on this device", each with a trailing /
++    QStringList _keepLocalPicks;
++    void openKeepLocalPicker();
+     enum class ProxyAuthentication {
+         AuthenticationRequired,
+         NoAuthentication,
+diff --git a/src/libsync/discovery.cpp b/src/libsync/discovery.cpp
+index 53dd69b..e8823d1 100644
+--- a/src/libsync/discovery.cpp
++++ b/src/libsync/discovery.cpp
+@@ -2501,6 +2501,12 @@ void ProcessDirectoryJob::computePinState(PinState parentState)
+             _pinState = *state;
+         }
+     }
++    // A folder picked "keep on this device" downloads in the first sync,
++    // before its placeholder exists to carry the pin (Folder writes it later).
++    if (!_currentFolder._original.isEmpty()
++        && std::binary_search(_discoveryData->_keepLocalPicks.cbegin(), _discoveryData->_keepLocalPicks.cend(), _currentFolder._original + QLatin1Char('/'))) {
++        _pinState = PinState::AlwaysLocal;
++    }
+ }
+ 
+ void ProcessDirectoryJob::setupDbPinStateActions(SyncJournalFileRecord &record)
+diff --git a/src/libsync/discoveryphase.cpp b/src/libsync/discoveryphase.cpp
+index 2ad6fb4..23a8f02 100644
+--- a/src/libsync/discoveryphase.cpp
++++ b/src/libsync/discoveryphase.cpp
+@@ -306,6 +306,12 @@ void DiscoveryPhase::setSelectiveSyncWhiteList(const QStringList &list)
+     _selectiveSyncWhiteList.sort();
+ }
+ 
++void DiscoveryPhase::setKeepLocalPicks(const QStringList &list)
++{
++    _keepLocalPicks = list;
++    _keepLocalPicks.sort();
++}
++
+ bool DiscoveryPhase::isRenamed(const QString &p) const
+ {
+     return _renamedItemsLocal.contains(p) || _renamedItemsRemote.contains(p);
+diff --git a/src/libsync/discoveryphase.h b/src/libsync/discoveryphase.h
+index 3138c89..5b11a28 100644
+--- a/src/libsync/discoveryphase.h
++++ b/src/libsync/discoveryphase.h
+@@ -238,6 +238,8 @@ class DiscoveryPhase : public QObject
+     // both must contain a sorted list
+     QStringList _selectiveSyncBlackList;
+     QStringList _selectiveSyncWhiteList;
++    // Sorted "keep on this device" picks not yet pinned, see computePinState()
++    QStringList _keepLocalPicks;
+ 
+     void scheduleMoreJobs();
+ 
+@@ -305,6 +307,7 @@ public:
+ 
+     void setSelectiveSyncBlackList(const QStringList &list);
+     void setSelectiveSyncWhiteList(const QStringList &list);
++    void setKeepLocalPicks(const QStringList &list);
+ 
+     // output
+     QByteArray _dataFingerprint;
+diff --git a/src/libsync/syncengine.cpp b/src/libsync/syncengine.cpp
+index 0a7aa38..09a187c 100644
+--- a/src/libsync/syncengine.cpp
++++ b/src/libsync/syncengine.cpp
+@@ -662,6 +662,16 @@ void SyncEngine::startSync()
+         finalize(false);
+         return;
+     }
++    if (_syncOptions._vfs->mode() != Vfs::Off) {
++        const auto picks = _journal->getSelectiveSyncList(SyncJournalDb::KeepLocalPickList, &ok);
++        if (!ok) {
++            qCWarning(lcEngine) << "Unable to read the keep-local picks, aborting.";
++            Q_EMIT syncError(tr("Unable to read from the sync journal."), ErrorCategory::GenericError);
++            finalize(false);
++            return;
++        }
++        _discoveryPhase->setKeepLocalPicks(picks);
++    }
+ 
+     const auto accountCaps = _account->capabilities();
+     const auto forbiddenFilenames = accountCaps.forbiddenFilenames();

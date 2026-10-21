@@ -34,7 +34,29 @@ func TestAutoExitNodePrefersTheHomeRouter(t *testing.T) {
 
 	tn.Peers = tn.Peers[1:]
 	v = decide(t, p, wifi("cafe", "wpa-psk", "172.16.5.0/24"), tn, fakeProber{})
-	if !v.ManageExitNode || v.ExitNode != "" || v.ExitNodeError == "" {
+	if !v.ManageExitNode || v.ExitNode != "b-offline-home" || v.Blocked != BlockExitNodeOffline {
+		t.Fatalf("no online exit node: want the offline home router set, got %+v", v)
+	}
+}
+
+func TestAutoExitNodeKeepsTheCurrentNodeWhenNoneIsOnline(t *testing.T) {
+	p := policy
+	p.ExitNode = ExitNodeAuto
+	current := exitOption("z-cloud", "10.9.0.0/24", false)
+	current.ExitNode = true
+	tn := Tailnet{Running: true, Peers: []Peer{exitOption("a-home", "192.168.8.0/24", false), current}}
+	v := decide(t, p, wifi("cafe", "wpa-psk", "172.16.5.0/24"), tn, fakeProber{})
+	if v.ExitNode != "z-cloud" || v.Blocked != BlockExitNodeOffline || len(v.Warnings) != 1 {
+		t.Fatalf("verdict = %+v", v)
+	}
+}
+
+func TestAutoWithoutAnyExitNodeIsBlocked(t *testing.T) {
+	p := policy
+	p.ExitNode = ExitNodeAuto
+	tn := Tailnet{Running: true, Peers: []Peer{router("home-router", "192.168.8.0/24")}}
+	v := decide(t, p, wifi("cafe", "", "172.16.5.0/24"), tn, fakeProber{})
+	if v.ExitNode != "" || v.ExitNodeError == "" || v.Blocked != BlockNoExitNode {
 		t.Fatalf("verdict = %+v", v)
 	}
 }
@@ -43,7 +65,7 @@ func TestExitNodeOffStaysOffOnUntrustedNetworks(t *testing.T) {
 	p := policy
 	p.ExitNode = ExitNodeOff
 	v := decide(t, p, wifi("cafe", "wpa-psk", "172.16.5.0/24"), Tailnet{Running: true}, fakeProber{})
-	if v.Trust != TrustUntrusted || !v.ManageExitNode || v.ExitNode != "" {
+	if v.Trust != TrustUntrusted || !v.ManageExitNode || v.ExitNode != "" || v.Blocked != "" {
 		t.Fatalf("verdict = %+v", v)
 	}
 }
@@ -127,7 +149,7 @@ func TestParseTailnetExitNodeOption(t *testing.T) {
 	if err != nil || len(tn.Peers) != 1 || !tn.Peers[0].ExitNodeOption {
 		t.Fatalf("tailnet = %+v %v", tn, err)
 	}
-	if autoExitNode(tn, []netip.Prefix{netip.MustParsePrefix("192.168.8.0/24")}) == nil {
+	if autoExitNode(tn, []netip.Prefix{netip.MustParsePrefix("192.168.8.0/24")}, true) == nil {
 		t.Fatal("no auto exit node")
 	}
 }

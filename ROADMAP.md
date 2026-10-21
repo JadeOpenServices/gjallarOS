@@ -902,11 +902,13 @@ way to root.
       `user.config.json` key (34ea9a04), the service itself with its
       `gjallarctl settings` front end (3.3, 887c1c5b) and the unique
       hostname check, signed export and import for the device's own users
-      (3.4a), key wipe on user removal (3.4b), and the user-side writers
-      (add-ons, USB review, Secure Boot) asking the service on a system
-      checkout, with each inner value of a change listed (3.5, e511f5cb).
-      Next: pairing and the installer opt-out (rest of 3.4). Factory reset
-      waits for a recovery mode that does one.
+      (3.4a), key wipe on user removal (3.4b), pairing two devices of one
+      person with a file each way and a code (3.4c, fbf8cc67), own
+      OpenSSH keys with the installer question (3.4d, 46a02b61, fw13 VM
+      passed), and the user-side writers (add-ons, USB review, Secure
+      Boot) asking the service on a system checkout, with each inner value
+      of a change listed (3.5, e511f5cb).
+      Next: factory reset waits for a recovery mode that does one.
 - [x] **Checkpoint 3b: developer mode.** `~/GjallarOS-local/`, the copy
       into `/etc/gjallar/developer/local`, the staged `.gjallar-local/`, notice,
       boot entry name and the recovery exit. Steps: 3b.1 the
@@ -1223,12 +1225,13 @@ profiles show "not signed" but still install, which is what phishing uses.
   on this device or a device you paired". A valid file still only loads
   as a draft, with the usual tier rules: a signature says where the file
   came from, not that the change is wanted now.
-- **Pairing own devices.** Both devices show the same short code; the
-  user confirms on both with their password. Each then trusts the other's
-  public key for that user. Unpairing removes it.
+- **Pairing own devices.** A pairing file goes each way; both devices
+  show the same code made from both public keys, and the user confirms on
+  both with their password. Each then trusts the other's public key for
+  that user. Unpairing removes it. See "Pairing and own keys" below.
 - **Opting out in the installer.** "Let GjallarOS manage signing keys
-  (recommended)". Saying no lets the person add their own public key (for
-  example an SSH or hardware key) as the only signer instead.
+  (recommended)". Saying no lets the person add their own OpenSSH public
+  key (ed25519 file or FIDO hardware key) as the only signer instead.
 - **Nothing is locked behind the key.** Login, disk unlock, applying
   settings in the editor and recovery never need it. Losing it only stops
   export until a new one is made; old exports still import, because the
@@ -1255,7 +1258,11 @@ How 3.4a does it (`internal/settings/signed.go`,
   secret where there is a TPM, no PCR binding, so turning on Secure Boot
   keeps it. systemd hands it to the service with `LoadCredentialEncrypted=`;
   the service never touches the TPM. Without it export is off and import
-  still works.
+  still works. The key unit runs before every start of the service and
+  replaces a key that no longer decrypts. A cleared TPM or a changed
+  `/etc/machine-id` loses the key; systemd deletes its host secret when
+  the machine id changes. Without this check the service would fail until
+  the next boot.
 - **User keys.** Made on the first export. Each user's Ed25519 seed is
   HKDF-SHA256 of the host key with a random salt and the uid and name.
   `/var/lib/gjallarOS/settings/keys/<uid>.json` (root, 0600) holds the salt
@@ -1316,6 +1323,130 @@ design does about it:
   It only ever brings back that user's own earlier settings, as a draft
   with the tier rules and the password, and the note shows its age.
   Logged on the security review page.
+
+### Pairing and own keys
+
+Decided with Jade 2026-10-20 (wiki 752 Q13, Q14): pairing is a file each
+way plus a code made from both public keys, with no network listener; an
+own key is an OpenSSH key used with `ssh-keygen -Y sign`.
+
+How others do it:
+
+- Signal shows a 60-digit safety number: two 30-digit halves, one per
+  person, each an iterated SHA-512 over that person's key and identifier,
+  in groups of five digits. Both phones show the same number because the
+  halves are put in a fixed order
+  ([moderncrypto messaging list](https://moderncrypto.org/mail-archive/messaging/2017/002381.html)).
+- KDE Connect's pairing review
+  ([oss-security 2020-11-30](https://www.openwall.com/lists/oss-security/2020/11/30/1),
+  CVE-2020-26164): device names are chosen by the other side, and the
+  fix shows a hash over both keys, but by default only 8 hex digits.
+- Short key ids: 32-bit PGP key ids were collided for every key of the
+  web of trust, and fake kernel developer keys turned up on key servers
+  in 2016 ([LWN](https://lwn.net/Articles/697538/)). A short code that
+  someone can search for offline proves little.
+- OpenSSH signatures
+  ([PROTOCOL.sshsig](https://github.com/openssh/openssh-portable/blob/master/PROTOCOL.sshsig))
+  sign a namespace with the message hash, so a signature made for git
+  (namespace `git`) or anything else never counts for another use. FIDO
+  keys carry a user-presence flag, and `ssh-keygen -Y verify` refuses a
+  signature without it unless the signer line says `no-touch-required`.
+
+**Pairing (3.4c).**
+
+- **File.** `gjallaros-pairing-v1`, then the `key` and `sig` lines as in a
+  settings file, then JSON with schema, device, user, uid, time and the
+  hostname. Signed by the user's own key, so it shows the sender holds it.
+  The other magic line means a pairing file never opens as a settings
+  file, nor the other way round.
+- **Code.** One half per side, Signal-style: SHA-512 over
+  `gjallaros-pair-v1`, the device id, uid, user name and key, then 5200
+  more rounds over the hash and the key; the first 30 bytes give 30
+  digits. The two halves are put in byte order, so both screens show the
+  same 60 digits in groups of five. Changing either key changes its half,
+  so a swapped file needs a match for the whole 30-digit half of a key it
+  does not have.
+- **Flow.** `gjallarctl settings pair export FILE` on each device (own
+  password, `auth_self`, makes the key when there is none yet), then the
+  files go across by any way the user likes (USB stick, Nextcloud, mail).
+  `gjallarctl settings pair add FILE` shows the code and what the other
+  device says it is, and asks to compare it with the other screen, at the
+  same time, both devices in front of the user. A code sent by message
+  proves nothing; on a difference, stop. The user then confirms with their
+  own password. The service computes the code again from the bytes it gets
+  and adds the pairing only when it equals the code the user saw.
+  `pair list` shows pairings with a short id; `pair remove ID` drops one.
+- **Store.** `/var/lib/gjallarOS/settings/pairings/<uid>.json` (root,
+  0600), one per local user: the other device's key, device id, uid, user
+  name, claimed hostname and when it was added. A removed user loses their
+  pairings, as with keys. A key of this device, or a file naming this
+  device, is refused.
+- **Import from a paired device.** The signer must be one of the caller's
+  pairings, and the file's device, uid and user must be the ones stored
+  with it. Keys that describe the device rather than the person (struct
+  tag `scope:"device"` on `config.User`: hostname, username, disk, boot,
+  recovery, USB blocking, JODS, firmware, channel, developer mode,
+  tailscale, dotfiles folder, clamshell) are left out and the note says how
+  many. Everything else goes the way of `settings set`, with the tier
+  rules, waits and password, and a note naming the paired device.
+- **Key changes.** When the other device's host key changes (a cleared
+  TPM), its files no longer import here; pair again.
+
+**Own key (3.4d, done 46a02b61).**
+
+- The installer asks "Let GjallarOS sign your settings files for you?"
+  (recommended). No: the user gives an OpenSSH public key line
+  (`ssh-ed25519` or `sk-ssh-ed25519@openssh.com`), checked before the
+  interview goes on. It is stored as `settingsSigningKey` (critical tier,
+  device scope) and belongs to the account named by `username`. That key
+  is then the only signer for that account: managed files and pairing are
+  refused. It can be set, changed or cleared later with the password and
+  the hour's wait; the change says what it does to export, import and
+  pairing.
+- Export writes the settings without a signature, under its own magic
+  line (`gjallaros-settings-ssh-v1`). The user signs it:
+  `ssh-keygen -Y sign -n gjallaros-settings -f KEY FILE` gives `FILE.sig`.
+- Import checks with `ssh-keygen -Y verify -n gjallaros-settings` from the
+  Nix store path, no shell, a cleared environment, a size cap and a
+  timeout, inside the sandboxed settings service. The allowed-signers
+  line is written by the service from a parsed key only: comment dropped,
+  `namespaces="gjallaros-settings"`, never `no-touch-required`. Only then
+  is the payload parsed, with the same strict parser.
+- `gjallarctl settings export FILE` prints the `ssh-keygen` line to run;
+  `gjallarctl settings import FILE` reads `FILE.sig` next to it and fails
+  with that line when it is missing. The change shows the key's SHA256
+  fingerprint and where the file was made. A file made on another device
+  leaves out `scope:"device"` keys, as from a paired device.
+- OpenSSH's own code checks the signature, so no new Go dependency
+  (`golang.org/x/crypto` has no sshsig).
+
+Security pass (2026-10-20). What went wrong elsewhere, and what this
+design does about it:
+
+- Short codes that can be searched for offline (KDE's 8 hex digits, 32-bit
+  PGP ids). File exchange has no commit step, so each half is long (30
+  digits per key) and slow to compute.
+- Names chosen by the other side (KDE review). The hostname is only shown
+  as "says it is", never used to decide anything, and text with control
+  characters is refused.
+- A file or signature made for one purpose used for another. Distinct
+  magic lines for settings, pairing and SSH files; the SSH namespace
+  `gjallaros-settings` keeps git or other SSH signatures out.
+- The file changing between showing the code and adding it. Add takes the
+  code the user saw and checks it against the bytes it gets.
+- Comparing over the same channel the file came by. The pairing screen
+  says to compare on both screens at once; the docs say a code sent by
+  message does not count.
+- FIDO keys without touch. The service never writes `no-touch-required`.
+- A root tool parsing untrusted signatures. `ssh-keygen` runs inside the
+  service's sandbox (no network, no capabilities, private /tmp) with fixed
+  arguments; the payload is parsed only after it says yes.
+- Device settings carried to another device. `scope:"device"` keys never
+  come from a paired device.
+- Residual, as with settings files: an old file from a paired device stays
+  valid until the pairing is removed. It only brings back that person's
+  settings as a draft with the tier rules. Logged on the security review
+  page.
 
 ### Developer mode and the local folder
 
@@ -1379,12 +1510,16 @@ GjallarOS managing the keys by default; Nix code only in developer mode
 with a local folder. Migration on the one existing install: whatever does
 not break the running system. New installs get no `~/Documents` clone.
 
-## 15. Snapshots (draft, to discuss)
+## 15. Snapshots (done)
 
-Draft written 2026-10-20 for Plane GJALLAROS-198. Nothing is built yet; the
-open choices are questions 18 to 22 on the questionnaire. Jade's frame:
-read-only snapshots, root-only, retention, rollback through recovery, no
-secrets in snapshots.
+Plane GJALLAROS-198. Jade decided questions 18 to 22 and 22a on the
+questionnaire (2026-10-20 and 2026-10-21): read-only snapshots, root-only,
+btrbk-style retention, rollback only through recovery, no secrets and no
+`/nix` in snapshots, settings in `user.config.json`, and only new installs
+get the layout. Step 1 (installer subvolumes), step 2 (snapshot
+units, settings, rebuild snapshots), step 3 (restoring your own
+files) and step 4 (rollback in recovery) are built and passed the VM test
+(2026-10-21, a new install on a throwaway VM).
 
 Today a fresh install puts everything on the top level of one encrypted
 Btrfs (no subvolumes). NixOS generations already roll back the system
@@ -1426,7 +1561,7 @@ Snapshots are for that.
   snapshot is deleted
   ([openSUSE forum](https://forums.opensuse.org/t/secure-remove-from-btrfs/152004)).
   Design: machine secrets (`/var/lib/sbctl`, sealed tokens and keys under
-  `/var/lib/gjallar`) sit on a subvolume that is never snapshotted. Home
+  `/var/lib/gjallar`) stay on `@`, which is never snapshotted. Home
   data cannot be split like that, so a rotation the system performs on a
   user's behalf says which snapshots still hold the old key and offers to
   delete them.
@@ -1442,28 +1577,94 @@ Snapshots are for that.
   overwrites.
 - **Disk filling.** Snapshots of `/nix` would keep every garbage-collected
   store path alive. `/nix` gets its own subvolume and is never
-  snapshotted; a free-space floor drops the oldest timeline snapshots
-  first.
+  snapshotted. Below a free-space floor (10% of the disk, at most 10 GiB)
+  a run makes no new snapshot and says so in the journal; old ones still
+  age out.
+- **The NixOS btrbk module is too wide.** In the pinned nixpkgs it runs
+  btrbk as its own user with a sudo rule for any `btrfs` command. `btrfs`
+  with free arguments can write or delete anywhere, so that user is root
+  in all but name. Design: own root oneshot units with no sudo rule,
+  `ProtectSystem=strict`, write access only to the snapshot paths, no
+  network, `NoNewPrivileges`, and a narrow capability set. A note for
+  upstream goes to the human-session queue.
 - Snapshots stay inside the LUKS volume, so nothing new is stored in the
   clear. They are not a backup.
 
-### Proposed design
+### Design (decided)
 
-1. New installs: subvolumes `@` (`/`), `@home`, `@nix`, `@keys` (machine
-   secrets, never snapshotted), `@snapshots` on the top level, mounted at
-   `/.snapshots` root-only.
-2. Snapshots by root timers (btrbk, no D-Bus service), read-only. Sets:
-   `home` hourly, `state` (`/var/lib`, `/etc/gjallar`) before every
-   rebuild and daily.
-3. Users restore their own files through the settings service
-   (`gjallarctl snapshots list`, `gjallarctl snapshots restore PATH`);
-   only their own home, copied next to the original.
-4. A full state rollback runs only from the recovery boot entry, offline,
-   and keeps the replaced state as a snapshot.
-5. Existing installs keep their layout until a decision on migration
-   (question 19).
+Only what is listed gets snapshots (question 22a). `/` and `/var/lib` never
+do: NixOS generations bring the system back, and the secrets live there.
 
-## 16. VPN: exit node down (draft, to discuss)
+| Subvolume | Mounted at | Snapshots |
+| --- | --- | --- |
+| `@` | `/` | never; default subvolume, so a plain mount of the disk (recovery tools) lands here |
+| `@home` | `/home` | hourly |
+| `@nix` | `/nix` | never |
+| `@config` | `/etc/gjallar/system` (the checkout: `user.config.json`, state, hardware) | daily and before every rebuild |
+| `@snapshots` | nowhere | holds the snapshots; 0700 root; only the snapshot units mount it, in their own mount namespace, `nosuid,nodev,noexec` |
+
+`/etc/gjallar` itself stays on `@`, because NixOS writes its own links
+there. The checkout holds no secrets: its content is in the world-readable
+store anyway.
+
+1. New installs get the layout above. The recovery `open-root` command
+   mounts `@nix`, `@home` and `@config` below `/mnt` when it finds it,
+   never `@snapshots`. The snapshot units turn themselves on only where
+   `/home` is `@home`.
+2. Snapshots by hardened root timers (btrbk retention rules:
+   `snapshot_create onchange`, `preserve_min` plus `preserve`, long ISO
+   timestamps, a lock file, a free-space floor before each run).
+   `snapshotsEnable` (on), `snapshotsKeepHours` (24) and
+   `snapshotsKeepDays` (7) in `user.config.json` set them; a config
+   without the keys gets these values.
+3. Users restore their own files (`gjallarctl snapshots list`,
+   `gjallarctl snapshots restore PATH [--from SNAPSHOT] [--to FOLDER]`);
+   only their own home, copied next to the original. This is not the
+   settings service but its own bus-started service, gjallar-snapshotd
+   (`org.gjallaros.Snapshots1`), so `gjallar-settingsd` keeps an empty
+   capability set; the restore service holds only `CAP_SYS_ADMIN` (to
+   mount `@snapshots` read-only in its own mount namespace) and
+   `CAP_DAC_READ_SEARCH`, and exits after two idle minutes. It checks the
+   snapshot name and that the path is in the caller's home before it asks
+   the caller's password, every time. It walks to the file beneath that
+   home in the snapshot one name at a time with `openat` and
+   `O_NOFOLLOW` (no symlinks, no `..`, no other file system), opens only a
+   regular file the caller owned, and hands back a read-only descriptor.
+   `openat2` would do the walk in one call, but systemd's
+   `RestrictSUIDSGID` blocks it, and that filter stays: it stops a
+   remount from making setuid files. `gjallarctl` writes the copy as the user under a new name
+   (`notes.restored-20261021T030000.txt`) and never overwrites. Folders
+   are a later step: a folder descriptor would let `..` out of the home.
+4. A rollback of `@home` or `@config` runs only in recovery: the trusted
+   recovery boot entry or the recovery partition (with the system at
+   `/mnt` from `open-root`). `gjallar-recover snapshots ROOT` lists the
+   snapshots, `gjallar-recover snapshot-rollback ROOT NAME` puts one back,
+   `gjallar-recover snapshot-drop ROOT NAME` deletes a copy a rollback
+   kept. The rollback:
+   - takes only a name of the btrbk form from the list and a snapshot that
+     is read-only, and asks a typed confirmation (`ROLLBACK-HOME`,
+     `ROLLBACK-CONFIG`);
+   - makes a new writable snapshot of it; the read-only snapshot is never
+     made writable, so it stays as it was;
+   - swaps it with the current `@home` or `@config` in one rename
+     (`RENAME_EXCHANGE`), so a power cut leaves one of the two in place,
+     never none;
+   - keeps the replaced one in `@snapshots/replaced` (0700, root only,
+     never pruned by btrbk) and makes it read-only as soon as nothing
+     mounts it;
+   - unmounts the target first; when it is in use (the recovery boot entry
+     with a signed-in user), the swap takes effect at the next start and
+     says so;
+   - lists the nested subvolumes, because a snapshot never holds them and
+     they stay with the kept copy;
+   - for `@config`, says that the settings are back but the system built
+     from them is not, so a `rebuild` follows.
+   btrbk keeps finding the older snapshots after a swap (it follows the
+   whole parent chain), so they still age out normally.
+5. Existing installs keep their layout and get no snapshots until they
+   are reinstalled (question 19).
+
+## 16. VPN: exit node down (steps 1 and 2 built)
 
 Draft written 2026-10-20 for Plane GJALLAROS-190: tell the user when the
 exit node is down and offer a pause that holds only for this network.
@@ -1553,61 +1754,246 @@ untrusted network carries the traffic in the clear (loophole 24, below).
    zsh completion; the bar shows the paused state.
 6. Loophole 24 fixed as above, once question 25 is answered.
 
-## 17. Nextcloud: what syncs first on a new machine (draft, to discuss)
+### Step 1: fail closed (built, branch vpn-fail-closed)
+
+Question 25 answered: `auto` blocks, and the pause is the way out. Built
+2026-10-21:
+
+- `auto` with no exit node online keeps the current exit node, else sets
+  an offline exit node (home router first), else reports "no exit node in
+  this tailnet". It never clears the exit node on an untrusted network.
+- The verdict carries `blocked`: `exit-node-offline`, `no-exit-node` or
+  `tailscale-down`. `gjallarctl vpn status` prints it in plain words.
+- Found on the way and closed with it: with Tailscale stopped, a wanted
+  exit node did nothing and the network carried the traffic in the clear.
+  That is now `tailscale-down`.
+- Backstop: while blocked, `gjallar-vpn-trust` loads the nftables table
+  `inet gjallar_vpn_block`. It drops traffic that leaves through an uplink
+  (every device with an IPv4 or IPv6 default route, not the Tailscale
+  device), in the output and forward chains. Let through: tailscaled's own
+  packets (its bypass mark), the DHCP client, the local subnets,
+  link-local and local multicast. DNS (ports 53 and 853) is dropped even
+  to the LAN. The table is swapped in one `nft -f` transaction, so there
+  is no moment without rules. The block goes away when the verdict is no
+  longer blocked, for example after `gjallarctl vpn exit-node off`.
+- VM test `tests/nix/vpn-fail-closed.nix`: headscale, one exit node, a
+  router and a client on its own LAN. It checks each blocked reason, that
+  the internet is cut and the LAN still answers, that marked packets pass
+  and that `exit-node off` lifts the block.
+
+Security pass for step 1:
+
+- **The bypass mark.** Tailscale marks its own control, DERP and
+  WireGuard sockets with 0x80000 in the 0xff0000 bits it owns
+  ([tailscale.com/util/linuxfw](https://pkg.go.dev/tailscale.com/util/linuxfw),
+  [netns_linux.go](https://github.com/tailscale/tailscale/blob/main/net/netns/netns_linux.go)).
+  Setting a mark (`SO_MARK`) needs `CAP_NET_ADMIN`, so trusting it trusts
+  root only; root can drop the table anyway. Mullvad's split tunnel
+  exempts traffic the same way, by mark
+  ([Mullvad split tunneling](https://mullvad.net/en/help/split-tunneling-with-linux-advanced)).
+- **LAN DNS.** Mullvad blocks DNS to the LAN by default in lockdown mode
+  ([Mullvad app docs](https://mintlify.com/mullvad/mullvadvpn-app/security/kill-switch)).
+  We do the same: queries to a hostile resolver say what the user looks
+  up even when nothing else leaves.
+- **DHCP is let through** by port pair, outgoing only. Root-only ports
+  (68, 546) on the source side, so a user process cannot use them.
+- **Interface names** come from `ip -j route`; anything that is not a
+  plain kernel name is refused instead of quoted into the ruleset.
+- **Open windows, recorded, not closed by step 1:**
+  - Boot: until `gjallar-vpn-trust` runs once, nothing blocks. Closing it
+    means a boot-time table before networking; that is step 3 below.
+  - A new uplink (USB tethering, a second Wi-Fi) is outside the table
+    until the dispatcher reruns the service, a second or so.
+  - Signing in to Tailscale again through the browser is blocked on an
+    untrusted network; the pause (step 2) is the way out.
+- **Default stays off.** With `exitNode = ""` (fresh installs, e2e) the
+  block is never loaded.
+
+### Step 2: notice and pause (built, branch vpn-fail-closed)
+
+Questions 23 and 24 answered: the local seat and an administrator's
+password, admins too; the pause ends on a network change, before sleep,
+on reboot, and after one hour at most. Built 2026-10-21:
+
+- **Notice.** `gjallarctl vpn notice` runs in the session at login and
+  each time `/run/gjallar/vpn-trust.json` changes
+  (`apps/tailscale/home.nix`). One notice per network join: it says which
+  network, what failed, and what a pause gives away, with "Pause VPN on
+  this network" and "Keep blocked". It closes by itself when the network
+  changes or the block ends. A network without a key (no gateway hardware
+  address) gets the notice without the pause button.
+- **Bar.** The `gjallar/vpn` noctalia plugin shows a shield while the VPN
+  blocks this network or a pause lets it through. A click pauses, or ends
+  the pause.
+- **Pause.** `gjallarctl vpn pause` asks the settings service
+  (`PauseVPN`). It checks the caller sits in a login session, asks the
+  polkit action `org.gjallaros.vpn.pause` (an administrator's password,
+  every time), checks again that the same network is still blocked, and
+  writes `/run/gjallar/vpn-pause/pause.json` for one hour. `gjallarctl
+  vpn resume` ends it without a password.
+- **Ends.** A transient timer at the end time, the sleep hook
+  `gjallar-vpn-pause-sleep`, a network change (the key no longer
+  matches), and a reboot (`/run`). `gjallarctl vpn status` prints who
+  paused it and until when.
+- VM test `tests/nix/vpn-fail-closed.nix` covers the pause: it lets the
+  network through, a new address on the uplink ends it, it runs out on
+  its own, `resume` and the sleep hook end it, and a pause without the
+  settings service is refused. Passed 2026-10-21, with `tailscale-trust`
+  still passing.
+- Trust runs no longer wait 30 s for a tailscaled that systemd reports
+  stopped or failed; that wait held up every decision, a pause among
+  them, while Tailscale was down. The block stays in place meanwhile.
+- fw13 VM check 2026-10-21 (eaaf444b): the notice and the password
+  dialog fit Noctalia (the notice cuts each line after about three rows,
+  so the body is three short lines); pause from the notice and from the
+  bar, Cancel, "Keep blocked", ending the pause from the bar, a rebuild
+  during a pause (the pause survives it) and the `exit-node default`
+  undo all passed. Rows in `.vm/installer-e2e/REGRESSION.md` under VPN.
+
+Security pass for step 2:
+
+- **What the pause holds to.** The network key is a hash of the device,
+  Wi-Fi name, key management, gateway address, gateway hardware address
+  and the subnets. A cloned Wi-Fi name alone does not match; any of these
+  changing ends the pause.
+- **The pause file.** `gjallar-vpn-trust` uses it only when root owns it,
+  nobody else can write it, it names this network, and it lasts at most
+  one hour from its start. Anything else counts as no pause, so a broken
+  or planted file fails closed.
+- **Who may pause.** Only a process in a login session (user units count
+  for the display session, as with polkit), and only with an
+  administrator's password. The password dialog names the network risk.
+  Ending a pause only tightens, so it needs no password.
+- **Notice text.** The Wi-Fi name is escaped before it goes into the
+  notice body; the bar shows a name with quotes or escapes as "this
+  network".
+- **Open window, recorded:** while paused, apps on that network reach the
+  internet without the tunnel. That is the point of the pause; the dialog
+  and the notice say so.
+
+Next: step 3 is the boot-time block.
+
+## 17. Nextcloud: what downloads first on a new machine (done)
 
 Job 173. On a fresh book12 install the client went through about 2100
 Music files before `claude/` (lower case sorts last), and ODDC work waited
-over half an hour. Jade: a new machine syncs only the folders the user
-picks first; everything else is opt-in. Folder names come from the user,
-never from this repository.
+over half an hour. Jade: everything is a placeholder; content comes down
+only for folders the user picks, or for a file the user opens. Folder
+names come from the user, never from this repository.
 
 ### Today
 
 - New accounts start in virtual-files mode (OpenVFS, patch
-  `nextcloud-vfs-default.patch`). Files are placeholders until opened.
-- Upstream turns "Choose what to sync" off when virtual files are on:
-  `Folder::supportsSelectiveSync()` returns false for VFS folders
-  (`src/gui/folder.cpp`). The sync engine still reads the exclude list
-  from the folder's journal database on every run (`SyncEngine::startSync`
-  in `src/libsync/syncengine.cpp`); upstream uses that for end-to-end
-  encrypted folders even with VFS on.
-- The list lives in the journal database (`.sync_*.db` in the sync
-  folder), not in `nextcloud.cfg`. Writing it from outside while the
-  client runs races with the client, so it has to go through the client.
+  `nextcloud-vfs-default.patch`) with the root pinned online-only. Files
+  are placeholders until opened.
+- gjallarOS starts the wizard with `--overrideserverurl` and
+  `--overridelocaldir`, so it skips the sync options page and creates the
+  folder right after login (`AccountWizardController`, client 34.x).
+- A folder can already be kept on the device later: the Dolphin menu
+  offers "Always available locally" and "Free up local space" for OpenVFS
+  (`socketApiPinStateActionsShown()` is true). There is no way to pick
+  before the first sync.
+- OpenVFS keeps the pin in an xattr on the placeholder
+  (`OpenVFS::setPinState`), so a folder can only be pinned once its
+  placeholder exists. During discovery a new folder inherits the pin of
+  its parent (`ProcessDirectoryJob::computePinState`).
 - Open fact (asked ODDC b12, answer 11.2): was book12 in virtual-files
-  mode during that sync? With placeholders only, half an hour means the
-  first listing is slow, which a folder list fixes the same way.
+  mode during that sync? If not, the half hour was downloads, and this
+  design fixes it. If it was, the first listing itself is slow and needs
+  its own look.
 
 ### How others handle it
 
-- Nextcloud: folder selection only with virtual files off
-  ([forum](https://help.nextcloud.com/t/choose-what-to-sync-not-available/243421)).
-- OneDrive: "Choose folders" and Files On-Demand work together; unticked
-  folders stay in the cloud and per device
-  ([UW guide](https://asais.uw.edu/kb/onedrive-file-status-sync-settings)).
+- OneDrive: Files On-Demand is the default; a folder marked "Always keep
+  on this device" downloads, and so do new files added to it later
+  ([Microsoft](https://support.microsoft.com/office/save-disk-space-with-onedrive-files-on-demand-0e6860d3-d9f3-4971-b321-7092438fb38e)).
+- Dropbox: folders not excluded are online-only by default; "available
+  offline" downloads one folder. Selective sync is a separate tool that
+  hides a folder completely
+  ([Dropbox](https://help.dropbox.com/sync/make-files-online-only),
+  [UMich](https://teamdynamix.umich.edu/TDClient/30/Portal/KB/ArticleDet?ID=6670)).
+- Google Drive for desktop, streaming mode: "Available offline" per file
+  or folder, new items in such a folder come down too
+  ([Google](https://support.google.com/drive/answer/2375012)).
+- Nextcloud: "Choose what to sync" (exclude) works only with virtual
+  files off (`Folder::supportsSelectiveSync()`).
+
+All three big ones use placeholders by default and a per-folder "keep on
+this device" pin. None asks at first login; gjallarOS adds that one
+question because a fresh machine is exactly when the user knows what
+they need first.
+
+### Decisions (Jade, 2026-10-20 and 2026-10-21)
+
+- Q27: the picker opens right after the account wizard.
+- Q28: new top-level folders made on another device show up as
+  placeholders, like everything else.
+- Closing the picker without a pick: everything stays a placeholder.
+- The pick is not saved anywhere outside this device's client. A
+  reinstall or a second machine starts with an empty picker. (Considered:
+  `user.config.json`, which reaches the world-readable Nix store, build
+  agents and the recovery image; a 0600 file in home, which needs an
+  unencrypted export to travel; a hidden file in the user's own Nextcloud,
+  which would expose names of end-to-end encrypted folders.)
 
 ### Security pass
 
-- Folder names are private data. They stay in the user's own config and
-  the client database; no logs with names, no handoff copies.
-- Taking a folder out of sync removes its local copy. A folder with local
-  changes that have not been uploaded must never be taken out silently:
-  the client refuses and says which folder still has changes. (Upstream
-  behaviour here still needs a VM check before the patch.)
-- New top-level folders made on another device follow the opt-in rule:
-  they wait for a yes instead of syncing on their own (question 28).
-- No change to the server side; the list only limits what this device
-  fetches.
+- Folder names are private data. The pick stays in the client's journal
+  database inside the sync folder, which already holds every name. The
+  patch logs counts, never names.
+- A pin downloads every file in that folder, also files others add later
+  to a shared folder inside it. The picker says so in one line. A new
+  share lands where the server's share folder setting puts it; inside a
+  pinned folder it downloads too, anywhere else it is a placeholder.
+- Disk space: upstream already stops downloads before the disk is full
+  (`criticalFreeSpaceLimit`, `freeSpaceLimit` in
+  `owncloudpropagator.cpp`). The picker shows the size of the pick next to
+  the free space, so the user sees it before saying OK.
+- A hostile or broken server can send odd folder names (control
+  characters, right-to-left marks). The worst outcome is a wrong folder
+  downloaded, not data leaving the device; names are shown the way Qt
+  shows file names everywhere else.
+- No server change, nothing excluded: the server copy is never touched,
+  and unpinning later ("Free up local space") keeps files with local
+  changes: OpenVFS refuses to turn a file changed since the last sync
+  back into a placeholder (`OpenVFS::createPlaceholder`).
 
-### Proposed design
+### Design
 
-1. Client patch: under OpenVFS, "Choose what to sync" works like without
-   virtual files, using the engine's existing exclude list.
-2. First login on a new machine: right after the account wizard, the
-   folder picker opens with the real server folders, nothing ticked
-   except what the user picks. Sync starts after the pick.
-3. The picked list is saved in the user config so a reinstall or a second
-   machine of the same user can offer it again (question 27).
-4. Later changes go through the same picker; a terminal form
-   `gjallarctl nextcloud folders` with zsh completion is optional
-   (question 27).
+1. Client patch, wizard side: when the wizard created the folder without
+   showing sync options (the gjallarOS override case) and the folder is
+   OpenVFS, the folder starts paused and the picker opens: the account's
+   folder tree with sizes, nothing ticked, title "Keep on this device",
+   buttons OK and "Not now". The tree is the existing
+   `SelectiveSyncWidget`; ticked folders become the pick.
+2. The pick goes into the journal database as its own list type, then
+   the folder un-pauses. "Not now" writes nothing.
+3. Client patch, engine side: during discovery a folder on that list
+   counts as pinned "always local" even before its placeholder exists, so
+   its files download in the first sync instead of becoming
+   placeholders. After each finished sync the client writes the real pin
+   on every listed folder that now exists and drops it from the list. A
+   folder that is gone from the server after a full sync is dropped too.
+4. Later changes stay with the Dolphin menu ("Always available locally",
+   "Free up local space"); README says where.
+5. Tests: client patch check in `tests/nix/nextcloud-client-patches.nix`;
+   e2e-fw13 against a SYNTHETIC test account and folder tree: pick one of
+   three folders, check that only it is hydrated and pinned after the
+   first sync, a new top-level folder arrives as a placeholder, "Not now"
+   leaves all placeholders, and a quit during the first sync keeps the
+   pick.
+
+### Built (2026-10-21)
+
+All passed on the fw13 VM against a local SYNTHETIC test server.
+
+- Picker and placeholders: 8ee44c2e. The pick survives a kill during the
+  first sync and applies after the restart.
+- Q42: openvfs unmounts when the client exits; a mount left from before
+  the client started is a setup error (713c504b).
+- A second start with a bad option no longer exits the running client
+  (5630fd4c). A plain launch opens the settings window (713395d8).
+- Q43: a crashed client restarts after 10 s, five starts in five minutes
+  at most. Quit stays quit (27c1646f).
+- Q44: the settings window floats at its own size instead of being cut
+  off, and the folder list is titled "Sync folders" (74f1fb25).

@@ -31,6 +31,7 @@
   "consoleLoginEnable": false,
   "debugFunctions": false,
   "developerMode": false,
+  "settingsSigningKey": "",
   "dotfilesDir": "",
   "editors": [
     "vscodium"
@@ -112,6 +113,9 @@
   "secureBootEnable": false,
   "secureBootPrompt": true,
   "shell": "zsh",
+  "snapshotsEnable": true,
+  "snapshotsKeepDays": 7,
+  "snapshotsKeepHours": 24,
   "theme": "noctalia",
   "timezone": "Europe/Berlin",
   "touchpadWorkspaceSwipe": true,

@@ -63,6 +63,7 @@ type keyOwner struct {
 
 type keyStore struct {
 	dir     string
+	pairDir string
 	hostKey []byte // nil when the credential did not load
 	// userName returns the account name of uid; tests replace it.
 	userName func(uid uint32) (string, error)
@@ -72,7 +73,7 @@ type keyStore struct {
 // loadKeyStore reads the host key systemd passed in. Without one, Export
 // refuses and Import still checks files against the stored public keys.
 func loadKeyStore() *keyStore {
-	store := &keyStore{dir: keyDir, userName: lookupUserName, now: time.Now}
+	store := &keyStore{dir: keyDir, pairDir: pairDir, userName: lookupUserName, now: time.Now}
 	dir := os.Getenv("CREDENTIALS_DIRECTORY")
 	if dir == "" {
 		log.Printf("settings files: no credential directory; export is off")
@@ -167,6 +168,7 @@ func (k *keyStore) signer(uid uint32) (ed25519.PrivateKey, string, error) {
 // counts for no one and is deleted, so the key cannot come back with a
 // later account of the same name.
 func (k *keyStore) trusted() (map[string]keyOwner, error) {
+	k.sweepPairs()
 	entries, err := os.ReadDir(k.dir)
 	if errors.Is(err, os.ErrNotExist) {
 		return map[string]keyOwner{}, nil

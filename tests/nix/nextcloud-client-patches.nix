@@ -34,6 +34,10 @@ pkgs.stdenvNoCC.mkDerivation {
     grep -A10 '_vfsReady = _vfs->mode() != Vfs::OpenVFS;' src/gui/folder.cpp | grep -Fq 'SyncResult::SetupError'
     grep -Fq 'if (isOpenVfsMountPoint(path)) {' "$f"
     ! grep -Fq 'QTimer::singleShot(1s, this, &Vfs::started);' "$f" || grep -B3 'QTimer::singleShot(1s, this, &Vfs::started);' "$f" | grep -Fq '#else'
+    # An openvfs left by a killed client kept its mount; the gate took it as
+    # ours, the new openvfs exited and its exit aborted the client
+    # (2026-10-21). A mount before our process starts is a setup error.
+    grep -B10 '_openVfsProcess = new QProcess(this);' "$f" | grep -Fq 'if (isOpenVfsMountPoint(params.filesystemPath)) {'
     # Upstream defaults Linux to classic sync; with the preset server and
     # folder the wizard never asks, and new accounts downloaded everything
     # (2026-10-09).
@@ -57,6 +61,31 @@ pkgs.stdenvNoCC.mkDerivation {
     # first start still wrote ~/.config/autostart (2026-10-20).
     grep -Fq 'settings.value(launchOnSystemStartupC, false)' src/libsync/configfile.cpp
     ! grep -Fq 'appNameGUI(), true);' src/gui/application.cpp
+    # New accounts are all placeholders; only folders picked after the
+    # wizard download. The pick must be pinned before local discovery, or
+    # the OnlineOnly root dehydrates a folder an interrupted sync fetched.
+    grep -Fq 'KeepLocalPickList = 100' src/common/syncjournaldb.h
+    grep -A3 'correctPlaceholderFiles();' src/gui/folder.cpp | grep -Fq 'applyKeepLocalPicks(false);'
+    grep -A8 'void AccountWizardController::openKeepLocalPicker' src/gui/wizard/accountwizardcontroller.cpp \
+      | grep -Fq 'KeepLocalDialog'
+    grep -Fq '_pinState = PinState::AlwaysLocal;' src/libsync/discovery.cpp
+    # Enforced VFS hid "Make always available locally", so folders could
+    # not be picked later in Dolphin or settings. Only turning VFS off stays
+    # locked.
+    ! grep -B2 'MAKE_AVAILABLE_LOCALLY:' src/gui/socketapi/socketapi.cpp | grep -Fq enforceVirtualFilesSyncFolder
+    ! grep -A2 'PinState::AlwaysLocal); });' src/gui/accountsettings.cpp | grep -Fq enforceVirtualFilesSyncFolder
+    grep -A2 'slotDisableVfsCurrentFolder);' src/gui/accountsettings.cpp | grep -Fq 'setDisabled(Theme::instance()->enforceVirtualFilesSyncFolder());'
+    # Folder names stay out of the log.
+    grep -Fq '"Keep-local picks: pinned" << pinned << "dropped" << dropped << "pending" << pending.size();' src/gui/folder.cpp
+    # A second start forwards its options to the running client. An unknown
+    # one ran the exit meant for a fresh start, so sync stopped and the
+    # OpenVFS mount went away (2026-10-21).
+    grep -A6 'void Application::showHint' src/gui/application.cpp | grep -Fq 'if (_remoteCommand) {'
+    grep -Fq 'if (shouldExit && !_remoteCommand) {' src/gui/application.cpp
+    grep -A12 'void Application::parseOptionsRemoteCommand' src/gui/application.cpp | grep -Fq 'if (_remoteOptionsInvalid) {'
+    # "Classic sync" stood above virtual-file folders (2026-10-21).
+    grep -A40 'void AccountSettings::updateSyncFoldersPanelVisibility' src/gui/accountsettings.cpp \
+      | grep -Fq '_ui->syncFoldersPanelTitle->setText(tr("Sync folders"));'
     touch $out
   '';
 }

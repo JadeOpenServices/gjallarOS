@@ -21,10 +21,12 @@ let
     # Bound hydration waits, deliver cancellation, and recognize Nix-wrapped KIO.
     # Release waiters on shutdown or when the sync client goes away.
     # Time a hydration out only when its download stops making progress.
+    # Unmount when the sync client exits, and never mount without one.
     patches = [
       ./patches/openvfs-hydration-liveness.patch
       ./patches/openvfs-shutdown.patch
       ./patches/openvfs-progress-deadline.patch
+      ./patches/openvfs-exit-with-client.patch
     ];
 
     nativeBuildInputs = [

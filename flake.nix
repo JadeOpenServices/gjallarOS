@@ -198,6 +198,11 @@
           flashReadModule = ./system/security/secure-boot/flash-read.nix;
         };
 
+        snapshots = import ./tests/nix/snapshots.nix {
+          inherit nixpkgs system;
+          snapshotsModule = ./system/services/snapshots.nix;
+        };
+
         secure-boot-lifecycle = import ./tests/nix/secure-boot-lifecycle.nix {
           inherit nixpkgs system;
           lifecycleModule = ./system/security/secure-boot/lifecycle.nix;
@@ -228,6 +233,14 @@
 
         tailscale-trust = import ./tests/nix/tailscale-trust.nix {
           inherit nixpkgs system;
+          tailscaleModules = [
+            ./apps/tailscale/nixos.nix
+            ./apps/nixos-options.nix
+          ];
+        };
+
+        vpn-fail-closed = import ./tests/nix/vpn-fail-closed.nix {
+          inherit pkgs;
           tailscaleModules = [
             ./apps/tailscale/nixos.nix
             ./apps/nixos-options.nix

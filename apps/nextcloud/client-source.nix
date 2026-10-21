@@ -26,6 +26,9 @@ in
     # A folder syncs only once the OpenVFS mount is confirmed; a failed
     # start is a setup error, not a sync on the bare directory.
     ./patches/nextcloud-openvfs-start-gate.patch
+    # A mount left from an earlier start is a setup error, not a started
+    # VFS, and the client does not spawn a second openvfs onto it.
+    ./patches/nextcloud-openvfs-stale-mount.patch
     # New accounts start as virtual-files folders on Linux too.
     ./patches/nextcloud-vfs-default.patch
     # Windows, menus and popups follow the Qt palette (Noctalia via qt6ct,
@@ -45,5 +48,13 @@ in
       onlineOnlyIcon = dolphinNextcloudIcons.onlineOnly;
       localIcon = dolphinNextcloudIcons.local;
     })
+    # After the wizard, pick folders to keep on this device; everything
+    # else, new top-level folders too, stays online-only.
+    ./patches/nextcloud-keep-local-picker.patch
+    # A bad option from a second start is logged and ignored; it no longer
+    # exits the running client.
+    ./patches/nextcloud-remote-options-no-exit.patch
+    # The folder list is titled "Sync folders", not "Classic sync".
+    ./patches/nextcloud-sync-folders-title.patch
   ];
 }

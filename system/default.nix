@@ -38,6 +38,7 @@
     ./services/printing.nix
     ./services/removable-media.nix
     ./services/settings-service.nix
+    ./services/snapshots.nix
 
     inputs.oddc.nixosModules.default
 

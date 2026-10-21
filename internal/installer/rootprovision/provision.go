@@ -20,6 +20,30 @@ import (
 
 const mountPoint = "/mnt"
 
+// SnapshotsSubvolume holds the read-only snapshots of @home and @config. It
+// is in no fstab: only the snapshot units mount it, in their own mount
+// namespace, so the running system never shows it.
+const SnapshotsSubvolume = "@snapshots"
+
+// Subvolume is one btrfs subvolume of a new install and where it is mounted.
+type Subvolume struct {
+	Name string
+	Path string
+}
+
+// Subvolumes is the layout of a new install, parents before children (ROADMAP
+// section 15). Only @home and @config are ever snapshotted: the system comes
+// back from NixOS generations, and / and /var/lib, where the secrets live,
+// never go into a snapshot. @config is the system checkout with
+// user.config.json and generated/; /etc/gjallar itself stays on @ because
+// NixOS writes its own links there.
+var Subvolumes = []Subvolume{
+	{Name: "@", Path: "/"},
+	{Name: "@home", Path: "/home"},
+	{Name: "@nix", Path: "/nix"},
+	{Name: "@config", Path: "/etc/gjallar/system"},
+}
+
 type Input struct {
 	Plan       diskplan.Plan
 	Passphrase []byte
@@ -169,7 +193,7 @@ func provision(
 
 	cleanup := func() {
 		if mounted {
-			_ = runner.Run(ctx, "sudo", "umount", mountPoint)
+			_ = runner.Run(ctx, "sudo", "umount", "-R", mountPoint)
 		}
 		if opened {
 			_ = runner.Run(
@@ -216,31 +240,35 @@ func provision(
 		return Result{}, fmt.Errorf("create root mount point: %w", err)
 	}
 
-	if err := privilegedRun(ctx, runner, "mount", mapperPath, mountPoint); err != nil {
+	if err := makeSubvolumes(ctx, runner, mapperPath); err != nil {
 		cleanup()
-		return Result{}, fmt.Errorf("mount encrypted root at %s: %w", mountPoint, err)
+		return Result{}, err
 	}
-	mounted = true
 
-	source, err := runner.Output(
-		ctx,
-		"findmnt",
-		"-nvro",
-		"SOURCE",
-		"--mountpoint",
-		mountPoint,
-	)
-	if err != nil {
-		cleanup()
-		return Result{}, fmt.Errorf("verify root mount: %w", err)
+	for _, sub := range Subvolumes {
+		target := filepath.Join(mountPoint, sub.Path)
+		if sub.Path != "/" {
+			if err := privilegedRun(ctx, runner, "mkdir", "-p", target); err != nil {
+				cleanup()
+				return Result{}, fmt.Errorf("create mount point %s: %w", target, err)
+			}
+		}
+		if err := privilegedRun(ctx, runner, "mount", "-o", "subvol="+sub.Name, mapperPath, target); err != nil {
+			cleanup()
+			return Result{}, fmt.Errorf("mount subvolume %s at %s: %w", sub.Name, target, err)
+		}
+		mounted = true
+		if err := verifySubvolume(ctx, runner, target, mapperPath, sub.Name); err != nil {
+			cleanup()
+			return Result{}, err
+		}
 	}
-	if strings.TrimSpace(string(source)) != mapperPath {
+
+	// A plain mount of the root, as recovery tools do, gets @ and not the
+	// top level.
+	if err := privilegedRun(ctx, runner, "btrfs", "subvolume", "set-default", mountPoint); err != nil {
 		cleanup()
-		return Result{}, fmt.Errorf(
-			"root mount source mismatch: expected %s, got %s",
-			mapperPath,
-			strings.TrimSpace(string(source)),
-		)
+		return Result{}, fmt.Errorf("make @ the default subvolume: %w", err)
 	}
 
 	uuidRaw, err := runner.Output(
@@ -274,6 +302,50 @@ func provision(
 		LUKSUUID:      luksUUID,
 		StableDevice:  "/dev/disk/by-uuid/" + luksUUID,
 	}, nil
+}
+
+// makeSubvolumes creates every subvolume and SnapshotsSubvolume at the top
+// level of the new file
+// system, mounted at mountPoint only for that.
+func makeSubvolumes(ctx context.Context, runner commandRunner, mapperPath string) error {
+	if err := privilegedRun(ctx, runner, "mount", "-o", "subvolid=5", mapperPath, mountPoint); err != nil {
+		return fmt.Errorf("mount new btrfs top level at %s: %w", mountPoint, err)
+	}
+	for _, sub := range Subvolumes {
+		if err := privilegedRun(ctx, runner, "btrfs", "subvolume", "create", filepath.Join(mountPoint, sub.Name)); err != nil {
+			_ = privilegedRun(ctx, runner, "umount", mountPoint)
+			return fmt.Errorf("create subvolume %s: %w", sub.Name, err)
+		}
+	}
+	// Only root may look into the snapshots: a snapshot keeps the modes
+	// files had when it was taken.
+	snapshots := filepath.Join(mountPoint, SnapshotsSubvolume)
+	for _, args := range [][]string{{"btrfs", "subvolume", "create", snapshots}, {"chmod", "0700", snapshots}} {
+		if err := privilegedRun(ctx, runner, args...); err != nil {
+			_ = privilegedRun(ctx, runner, "umount", mountPoint)
+			return fmt.Errorf("create subvolume %s: %w", SnapshotsSubvolume, err)
+		}
+	}
+	if err := privilegedRun(ctx, runner, "umount", mountPoint); err != nil {
+		return fmt.Errorf("unmount new btrfs top level: %w", err)
+	}
+	return nil
+}
+
+// verifySubvolume checks that target is the encrypted root's subvolume name.
+func verifySubvolume(ctx context.Context, runner commandRunner, target, mapperPath, name string) error {
+	raw, err := runner.Output(ctx, "findmnt", "-nvro", "SOURCE,FSROOT", "--mountpoint", target)
+	if err != nil {
+		return fmt.Errorf("verify mount %s: %w", target, err)
+	}
+	fields := strings.Fields(string(raw))
+	if len(fields) != 2 || fields[0] != mapperPath || fields[1] != "/"+name {
+		return fmt.Errorf(
+			"mount %s mismatch: expected %s /%s, got %q",
+			target, mapperPath, name, strings.TrimSpace(string(raw)),
+		)
+	}
+	return nil
 }
 
 func privilegedRun(

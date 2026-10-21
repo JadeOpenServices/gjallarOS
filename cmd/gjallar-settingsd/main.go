@@ -43,6 +43,25 @@ const introspection = `<node>
       <arg name="file" type="ay" direction="in"/>
       <arg name="change" type="s" direction="out"/>
     </method>
+    <method name="ImportSigned">
+      <arg name="file" type="ay" direction="in"/>
+      <arg name="sig" type="ay" direction="in"/>
+      <arg name="change" type="s" direction="out"/>
+    </method>
+    <method name="PairExport"><arg name="file" type="ay" direction="out"/></method>
+    <method name="PairCheck">
+      <arg name="file" type="ay" direction="in"/>
+      <arg name="offer" type="s" direction="out"/>
+    </method>
+    <method name="PairAdd">
+      <arg name="file" type="ay" direction="in"/>
+      <arg name="code" type="s" direction="in"/>
+      <arg name="pairing" type="s" direction="out"/>
+    </method>
+    <method name="PairList"><arg name="pairings" type="s" direction="out"/></method>
+    <method name="PairRemove"><arg name="id" type="s" direction="in"/></method>
+    <method name="PauseVPN"><arg name="pause" type="s" direction="out"/></method>
+    <method name="ResumeVPN"/>
   </interface>` + introspect.IntrospectDataString + `</node>`
 
 func main() {
