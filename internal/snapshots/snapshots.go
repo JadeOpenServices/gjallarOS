@@ -100,9 +100,55 @@ func InHome(home, path string) (homeName, rel string, err error) {
 	return filepath.Base(home), rel, nil
 }
 
-// beneath opens without leaving dir, without symlinks and without
-// crossing into another mount.
-const beneath = unix.RESOLVE_BENEATH | unix.RESOLVE_NO_SYMLINKS | unix.RESOLVE_NO_MAGICLINKS | unix.RESOLVE_NO_XDEV
+var errLink = fmt.Errorf("%w: the path goes through a link in the snapshot; give the real path", ErrRefused)
+
+// openStep opens one name in dir without following a link and without
+// leaving the device of the snapshot. It is not openat2: the service runs
+// with RestrictSUIDSGID, which blocks openat2 entirely. Snapshots are
+// read-only, so nothing can swap a folder for a link between the steps.
+func openStep(dir int, name string, flags int, dev uint64) (int, *unix.Stat_t, error) {
+	if name == "" || name == "." || name == ".." {
+		return -1, nil, fmt.Errorf("%w: %q is not a plain name", ErrRefused, name)
+	}
+	fd, err := unix.Openat(dir, name, flags|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
+	switch {
+	case errors.Is(err, unix.ENOENT):
+		return -1, nil, ErrNotFound
+	case errors.Is(err, unix.ELOOP):
+		return -1, nil, errLink
+	case err != nil:
+		return -1, nil, err
+	}
+	var st unix.Stat_t
+	if err := unix.Fstat(fd, &st); err != nil {
+		unix.Close(fd)
+		return -1, nil, err
+	}
+	if st.Dev != dev {
+		unix.Close(fd)
+		return -1, nil, fmt.Errorf("%w: the path leaves the snapshot", ErrRefused)
+	}
+	return fd, &st, nil
+}
+
+// openDir opens name in dir as a folder. A link is refused, anything else
+// that is not a folder is not found, as the path cannot go through it.
+func openDir(dir int, name string, dev uint64) (int, *unix.Stat_t, error) {
+	fd, st, err := openStep(dir, name, unix.O_PATH, dev)
+	if err != nil {
+		return -1, nil, err
+	}
+	switch st.Mode & unix.S_IFMT {
+	case unix.S_IFDIR:
+		return fd, st, nil
+	case unix.S_IFLNK:
+		unix.Close(fd)
+		return -1, nil, errLink
+	default:
+		unix.Close(fd)
+		return -1, nil, ErrNotFound
+	}
+}
 
 // Open opens rel in homeName of the snapshot folder snapshot for uid. It refuses anything uid does not own and anything but a
 // regular file. The returned file is read-only.
@@ -112,41 +158,39 @@ func Open(snapshot, homeName, rel string, uid int) (*os.File, error) {
 		return nil, fmt.Errorf("open snapshot: %w", err)
 	}
 	defer unix.Close(root)
-
-	homeFD, err := unix.Openat2(root, homeName, &unix.OpenHow{
-		Flags:   unix.O_PATH | unix.O_DIRECTORY | unix.O_CLOEXEC,
-		Resolve: beneath,
-	})
-	if errors.Is(err, unix.ENOENT) {
-		return nil, ErrNotFound
-	}
-	if err != nil {
-		return nil, fmt.Errorf("open your home in the snapshot: %w", err)
-	}
-	defer unix.Close(homeFD)
-	var st unix.Stat_t
-	if err := unix.Fstat(homeFD, &st); err != nil {
+	var rootSt unix.Stat_t
+	if err := unix.Fstat(root, &rootSt); err != nil {
 		return nil, err
 	}
+
+	dir, st, err := openDir(root, homeName, rootSt.Dev)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) || errors.Is(err, ErrRefused) {
+			return nil, err
+		}
+		return nil, fmt.Errorf("open your home in the snapshot: %w", err)
+	}
 	if int(st.Uid) != uid {
+		unix.Close(dir)
 		return nil, fmt.Errorf("%w: in this snapshot, %s belonged to another user", ErrRefused, homeName)
 	}
 
-	fd, err := unix.Openat2(homeFD, rel, &unix.OpenHow{
-		Flags:   unix.O_RDONLY | unix.O_CLOEXEC | unix.O_NOCTTY | unix.O_NONBLOCK,
-		Resolve: beneath,
-	})
-	switch {
-	case errors.Is(err, unix.ENOENT), errors.Is(err, unix.ENOTDIR):
-		return nil, ErrNotFound
-	case errors.Is(err, unix.ELOOP), errors.Is(err, unix.EXDEV):
-		return nil, fmt.Errorf("%w: the path goes through a link in the snapshot; give the real path", ErrRefused)
-	case err != nil:
-		return nil, fmt.Errorf("open the file in the snapshot: %w", err)
+	parts := strings.Split(rel, "/")
+	for _, name := range parts[:len(parts)-1] {
+		next, _, err := openDir(dir, name, rootSt.Dev)
+		unix.Close(dir)
+		if err != nil {
+			return nil, err
+		}
+		dir = next
 	}
-	if err := unix.Fstat(fd, &st); err != nil {
-		unix.Close(fd)
-		return nil, err
+	fd, st, err := openStep(dir, parts[len(parts)-1], unix.O_RDONLY|unix.O_NOCTTY|unix.O_NONBLOCK, rootSt.Dev)
+	unix.Close(dir)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) || errors.Is(err, ErrRefused) {
+			return nil, err
+		}
+		return nil, fmt.Errorf("open the file in the snapshot: %w", err)
 	}
 	if st.Mode&unix.S_IFMT != unix.S_IFREG {
 		unix.Close(fd)

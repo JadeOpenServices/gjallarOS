@@ -81,7 +81,7 @@ func TestOpen(t *testing.T) {
 		t.Fatalf("read %q", data)
 	}
 
-	for _, rel := range []string{"link.txt", "linkdir/notes.txt", "../tester/docs/notes.txt", "docs"} {
+	for _, rel := range []string{"link.txt", "linkdir/notes.txt", "../tester/docs/notes.txt", "docs/../docs/notes.txt", "docs//notes.txt", "./docs/notes.txt", "docs"} {
 		if f, err := Open(snap, "tester", rel, uid); !errors.Is(err, ErrRefused) {
 			if f != nil {
 				f.Close()

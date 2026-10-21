@@ -211,6 +211,9 @@ in
             DevicePolicy = "closed";
             DeviceAllow = [ "${homeDevice} r" ];
             NoNewPrivileges = true;
+            # With CAP_SYS_ADMIN the service could remount and write a
+            # root-owned SUID file; this stops that. It also blocks openat2,
+            # so restore opens paths with openat one name at a time.
             RestrictSUIDSGID = true;
             RestrictNamespaces = true;
             RestrictRealtime = true;
@@ -223,12 +226,9 @@ in
             ProtectKernelTunables = true;
             ProtectControlGroups = true;
             SystemCallArchitectures = "native";
-            # Restore opens paths in the snapshot with openat2, which is in
-            # neither group (systemd 260).
             SystemCallFilter = [
               "@system-service"
               "@mount"
-              "openat2"
             ];
             # The mount, and reading other users' old files to check who
             # owns them. It never writes.
