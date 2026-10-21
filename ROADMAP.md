@@ -1873,61 +1873,112 @@ Security pass for step 2:
 
 Next: step 3 is the boot-time block.
 
-## 17. Nextcloud: what syncs first on a new machine (draft, to discuss)
+## 17. Nextcloud: what downloads first on a new machine (decided, to build)
 
 Job 173. On a fresh book12 install the client went through about 2100
 Music files before `claude/` (lower case sorts last), and ODDC work waited
-over half an hour. Jade: a new machine syncs only the folders the user
-picks first; everything else is opt-in. Folder names come from the user,
-never from this repository.
+over half an hour. Jade: everything is a placeholder; content comes down
+only for folders the user picks, or for a file the user opens. Folder
+names come from the user, never from this repository.
 
 ### Today
 
 - New accounts start in virtual-files mode (OpenVFS, patch
-  `nextcloud-vfs-default.patch`). Files are placeholders until opened.
-- Upstream turns "Choose what to sync" off when virtual files are on:
-  `Folder::supportsSelectiveSync()` returns false for VFS folders
-  (`src/gui/folder.cpp`). The sync engine still reads the exclude list
-  from the folder's journal database on every run (`SyncEngine::startSync`
-  in `src/libsync/syncengine.cpp`); upstream uses that for end-to-end
-  encrypted folders even with VFS on.
-- The list lives in the journal database (`.sync_*.db` in the sync
-  folder), not in `nextcloud.cfg`. Writing it from outside while the
-  client runs races with the client, so it has to go through the client.
+  `nextcloud-vfs-default.patch`) with the root pinned online-only. Files
+  are placeholders until opened.
+- gjallarOS starts the wizard with `--overrideserverurl` and
+  `--overridelocaldir`, so it skips the sync options page and creates the
+  folder right after login (`AccountWizardController`, client 34.x).
+- A folder can already be kept on the device later: the Dolphin menu
+  offers "Always available locally" and "Free up local space" for OpenVFS
+  (`socketApiPinStateActionsShown()` is true). There is no way to pick
+  before the first sync.
+- OpenVFS keeps the pin in an xattr on the placeholder
+  (`OpenVFS::setPinState`), so a folder can only be pinned once its
+  placeholder exists. During discovery a new folder inherits the pin of
+  its parent (`ProcessDirectoryJob::computePinState`).
 - Open fact (asked ODDC b12, answer 11.2): was book12 in virtual-files
-  mode during that sync? With placeholders only, half an hour means the
-  first listing is slow, which a folder list fixes the same way.
+  mode during that sync? If not, the half hour was downloads, and this
+  design fixes it. If it was, the first listing itself is slow and needs
+  its own look.
 
 ### How others handle it
 
-- Nextcloud: folder selection only with virtual files off
-  ([forum](https://help.nextcloud.com/t/choose-what-to-sync-not-available/243421)).
-- OneDrive: "Choose folders" and Files On-Demand work together; unticked
-  folders stay in the cloud and per device
-  ([UW guide](https://asais.uw.edu/kb/onedrive-file-status-sync-settings)).
+- OneDrive: Files On-Demand is the default; a folder marked "Always keep
+  on this device" downloads, and so do new files added to it later
+  ([Microsoft](https://support.microsoft.com/office/save-disk-space-with-onedrive-files-on-demand-0e6860d3-d9f3-4971-b321-7092438fb38e)).
+- Dropbox: folders not excluded are online-only by default; "available
+  offline" downloads one folder. Selective sync is a separate tool that
+  hides a folder completely
+  ([Dropbox](https://help.dropbox.com/sync/make-files-online-only),
+  [UMich](https://teamdynamix.umich.edu/TDClient/30/Portal/KB/ArticleDet?ID=6670)).
+- Google Drive for desktop, streaming mode: "Available offline" per file
+  or folder, new items in such a folder come down too
+  ([Google](https://support.google.com/drive/answer/2375012)).
+- Nextcloud: "Choose what to sync" (exclude) works only with virtual
+  files off (`Folder::supportsSelectiveSync()`).
+
+All three big ones use placeholders by default and a per-folder "keep on
+this device" pin. None asks at first login; gjallarOS adds that one
+question because a fresh machine is exactly when the user knows what
+they need first.
+
+### Decisions (Jade, 2026-10-20 and 2026-10-21)
+
+- Q27: the picker opens right after the account wizard.
+- Q28: new top-level folders made on another device show up as
+  placeholders, like everything else.
+- Closing the picker without a pick: everything stays a placeholder.
+- The pick is not saved anywhere outside this device's client. A
+  reinstall or a second machine starts with an empty picker. (Considered:
+  `user.config.json`, which reaches the world-readable Nix store, build
+  agents and the recovery image; a 0600 file in home, which needs an
+  unencrypted export to travel; a hidden file in the user's own Nextcloud,
+  which would expose names of end-to-end encrypted folders.)
 
 ### Security pass
 
-- Folder names are private data. They stay in the user's own config and
-  the client database; no logs with names, no handoff copies.
-- Taking a folder out of sync removes its local copy. A folder with local
-  changes that have not been uploaded must never be taken out silently:
-  the client refuses and says which folder still has changes. (Upstream
-  behaviour here still needs a VM check before the patch.)
-- New top-level folders made on another device follow the opt-in rule:
-  they wait for a yes instead of syncing on their own (question 28).
-- No change to the server side; the list only limits what this device
-  fetches.
+- Folder names are private data. The pick stays in the client's journal
+  database inside the sync folder, which already holds every name. The
+  patch logs counts, never names.
+- A pin downloads every file in that folder, also files others add later
+  to a shared folder inside it. The picker says so in one line. A new
+  share lands where the server's share folder setting puts it; inside a
+  pinned folder it downloads too, anywhere else it is a placeholder.
+- Disk space: upstream already stops downloads before the disk is full
+  (`criticalFreeSpaceLimit`, `freeSpaceLimit` in
+  `owncloudpropagator.cpp`). The picker shows the size of the pick next to
+  the free space, so the user sees it before saying OK.
+- A hostile or broken server can send odd folder names (control
+  characters, right-to-left marks). The worst outcome is a wrong folder
+  downloaded, not data leaving the device; names are shown the way Qt
+  shows file names everywhere else.
+- No server change, nothing excluded: the server copy is never touched,
+  and unpinning later ("Free up local space") keeps files with local
+  changes: OpenVFS refuses to turn a file changed since the last sync
+  back into a placeholder (`OpenVFS::createPlaceholder`).
 
-### Proposed design
+### Design
 
-1. Client patch: under OpenVFS, "Choose what to sync" works like without
-   virtual files, using the engine's existing exclude list.
-2. First login on a new machine: right after the account wizard, the
-   folder picker opens with the real server folders, nothing ticked
-   except what the user picks. Sync starts after the pick.
-3. The picked list is saved in the user config so a reinstall or a second
-   machine of the same user can offer it again (question 27).
-4. Later changes go through the same picker; a terminal form
-   `gjallarctl nextcloud folders` with zsh completion is optional
-   (question 27).
+1. Client patch, wizard side: when the wizard created the folder without
+   showing sync options (the gjallarOS override case) and the folder is
+   OpenVFS, the folder starts paused and the picker opens: the account's
+   folder tree with sizes, nothing ticked, title "Keep on this device",
+   buttons OK and "Not now". The tree is the existing
+   `SelectiveSyncWidget`; ticked folders become the pick.
+2. The pick goes into the journal database as its own list type, then
+   the folder un-pauses. "Not now" writes nothing.
+3. Client patch, engine side: during discovery a folder on that list
+   counts as pinned "always local" even before its placeholder exists, so
+   its files download in the first sync instead of becoming
+   placeholders. After each finished sync the client writes the real pin
+   on every listed folder that now exists and drops it from the list. A
+   folder that is gone from the server after a full sync is dropped too.
+4. Later changes stay with the Dolphin menu ("Always available locally",
+   "Free up local space"); README says where.
+5. Tests: client patch check in `tests/nix/nextcloud-client-patches.nix`;
+   e2e-fw13 against a SYNTHETIC test account and folder tree: pick one of
+   three folders, check that only it is hydrated and pinned after the
+   first sync, a new top-level folder arrives as a placeholder, "Not now"
+   leaves all placeholders, and a quit during the first sync keeps the
+   pick.
