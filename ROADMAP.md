@@ -2385,3 +2385,94 @@ arXiv 2608.14736 (Werling, Zahin, Seifert); TCG CPU to TPM Bus Protection
 Guidance (2023); kernel `Documentation/security/tpm/tpm-security.rst`;
 Phoronix and LKML on `TCG_TPM2_HMAC` off by default (6.18); Pulse Security,
 WithSecure, SCRT and NVISO write-ups on TPM sniffing.
+
+## 20. Thunderbird mail (design)
+
+Written 2026-10-21 for Plane GJALLAROS-249. Jade asked for Thunderbird with
+good defaults (encryption keys, a modern theme, ease of use). The user sets
+up every account. Decisions are Q50 to Q57 on the questionnaire page.
+
+### What Thunderbird does today
+
+- **OpenPGP keys** (built in since 78, RNP library). Secret keys are stored
+  under a random passphrase, and that passphrase is kept in the profile's
+  `key4.db`. Without a Primary Password, `key4.db` is not encrypted, so
+  anything that can read the profile (an app running as the user, a
+  snapshot, a backup, a copied home folder) can read the keys.
+- **Primary Password** encrypts `key4.db`: saved account passwords, login
+  tokens, OpenPGP keys and S/MIME certificates. It is asked once per
+  session and stays open until Thunderbird closes. A policy can require
+  it.
+- **Per-key passphrase** (since 115, bug 1679278): asked on every sign and
+  decrypt. There is no cache yet (bug 1834577 is open).
+- **Login keyring:** Thunderbird cannot unlock its Primary Password from
+  the desktop keyring.
+- **External GnuPG** (`mail.openpgp.allow_external_gnupg`): Thunderbird
+  hands secret-key work to gpg-agent. This is how smart cards work.
+- **Account autoconfig** asks the mail provider over plain HTTP by default
+  (`mailnews.auto_config.fetchFromISP.sslOnly` is false).
+
+### How others handle it
+
+- **Mozilla:** recommends a Primary Password for OpenPGP keys and documents
+  the policies used here (policy templates for Thunderbird 153).
+- **Hardening guides** (thunderbird-user.js, arkenfox style):
+  autoconfig over HTTPS only, remote content off, telemetry off, plain or
+  simple HTML reading.
+- **Tails:** ships Thunderbird with its built-in OpenPGP; mail over Tor.
+- **Distributions** (Fedora, Debian, NixOS): ship Thunderbird stock and
+  leave all of this to the user.
+
+### Decisions
+
+- Keys stay in Thunderbird, with a **Primary Password required** (Q54,
+  Q55). It is asked once per session. The opt-in **smart card** is the step
+  up: off by default, offered by the installer when Thunderbird is ticked,
+  declinable there (Q51). OpenPGP cards go through GnuPG (pcscd, scdaemon),
+  S/MIME cards through OpenSC as a security device.
+- No password-manager add-on. KeePassXC is being replaced (215); the
+  first-run guide tells the user to keep a key backup in their password
+  manager or on an offline copy.
+- The installer lists Thunderbird and ticks it (Q56). All mailto links on
+  the system open Thunderbird, whatever browser is installed (Q53).
+- Latest release, not ESR, like Firefox (Q57).
+- On by default: Simple HTML reading, key lookups only when the user asks,
+  a local first-run guide (account, Primary Password, key create or import,
+  key backup, Nextcloud calendar and contacts) (Q57).
+- Theme: follows the GjallarOS theme job (250, genbu Superbird look),
+  in the theme phase.
+
+### Security pass
+
+**Threat model.** (1) Someone with a copy of the home folder (snapshot,
+backup, old disk image). (2) An app running as the user. (3) A mail that
+tracks the reader or carries active content. (4) A network that sees or
+changes account setup. (5) The local AI agent reading mail data.
+
+- (1) The Primary Password encrypts `key4.db`; a copy without it is
+  useless. This is the main reason it is required. The disk is LUKS
+  encrypted; snapshots and backups are not, from inside the session.
+- (2) Not solved by any software option. While Thunderbird is open, an app
+  running as the user can use the unlocked keys. The smart card is the
+  only option that keeps the key itself off the computer. Said plainly in
+  the first-run guide.
+- (3) Remote content blocked (per-sender allow kept), Simple HTML, no
+  JavaScript in mail (Thunderbird default, locked), scam detection on.
+- (4) Autoconfig over HTTPS only (ISP fetch and guess), TLS 1.2 minimum.
+  Key lookups only on ask, since a lookup tells the key server who the user
+  writes to.
+- (5) The AI agent's read deny list gets `**/.thunderbird/**`, next to the
+  existing `.ssh`, `.gnupg` and `.password-store` lines.
+- Telemetry, data collection, promotions, in-app messages and chat are
+  locked off. Add-ons follow the Firefox scheme: catalogue pins only.
+- The smart card adds pcscd. It only runs on demand (socket), and only when
+  the option is on.
+
+**What stays open.** The Primary Password stays open for the whole session
+(no screen-lock timeout in Thunderbird). Logged on the security review
+page; a timeout would need upstream work (bug 1834577 covers the key cache).
+
+**Sources:** Mozilla support "Primary Password" and "OpenPGP in
+Thunderbird"; Thunderbird policy templates (policies-descriptions.ftl);
+bugzilla 1679278, 1834577, 1566458; cylab.be on Thunderbird key storage;
+GnuPG gpg-agent manual; Home Manager `programs.thunderbird`.
