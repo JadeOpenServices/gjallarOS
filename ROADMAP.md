@@ -1873,7 +1873,7 @@ Security pass for step 2:
 
 Next: step 3 is the boot-time block.
 
-## 17. Nextcloud: what downloads first on a new machine (decided, to build)
+## 17. Nextcloud: what downloads first on a new machine (done)
 
 Job 173. On a fresh book12 install the client went through about 2100
 Music files before `claude/` (lower case sorts last), and ODDC work waited
@@ -1982,3 +1982,18 @@ they need first.
    first sync, a new top-level folder arrives as a placeholder, "Not now"
    leaves all placeholders, and a quit during the first sync keeps the
    pick.
+
+### Built (2026-10-21)
+
+All passed on the fw13 VM against a local SYNTHETIC test server.
+
+- Picker and placeholders: 8ee44c2e. The pick survives a kill during the
+  first sync and applies after the restart.
+- Q42: openvfs unmounts when the client exits; a mount left from before
+  the client started is a setup error (713c504b).
+- A second start with a bad option no longer exits the running client
+  (5630fd4c). A plain launch opens the settings window (713395d8).
+- Q43: a crashed client restarts after 10 s, five starts in five minutes
+  at most. Quit stays quit (27c1646f).
+- Q44: the settings window floats at its own size instead of being cut
+  off, and the folder list is titled "Sync folders" (74f1fb25).
