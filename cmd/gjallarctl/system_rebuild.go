@@ -142,12 +142,13 @@ func startSystemRebuild(opts rebuildOptions, stdout, stderr io.Writer) int {
 }
 
 func runSystem(args []string, stdout, stderr io.Writer) int {
-	if len(args) == 0 || !slices.Contains([]string{"check", "rebuild", "apply", "status", "move", "clone", "developer-off", "time-check"}, args[0]) {
-		fmt.Fprintln(stderr, "Usage: gjallarctl system check|rebuild [OPTIONS]\n       gjallarctl system apply|status|move\n       gjallarctl system clone --from DIR\n       gjallarctl system developer-off")
+	if len(args) == 0 || !slices.Contains([]string{"check", "rebuild", "apply", "status", "move", "clone", "developer-off", "time", "time-watch", "time-check"}, args[0]) {
+		fmt.Fprintln(stderr, "Usage: gjallarctl system check|rebuild [OPTIONS]\n       gjallarctl system apply|status|move|time\n       gjallarctl system clone --from DIR\n       gjallarctl system developer-off")
 		return 2
 	}
 	// apply runs as the user: the folder is theirs, the settings service
-	// takes it from their session. status reads only what anyone may read.
+	// takes it from their session. status and time read only what anyone
+	// may read; time-watch is the user unit for the bar and the card.
 	// move, clone and developer-off check who runs them.
 	switch args[0] {
 	case "apply":
@@ -160,6 +161,10 @@ func runSystem(args []string, stdout, stderr io.Writer) int {
 		return systemClone(args[1:], stdout, stderr)
 	case "developer-off":
 		return systemDeveloperOff(args[1:], stdout, stderr)
+	case "time":
+		return systemTime(args[1:], stdout, stderr)
+	case "time-watch":
+		return runTimeWatch(args[1:], stderr)
 	}
 	if os.Geteuid() != 0 {
 		fmt.Fprintf(stderr, "ERROR: gjallarctl system %s runs as root; use rebuild\n", args[0])

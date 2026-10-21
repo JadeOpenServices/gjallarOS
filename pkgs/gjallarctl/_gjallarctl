@@ -25,6 +25,8 @@ _gjallarctl_system() {
     'rebuild:rebuild from the system checkout (root only, started by rebuild)'
     'apply:copy ~/GjallarOS-local into the system and rebuild (developer mode)'
     'status:show what the running system was built from'
+    'time:show whether NTS confirmed the clock'
+    'time-watch:keep the bar clock and the time card current (user unit)'
     'move:show what moving to the root-owned system checkout leaves behind'
     'clone:create the root-owned system checkout (root only)'
     'developer-off:turn developer mode off and build the official system (recovery entry, root only)'
