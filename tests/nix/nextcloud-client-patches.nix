@@ -34,6 +34,10 @@ pkgs.stdenvNoCC.mkDerivation {
     grep -A10 '_vfsReady = _vfs->mode() != Vfs::OpenVFS;' src/gui/folder.cpp | grep -Fq 'SyncResult::SetupError'
     grep -Fq 'if (isOpenVfsMountPoint(path)) {' "$f"
     ! grep -Fq 'QTimer::singleShot(1s, this, &Vfs::started);' "$f" || grep -B3 'QTimer::singleShot(1s, this, &Vfs::started);' "$f" | grep -Fq '#else'
+    # An openvfs left by a killed client kept its mount; the gate took it as
+    # ours, the new openvfs exited and its exit aborted the client
+    # (2026-10-21). A mount before our process starts is a setup error.
+    grep -B10 '_openVfsProcess = new QProcess(this);' "$f" | grep -Fq 'if (isOpenVfsMountPoint(params.filesystemPath)) {'
     # Upstream defaults Linux to classic sync; with the preset server and
     # folder the wizard never asks, and new accounts downloaded everything
     # (2026-10-09).

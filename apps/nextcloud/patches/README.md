@@ -19,6 +19,10 @@ Client behaviour patches:
   availability to file status and the Dolphin plugin maps it to emblems.
   `@onlineOnlyIcon@` and `@localIcon@` come from
   `themes/apps/dolphin/nextcloud-icons.nix` through `replaceVars`.
+- `nextcloud-openvfs-stale-mount.patch`: an OpenVFS mount that is already
+  there before the client starts its own openvfs is a setup error. The start
+  gate took such a mount for its own, and the second openvfs's exit aborted
+  the client.
 - `nextcloud-keep-local-picker.patch`: after the wizard a virtual-files
   account opens "Keep on this device" with nothing ticked. Ticked folders get
   the "always available locally" pin; closing or "Not now" leaves everything
@@ -60,6 +64,10 @@ Hydration patches:
   fail at once and new ones fail without waiting for the deadline. Upstream
   read EOF as "no data" and kept the closed socket's fd number for later
   writes.
+- OpenVFS unmounts when the sync client closes its socket, which it only does
+  when it exits, and does not mount when it cannot reach the client. Upstream
+  kept serving a mount after the client was killed; the restarted client's
+  openvfs could not mount over it and the client aborted.
 - OpenVFS placeholders always report themselves in sync. Upstream marked every
   unchanged file for a metadata update on each sync run, but OpenVFS cannot
   record that it finished, so tens of thousands of no-op jobs repeated forever.
@@ -86,8 +94,8 @@ python3 tests/openvfs-hydration.py /path/to/openvfs --timeout
 
 It checks concurrent opens, in-progress hydration, wrapped preview exclusion,
 server errors, cancellation with zero blocked requests, SIGTERM and sync
-client exit during a hydration, the actual deadline, and a slow download that
-outlasts it.
+client exit during a hydration (both must unmount), no mount without a sync
+client, the actual deadline, and a slow download that outlasts it.
 It does not replace an integration check against the rebuilt Nextcloud client.
 
 KIO 6.26 normally runs its file worker inside Dolphin. `dolphin.nix` uses

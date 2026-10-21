@@ -238,15 +238,27 @@ try:
     p.communicate(timeout=5)
     assert p.returncode != 0 and not os.path.ismount(mount2)
     print(f'PASS: SIGTERM during hydration exits and unmounts in {time.monotonic() - start:.1f} s', flush=True)
-    # Last case: it ends the fake client. The waiter and later opens fail fast.
+    # No sync client listening: openvfs must not mount at all. A mount
+    # nobody serves blocked the next client's openvfs (2026-10-21).
+    mount3 = base / 'mount3'
+    mount3.mkdir()
+    os.setxattr(mount3, 'user.openvfs.registration', pack(dict(owner='test', version=0)))
+    lonely = subprocess.run([sys.argv[1], '-f', '-i', str(config), '-o', 'test', '-s', str(base / 'no-socket'), str(mount3)],
+                            stdout=log, stderr=log, timeout=10)
+    assert lonely.returncode != 0 and not os.path.ismount(mount3)
+    print('PASS: no sync client, no mount', flush=True)
+    # Last case: it ends the fake client. The waiter fails fast and openvfs
+    # unmounts, so a restarted client can mount again.
     start = time.monotonic()
     p = cat('gone')
     p.communicate(timeout=5)
     assert p.returncode != 0
-    p = cat('gone')
-    p.communicate(timeout=5)
-    assert p.returncode != 0 and time.monotonic() - start < 5
-    print('PASS: sync client exit releases the waiter and later opens fail fast', flush=True)
+    try:
+        daemon.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        raise AssertionError('openvfs outlived its sync client') from None
+    assert not os.path.ismount(mount) and time.monotonic() - start < 10
+    print(f'PASS: sync client exit releases the waiter and unmounts in {time.monotonic() - start:.1f} s', flush=True)
     assert not errors, errors
 finally:
     subprocess.run(['fusermount3', '-uz', str(mount)], capture_output=True, timeout=5)
