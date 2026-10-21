@@ -2282,6 +2282,13 @@ security bs goes in" (Q48), kernel HMAC "Leave off for now" (Q49).
    disk on the recovery key. Look again when upstream fixes that or our
    release cache builds kernels. Logged on the security page.
 
+**Status (2026-10-21):** items 2-6 built in e4078c7f. e2e-fw13 passed:
+status shows the chip type and no hint with a PIN set, the record carries
+`pin=1`, the old install got its USB key pinned after its signed state
+verified, and a wrong pin is refused. Item 1 waits on ODDC 103; until then
+every model is unknown and gets the PIN preselected. Still to test: the
+card on an install without a PIN, and fresh provisioning.
+
 **Tests:** unit tests for the token check and the status lines; installer
 text test per TPM type; e2e-fw13 for status and card. Wire attacks cannot
 be tested in a VM (swtpm has no bus); the source review above stands in
