@@ -833,7 +833,10 @@ network. When no NTS server answers, for example on a network that blocks
 TCP port 4460, the clock keeps running from where it was.
 `gjallarctl system status` shows `Time: confirmed by NTS at ...`, or
 `Time: not confirmed since ...` when no server has confirmed it in the last
-two hours. The design and the next steps are in section 18 of
+two hours. While the time is not confirmed, a clock shows in the bar; click
+it for details, or run `gjallarctl system time`. When it stays unconfirmed
+for 24 hours while you are online, a card says so once. The design and the
+next steps are in section 18 of
 [ROADMAP.md](ROADMAP.md).
 
 <div align="right"><a href="#gjallaros">↑ back to top</a></div>

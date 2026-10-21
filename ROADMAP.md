@@ -2286,8 +2286,32 @@ Security pass for step 3:
 - Residual: each restart of chronyd sets the clock from the RTC (`-s`);
   that is the same as at boot.
 
-**Later:** the time line in the settings app, and a notice when the time
-has not been confirmed for a long time.
+**Step 4 (built, `1b51ff24`):** the time in the desktop (questions 60-62).
+
+- `gjallarctl system time-watch`, the user unit `gjallar-time-watch`,
+  asks chronyd every 30 s and writes `$XDG_RUNTIME_DIR/gjallar/time` for
+  the bar plugin `gjallar/time`. The clock shows only while the time is
+  not confirmed: `clock-exclamation` after 5 minutes without NTS (so a
+  normal boot never shows it), `clock-question` right away while the home
+  router sets the time. The tooltip says since when; a click opens
+  `gjallarctl system time` in a small window.
+- The card comes once per spell: the last NTS confirmation
+  (`/var/lib/gjallar-time/confirmed`) is 24 hours old or more, the device
+  has been online (NetworkManager `CONNECTED_GLOBAL`) for 15 minutes, and
+  the router fallback is off. The stamp names the spell, kept in
+  `~/.local/state/gjallar/time-notice-seen`; a new confirmation starts a
+  new one. Details opens the same window. The card closes when NTS
+  confirms the time while it is open. An install that never confirmed
+  counts the 24 hours from when the watch first saw that.
+- Offline the clock icon still shows after the 2 hours `clockFresh`
+  allows, but no card: without a network NTS cannot be asked, so there is
+  nothing to do.
+- e2e-fw13 passed on 2026-10-21: icon after the grace with NTS blocked,
+  click and card Details open the window, one card per spell across a unit
+  restart, router tooltip, icon gone after restore. The window is sized in
+  cells (84x12, `f341a3d0`) so no line wraps.
+
+**Later:** the time line in the settings app (Plane 218).
 
 **Tests:** step 1 has the Nix check and the e2e-fw13 run. Steps 2 and 3
 need NixOS VM tests: a plain NTP server on the LAN that the client must
