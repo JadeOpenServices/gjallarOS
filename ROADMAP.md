@@ -1517,10 +1517,9 @@ questionnaire (2026-10-20 and 2026-10-21): read-only snapshots, root-only,
 btrbk-style retention, rollback only through recovery, no secrets and no
 `/nix` in snapshots, settings in `user.config.json`, and only new installs
 get the layout. Step 1 (installer subvolumes), step 2 (snapshot
-units, settings, rebuild snapshots) and step 3 (restoring your own
-files) are built and passed the VM test (2026-10-21, a new install on a
-throwaway VM). Step 4 (rollback in recovery) is built; its VM test is
-open.
+units, settings, rebuild snapshots), step 3 (restoring your own
+files) and step 4 (rollback in recovery) are built and passed the VM test
+(2026-10-21, a new install on a throwaway VM).
 
 Today a fresh install puts everything on the top level of one encrypted
 Btrfs (no subvolumes). NixOS generations already roll back the system
