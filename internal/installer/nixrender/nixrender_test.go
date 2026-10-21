@@ -140,6 +140,7 @@ func TestFromUserMapsRoutedIntent(t *testing.T) {
 		USBTrustTPMHandle:     "0x81000042",
 		PrintingEnable:        true,
 		NetworkPrintingEnable: true,
+		ThunderbirdSmartCard:  true,
 		Apps:                  []string{"containers"},
 		WebApplications: []config.WebApplicationIntent{
 			{
@@ -168,6 +169,7 @@ func TestFromUserMapsRoutedIntent(t *testing.T) {
 
 	if !got.PrintingEnable ||
 		!got.NetworkPrintingEnable ||
+		!got.ThunderbirdSmartCard ||
 		!slices.Equal(got.Apps, []string{"containers"}) ||
 		!got.USBGuardEnable ||
 		!got.USBTrustEnforce {

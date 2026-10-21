@@ -2083,11 +2083,13 @@ func collectApps(ctx context.Context, ui prompt.UI, running, u *config.User) err
 		return err
 	}
 	followUp := map[string]func(context.Context, prompt.UI, *config.User, *config.User) error{
-		"ai":        collectAI,
-		"tailscale": collectTailscale,
+		"ai":          collectAI,
+		"tailscale":   collectTailscale,
+		"thunderbird": collectThunderbird,
 	}
 	u.Apps = []string{}
 	u.Tailscale = nil
+	u.ThunderbirdSmartCard = false
 	u.AIAgentMode, u.OverrideAISelection, u.OverrideModelWith = "", false, ""
 	u.AIEndpoint, u.AIRemoteModel, u.AIRemoteContextTokens = "", "", 0
 	for _, app := range catalogue {
@@ -2310,6 +2312,15 @@ func collectAI(ctx context.Context, ui prompt.UI, running, u *config.User) error
 		mode = offeredOr(running.AIAgentMode, modes, mode)
 	}
 	u.AIAgentMode, err = ui.Choice(ctx, "AI permission profile", mode, modes)
+	return err
+}
+
+// collectThunderbird offers smart card support for mail keys. It stays off
+// unless the user has a card: it starts pcscd and gpg-agent for them.
+func collectThunderbird(ctx context.Context, ui prompt.UI, running, u *config.User) error {
+	was := running != nil && running.ThunderbirdSmartCard
+	var err error
+	u.ThunderbirdSmartCard, err = ui.Confirm(ctx, "Use a smart card for mail encryption keys?", was)
 	return err
 }
 

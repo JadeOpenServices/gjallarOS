@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Getting started</title>
+<style>
+  :root { color-scheme: light dark; --fg: #1d1f24; --bg: #f7f7f9; --muted: #5a5f6b; --line: #d8dbe2; }
+  @media (prefers-color-scheme: dark) { :root { --fg: #e6e7eb; --bg: #18191d; --muted: #a2a6b1; --line: #33363e; } }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.55 system-ui, sans-serif; }
+  main { max-width: 46rem; margin: 0 auto; padding: 2rem 1.5rem 3rem; }
+  h1 { font-size: 1.6rem; margin: 0 0 .3rem; }
+  h2 { font-size: 1.1rem; margin: 2rem 0 .4rem; padding-top: 1rem; border-top: 1px solid var(--line); }
+  p, li { margin: .35rem 0; }
+  .muted { color: var(--muted); }
+  code, kbd { font: .9em ui-monospace, monospace; }
+</style>
+</head>
+<body>
+<main>
+<h1>Getting started with Thunderbird</h1>
+<p class="muted">This page is stored on your computer and loads nothing from the internet.
+To stop showing it, untick "When Thunderbird launches, show the Start Page"
+under Settings, General.</p>
+
+<h2>1. Add your mail account</h2>
+<p>Choose the menu, then New, then Existing Mail Account. Enter your name, address and
+password. Thunderbird asks your mail provider for the server settings, over HTTPS only.
+If it finds nothing, ask your provider for the IMAP and SMTP settings and enter them by hand.</p>
+
+<h2>2. Set a Primary Password</h2>
+<p>Thunderbird asks for one before it saves your first account password. It protects your
+saved passwords, login tokens and encryption keys. Without it, anyone with a copy of your
+home folder could read them.</p>
+<ul>
+  <li>Pick a long passphrase you do not use anywhere else, and save it in your password manager.</li>
+  <li>Thunderbird asks for it once after each start. It cannot be removed again.</li>
+  <li>If you forget it, the saved passwords and keys are lost. Keep the key backup from step 4.</li>
+</ul>
+
+<h2>3. Create or import your OpenPGP key</h2>
+<p>Open Account Settings, then End-To-End Encryption, then Add Key. Create a new key, or
+import the one you already use. For a new key, choose a date it expires; you can extend it later.</p>
+
+<h2>4. Back up your key</h2>
+<p>In the OpenPGP Key Manager, select your key, then File, then Backup Secret Key(s) To File.
+Thunderbird asks for a password for the file. Keep the file and that password in your
+password manager, or on a USB stick you store safely at home. Without a backup, mail
+encrypted to you cannot be read once the key is gone.</p>
+
+<h2>5. Find the keys of people you write to</h2>
+<p>Thunderbird searches key servers only when you ask: "Discover Public Keys Online" in the
+key assistant, or "Discover Keys Online" in the OpenPGP Key Manager. Each search tells the key server
+whose key you are looking for, so it is never done in the background. You can also import
+a key someone sends you as a file.</p>
+
+<h2>6. Calendar and contacts from Nextcloud</h2>
+<p>Calendar: New Calendar, then On the Network, then enter your Nextcloud address and
+user name. Contacts: in the Address Book, New Address Book, then Add CardDAV Address Book,
+with the same address. Use an app password from Nextcloud (Settings, Security), not your
+main password.</p>
+
+<h2>How mail is shown</h2>
+<ul>
+  <li>Remote content (pictures and other files a mail loads from the internet) is blocked.
+  Allow it per sender from the bar above the mail.</li>
+  <li>Mail is shown as simple HTML: layout stays, risky parts are left out. View, then
+  Message Body As, switches to plain text or the original HTML.</li>
+  <li>Thunderbird warns about mails that look like scams.</li>
+</ul>
+
+<h2>What the Primary Password does not cover</h2>
+<p>While Thunderbird is open and unlocked, another program running as you can use the
+unlocked keys. A smart card keeps the secret key off the computer entirely. To use one,
+run <code>gjallarctl settings set thunderbirdSmartCard=true</code>, then
+<code>gjallarctl settings apply</code>, and approve the card reader when GjallarOS asks
+about the new USB device. In Thunderbird, choose Add Key, then Use your external key
+through GnuPG, and enter the key ID from the card.</p>
+</main>
+</body>
+</html>

@@ -11,7 +11,7 @@ func TestWorkspaceAndSecrets(t *testing.T) {
 	if !Within(w, filepath.Join(w, "a.nix")) || Within(w, filepath.Join(w, "..", "other")) {
 		t.Fatal("workspace boundary failed")
 	}
-	if !IsSecret("/home/user/.ssh/id_ed25519") || !IsSecret("/work/.env") {
+	if !IsSecret("/home/user/.ssh/id_ed25519") || !IsSecret("/work/.env") || !IsSecret("/home/user/.thunderbird/abc.default/key4.db") {
 		t.Fatal("secret classification failed")
 	}
 }

@@ -101,7 +101,7 @@ Taken in a QEMU test VM at 1920×1080.</sub>
 | **App catalogue** | One list in `user.config.json` picks the apps; each app owns its whole module. |
 | **Local AI** | Optional localhost-only Ollama with hardware-aware model selection, or a central HTTPS server with a sealed token. |
 | **Recovery** | Trusted recovery boot entry, recovery ISO, generation rollback without deleting anything newer. |
-| **Apps** | VSCodium, web apps (Teams, Plane, draw.io), system-wide Wine, optional Nemu. |
+| **Apps** | VSCodium, Thunderbird, web apps (Teams, Plane, draw.io), system-wide Wine, optional Nemu. |
 | **Maintenance** | Helpers for rebuilding, cleanup, thermal status, and updates. |
 
 <details>
@@ -276,7 +276,7 @@ everything it brought in.
 
 Without `apps`, every app with `"default": true` is installed. The installer
 asks each app's `installer` question (today `ai`, `containers`, `nemu`,
-`tailscale`) and uses `default` for the rest. `apps` drives
+`tailscale`, `thunderbird`) and uses `default` for the rest. `apps` drives
 `gjallar.apps.<id>.enable` on both the NixOS side (`apps/nixos-options.nix`)
 and the Home Manager side (`user/apps/default.nix`). The old `aiEnable`,
 `containersEnable` and `nemuEnable` keys are rejected; list `ai`,
@@ -364,6 +364,39 @@ only; another device of yours starts with everything online-only again.
 If the client crashes, it starts again after ten seconds. After five starts in
 five minutes it stays off, and Quit in the tray stops it as well; open
 Nextcloud from the app menu or log in again to bring it back.
+
+### Thunderbird
+
+Thunderbird (latest release) is in the default apps; the installer asks
+before it installs it. You set up every account yourself. On the first start a
+local page walks through the account, the Primary Password, your OpenPGP key
+and its backup, and Nextcloud calendar and contacts.
+
+GjallarOS sets these through Thunderbird's enterprise policy:
+
+- A Primary Password is asked before the first saved password, and it cannot
+  be removed. It protects saved passwords, login tokens and OpenPGP keys.
+- Remote content in mail stays blocked; you allow it per sender. Scam
+  warnings stay on. Account autoconfig uses HTTPS only, and connections need
+  TLS 1.2 or newer.
+- Mail shows as simple HTML (View, Message Body As changes it). Chat,
+  telemetry, donation and survey messages are off.
+- Only dictionaries, languages and themes can be added, no add-ons with code.
+- Key servers are searched only when you ask for a key.
+
+Every `mailto` link opens Thunderbird, Firefox ones included.
+
+Smart cards are off by default. The installer asks after Thunderbird, or set
+it later (security tier):
+
+```sh
+gjallarctl settings set thunderbirdSmartCard=true
+gjallarctl settings apply
+```
+
+This starts `pcscd` and `gpg-agent`, lets Thunderbird use a card key through
+GnuPG, and adds OpenSC for S/MIME cards. Approve the card reader when
+GjallarOS asks about the new USB device.
 
 <div align="right"><a href="#gjallaros">↑ back to top</a></div>
 

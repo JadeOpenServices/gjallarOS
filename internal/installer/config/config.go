@@ -67,6 +67,9 @@ type User struct {
 	// pinned to one file.
 	FirefoxStoreAddons []apps.FirefoxStoreAddon `json:"firefoxStoreAddons" tier:"security"`
 
+	// ThunderbirdSmartCard adds smart card support for Thunderbird keys.
+	ThunderbirdSmartCard bool `json:"thunderbirdSmartCard" tier:"security"`
+
 	NextcloudEnable           bool   `json:"nextcloudEnable" tier:"security"`
 	NextcloudHost             string `json:"nextcloudHost" tier:"security"`
 	Theme                     string `json:"theme" tier:"everyday"`

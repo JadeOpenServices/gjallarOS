@@ -125,7 +125,7 @@ var presetSchema = map[string]presetValueType{
 	"firefoxStoreAddons": presetFirefoxStoreAddons,
 	"tailscale":          presetTailscale,
 	"planeEnable":        presetBool, "planeHost": presetString, "drawioEnable": presetBool, "drawioSelfHosted": presetBool, "drawioHost": presetString, "nextcloudEnable": presetBool, "nextcloudHost": presetString,
-	"apps": presetStringList, "debugFunctions": presetBool,
+	"apps": presetStringList, "thunderbirdSmartCard": presetBool, "debugFunctions": presetBool,
 	"overrideAiSelection": presetBool, "overrideModelWith": presetString, "aiAgentMode": presetString,
 	"aiEndpoint": presetString, "aiRemoteModel": presetString, "aiRemoteContextTokens": presetInt,
 	"jodsFingerprintEnrollmentAllowed": presetBool,

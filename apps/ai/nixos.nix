@@ -362,7 +362,8 @@ let
           "*.env.*": "deny",
           "**/.ssh/**": "deny",
           "**/.gnupg/**": "deny",
-          "**/.password-store/**": "deny"
+          "**/.password-store/**": "deny",
+          "**/.thunderbird/**": "deny"
         },
 
         "glob": "allow",

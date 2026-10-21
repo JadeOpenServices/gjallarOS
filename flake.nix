@@ -244,6 +244,14 @@
           ];
         };
 
+        thunderbird = import ./tests/nix/thunderbird.nix {
+          inherit nixpkgs system;
+          thunderbirdModules = [
+            ./apps/thunderbird/nixos.nix
+            ./apps/nixos-options.nix
+          ];
+        };
+
         vpn-fail-closed = import ./tests/nix/vpn-fail-closed.nix {
           inherit pkgs;
           tailscaleModules = [
