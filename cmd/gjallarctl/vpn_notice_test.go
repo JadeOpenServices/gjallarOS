@@ -48,14 +48,19 @@ func TestVPNNoticeStepOncePerJoin(t *testing.T) {
 func TestVPNNoticeText(t *testing.T) {
 	summary, body := vpnNoticeText(nettrust.Verdict{Blocked: nettrust.BlockExitNodeOffline, Network: "synthetic-net-a", SSID: "Synthetic <Cafe>"})
 	if summary != "VPN blocking this network" ||
-		!strings.Contains(body, "Wi-Fi Synthetic &lt;Cafe&gt;") ||
-		!strings.Contains(body, "The exit node is offline;") ||
-		!strings.Contains(body, "without the tunnel for up to 60 minutes") {
+		!strings.HasPrefix(body, "Wi-Fi Synthetic &lt;Cafe&gt;: The exit node is offline.\n") ||
+		!strings.Contains(body, "max 60 min, admin password") ||
+		!strings.Contains(body, "sees where apps connect") {
 		t.Fatalf("summary %q body %q", summary, body)
 	}
 	_, body = vpnNoticeText(nettrust.Verdict{Blocked: nettrust.BlockTailscaleDown, Device: "eth0"})
-	if !strings.Contains(body, "this network. Tailscale is not running") || !strings.Contains(body, "cannot be paused") {
+	if !strings.HasPrefix(body, "Tailscale is not running.\n") || !strings.Contains(body, "cannot be paused") {
 		t.Fatalf("body %q", body)
+	}
+	// The popup shows about seven lines of 28 characters.
+	_, body = vpnNoticeText(nettrust.Verdict{Blocked: nettrust.BlockNoExitNode, Network: "synthetic-net-a", SSID: "Synthetic Cafe"})
+	if len(body) > 170 {
+		t.Fatalf("body is %d characters: %q", len(body), body)
 	}
 }
 

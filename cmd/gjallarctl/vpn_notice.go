@@ -151,22 +151,24 @@ func showVPNNotice(ctx context.Context, v nettrust.Verdict) (string, error) {
 	return choice, err
 }
 
-// vpnNoticeText says which side failed and what a pause gives away.
+// vpnNoticeText says which side failed and what a pause gives away. The
+// notice popup shows about seven short lines, so the risk comes first and
+// the summary already says the network is blocked.
 func vpnNoticeText(v nettrust.Verdict) (summary, body string) {
-	where := "this network"
-	if v.SSID != "" {
-		where = "Wi-Fi " + html.EscapeString(v.SSID)
-	}
-	reason := nettrust.BlockText(v.Blocked)
+	reason, _, _ := strings.Cut(nettrust.BlockText(v.Blocked), ";")
 	if reason != "" {
 		reason = strings.ToUpper(reason[:1]) + reason[1:] + "."
 	}
-	body = fmt.Sprintf("The VPN is blocking %s. %s", where, reason)
+	if v.SSID != "" {
+		body = "Wi-Fi " + html.EscapeString(v.SSID) + ": " + reason
+	} else {
+		body = reason
+	}
 	if v.Network == "" {
-		return "VPN blocking this network", body + "\n\nThis network cannot be told apart from others, so it cannot be paused."
+		return "VPN blocking this network", body + "\nThis network cannot be told apart from others, so it cannot be paused."
 	}
 	return "VPN blocking this network", body + fmt.Sprintf(
-		"\n\nA pause lets apps here reach the internet without the tunnel for up to %d minutes, so this network can see where they connect. It asks an administrator's password.",
+		"\nPausing (max %d min, admin password) skips the tunnel here; this network then sees where apps connect.",
 		int(nettrust.MaxPause.Minutes()))
 }
 
