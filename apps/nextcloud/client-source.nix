@@ -54,5 +54,7 @@ in
     # A bad option from a second start is logged and ignored; it no longer
     # exits the running client.
     ./patches/nextcloud-remote-options-no-exit.patch
+    # The folder list is titled "Sync folders", not "Classic sync".
+    ./patches/nextcloud-sync-folders-title.patch
   ];
 }

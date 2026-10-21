@@ -547,6 +547,10 @@ lib.mkMerge [
   wayland.windowManager.hyprland.settings.windowrule = lib.optionals enable [
     "match:class ^(${loginClass})$, float on, center on, size (monitor_w*0.5) (monitor_h*0.75)"
     "match:class ^([Nn]extcloud|com\\.nextcloud\\.desktopclient\\.nextcloud)$, focus_on_activate on"
+    # The client's windows are dialogs with a minimum size (settings 950x500).
+    # Tiled, they got a smaller slot and were cut off (wiki 752 Q44). The
+    # title is localized, so the rule matches the class.
+    "match:class ^([Nn]extcloud|com\\.nextcloud\\.desktopclient\\.nextcloud)$, float on, center on, max_size (monitor_w*0.95) (monitor_h*0.9)"
   ];
 
 

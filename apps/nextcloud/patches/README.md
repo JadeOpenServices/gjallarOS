@@ -39,6 +39,10 @@ Client behaviour patches:
   code meant for a fresh start, so a typo or unknown option exited the
   running client: sync stopped and the OpenVFS mount went away. The running
   client now logs a warning and does not act on that command.
+- `nextcloud-sync-folders-title.patch`: upstream titles the folder list
+  "Classic sync" to set it apart from macOS File Provider. Linux has no File
+  Provider, so the title sat above virtual-file folders and said the
+  opposite of what they do. It now reads "Sync folders".
 
 Hydration patches:
 

@@ -83,6 +83,9 @@ pkgs.stdenvNoCC.mkDerivation {
     grep -A6 'void Application::showHint' src/gui/application.cpp | grep -Fq 'if (_remoteCommand) {'
     grep -Fq 'if (shouldExit && !_remoteCommand) {' src/gui/application.cpp
     grep -A12 'void Application::parseOptionsRemoteCommand' src/gui/application.cpp | grep -Fq 'if (_remoteOptionsInvalid) {'
+    # "Classic sync" stood above virtual-file folders (2026-10-21).
+    grep -A40 'void AccountSettings::updateSyncFoldersPanelVisibility' src/gui/accountsettings.cpp \
+      | grep -Fq '_ui->syncFoldersPanelTitle->setText(tr("Sync folders"));'
     touch $out
   '';
 }
