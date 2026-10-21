@@ -72,7 +72,7 @@ func runLUKSLifecycle(args []string, stdout, stderr io.Writer) int {
 	var code int
 	switch args[0] {
 	case "status":
-		printLUKSStatus(stdout, device, slots)
+		printLUKSStatus(stdout, device, slots, diskcrypto.ModelTPMKind())
 		return 0
 	case "record":
 		return recordOrFail(newLUKSRecord(slots), stderr)
@@ -114,7 +114,7 @@ func recordOrFail(r luksRecord, stderr io.Writer) int {
 	return 0
 }
 
-func printLUKSStatus(out io.Writer, device string, slots diskcrypto.Keyslots) {
+func printLUKSStatus(out io.Writer, device string, slots diskcrypto.Keyslots, kind diskcrypto.TPMKind) {
 	chip := "off"
 	if len(slots.TPM2) > 0 {
 		chip = "on"
@@ -128,6 +128,7 @@ func printLUKSStatus(out io.Writer, device string, slots diskcrypto.Keyslots) {
 	}
 	fmt.Fprintf(out, "System disk:   %s\n", device)
 	fmt.Fprintf(out, "Security chip: %s\n", chip)
+	fmt.Fprintf(out, "Chip type:     %s\n", kind.Describe())
 	fmt.Fprintf(out, "Recovery key:  %s\n", recovery)
 	fmt.Fprintf(out, "Passphrases:   %d\n", len(slots.Passphrase))
 	switch {
@@ -135,6 +136,15 @@ func printLUKSStatus(out io.Writer, device string, slots diskcrypto.Keyslots) {
 		fmt.Fprintln(out, "\nCreate a recovery key: gjallarctl luks recovery-key")
 	case len(slots.TPM2) > 0 && len(slots.Passphrase) > 0:
 		fmt.Fprintln(out, "\nRemove the install passphrase: gjallarctl luks setup")
+	}
+	if len(slots.TPM2) > 0 && slots.TPM2NoSRK {
+		fmt.Fprintln(out, "\nThe security chip unlock was set up by an older version and does not")
+		fmt.Fprintln(out, "check that it talks to the right chip. Set it up again:")
+		fmt.Fprintln(out, "gjallarctl tpm2 reenroll")
+	}
+	if len(slots.TPM2) > 0 && !slots.TPM2PIN && kind.PINRecommended() {
+		fmt.Fprintln(out, "\nWithout a startup PIN, someone who has this device and special tools")
+		fmt.Fprintln(out, "can get the disk key out of a separate chip. Add a PIN: gjallarctl luks pin")
 	}
 }
 

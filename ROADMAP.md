@@ -2164,3 +2164,138 @@ has not been confirmed for a long time.
 need NixOS VM tests: a plain NTP server on the LAN that the client must
 ignore, only one source answering (the clock must not move), and a clock
 months behind with the exception.
+
+## 19. TPM bus protection (parameter encryption)
+
+Written 2026-10-21 for Plane GJALLAROS-248. Jade asked whether we use TPM
+parameter encryption against the bus attacks from a CypherCon talk.
+
+Short answer: yes for disk unlock. systemd encrypts that traffic, and our
+LUKS tokens carry what it needs. Parameter encryption does not close the
+bigger gap: on a machine with a separate TPM chip, unlock without a PIN can
+be beaten by someone who has the device and the tools.
+
+### The talk
+
+I found no CypherCon talk by Cook on this (CypherCon 9 speaker page,
+Sessionize, web search). Dale Cook published a low-cost tool in March 2025
+that records the traffic between the CPU and a separate TPM chip and shows
+the BitLocker volume key in plain, because BitLocker sends it unencrypted.
+CVE-2026-0714 (Moxa UC-1222A) is the same flaw for a LUKS key on an SPI
+TPM. The attack class is public: reading or changing the traffic on the
+wire between the CPU and a separate TPM chip.
+
+### What we use today
+
+- **Disk unlock, PIN change, re-enroll:** systemd-cryptsetup and
+  systemd-cryptenroll (260.5 on the e2e-fw13 staging checkout; code read in
+  the v255, v260 and v261 sources of `src/shared/tpm2-util.c`).
+  - Every seal and unseal runs in a salted HMAC session with AES-128-CFB
+    parameter encryption in both directions
+    (`tpm2_make_encryption_session`). The salt is encrypted to the storage
+    root key (SRK), so a listener on the wire cannot work out the session
+    keys.
+  - The SRK's public part is stored in the LUKS token (`tpm2_srk`) at
+    enrollment, and unseal uses that stored key. A fake chip cannot answer
+    a session started against it.
+  - With a startup PIN the session is also bound to the PIN of the sealed
+    object. systemd's comment says this is against an active interposer
+    that relays to the real chip.
+  - e2e-fw13 token (2026-10-21): `tpm2_srk` present, `tpm2-pin` true,
+    `tpm2_salt`, `tpm2_pcrlock`. Secure Boot keys are our own, and
+    `tpm2-measure-pcr=yes` extends PCR 15 after unlock.
+- **Settings key** (`systemd-creds`, credstore): the same systemd code.
+- **USB trust signing** (`tpm2_sign`, `tpm2_readpublic`): no secret
+  crosses the wire, only the message digest and the signature. The public
+  key is read once per daemon start and is not compared with a stored
+  copy.
+- **Kernel:** `CONFIG_TCG_TPM2_HMAC` is off in our kernel. Upstream turned
+  the default off in 6.18 (and stable from 6.10) because of slow boots and
+  TPMs that failed to start with it. This covers the kernel's own TPM use
+  (PCR extends, random numbers), not disk unlock.
+
+### How others handle it
+
+- **BitLocker:** no parameter encryption. Public research has read the
+  volume key off the wire of separate TPM chips many times; the vendor
+  advice is a startup PIN.
+- **systemd (Fedora, Arch, NixOS and others):** encrypted sessions as
+  above; the SRK in the token since v255.
+- **Linux kernel:** HMAC and encrypted sessions for its own TPM use,
+  optional, off by default since 6.18.
+- **TCG bus protection guidance (2023):** parameter encryption against
+  passive listeners; it says this does not stop active attacks.
+
+### Security pass
+
+Threat model: a laptop lost or stolen, switched off or locked, and an
+attacker with time, the device and hardware tools.
+
+- **Listener on the TPM wire:** covered by the encrypted session. Checked in
+  the source and in the token.
+- **Device on the wire that relays and changes traffic:** the unsealed key
+  stays encrypted to the session, because the SRK is pinned in the token.
+  The PIN binding adds to it.
+- **Faked boot measurements on a separate TPM chip:** not covered by any
+  bus protection. Werling, Zahin and Seifert (ACSAC Workshops 2025) show
+  that a separate TPM can be brought to the measured state of a normal
+  boot from another system, and then gives out keys sealed only to that
+  state. Their conclusion: sealed keys need a PIN. TPMs inside the CPU
+  (firmware TPMs) have no outside wire and are much harder to attack this
+  way.
+- **So:** with a PIN, the DA lockout (15 tries, 2 h, Jade 2026-10-19)
+  limits guessing on every TPM type. Without a PIN, "Automatic" holds
+  against reading the removed disk, but not against a skilled attacker
+  with the machine on separate-chip models. The installer text today does
+  not say that.
+- **Unknown TPM type:** handled as a separate chip, shown as "not
+  confirmed" (rule for security facts from ODDC).
+- **USB trust key not pinned:** low. Swapping the key also needs writing
+  root-owned files on the encrypted disk.
+- **Kernel HMAC off:** low for us; no disk key goes through the kernel's
+  TPM use.
+
+### Design (Jade, 2026-10-21, Q46-Q49)
+
+Jade: "do whats sane and secure here" (Q46), "Suggest once" (Q47), "all
+security bs goes in" (Q48), kernel HMAC "Leave off for now" (Q49).
+
+1. ODDC fact per model: TPM inside the CPU or separate chip, and its bus
+   (asked as ODDC answer item 103). Until ODDC answers, every model counts
+   as unknown, which is handled like a separate chip.
+2. Installer: on separate-chip or unknown models, "PIN at startup" is
+   preselected and marked recommended, and a plain line under "Automatic"
+   says what it does not cover there. Automatic stays the default on
+   models ODDC confirms as firmware TPM.
+3. `gjallarctl luks status` shows the TPM type and whether a PIN is set.
+   On separate-chip or unknown models without a PIN, a card suggests a PIN
+   once: Add PIN, Later, Don't ask again.
+4. Status flags a TPM token without `tpm2_srk` (only systemd before 255
+   wrote those) and points at `gjallarctl tpm2 reenroll`.
+5. USB trust: store a SHA-256 fingerprint of the signing key's public key
+   (`tpm-key.sha256`, 0600) at provision and compare it every time the key
+   is read. Installs from before the pin get it only after the signed
+   state on disk verifies with that key. A different key at the handle is
+   an error, never a new trust root.
+6. Kernel HMAC stays off (Q49). It would need a self-built kernel on every
+   device and some TPM chips fail to start with it, which would leave the
+   disk on the recovery key. Look again when upstream fixes that or our
+   release cache builds kernels. Logged on the security page.
+
+**Status (2026-10-21):** items 2-6 built in e4078c7f. e2e-fw13 passed:
+status shows the chip type and no hint with a PIN set, the record carries
+`pin=1`, the old install got its USB key pinned after its signed state
+verified, and a wrong pin is refused. Item 1 waits on ODDC 103; until then
+every model is unknown and gets the PIN preselected. Still to test: the
+card on an install without a PIN, and fresh provisioning.
+
+**Tests:** unit tests for the token check and the status lines; installer
+text test per TPM type; e2e-fw13 for status and card. Wire attacks cannot
+be tested in a VM (swtpm has no bus); the source review above stands in
+for that, marked as such.
+
+**Sources:** systemd `src/shared/tpm2-util.c` (v255, v260, v261);
+arXiv 2608.14736 (Werling, Zahin, Seifert); TCG CPU to TPM Bus Protection
+Guidance (2023); kernel `Documentation/security/tpm/tpm-security.rst`;
+Phoronix and LKML on `TCG_TPM2_HMAC` off by default (6.18); Pulse Security,
+WithSecure, SCRT and NVISO write-ups on TPM sniffing.

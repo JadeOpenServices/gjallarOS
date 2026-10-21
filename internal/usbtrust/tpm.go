@@ -36,6 +36,10 @@ type TPMSigner struct {
 
 	readPublic publicKeyReader
 
+	// PinFile, when set, holds the fingerprint the key must match
+	// (KeyPinFile). Without the file every key is accepted.
+	PinFile string
+
 	// The persistent key never changes under a running daemon, so one
 	// successful read serves every later verification. Reading it per
 	// request put a TPM round-trip in every 2s policy poll, which timed out
@@ -235,6 +239,11 @@ func (s *TPMSigner) publicKey(
 	key, err := s.readPublicKey(ctx)
 	if err != nil {
 		return nil, err
+	}
+	if s.PinFile != "" {
+		if err := checkKeyPin(s.PinFile, key); err != nil {
+			return nil, err
+		}
 	}
 	s.key = key
 	return key, nil

@@ -29,10 +29,13 @@ const luksRecordPath = "/run/gjallar-luks/keyslots"
 type luksRecord struct {
 	Encrypted                  bool
 	TPM2, Recovery, Passphrase int
+	// Whether the TPM2 unlock asks for a startup PIN. Records written
+	// before the pin line existed leave PINKnown false.
+	PINKnown, PIN bool
 }
 
 func newLUKSRecord(s diskcrypto.Keyslots) luksRecord {
-	return luksRecord{Encrypted: true, TPM2: len(s.TPM2), Recovery: len(s.Recovery), Passphrase: len(s.Passphrase)}
+	return luksRecord{Encrypted: true, TPM2: len(s.TPM2), Recovery: len(s.Recovery), Passphrase: len(s.Passphrase), PINKnown: true, PIN: s.TPM2PIN}
 }
 
 func writeLUKSRecord(path string, r luksRecord) error {
@@ -41,6 +44,13 @@ func writeLUKSRecord(path string, r luksRecord) error {
 		encrypted = "yes"
 	}
 	data := fmt.Sprintf("encrypted=%s\ntpm2=%d\nrecovery=%d\npassphrase=%d\n", encrypted, r.TPM2, r.Recovery, r.Passphrase)
+	if r.PINKnown {
+		pin := 0
+		if r.PIN {
+			pin = 1
+		}
+		data += fmt.Sprintf("pin=%d\n", pin)
+	}
 	tmp, err := os.CreateTemp(filepath.Dir(path), ".keyslots-*")
 	if err != nil {
 		return err
@@ -88,6 +98,12 @@ func readLUKSRecord(path string) (luksRecord, error) {
 			r.Recovery = n
 		case "passphrase":
 			r.Passphrase = n
+		case "pin":
+			if n > 1 {
+				return luksRecord{}, fmt.Errorf("%s: bad %s", path, key)
+			}
+			r.PINKnown, r.PIN = true, n == 1
+			continue
 		default:
 			continue
 		}
@@ -105,21 +121,27 @@ const (
 	diskProtectionSetup       = "setup"
 	diskProtectionSecureBoot  = "secure-boot"
 	diskProtectionRecoveryKey = "recovery-key"
+	// A startup PIN is suggested on a separate or unconfirmed TPM. Card
+	// only: the bar widget shows no shield for it.
+	diskProtectionPIN         = "pin"
 	diskProtectionUnencrypted = "unencrypted"
 )
 
 // diskProtectionState says what is missing. chipPossible reports whether
 // the security chip may unlock this disk once Secure Boot is on; it is only
 // asked when the chip does not unlock it yet.
-func diskProtectionState(r luksRecord, chipPossible func() bool) string {
+func diskProtectionState(r luksRecord, kind diskcrypto.TPMKind, chipPossible func() bool) string {
 	switch {
 	case !r.Encrypted:
 		return diskProtectionUnencrypted
 	case r.TPM2 > 0:
-		if r.Recovery > 0 && r.Passphrase == 0 {
-			return diskProtectionDone
+		if r.Recovery == 0 || r.Passphrase > 0 {
+			return diskProtectionSetup
 		}
-		return diskProtectionSetup
+		if r.PINKnown && !r.PIN && kind.PINRecommended() {
+			return diskProtectionPIN
+		}
+		return diskProtectionDone
 	case chipPossible():
 		return diskProtectionSecureBoot
 	case r.Recovery > 0:
@@ -192,6 +214,13 @@ func diskProtectionTexts(state string, r luksRecord) diskProtectionText {
 			risk:    "a forgotten passphrase means your files are lost",
 			command: []string{"luks", "recovery-key"},
 		}
+	case diskProtectionPIN:
+		return diskProtectionText{
+			summary: "Add a startup PIN",
+			body:    "Without one, the disk key can be taken out of this device.",
+			risk:    "someone who has this device and special tools can get the disk key out of its security chip",
+			command: []string{"luks", "pin"},
+		}
 	case diskProtectionUnencrypted:
 		return diskProtectionText{
 			summary: "System disk not encrypted",
@@ -204,7 +233,8 @@ func diskProtectionTexts(state string, r luksRecord) diskProtectionText {
 
 // runLUKSRemind is the login reminder (user unit disk-protection-reminder).
 // It writes the state for the bar widget and, until protection is done,
-// shows a card with Set up, Later and, on standalone installs, Don't ask.
+// shows a card with Set up (Add PIN for the PIN suggestion), Later and, on
+// standalone installs, Don't ask.
 // The labels stay short: Noctalia puts a button that does not fit onto its
 // own full-width row, where it looks like the main choice. --open runs the
 // setup right away (the bar widget's click); --refresh only updates the
@@ -231,7 +261,7 @@ func runLUKSRemind(args []string, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "ERROR: %v\n", err)
 		return 1
 	}
-	state := diskProtectionState(record, chipUnlockPossible)
+	state := diskProtectionState(record, diskcrypto.ModelTPMKind(), chipUnlockPossible)
 	if err := writeDiskProtectionState(state); err != nil {
 		fmt.Fprintf(stderr, "ERROR: %v\n", err)
 		return 1
@@ -253,7 +283,11 @@ func runLUKSRemind(args []string, stderr io.Writer) int {
 	}
 	actions := []noticeAction{}
 	if text.command != nil {
-		actions = append(actions, noticeAction{"open", "Set up"})
+		label := "Set up"
+		if state == diskProtectionPIN {
+			label = "Add PIN"
+		}
+		actions = append(actions, noticeAction{"open", label})
 	}
 	actions = append(actions, noticeAction{"later", "Later"})
 	if os.Getenv("GJALLAR_MANAGED_DEVICE") != "1" {
@@ -284,7 +318,7 @@ func runLUKSRemind(args []string, stderr io.Writer) int {
 			return 0
 		}
 		question := "Stop asking at login?\n\nWithout it, " + text.risk + "."
-		if text.command != nil {
+		if text.command != nil && state != diskProtectionPIN {
 			question += "\n\nThe shield in the bar stays until setup is done, and a click on it starts setup."
 		}
 		err := exec.CommandContext(ctx, "zenity", "--question", "--icon=dialog-warning",
