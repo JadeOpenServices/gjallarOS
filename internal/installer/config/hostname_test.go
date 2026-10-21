@@ -73,3 +73,38 @@ func TestValidateSettingsSigningKey(t *testing.T) {
 		}
 	}
 }
+
+func TestValidateTimezoneAndLocale(t *testing.T) {
+	user, err := Defaults()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, zone := range []string{"Europe/Berlin", "Etc/UTC", "UTC", "Etc/GMT+5", "Etc/GMT-14", "America/Argentina/Buenos_Aires", "America/Port-au-Prince", "EST5EDT"} {
+		u := user
+		u.Timezone = zone
+		if err := Validate(u); err != nil {
+			t.Errorf("timezone %q rejected: %v", zone, err)
+		}
+	}
+	for _, zone := range []string{`"Etc/UTC"`, "Etc/../../etc/shadow", "/etc/shadow", "Europe/", "Europe Berlin", "Europe//Berlin", "../UTC", strings.Repeat("A", 65)} {
+		u := user
+		u.Timezone = zone
+		if err := Validate(u); err == nil {
+			t.Errorf("timezone %q accepted", zone)
+		}
+	}
+	for _, locale := range []string{"en_US.UTF-8", "de_DE.UTF-8", "C.UTF-8", "C", "POSIX", "eo", "ast_ES.UTF-8", "sr_RS@latin", "ca_ES.UTF-8@valencia"} {
+		u := user
+		u.Locale = locale
+		if err := Validate(u); err != nil {
+			t.Errorf("locale %q rejected: %v", locale, err)
+		}
+	}
+	for _, locale := range []string{`"en_US.UTF-8"`, "en_US.UTF-8/UTF-8", "en US", "../en_US", "EN_us"} {
+		u := user
+		u.Locale = locale
+		if err := Validate(u); err == nil {
+			t.Errorf("locale %q accepted", locale)
+		}
+	}
+}

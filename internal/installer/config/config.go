@@ -223,6 +223,15 @@ var usernamePattern = regexp.MustCompile(`^[a-z_][a-z0-9_-]*$`)
 var hostnamePattern = regexp.MustCompile(`^[A-Za-z0-9]([A-Za-z0-9_-]{0,61}[A-Za-z0-9])?$`)
 var usbTrustTPMHandlePattern = regexp.MustCompile(`^0x810[0-9a-fA-F]{5}$`)
 
+// timezonePattern is the shape of an IANA time zone name such as
+// Europe/Berlin or Etc/GMT+5: parts of letters, digits, _, + and -, joined
+// by /. No part can be . or .., so the name stays inside the zoneinfo tree.
+var timezonePattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_+-]*(/[A-Za-z0-9_+-]+)*$`)
+
+// localePattern is the shape of a glibc locale name such as en_US.UTF-8,
+// sr_RS@latin or C.UTF-8.
+var localePattern = regexp.MustCompile(`^(C|POSIX|[a-z]{2,3}(_[A-Z]{2})?)(\.[A-Za-z0-9-]+)?(@[a-z]+)?$`)
+
 // DefaultUSBTrustTPMHandle is where the USB trust broker creates its signing
 // key on first boot. It stays clear of the handles systemd and Windows use
 // (0x81000001, 0x81000002) and the endorsement range (0x8101xxxx).
@@ -310,6 +319,12 @@ func Validate(user User) error {
 	}
 	if !hostnamePattern.MatchString(user.Hostname) {
 		return fmt.Errorf("invalid hostname: %q; use letters, digits and - (at most 63), starting and ending with a letter or digit", user.Hostname)
+	}
+	if user.Timezone != "" && (len(user.Timezone) > 64 || !timezonePattern.MatchString(user.Timezone)) {
+		return fmt.Errorf("invalid timezone: %q; use an IANA name such as Europe/Berlin or Etc/UTC", user.Timezone)
+	}
+	if user.Locale != "" && (len(user.Locale) > 64 || !localePattern.MatchString(user.Locale)) {
+		return fmt.Errorf("invalid locale: %q; use a locale name such as en_US.UTF-8", user.Locale)
 	}
 	if len(user.Editors) == 0 || len(user.Browsers) == 0 {
 		return fmt.Errorf("at least one editor and browser are required")
