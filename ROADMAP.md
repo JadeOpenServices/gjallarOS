@@ -2451,7 +2451,7 @@ Guidance (2023); kernel `Documentation/security/tpm/tpm-security.rst`;
 Phoronix and LKML on `TCG_TPM2_HMAC` off by default (6.18); Pulse Security,
 WithSecure, SCRT and NVISO write-ups on TPM sniffing.
 
-## 20. Thunderbird mail (design)
+## 20. Thunderbird mail (built)
 
 Written 2026-10-21 for Plane GJALLAROS-249. Jade asked for Thunderbird with
 good defaults (encryption keys, a modern theme, ease of use). The user sets
@@ -2521,21 +2521,58 @@ changes account setup. (5) The local AI agent reading mail data.
   running as the user can use the unlocked keys. The smart card is the
   only option that keeps the key itself off the computer. Said plainly in
   the first-run guide.
-- (3) Remote content blocked (per-sender allow kept), Simple HTML, no
-  JavaScript in mail (Thunderbird default, locked), scam detection on.
+- (3) Remote content blocked (per-sender allow kept), Simple HTML, scam
+  detection on. Mail never runs JavaScript: Thunderbird has no switch for
+  it, and policies cannot set `javascript.*` prefs anyway.
 - (4) Autoconfig over HTTPS only (ISP fetch and guess), TLS 1.2 minimum.
   Key lookups only on ask, since a lookup tells the key server who the user
   writes to.
 - (5) The AI agent's read deny list gets `**/.thunderbird/**`, next to the
   existing `.ssh`, `.gnupg` and `.password-store` lines.
 - Telemetry, data collection, promotions, in-app messages and chat are
-  locked off. Add-ons follow the Firefox scheme: catalogue pins only.
+  locked off. Add-ons will follow the Firefox scheme (catalogue pins). Until
+  the catalogue has pins, only dictionaries, languages and themes install.
 - The smart card adds pcscd. It only runs on demand (socket), and only when
   the option is on.
 
 **What stays open.** The Primary Password stays open for the whole session
 (no screen-lock timeout in Thunderbird). Logged on the security review
 page; a timeout would need upstream work (bug 1834577 covers the key cache).
+
+### Built (8a3890eb)
+
+- `apps/thunderbird/` in the app catalogue: `thunderbird-latest`, policies
+  in `/etc/thunderbird/policies/policies.json`. PrimaryPassword,
+  DisableTelemetry, DisableAppUpdate (Nix updates it), InAppNotification
+  off, `SSLVersionMin` tls1.2 (policies cannot set `security.tls.*`),
+  ExtensionSettings allows dictionary, locale and theme only.
+- Locked prefs: autoconfig HTTPS only (ISP fetch and guess), remote images
+  off, scam detection, data submission off, chat off, no remote "what's
+  new" page, start page = local guide, external GnuPG only with the smart
+  card. Presets the user can change: Simple HTML (`html_as` 3,
+  `disallow_mime_handlers` 3), no User-Agent header, no default-client
+  check.
+- Key lookups: Thunderbird already searches key servers only from the key
+  assistant or key manager, so nothing to set; the guide explains it.
+- Smart card (`thunderbirdSmartCard`, installer follow-up question,
+  `gjallarctl settings` security tier): pcscd (socket), gpg-agent with
+  pinentry-qt, `/etc/gnupg/scdaemon.conf` with `disable-ccid` and
+  `pcsc-shared` so scdaemon and OpenSC share the reader, OpenSC as a
+  security device.
+- mailto and `message/rfc822` go to Thunderbird (Home Manager mimeApps);
+  Firefox hands mailto to the system default when Thunderbird is on.
+- Nix check `checks.thunderbird`: policies, prefs, local start page with no
+  remote links, smart card parts only when on, no policies without the app.
+- Mozilla's "Know your rights" bar shows once on first start. It opens the
+  local about:rights page and is kept on purpose.
+
+VM results (e2e-fw13, 2026-10-21): rebuild rc 0; Thunderbird 157.0.1;
+policies and prefs as above; start page renders from the store in dark
+mode behind the account setup dialog; mailto and rfc822 defaults; Firefox
+mailto handler; AI deny line. Smart card off: no pcscd, no `/etc/gnupg`.
+Smart card on: pcscd.socket enabled, scdaemon.conf linked, GnuPG 2.4.9
+reads `/etc/gnupg` (`disable-ccid` set), agent and scdaemon answer, OpenSC
+module present. Not run: a real card (no reader in the VM).
 
 **Sources:** Mozilla support "Primary Password" and "OpenPGP in
 Thunderbird"; Thunderbird policy templates (policies-descriptions.ftl);
