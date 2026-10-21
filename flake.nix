@@ -236,6 +236,11 @@
           stockUdiskie = nixpkgs.legacyPackages.${system}.udiskie;
         };
 
+        kio-fuse-slow = import ./tests/nix/kio-fuse-slow.nix {
+          inherit pkgs;
+          stockKio = nixpkgs.legacyPackages.${system}.kdePackages.kio;
+        };
+
         tailscale-trust = import ./tests/nix/tailscale-trust.nix {
           inherit nixpkgs system;
           tailscaleModules = [

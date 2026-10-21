@@ -120,6 +120,17 @@ KIO 6.26 normally runs its file worker inside Dolphin. `dolphin.nix` uses
 distinguish intentional file transfers from preview reads. Both `file.so` and
 `kio_file.so` plugin names are recognized.
 
+KIO 6.26 also takes the OpenVFS mount for a fast local disk, so Dolphin reads
+the start of every file to guess its type and asks for thumbnails, and each
+read downloads an online-only file (Plane 252). `pkgs/overlays/kio.nix` adds the
+KIO 6.31 change that counts `fuse.*` mounts not backed by a `/dev/` device as
+slow: types come from the file name only and the remote preview limits apply.
+It also adds upstream 26081ad6: the file worker stops reading files on slow
+mounts to find their type. Dolphin asks the worker for files whose name gives
+no type (no extension, `.bin`), and without it those were still downloaded.
+`checks.kio-fuse-slow` tests both on a bindfs mount and says when stock KIO no
+longer needs the overlay.
+
 Build `tests/nix/kio-copy.nix` with the host's `pkgs` and pass its `bin/dolphin`
 to the fixture as `--kio-copy=/path/to/bin/dolphin` to exercise actual KIO. The
 fixture verifies the threaded failure and the separate-worker fix, without a
