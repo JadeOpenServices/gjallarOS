@@ -238,7 +238,11 @@ func runVPNStatus(stdout, stderr io.Writer) int {
 			exit += " (NOT ACTIVE: " + v.ExitNodeError + ")"
 		}
 	}
-	fmt.Fprintf(stdout, "exit node: %s\nlocal:     %s\n", exit, strings.Join(v.Bypass, " "))
+	local := strings.Join(v.Bypass, " ")
+	if local == "" {
+		local = "none"
+	}
+	fmt.Fprintf(stdout, "exit node: %s\nlocal:     %s\n", exit, local)
 	if v.Blocked != "" {
 		fmt.Fprintf(stdout, "blocked:   %s (gjallarctl vpn pause lets this network through for up to 1 hour)\n", nettrust.BlockText(v.Blocked))
 	}
