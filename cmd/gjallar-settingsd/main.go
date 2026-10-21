@@ -60,6 +60,8 @@ const introspection = `<node>
     </method>
     <method name="PairList"><arg name="pairings" type="s" direction="out"/></method>
     <method name="PairRemove"><arg name="id" type="s" direction="in"/></method>
+    <method name="PauseVPN"><arg name="pause" type="s" direction="out"/></method>
+    <method name="ResumeVPN"/>
   </interface>` + introspect.IntrospectDataString + `</node>`
 
 func main() {

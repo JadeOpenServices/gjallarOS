@@ -141,6 +141,12 @@ func (b *fakeSettingsBus) Call(_ context.Context, method string, args ...any) (s
 		offer.Code, offer.Added = "", settingsTestNow
 		b.pairs = append(b.pairs, offer)
 		return answer(offer)
+	case "PauseVPN":
+		b.asked = append(b.asked, method)
+		return answer(map[string]any{"user": "tester", "until": settingsTestNow.Add(time.Hour), "blocked": "exit-node-offline"})
+	case "ResumeVPN":
+		b.asked = append(b.asked, method)
+		return "", nil
 	case "PairList":
 		return answer(b.pairs)
 	case "PairRemove":

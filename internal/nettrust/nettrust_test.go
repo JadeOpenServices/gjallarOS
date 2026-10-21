@@ -164,7 +164,8 @@ func TestOfflineExitNodeStaysSet(t *testing.T) {
 	exit := router("exit-1", "0.0.0.0/0")
 	exit.Online = false
 	v := decide(t, Policy{ExitNode: "exit-1", RouterHome: true}, wifi("cafe-net", "", "10.30.0.0/24"), Tailnet{Running: true, Peers: []Peer{exit}}, fakeProber{})
-	if v.ExitNode != "exit-1" || len(v.Warnings) != 1 || !strings.Contains(v.Warnings[0], "offline") {
+	if v.ExitNode != "exit-1" || len(v.Warnings) != 1 || !strings.Contains(v.Warnings[0], "offline") ||
+		v.Blocked != BlockExitNodeOffline {
 		t.Fatalf("verdict = %+v", v)
 	}
 }
@@ -176,9 +177,16 @@ func TestUnmanagedPolicyKeepsLegacyBypass(t *testing.T) {
 	}
 }
 
-func TestStoppedTailscaleLeavesExitNodeAlone(t *testing.T) {
+func TestStoppedTailscaleLeavesExitNodeAloneButBlocks(t *testing.T) {
 	v := decide(t, policy, wifi("cafe", "", "172.16.0.0/16"), Tailnet{}, fakeProber{})
-	if v.Trust != TrustUntrusted || v.ManageExitNode {
+	if v.Trust != TrustUntrusted || v.ManageExitNode || v.Blocked != BlockTailscaleDown {
+		t.Fatalf("verdict = %+v", v)
+	}
+}
+
+func TestTrustedHomeIsNeverBlocked(t *testing.T) {
+	v := decide(t, policy, wifi("bakasifu-5Ghz", "wpa-psk", "192.168.8.0/24"), Tailnet{}, fakeProber{})
+	if v.Trust != TrustHome || v.Blocked != "" {
 		t.Fatalf("verdict = %+v", v)
 	}
 }
@@ -282,7 +290,10 @@ func TestTailnetWaitsForStartingTailscaled(t *testing.T) {
 	tailnetSettle = 5 * time.Second
 	defer func() { tailnetSettle = old }()
 	answers := []string{"", `{"BackendState":"Starting"}`, `{"BackendState":"Running"}`}
-	s := System{run: func(context.Context, string, ...string) ([]byte, error) {
+	s := System{run: func(_ context.Context, name string, _ ...string) ([]byte, error) {
+		if name == "systemctl" {
+			return []byte("activating\n"), errors.New("synthetic exit status 3")
+		}
 		a := answers[0]
 		answers = answers[1:]
 		if a == "" {
@@ -299,6 +310,22 @@ func TestTailnetWaitsForStartingTailscaled(t *testing.T) {
 	}}
 	if tn, _ := stopped.Tailnet(context.Background()); tn.Running {
 		t.Fatal("NeedsLogin reported running")
+	}
+	// A failed unit has no start coming: no wait at all.
+	var calls []string
+	failed := System{run: func(_ context.Context, name string, _ ...string) ([]byte, error) {
+		calls = append(calls, name)
+		if name == "systemctl" {
+			return []byte("failed\n"), errors.New("synthetic exit status 3")
+		}
+		return nil, errors.New("no tailscaled socket")
+	}}
+	begin := time.Now()
+	if tn, err := failed.Tailnet(context.Background()); err != nil || tn.Running || time.Since(begin) > time.Second {
+		t.Fatalf("failed unit: tailnet %+v, err %v after %v, calls %v", tn, err, time.Since(begin), calls)
+	}
+	if !slices.Equal(calls, []string{"tailscale", "systemctl"}) {
+		t.Fatalf("calls = %v", calls)
 	}
 }
 

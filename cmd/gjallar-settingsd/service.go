@@ -73,6 +73,10 @@ type system interface {
 	// USBArmed reports whether the stored USB trust state says blocking is
 	// armed.
 	USBArmed() (bool, error)
+	// Verdict returns root's network verdict when it is fresh.
+	Verdict() (nettrust.Verdict, bool)
+	// ReapplyVPN runs the VPN trust decision again.
+	ReapplyVPN(ctx context.Context) error
 }
 
 type service struct {
@@ -85,6 +89,11 @@ type service struct {
 	// reads it.
 	localPath string
 	readLocal func(string) (localchanges.Tree, error)
+	// pausePath is the VPN pause file; writePause and userName are
+	// nettrust.WritePause and the account lookup.
+	pausePath  string
+	writePause func(string, nettrust.Pause) error
+	userName   func(uint32) (string, error)
 
 	// keys signs and checks settings files; device is this machine's
 	// app-specific id in them. Without keys, Export and Import refuse.
@@ -106,6 +115,9 @@ func newService(sys system, checkoutPath string, checkout func(string) error) *s
 		now:          time.Now,
 		localPath:    localchanges.Path,
 		readLocal:    localchanges.ReadRoot,
+		pausePath:    nettrust.PausePath,
+		writePause:   nettrust.WritePause,
+		userName:     lookupUserName,
 		pending:      map[string]settings.Change{},
 	}
 }

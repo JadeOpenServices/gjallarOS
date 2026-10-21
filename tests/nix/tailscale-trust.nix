@@ -96,6 +96,8 @@ assert
 assert (policyOf vpn).exitNode == "home-router";
 assert (policyOf vpn).wifiExitNodes == { fizzlipuzzli = "auto"; };
 assert vpn.services.tailscale.useRoutingFeatures == "client";
+# The internet block (nettrust ApplyBlock) needs nft on the unit's path.
+assert builtins.elem pkgs.nftables vpn.systemd.services.gjallar-vpn-trust.path;
 assert !(policyOf vpn).routerHome;
 assert (policyOf routerHome).routerHome && (policyOf routerHome).homeSubnets == [ ];
 assert vpn.systemd.paths.gjallar-vpn-trust.pathConfig.Unit == "gjallar-vpn-trust.service";

@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/JadeOpenServices/gjallarOS/internal/nettrust"
 )
 
 func fakeVPNPaths(t *testing.T) (reapplied *int) {
@@ -124,5 +126,56 @@ func TestVPNOverrideNeedsRoot(t *testing.T) {
 	}
 	if _, err := os.Stat(vpnOverridePath); !os.IsNotExist(err) {
 		t.Fatal("non-root wrote an override")
+	}
+}
+
+func TestVPNPauseAsksTheService(t *testing.T) {
+	fakeVPNPaths(t)
+	bus := &fakeSettingsBus{}
+	useFakeSettings(t, bus)
+	vpnEUID = func() int { return 1000 }
+	var out, errOut bytes.Buffer
+	if code := runVPN([]string{"pause"}, &out, &errOut); code != 0 {
+		t.Fatalf("code %d: %s", code, errOut.String())
+	}
+	if len(bus.asked) != 1 || bus.asked[0] != "PauseVPN" {
+		t.Fatalf("asked %v", bus.asked)
+	}
+	if !strings.Contains(out.String(), "without the tunnel") {
+		t.Fatalf("output %q", out.String())
+	}
+	vpnEUID = func() int { return 0 }
+	if code := runVPN([]string{"pause"}, &out, &errOut); code != 1 || len(bus.asked) != 1 {
+		t.Fatalf("root pause: code %d, asked %v", code, bus.asked)
+	}
+}
+
+func TestVPNResume(t *testing.T) {
+	reapplied := fakeVPNPaths(t)
+	oldPause := nettrust.PausePath
+	t.Cleanup(func() { nettrust.PausePath = oldPause })
+	nettrust.PausePath = filepath.Join(t.TempDir(), "pause.json")
+	if err := os.WriteFile(nettrust.PausePath, []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var out, errOut bytes.Buffer
+	if code := runVPN([]string{"resume"}, &out, &errOut); code != 0 || *reapplied != 1 {
+		t.Fatalf("root resume: code %d, reapplied %d: %s", code, *reapplied, errOut.String())
+	}
+	if _, err := os.Stat(nettrust.PausePath); !os.IsNotExist(err) {
+		t.Fatalf("pause file still there: %v", err)
+	}
+	if code := runVPN([]string{"resume"}, &out, &errOut); code != 0 || *reapplied != 1 {
+		t.Fatalf("resume without a pause: code %d, reapplied %d", code, *reapplied)
+	}
+
+	bus := &fakeSettingsBus{}
+	useFakeSettings(t, bus)
+	vpnEUID = func() int { return 1000 }
+	if code := runVPN([]string{"resume"}, &out, &errOut); code != 0 || len(bus.asked) != 1 || bus.asked[0] != "ResumeVPN" {
+		t.Fatalf("user resume: code %d, asked %v", code, bus.asked)
+	}
+	if *reapplied != 1 {
+		t.Fatal("a user's resume ran the decision itself instead of the service")
 	}
 }

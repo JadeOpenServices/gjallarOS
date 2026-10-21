@@ -1664,7 +1664,7 @@ store anyway.
 5. Existing installs keep their layout and get no snapshots until they
    are reinstalled (question 19).
 
-## 16. VPN: exit node down (draft, to discuss)
+## 16. VPN: exit node down (steps 1 and 2 built)
 
 Draft written 2026-10-20 for Plane GJALLAROS-190: tell the user when the
 exit node is down and offer a pause that holds only for this network.
@@ -1753,6 +1753,119 @@ untrusted network carries the traffic in the clear (loophole 24, below).
 5. `gjallarctl vpn pause` / `gjallarctl vpn resume` for the terminal, with
    zsh completion; the bar shows the paused state.
 6. Loophole 24 fixed as above, once question 25 is answered.
+
+### Step 1: fail closed (built, branch vpn-fail-closed)
+
+Question 25 answered: `auto` blocks, and the pause is the way out. Built
+2026-10-21:
+
+- `auto` with no exit node online keeps the current exit node, else sets
+  an offline exit node (home router first), else reports "no exit node in
+  this tailnet". It never clears the exit node on an untrusted network.
+- The verdict carries `blocked`: `exit-node-offline`, `no-exit-node` or
+  `tailscale-down`. `gjallarctl vpn status` prints it in plain words.
+- Found on the way and closed with it: with Tailscale stopped, a wanted
+  exit node did nothing and the network carried the traffic in the clear.
+  That is now `tailscale-down`.
+- Backstop: while blocked, `gjallar-vpn-trust` loads the nftables table
+  `inet gjallar_vpn_block`. It drops traffic that leaves through an uplink
+  (every device with an IPv4 or IPv6 default route, not the Tailscale
+  device), in the output and forward chains. Let through: tailscaled's own
+  packets (its bypass mark), the DHCP client, the local subnets,
+  link-local and local multicast. DNS (ports 53 and 853) is dropped even
+  to the LAN. The table is swapped in one `nft -f` transaction, so there
+  is no moment without rules. The block goes away when the verdict is no
+  longer blocked, for example after `gjallarctl vpn exit-node off`.
+- VM test `tests/nix/vpn-fail-closed.nix`: headscale, one exit node, a
+  router and a client on its own LAN. It checks each blocked reason, that
+  the internet is cut and the LAN still answers, that marked packets pass
+  and that `exit-node off` lifts the block.
+
+Security pass for step 1:
+
+- **The bypass mark.** Tailscale marks its own control, DERP and
+  WireGuard sockets with 0x80000 in the 0xff0000 bits it owns
+  ([tailscale.com/util/linuxfw](https://pkg.go.dev/tailscale.com/util/linuxfw),
+  [netns_linux.go](https://github.com/tailscale/tailscale/blob/main/net/netns/netns_linux.go)).
+  Setting a mark (`SO_MARK`) needs `CAP_NET_ADMIN`, so trusting it trusts
+  root only; root can drop the table anyway. Mullvad's split tunnel
+  exempts traffic the same way, by mark
+  ([Mullvad split tunneling](https://mullvad.net/en/help/split-tunneling-with-linux-advanced)).
+- **LAN DNS.** Mullvad blocks DNS to the LAN by default in lockdown mode
+  ([Mullvad app docs](https://mintlify.com/mullvad/mullvadvpn-app/security/kill-switch)).
+  We do the same: queries to a hostile resolver say what the user looks
+  up even when nothing else leaves.
+- **DHCP is let through** by port pair, outgoing only. Root-only ports
+  (68, 546) on the source side, so a user process cannot use them.
+- **Interface names** come from `ip -j route`; anything that is not a
+  plain kernel name is refused instead of quoted into the ruleset.
+- **Open windows, recorded, not closed by step 1:**
+  - Boot: until `gjallar-vpn-trust` runs once, nothing blocks. Closing it
+    means a boot-time table before networking; that is step 3 below.
+  - A new uplink (USB tethering, a second Wi-Fi) is outside the table
+    until the dispatcher reruns the service, a second or so.
+  - Signing in to Tailscale again through the browser is blocked on an
+    untrusted network; the pause (step 2) is the way out.
+- **Default stays off.** With `exitNode = ""` (fresh installs, e2e) the
+  block is never loaded.
+
+### Step 2: notice and pause (built, branch vpn-fail-closed)
+
+Questions 23 and 24 answered: the local seat and an administrator's
+password, admins too; the pause ends on a network change, before sleep,
+on reboot, and after one hour at most. Built 2026-10-21:
+
+- **Notice.** `gjallarctl vpn notice` runs in the session at login and
+  each time `/run/gjallar/vpn-trust.json` changes
+  (`apps/tailscale/home.nix`). One notice per network join: it says which
+  network, what failed, and what a pause gives away, with "Pause VPN on
+  this network" and "Keep blocked". It closes by itself when the network
+  changes or the block ends. A network without a key (no gateway hardware
+  address) gets the notice without the pause button.
+- **Bar.** The `gjallar/vpn` noctalia plugin shows a shield while the VPN
+  blocks this network or a pause lets it through. A click pauses, or ends
+  the pause.
+- **Pause.** `gjallarctl vpn pause` asks the settings service
+  (`PauseVPN`). It checks the caller sits in a login session, asks the
+  polkit action `org.gjallaros.vpn.pause` (an administrator's password,
+  every time), checks again that the same network is still blocked, and
+  writes `/run/gjallar/vpn-pause/pause.json` for one hour. `gjallarctl
+  vpn resume` ends it without a password.
+- **Ends.** A transient timer at the end time, the sleep hook
+  `gjallar-vpn-pause-sleep`, a network change (the key no longer
+  matches), and a reboot (`/run`). `gjallarctl vpn status` prints who
+  paused it and until when.
+- VM test `tests/nix/vpn-fail-closed.nix` covers the pause: it lets the
+  network through, a new address on the uplink ends it, it runs out on
+  its own, `resume` and the sleep hook end it, and a pause without the
+  settings service is refused. Passed 2026-10-21, with `tailscale-trust`
+  still passing.
+- Trust runs no longer wait 30 s for a tailscaled that systemd reports
+  stopped or failed; that wait held up every decision, a pause among
+  them, while Tailscale was down. The block stays in place meanwhile.
+
+Security pass for step 2:
+
+- **What the pause holds to.** The network key is a hash of the device,
+  Wi-Fi name, key management, gateway address, gateway hardware address
+  and the subnets. A cloned Wi-Fi name alone does not match; any of these
+  changing ends the pause.
+- **The pause file.** `gjallar-vpn-trust` uses it only when root owns it,
+  nobody else can write it, it names this network, and it lasts at most
+  one hour from its start. Anything else counts as no pause, so a broken
+  or planted file fails closed.
+- **Who may pause.** Only a process in a login session (user units count
+  for the display session, as with polkit), and only with an
+  administrator's password. The password dialog names the network risk.
+  Ending a pause only tightens, so it needs no password.
+- **Notice text.** The Wi-Fi name is escaped before it goes into the
+  notice body; the bar shows a name with quotes or escapes as "this
+  network".
+- **Open window, recorded:** while paused, apps on that network reach the
+  internet without the tunnel. That is the point of the pause; the dialog
+  and the notice say so.
+
+Next: step 3 is the boot-time block.
 
 ## 17. Nextcloud: what syncs first on a new machine (draft, to discuss)
 

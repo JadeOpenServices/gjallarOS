@@ -39,6 +39,8 @@ const (
 
 var vpnTrustPath = "/run/gjallar/vpn-trust.json"
 
+const vpnTrustUnit = "gjallar-vpn-trust.service"
+
 // systemDiskPath is where gjallar-system-disk writes its boot check.
 var systemDiskPath = "/run/gjallar/system-disk.json"
 
@@ -163,6 +165,18 @@ func (busSystem) Network() (string, bool) {
 		return "", false
 	}
 	return verdict.Device, true
+}
+
+func (busSystem) Verdict() (nettrust.Verdict, bool) {
+	return readVerdict(vpnTrustPath, time.Now())
+}
+
+// ReapplyVPN restarts the trust decision; a run still probing the old state
+// is stale.
+func (b busSystem) ReapplyVPN(ctx context.Context) error {
+	manager := b.conn.Object("org.freedesktop.systemd1", "/org/freedesktop/systemd1")
+	var job dbus.ObjectPath
+	return manager.CallWithContext(ctx, "org.freedesktop.systemd1.Manager.RestartUnit", 0, vpnTrustUnit, "replace").Store(&job)
 }
 
 func (busSystem) Tailnet(ctx context.Context) (nettrust.Tailnet, error) {
@@ -377,6 +391,15 @@ func (o object) PairList(sender dbus.Sender) (string, *dbus.Error) {
 
 func (o object) PairRemove(sender dbus.Sender, id string) *dbus.Error {
 	return busError(o.svc.PairRemove(context.Background(), string(sender), id))
+}
+
+func (o object) PauseVPN(sender dbus.Sender) (string, *dbus.Error) {
+	state, err := o.svc.PauseVPN(context.Background(), string(sender))
+	return answer(state, err)
+}
+
+func (o object) ResumeVPN(sender dbus.Sender) *dbus.Error {
+	return busError(o.svc.ResumeVPN(context.Background(), string(sender)))
 }
 
 func answer(value any, err error) (string, *dbus.Error) {

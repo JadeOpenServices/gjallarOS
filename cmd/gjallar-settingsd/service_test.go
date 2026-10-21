@@ -40,6 +40,9 @@ type fakeSystem struct {
 	usbDisk    string
 	usbArmed   bool
 	usbErr     error
+
+	verdicts  []nettrust.Verdict
+	reapplied int
 }
 
 func (f *fakeSystem) Caller(_ context.Context, sender string) (caller, error) {
@@ -70,6 +73,22 @@ func (f *fakeSystem) NameTaken(_ context.Context, device, name string) (netip.Ad
 func (f *fakeSystem) Rebuilding(context.Context) (bool, error) { return f.rebuilding, nil }
 func (f *fakeSystem) SystemDiskOnUSB() string                  { return f.usbDisk }
 func (f *fakeSystem) USBArmed() (bool, error)                  { return f.usbArmed, f.usbErr }
+
+// Verdict hands out the queued verdicts in turn and repeats the last one.
+func (f *fakeSystem) Verdict() (nettrust.Verdict, bool) {
+	if len(f.verdicts) == 0 {
+		return nettrust.Verdict{}, false
+	}
+	v := f.verdicts[0]
+	if len(f.verdicts) > 1 {
+		f.verdicts = f.verdicts[1:]
+	}
+	return v, true
+}
+func (f *fakeSystem) ReapplyVPN(context.Context) error {
+	f.reapplied++
+	return nil
+}
 func (f *fakeSystem) StartRebuild(_ context.Context, colors string) error {
 	f.rebuilt = append(f.rebuilt, colors)
 	return nil

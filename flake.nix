@@ -239,6 +239,14 @@
           ];
         };
 
+        vpn-fail-closed = import ./tests/nix/vpn-fail-closed.nix {
+          inherit pkgs;
+          tailscaleModules = [
+            ./apps/tailscale/nixos.nix
+            ./apps/nixos-options.nix
+          ];
+        };
+
         oddc-security-flags = import ./tests/nix/oddc-security-flags.nix {
           inherit nixpkgs system;
           inherit (inputs) oddc;

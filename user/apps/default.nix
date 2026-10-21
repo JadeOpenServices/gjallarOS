@@ -5,7 +5,8 @@ let
   catalogue = lib.filterAttrs (_: app: builtins.pathExists (app.path + "/home.nix")) all;
 
   # `settings.apps` selects catalogue apps. System apps (ai, containers,
-  # nemu, tailscale) are enabled on the NixOS side; see apps/nixos-options.nix.
+  # nemu) are enabled on the NixOS side; see apps/nixos-options.nix.
+  # tailscale has both sides.
   selected = builtins.filter (id: catalogue ? ${id}) settings.apps;
 
   unknown = builtins.filter (id: !(all ? ${id})) settings.apps;

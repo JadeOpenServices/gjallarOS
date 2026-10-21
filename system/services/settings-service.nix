@@ -70,6 +70,15 @@ let
           <allow_active>auth_self</allow_active>
         </defaults>
       </action>
+      <action id="org.gjallaros.vpn.pause">
+        <description>Let this network reach the internet without the VPN for up to 1 hour</description>
+        <message>Authentication is required to let this network reach the internet without the VPN</message>
+        <defaults>
+          <allow_any>no</allow_any>
+          <allow_inactive>no</allow_inactive>
+          <allow_active>auth_admin</allow_active>
+        </defaults>
+      </action>
       <action id="org.gjallaros.settings.pair">
         <description>Pair your account with your account on another device</description>
         <message>Authentication is required to pair your account with another device</message>
@@ -195,6 +204,8 @@ lib.mkIf (settings.dotfilesDir == "/etc/gjallar/system") {
       ReadWritePaths = [
         "-/etc/gjallar/system"
         "-/etc/gjallar/developer"
+        # The VPN pause (gjallarctl vpn pause), when Tailscale is on.
+        "-/run/gjallar/vpn-pause"
       ];
       # Users' signing key records (keys/<uid>.json).
       StateDirectory = "gjallarOS/settings";

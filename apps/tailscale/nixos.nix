@@ -53,13 +53,32 @@ lib.mkIf config.gjallar.apps.tailscale.enable {
       pkgs.iproute2
       pkgs.iputils
       pkgs.networkmanager
+      pkgs.nftables
       config.services.tailscale.package
+      config.systemd.package
     ];
     # The dispatcher, tailscaled and its state file can fire in bursts.
     unitConfig.StartLimitIntervalSec = 0;
     serviceConfig = {
       Type = "oneshot";
       ExecStart = "${gjallarctl}/bin/gjallarctl vpn apply --policy ${policyFile} --override /var/lib/gjallar/vpn-trust-override.json";
+    };
+  };
+
+  # gjallarctl vpn pause: the settings service writes the pause here, and
+  # may write nothing else in /run.
+  systemd.tmpfiles.rules = [ "d /run/gjallar/vpn-pause 0755 root root -" ];
+
+  # A pause ends before the device sleeps; the block is back before it does.
+  systemd.services.gjallar-vpn-pause-sleep = {
+    description = "End the VPN pause before sleep";
+    wantedBy = [ "sleep.target" ];
+    before = [ "sleep.target" ];
+    path = [ config.systemd.package ];
+    serviceConfig = {
+      Type = "oneshot";
+      ExecStart = "${gjallarctl}/bin/gjallarctl vpn resume";
+      TimeoutStartSec = "30s";
     };
   };
 

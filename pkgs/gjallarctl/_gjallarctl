@@ -116,6 +116,9 @@ _gjallarctl_vpn() {
     'trust-wifi:trust a Wi-Fi network'
     'untrust-wifi:stop trusting a Wi-Fi network'
     'exit-node:pick the exit node'
+    'pause:let a blocked network through without the tunnel for up to 1 hour'
+    'resume:end the VPN pause now'
+    'notice:show the desktop notice when the VPN blocks a network'
     'export:print the state.nix line for these changes'
     'apply:apply a network trust policy'
   )
