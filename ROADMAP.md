@@ -1518,7 +1518,9 @@ btrbk-style retention, rollback only through recovery, no secrets and no
 `/nix` in snapshots, settings in `user.config.json`, and only new installs
 get the layout. Step 1 (installer subvolumes), step 2 (snapshot
 units, settings, rebuild snapshots) and step 3 (restoring your own
-files) are built; the VM test is open.
+files) are built and passed the VM test (2026-10-21, a new install on a
+throwaway VM). Step 4 (rollback in recovery) is built; its VM test is
+open.
 
 Today a fresh install puts everything on the top level of one encrypted
 Btrfs (no subvolumes). NixOS generations already roll back the system
@@ -1625,15 +1627,41 @@ store anyway.
    mount `@snapshots` read-only in its own mount namespace) and
    `CAP_DAC_READ_SEARCH`, and exits after two idle minutes. It checks the
    snapshot name and that the path is in the caller's home before it asks
-   the caller's password, every time. It opens the file beneath that home
-   in the snapshot with `openat2` (no symlinks, no `..`, no other mount),
-   only a regular file the caller owned, and hands back a read-only
-   descriptor. `gjallarctl` writes the copy as the user under a new name
+   the caller's password, every time. It walks to the file beneath that
+   home in the snapshot one name at a time with `openat` and
+   `O_NOFOLLOW` (no symlinks, no `..`, no other file system), opens only a
+   regular file the caller owned, and hands back a read-only descriptor.
+   `openat2` would do the walk in one call, but systemd's
+   `RestrictSUIDSGID` blocks it, and that filter stays: it stops a
+   remount from making setuid files. `gjallarctl` writes the copy as the user under a new name
    (`notes.restored-20261021T030000.txt`) and never overwrites. Folders
    are a later step: a folder descriptor would let `..` out of the home.
-4. A rollback of `@home` or `@config` runs only from the recovery boot
-   entry, offline, as a new read-write snapshot (never a read-only one made
-   writable), and keeps the replaced one as a snapshot.
+4. A rollback of `@home` or `@config` runs only in recovery: the trusted
+   recovery boot entry or the recovery partition (with the system at
+   `/mnt` from `open-root`). `gjallar-recover snapshots ROOT` lists the
+   snapshots, `gjallar-recover snapshot-rollback ROOT NAME` puts one back,
+   `gjallar-recover snapshot-drop ROOT NAME` deletes a copy a rollback
+   kept. The rollback:
+   - takes only a name of the btrbk form from the list and a snapshot that
+     is read-only, and asks a typed confirmation (`ROLLBACK-HOME`,
+     `ROLLBACK-CONFIG`);
+   - makes a new writable snapshot of it; the read-only snapshot is never
+     made writable, so it stays as it was;
+   - swaps it with the current `@home` or `@config` in one rename
+     (`RENAME_EXCHANGE`), so a power cut leaves one of the two in place,
+     never none;
+   - keeps the replaced one in `@snapshots/replaced` (0700, root only,
+     never pruned by btrbk) and makes it read-only as soon as nothing
+     mounts it;
+   - unmounts the target first; when it is in use (the recovery boot entry
+     with a signed-in user), the swap takes effect at the next start and
+     says so;
+   - lists the nested subvolumes, because a snapshot never holds them and
+     they stay with the kept copy;
+   - for `@config`, says that the settings are back but the system built
+     from them is not, so a `rebuild` follows.
+   btrbk keeps finding the older snapshots after a swap (it follows the
+   whole parent chain), so they still age out normally.
 5. Existing installs keep their layout and get no snapshots until they
    are reinstalled (question 19).
 
