@@ -123,6 +123,19 @@ func TestSnapshotsRestoreNeverOverwrites(t *testing.T) {
 	if data, _ := os.ReadFile(existing); string(data) != "SYNTHETIC kept\n" {
 		t.Fatalf("existing file changed: %q", data)
 	}
+	// With --from the name is known, so no password is asked for nothing.
+	if len(bus.asked) != 0 {
+		t.Fatalf("asked %v", bus.asked)
+	}
+	// Without --from the newest snapshot is found by the service first.
+	if err := os.WriteFile(filepath.Join(home, "notes.restored-20261021T030000.txt"), []byte("SYNTHETIC kept\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	stderr.Reset()
+	code = run([]string{"snapshots", "restore", filepath.Join(home, "notes.txt")}, &stdout, &stderr)
+	if code != 1 || !strings.Contains(stderr.String(), "already there") {
+		t.Fatalf("code %d: %s", code, stderr.String())
+	}
 }
 
 func TestSnapshotsRestoreToFolder(t *testing.T) {

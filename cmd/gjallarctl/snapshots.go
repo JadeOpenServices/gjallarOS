@@ -162,6 +162,13 @@ func snapshotsRestore(ctx context.Context, bus snapshotsBus, path, from, to stri
 	if info, err := os.Stat(dest); err != nil || !info.IsDir() {
 		return fmt.Errorf("the folder %s is not there; give one with --to FOLDER", dest)
 	}
+	// With --from the new name is known now; say so before the password.
+	if from != "" {
+		target := filepath.Join(dest, snapshots.RestoredName(filepath.Base(abs), from))
+		if _, err := os.Lstat(target); err == nil {
+			return fmt.Errorf("%s is already there; nothing was changed", target)
+		}
+	}
 
 	old, snapshot, err := bus.Restore(ctx, abs, from)
 	if err != nil {
