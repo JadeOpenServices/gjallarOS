@@ -2602,3 +2602,72 @@ module present. Not run: a real card (no reader in the VM).
 Thunderbird"; Thunderbird policy templates (policies-descriptions.ftl);
 bugzilla 1679278, 1834577, 1566458; cylab.be on Thunderbird key storage;
 GnuPG gpg-agent manual; Home Manager `programs.thunderbird`.
+
+## 21. Off-disk backup (later phase, Genbu/JODS)
+
+Moved to a later phase on 2026-10-21 (question 63): Genbu/JODS picks the
+backup server and runs it. Local snapshots (section 15) stay the only copy
+until then; they are not a backup when the disk dies.
+
+Already decided for that phase:
+
+- Key (question 64): one key per device, sealed to the TPM so the daily run
+  needs no one. It is shown once at setup, like the LUKS recovery key, for
+  paper or the password manager. A master public key can be added so JODS
+  can escrow a recovery copy.
+- Content (question 65): `@home` and `@config`, read from the newest local
+  read-only snapshot so the copy is consistent. The Nextcloud sync folder
+  is skipped (it already lives on the server). Never `@`, secrets under
+  `/var/lib` or `/nix`.
+- Timing (question 66): once a day when the server answers (home network
+  or tailnet), catching up after sleep, not on battery below 30%. A card
+  when nothing succeeded for 7 days.
+
+### Research so far
+
+- restic encrypts and authenticates everything (AES-256-CTR with
+  Poly1305-AES, scrypt for the key file). Its threat model says plainly
+  that it does not protect against deletion at the storage, and that a
+  compromised client can capture the key and steer `forget`
+  ([restic references](https://restic.readthedocs.io/en/stable/100_references.html)).
+  `rest-server --append-only` stops a client deleting, `--private-repos`
+  keeps devices apart ([rest-server](https://github.com/restic/rest-server)).
+  Pruning then needs the repository key on a trusted machine.
+- Borg's append-only mode only soft-deletes; the next normal-mode write by
+  a trusted machine makes the deletes final, and `rm` on the server still
+  works ([Borg notes](https://borgbackup.readthedocs.io/en/stable/usage/notes.html)).
+  Borg 1.2.5 fixed forged archives (CVE-2023-36811, TAM checks)
+  ([Borg changelog](https://borgbackup.readthedocs.io/en/latest/changes_1.x.html)).
+- Proxmox Backup Server encrypts on the client (AES-256-GCM), offers an RSA
+  master key for recovery and a paper key
+  ([PBS client](https://pbs.proxmox.com/docs-1/backup-client.html)). The
+  DatastoreBackup role can add and restore owned backups but not prune
+  ([PBS user management](https://pbs.proxmox.com/docs/user-management.html));
+  prune and garbage collection work on metadata on the server. The server
+  checks only a CRC on encrypted chunks
+  ([PBS technical overview](https://pbs.proxmox.com/docs/technical-overview.html)).
+  Proxmox recommends an off-site copy that pulls.
+- btrbk can send snapshots to a raw file target through GnuPG; the manual
+  marks it experimental and it sends full streams
+  ([btrbk.conf](https://www.mankier.com/5/btrbk.conf)).
+- Desktop tools: Déjà Dup uses restic, Pika Backup uses Borg; Time Machine
+  encrypts network backups with a password separate from the disk's.
+
+### Security pass (for that phase)
+
+- A device must never be able to delete or rewrite its own history: an
+  attacker with root on the device would wipe the backups first. The
+  device credential can only add and restore.
+- Pruning without handing the server the key: the server prunes from
+  metadata (PBS) or a separate trusted host prunes. A forged snapshot
+  shaped for the retention rule can push real ones out, so retention keeps
+  a time window, not a count.
+- The server must not read the data: encryption on the device, key per
+  device, nothing in the clear on the wire (TLS with a pinned server
+  certificate, like the AI endpoint).
+- What the server still sees: sizes, times, chunk counts. That is accepted.
+- The NixOS restic module runs as root without systemd hardening; we use
+  our own hardened units as for the snapshots.
+
+**Sources:** as linked above; Synology ransomware advisory and community
+threads on pull versus push.
