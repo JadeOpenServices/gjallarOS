@@ -57,10 +57,17 @@ func TestVPNNoticeText(t *testing.T) {
 	if !strings.HasPrefix(body, "Tailscale is not running.\n") || !strings.Contains(body, "cannot be paused") {
 		t.Fatalf("body %q", body)
 	}
-	// The popup shows about seven lines of 28 characters.
-	_, body = vpnNoticeText(nettrust.Verdict{Blocked: nettrust.BlockNoExitNode, Network: "synthetic-net-a", SSID: "Synthetic Cafe"})
-	if len(body) > 170 {
-		t.Fatalf("body is %d characters: %q", len(body), body)
+	// The popup cuts each line after three rows of about 33 characters.
+	for _, v := range []nettrust.Verdict{
+		{Blocked: nettrust.BlockNoExitNode, Network: "synthetic-net-a", SSID: "Synthetic Cafe Guest 5G"},
+		{Blocked: nettrust.BlockTailscaleDown},
+	} {
+		_, body = vpnNoticeText(v)
+		for _, line := range strings.Split(body, "\n") {
+			if len(line) > 80 {
+				t.Fatalf("line is %d characters: %q", len(line), line)
+			}
+		}
 	}
 }
 
