@@ -361,6 +361,10 @@ available locally" or "Free up local space". The folder settings in the
 Nextcloud window have the same two actions. Your picks stay on this device
 only; another device of yours starts with everything online-only again.
 
+If the client crashes, it starts again after ten seconds. After five starts in
+five minutes it stays off, and Quit in the tray stops it as well; open
+Nextcloud from the app menu or log in again to bring it back.
+
 <div align="right"><a href="#gjallaros">↑ back to top</a></div>
 
 ## 🧬 Hardware catalog (ODDC)
