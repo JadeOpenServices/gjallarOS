@@ -1642,6 +1642,16 @@ func prepareHost(
 	out,
 	errOut io.Writer,
 ) int {
+	// A completed GjallarOS installation is flake-owned: the flake pins the
+	// NixOS release and brings every installer prerequisite. Staging a release
+	// or rebuilding the bootstrap /etc/nixos/configuration.nix would put the
+	// machine back on its pre-install base generation, and a clean redeploy
+	// once did that under the running desktop (Plane 199). The flake
+	// deployment later in the run is the only system change on a rerun.
+	if s.existing {
+		fmt.Fprintln(out, "Existing GjallarOS installation detected; skipping /etc/nixos release and bootstrap rebuilds.")
+		return offerFirmwareUpdates(ctx, ui, s, out, errOut)
+	}
 	expected, actual, err := release.Inspect(opt.repo, "/etc/os-release")
 	if err != nil {
 		return fail(errOut, err)
@@ -1718,38 +1728,38 @@ func prepareHost(
 
 		return installerReleaseRebootScheduled
 	}
-	// A completed GjallarOS installation is flake-owned. Rebuilding the
-	// bootstrap /etc/nixos/configuration.nix on a rerun would switch the live
-	// machine back to its pre-install base generation before deploying the
-	// requested flake generation.
-	if s.existing && !opt.forceRedeploy {
-		fmt.Fprintln(out, "Existing GjallarOS installation detected; skipping /etc/nixos bootstrap rebuild.")
-	} else {
-		if s.existing && opt.forceRedeploy {
-			fmt.Fprintln(out, "Force redeployment requested; running prerequisite bootstrap despite existing-install detection.")
-		}
-		configPath := "/etc/nixos/configuration.nix"
-		data, err := os.ReadFile(configPath)
-		if err != nil {
-			return fail(errOut, err)
-		}
-		plan := bootstrap.Build(data, s.preset)
-		if len(plan.Missing) > 0 {
-			fmt.Fprintf(out, "Missing helpers/options: %s\nProposed configuration:\n%s\n", strings.Join(plan.Missing, ", "), plan.Updated)
-			if !s.user.EndpointManagedDevice && os.Getenv("GJALLAR_INSTALLER_RESUMED") != "1" {
-				yes, err := ui.Confirm(ctx, "Apply prerequisite configuration and rebuild?", false)
-				if err != nil {
-					return fail(errOut, err)
-				}
-				if !yes {
-					return fail(errOut, errors.New("required persistent prerequisites were not approved"))
-				}
-			}
-			if _, err := bootstrap.Apply(ctx, configPath, plan.Updated, time.Now()); err != nil {
+	configPath := "/etc/nixos/configuration.nix"
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return fail(errOut, err)
+	}
+	plan := bootstrap.Build(data, s.preset)
+	if len(plan.Missing) > 0 {
+		fmt.Fprintf(out, "Missing helpers/options: %s\nProposed configuration:\n%s\n", strings.Join(plan.Missing, ", "), plan.Updated)
+		if !s.user.EndpointManagedDevice && os.Getenv("GJALLAR_INSTALLER_RESUMED") != "1" {
+			yes, err := ui.Confirm(ctx, "Apply prerequisite configuration and rebuild?", false)
+			if err != nil {
 				return fail(errOut, err)
 			}
+			if !yes {
+				return fail(errOut, errors.New("required persistent prerequisites were not approved"))
+			}
+		}
+		if _, err := bootstrap.Apply(ctx, configPath, plan.Updated, time.Now()); err != nil {
+			return fail(errOut, err)
 		}
 	}
+	return offerFirmwareUpdates(ctx, ui, s, out, errOut)
+}
+
+func offerFirmwareUpdates(
+	ctx context.Context,
+	ui prompt.UI,
+	s state,
+	out,
+	errOut io.Writer,
+) int {
+	var err error
 	check := s.user.RunUpdateChecks
 	if !s.preset && os.Getenv("GJALLAR_INSTALLER_RESUMED") != "1" {
 		check, err = ui.Confirm(ctx, "Check for and install firmware updates?", false)
