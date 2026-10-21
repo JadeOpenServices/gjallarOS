@@ -1843,6 +1843,12 @@ on reboot, and after one hour at most. Built 2026-10-21:
 - Trust runs no longer wait 30 s for a tailscaled that systemd reports
   stopped or failed; that wait held up every decision, a pause among
   them, while Tailscale was down. The block stays in place meanwhile.
+- fw13 VM check 2026-10-21 (eaaf444b): the notice and the password
+  dialog fit Noctalia (the notice cuts each line after about three rows,
+  so the body is three short lines); pause from the notice and from the
+  bar, Cancel, "Keep blocked", ending the pause from the bar, a rebuild
+  during a pause (the pause survives it) and the `exit-node default`
+  undo all passed. Rows in `.vm/installer-e2e/REGRESSION.md` under VPN.
 
 Security pass for step 2:
 

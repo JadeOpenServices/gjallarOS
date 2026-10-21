@@ -720,9 +720,20 @@ when its owner allows that, so a friend's exit node works too.
 `exitNode` is a tailnet host name or 100.x address; `auto` picks an
 online exit node, preferring one that routes a home subnet; `off` keeps it off
 everywhere; empty leaves the exit node to you unless `wifiExitNodes` is set.
-An exit node that is offline stays set, so Tailscale blocks the internet
-instead of sending it around the tunnel; `gjallarctl vpn status` warns about
-it. `auto` with no exit node online leaves the internet open.
+On an untrusted network the VPN fails closed: when the exit node is offline,
+none can be set or Tailscale is not running, the internet is blocked outside
+the tunnel instead of going around it. The local network and DHCP still work;
+DNS does not, so the network cannot see what you look up. A notice says which
+side failed, and the shield in the bar shows the block.
+
+To get online anyway, for example to sign in to a captive portal or to
+Tailscale again, pause the VPN on that network from the notice, the bar or
+`gjallarctl vpn pause`. It asks for an administrator's password every time and
+ends after one hour, on a network change, before sleep or on a restart, or
+when you click the shield again (`gjallarctl vpn resume`). While paused, the
+network sees where apps connect. `gjallarctl vpn status` shows the block or
+the pause.
+
 LAN access stays on while an exit node is active so captive portals and
 printers keep working. DNS then goes to the exit node, so a home router's
 filtering also applies away from home unless the tailnet's admin console
