@@ -903,12 +903,12 @@ way to root.
       `gjallarctl settings` front end (3.3, 887c1c5b) and the unique
       hostname check, signed export and import for the device's own users
       (3.4a), key wipe on user removal (3.4b), pairing two devices of one
-      person with a file each way and a code (3.4c, fbf8cc67), and the
-      user-side writers (add-ons, USB review, Secure Boot) asking the
-      service on a system checkout, with each inner value of a change
-      listed (3.5, e511f5cb).
-      Next: own keys (3.4d, `ssh-keygen -Y`) and the installer opt-out
-      (rest of 3.4). Factory reset waits for a recovery mode that does one.
+      person with a file each way and a code (3.4c, fbf8cc67), own
+      OpenSSH keys with the installer question (3.4d, 46a02b61, fw13 VM
+      passed), and the user-side writers (add-ons, USB review, Secure
+      Boot) asking the service on a system checkout, with each inner value
+      of a change listed (3.5, e511f5cb).
+      Next: factory reset waits for a recovery mode that does one.
 - [x] **Checkpoint 3b: developer mode.** `~/GjallarOS-local/`, the copy
       into `/etc/gjallar/developer/local`, the staged `.gjallar-local/`, notice,
       boot entry name and the recovery exit. Steps: 3b.1 the
@@ -1392,13 +1392,17 @@ How others do it:
 - **Key changes.** When the other device's host key changes (a cleared
   TPM), its files no longer import here; pair again.
 
-**Own key (3.4d).**
+**Own key (3.4d, done 46a02b61).**
 
-- The installer asks "Let GjallarOS manage signing keys (recommended)".
-  No: the user gives an OpenSSH public key (`ssh-ed25519` or
-  `sk-ssh-ed25519@openssh.com`). That key is then the only signer for that
-  user: no managed key, no pairing. It can be set or changed later with
-  the password (critical tier).
+- The installer asks "Let GjallarOS sign your settings files for you?"
+  (recommended). No: the user gives an OpenSSH public key line
+  (`ssh-ed25519` or `sk-ssh-ed25519@openssh.com`), checked before the
+  interview goes on. It is stored as `settingsSigningKey` (critical tier,
+  device scope) and belongs to the account named by `username`. That key
+  is then the only signer for that account: managed files and pairing are
+  refused. It can be set, changed or cleared later with the password and
+  the hour's wait; the change says what it does to export, import and
+  pairing.
 - Export writes the settings without a signature, under its own magic
   line (`gjallaros-settings-ssh-v1`). The user signs it:
   `ssh-keygen -Y sign -n gjallaros-settings -f KEY FILE` gives `FILE.sig`.
@@ -1408,6 +1412,11 @@ How others do it:
   line is written by the service from a parsed key only: comment dropped,
   `namespaces="gjallaros-settings"`, never `no-touch-required`. Only then
   is the payload parsed, with the same strict parser.
+- `gjallarctl settings export FILE` prints the `ssh-keygen` line to run;
+  `gjallarctl settings import FILE` reads `FILE.sig` next to it and fails
+  with that line when it is missing. The change shows the key's SHA256
+  fingerprint and where the file was made. A file made on another device
+  leaves out `scope:"device"` keys, as from a paired device.
 - OpenSSH's own code checks the signature, so no new Go dependency
   (`golang.org/x/crypto` has no sshsig).
 

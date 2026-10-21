@@ -244,6 +244,23 @@ your account, and refuses a file that was changed after it was made. It
 asks for the change the way `set` does, with the same tiers and waits, and
 says how old the file is.
 
+To sign these files with your own OpenSSH key instead (an `ssh-ed25519` key
+file or a FIDO `sk-ssh-ed25519` key), answer No to "Let GjallarOS sign your
+settings files for you?" in the installer, or set `settingsSigningKey` to
+your public key line later (critical tier). Export then writes a file you
+sign yourself, and import needs that signature next to the file:
+
+```sh
+gjallarctl settings export ~/settings.gjallar
+ssh-keygen -Y sign -n gjallaros-settings -f ~/.ssh/id_ed25519 ~/settings.gjallar
+gjallarctl settings import ~/settings.gjallar
+```
+
+The second line writes `~/settings.gjallar.sig`. With an own key, only that
+key counts for your account: files GjallarOS signed are refused, and pairing
+is off. A file made on another device brings your personal settings, not
+that device's (hostname, disk, boot and the like).
+
 ### App catalogue
 
 Optional applications live in `apps/<id>/`: `meta.json` (name, description,
