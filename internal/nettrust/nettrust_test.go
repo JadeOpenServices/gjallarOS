@@ -384,3 +384,21 @@ func TestWriteStatusSkipsUnchanged(t *testing.T) {
 		t.Fatalf("changed verdict not written: %v", err)
 	}
 }
+
+func TestMayBlockOnlyWhenAnExitNodeIsWanted(t *testing.T) {
+	for _, tc := range []struct {
+		p    Policy
+		want bool
+	}{
+		{Policy{}, false},
+		{Policy{ExitNode: ExitNodeOff, TrustedWifis: []string{"home"}, RouterHome: true}, false},
+		{Policy{ExitNode: ExitNodeAuto}, true},
+		{Policy{ExitNode: "exit"}, true},
+		{Policy{WifiExitNodes: map[string]string{"home": ""}}, false},
+		{Policy{ExitNode: ExitNodeOff, WifiExitNodes: map[string]string{"home": ExitNodeOff, "work": "exit"}}, true},
+	} {
+		if got := tc.p.MayBlock(); got != tc.want {
+			t.Errorf("%+v: MayBlock = %v", tc.p, got)
+		}
+	}
+}

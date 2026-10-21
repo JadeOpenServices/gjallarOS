@@ -52,10 +52,79 @@ func TestBlockRulesRefuseOddInterfaceNames(t *testing.T) {
 	}
 }
 
+// tempBlockPaths points the rules file and the boot marker into a test dir.
+func tempBlockPaths(t *testing.T) {
+	dir := t.TempDir()
+	oldRules, oldMarker := blockRulesPath, BootBlockPath
+	blockRulesPath = filepath.Join(dir, "vpn-block.nft")
+	BootBlockPath = filepath.Join(dir, "vpn-boot-block")
+	t.Cleanup(func() { blockRulesPath, BootBlockPath = oldRules, oldMarker })
+}
+
+func TestBootBlockRulesKeepOnlyLoopbackAndTheTunnel(t *testing.T) {
+	rules := bootBlockRules()
+	for _, want := range []string{
+		"table inet gjallar_vpn_block {}\ndelete table inet gjallar_vpn_block\n",
+		"\t\toifname \"lo\" accept\n\t\toifname \"tailscale*\" accept\n",
+		"elements = { 169.254.0.0/16, 224.0.0.0/24, 255.255.255.255 }",
+		"elements = { fe80::/10, ff02::/16 }",
+		"meta mark & 0xff0000 == 0x80000 accept",
+		"udp sport 68 udp dport 67 accept",
+		"udp sport 546 udp dport 547 accept",
+	} {
+		if !strings.Contains(rules, want) {
+			t.Errorf("rules lack %q:\n%s", want, rules)
+		}
+	}
+	// No uplink set: every other interface is an uplink at boot.
+	if strings.Contains(rules, "uplinks") {
+		t.Errorf("boot rules name uplinks:\n%s", rules)
+	}
+	if strings.Count(rules, "th dport { 53, 853 } counter drop\n\t\tip daddr @lan4 accept") != 2 ||
+		strings.Count(rules, "\t\tcounter drop\n\t}") != 2 || strings.Count(rules, "meta mark") != 1 {
+		t.Errorf("chains differ from the verdict table:\n%s", rules)
+	}
+}
+
+func TestApplyBootBlockLeavesAMarkerTheVerdictRemoves(t *testing.T) {
+	tempBlockPaths(t)
+	var calls []string
+	s := System{run: func(_ context.Context, name string, args ...string) ([]byte, error) {
+		calls = append(calls, name+" "+strings.Join(args, " "))
+		return []byte(`[{"dev":"wlan0"}]`), nil
+	}}
+	if err := s.ApplyBootBlock(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(calls, []string{"nft -f " + blockRulesPath, "nft list chain inet gjallar_vpn_block output"}) {
+		t.Fatalf("calls = %q", calls)
+	}
+	if _, err := os.Stat(BootBlockPath); err != nil {
+		t.Fatalf("no marker: %v", err)
+	}
+	if err := s.ApplyBlock(context.Background(), wifi("cafe", "", "172.16.5.0/24"), true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(BootBlockPath); !os.IsNotExist(err) {
+		t.Fatalf("marker left after a verdict: %v", err)
+	}
+}
+
+func TestApplyBootBlockWritesNoMarkerOnFailure(t *testing.T) {
+	tempBlockPaths(t)
+	s := System{run: func(context.Context, string, ...string) ([]byte, error) {
+		return nil, errors.New("nft failed")
+	}}
+	if err := s.ApplyBootBlock(context.Background()); err == nil {
+		t.Fatal("no error")
+	}
+	if _, err := os.Stat(BootBlockPath); !os.IsNotExist(err) {
+		t.Fatalf("marker without a table: %v", err)
+	}
+}
+
 func TestApplyBlockCoversEveryDefaultRoute(t *testing.T) {
-	old := blockRulesPath
-	blockRulesPath = filepath.Join(t.TempDir(), "vpn-block.nft")
-	defer func() { blockRulesPath = old }()
+	tempBlockPaths(t)
 	var calls []string
 	s := System{run: func(_ context.Context, name string, args ...string) ([]byte, error) {
 		call := name + " " + strings.Join(args, " ")
@@ -81,6 +150,7 @@ func TestApplyBlockCoversEveryDefaultRoute(t *testing.T) {
 }
 
 func TestApplyBlockRemovesOnlyAnInstalledTable(t *testing.T) {
+	tempBlockPaths(t)
 	var calls []string
 	installed := false
 	s := System{run: func(_ context.Context, name string, args ...string) ([]byte, error) {
@@ -94,8 +164,12 @@ func TestApplyBlockRemovesOnlyAnInstalledTable(t *testing.T) {
 		t.Fatalf("absent: calls = %q, %v", calls, err)
 	}
 	installed, calls = true, nil
+	os.WriteFile(BootBlockPath, nil, 0644)
 	if err := s.ApplyBlock(context.Background(), nil, false); err != nil ||
 		!slices.Equal(calls, []string{"nft list table inet gjallar_vpn_block", "nft delete table inet gjallar_vpn_block"}) {
 		t.Fatalf("installed: calls = %q, %v", calls, err)
+	}
+	if _, err := os.Stat(BootBlockPath); !os.IsNotExist(err) {
+		t.Fatalf("boot marker left after the table went: %v", err)
 	}
 }

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -177,5 +178,86 @@ func TestVPNResume(t *testing.T) {
 	}
 	if *reapplied != 1 {
 		t.Fatal("a user's resume ran the decision itself instead of the service")
+	}
+}
+
+func TestVPNBootBlock(t *testing.T) {
+	fakeVPNPaths(t)
+	old := vpnBootBlock
+	t.Cleanup(func() { vpnBootBlock = old })
+	blocked := 0
+	vpnBootBlock = func(context.Context) error { blocked++; return nil }
+	run := func(policy string) string {
+		t.Helper()
+		var out, errOut bytes.Buffer
+		args := []string{"boot-block", "--policy", policy, "--override", vpnOverridePath}
+		if code := runVPN(args, &out, &errOut); code != 0 {
+			t.Fatalf("code %d: %s", code, errOut.String())
+		}
+		return out.String() + errOut.String()
+	}
+
+	if out := run(vpnPolicyPath); blocked != 0 || !strings.Contains(out, "already checked") {
+		t.Fatalf("with a verdict: blocked %d, %q", blocked, out)
+	}
+	os.Remove(vpnStatusPath)
+	if out := run(vpnPolicyPath); blocked != 1 || !strings.Contains(out, nettrust.BootBlockText) {
+		t.Fatalf("exit node wanted: blocked %d, %q", blocked, out)
+	}
+
+	off := filepath.Join(t.TempDir(), "off.json")
+	os.WriteFile(off, []byte(`{"homeSubnets":[],"trustedWifis":["home"],"exitNode":"off"}`), 0o644)
+	if out := run(off); blocked != 1 || !strings.Contains(out, "no boot block") {
+		t.Fatalf("exit node off: blocked %d, %q", blocked, out)
+	}
+
+	// The override turns the exit node off, and a broken one is ignored.
+	os.MkdirAll(filepath.Dir(vpnOverridePath), 0o755)
+	os.WriteFile(vpnOverridePath, []byte(`{"exitNode":"off"}`), 0o644)
+	if out := run(vpnPolicyPath); blocked != 1 || !strings.Contains(out, "no boot block") {
+		t.Fatalf("override off: blocked %d, %q", blocked, out)
+	}
+	os.WriteFile(vpnOverridePath, []byte(`{`), 0o644)
+	if out := run(vpnPolicyPath); blocked != 2 || !strings.Contains(out, "ignoring override") {
+		t.Fatalf("broken override: blocked %d, %q", blocked, out)
+	}
+
+	// A policy that cannot be read may want an exit node.
+	if out := run(filepath.Join(t.TempDir(), "missing.json")); blocked != 3 || !strings.Contains(out, "blocking anyway") {
+		t.Fatalf("no policy: blocked %d, %q", blocked, out)
+	}
+
+	vpnEUID = func() int { return 1000 }
+	var out, errOut bytes.Buffer
+	if code := runVPN([]string{"boot-block", "--policy", vpnPolicyPath}, &out, &errOut); code != 1 || blocked != 3 {
+		t.Fatalf("as a user: code %d, blocked %d", code, blocked)
+	}
+}
+
+func TestVPNStatusReportsTheBootBlock(t *testing.T) {
+	fakeVPNPaths(t)
+	old := nettrust.BootBlockPath
+	t.Cleanup(func() { nettrust.BootBlockPath = old })
+	nettrust.BootBlockPath = filepath.Join(t.TempDir(), "vpn-boot-block")
+	status := func() (int, string) {
+		var out, errOut bytes.Buffer
+		code := runVPN([]string{"status"}, &out, &errOut)
+		return code, out.String() + errOut.String()
+	}
+
+	if _, out := status(); strings.Contains(out, nettrust.BootBlockText) {
+		t.Fatalf("boot block without a marker:\n%s", out)
+	}
+	os.WriteFile(nettrust.BootBlockPath, nil, 0o644)
+	if code, out := status(); code != 0 || !strings.Contains(out, "network:   untrusted") || !strings.Contains(out, nettrust.BootBlockText) {
+		t.Fatalf("offline verdict, boot table left:\n%s", out)
+	}
+	os.Remove(vpnStatusPath)
+	if code, out := status(); code != 0 || !strings.Contains(out, "not checked yet") || !strings.Contains(out, nettrust.BootBlockText) {
+		t.Fatalf("no verdict yet:\n%s", out)
+	}
+	os.Remove(nettrust.BootBlockPath)
+	if code, _ := status(); code != 1 {
+		t.Fatal("no verdict and no boot block is not an error")
 	}
 }

@@ -1800,8 +1800,8 @@ Security pass for step 1:
 - **Interface names** come from `ip -j route`; anything that is not a
   plain kernel name is refused instead of quoted into the ruleset.
 - **Open windows, recorded, not closed by step 1:**
-  - Boot: until `gjallar-vpn-trust` runs once, nothing blocks. Closing it
-    means a boot-time table before networking; that is step 3 below.
+  - Boot: until `gjallar-vpn-trust` runs once, nothing blocks. Closed by
+    step 3 below.
   - A new uplink (USB tethering, a second Wi-Fi) is outside the table
     until the dispatcher reruns the service, a second or so.
   - Signing in to Tailscale again through the browser is blocked on an
@@ -1871,7 +1871,75 @@ Security pass for step 2:
   internet without the tunnel. That is the point of the pause; the dialog
   and the notice say so.
 
-Next: step 3 is the boot-time block.
+### Step 3: block from boot until the first check (built, branch t190s3)
+
+Until `gjallar-vpn-trust` ran once after boot, nothing blocked: the window
+from network up to the first check, and longer if the service never ran.
+Built 2026-10-22:
+
+- `gjallar-vpn-boot-block` runs before `network-pre.target`, without
+  default dependencies, from `sysinit.target`, like the NixOS iptables
+  firewall. It runs `gjallarctl vpn boot-block`, which loads the same
+  table `inet gjallar_vpn_block`, with nothing let out but loopback, the
+  Tailscale device, tailscaled's own marked packets and the DHCP client.
+  Local subnets are not known yet, so the LAN is blocked too; link-local
+  and local multicast pass.
+- It writes the marker `/run/gjallar/vpn-boot-block`. The first verdict
+  of `gjallar-vpn-trust` swaps the table in one transaction (blocked) or
+  deletes it (not blocked), and removes the marker either way. A check
+  with no network yet keeps the table.
+- `gjallarctl vpn status` before the first check prints "not checked yet"
+  and names the boot block and `systemctl status gjallar-vpn-trust`.
+- No boot block when the policy wants no exit node (`exitNode = ""`, the
+  default, and e2e) or when a verdict already exists (a rebuild on a
+  running system). A policy file that does not load blocks anyway; a
+  broken override is ignored.
+- `networking.nftables.flushRuleset` would delete the table when
+  `nftables.service` starts, so an assertion refuses that combination.
+- VM test `tests/nix/vpn-fail-closed.nix`: the unit finished before
+  `network-pre.target`; with the trust service held back, only the tunnel
+  carries the internet and the LAN is cut, marked packets pass; the first
+  verdict lifts the block and status no longer says "not checked yet".
+  `tailscale-trust` checks the unit wiring and that it is absent without
+  an exit node. Passed 2026-10-22.
+
+How others handle it:
+
+- Mullvad ships `mullvad-early-boot-blocking.service`, ordered before
+  `network-pre.target` with `DefaultDependencies=no`, which blocks all
+  traffic until the daemon takes over
+  ([unit file](https://raw.githubusercontent.com/mullvad/mullvadvpn-app/main/dist-assets/linux/mullvad-early-boot-blocking.service)).
+  Its lockdown mode blocks the LAN too unless "allow LAN" is on
+  ([kill switch docs](https://mintlify.com/mullvad/mullvadvpn-app/security/kill-switch)).
+  NixOS packages it as `services.mullvad-vpn.enableEarlyBootBlocking`,
+  off by default.
+- ProtonVPN's permanent kill switch keeps its rules across reboots, so a
+  machine stays offline until the app connects; users who uninstall the
+  app without turning it off are left with no network
+  ([Fedora discussion](https://discussion.fedoraproject.org/t/how-to-proton-vpn-killswitch-stuck-on-a-solution/75457),
+  [System76](https://support.system76.com/articles/fix-pvpn-killswitch)).
+  Ours lives in `/run` and comes from the policy, so turning the exit
+  node off and rebuilding removes it.
+- `network-pre.target` is the point firewalls order before
+  ([freedesktop bug 79600](https://bugs.freedesktop.org/show_bug.cgi?id=79600)).
+
+Security pass for step 3:
+
+- **Fails closed when the trust service never runs.** The table stays
+  until a verdict replaces it; there is no timeout that opens it.
+- **The marker only reports.** Nothing reads it to decide on the block,
+  so a planted or deleted marker changes the status text, not the rules;
+  `/run/gjallar` is root-only.
+- **The LAN at boot.** Blocked like Mullvad without "allow LAN". The first
+  check opens the local subnets it can prove, a few seconds after the
+  network is up.
+- **Policy errors.** A policy that does not load blocks; a broken
+  override is ignored, so neither can switch the boot block off.
+- **Open windows, recorded:** a new uplink after the first check is still
+  outside the table until the dispatcher reruns the service (step 1);
+  with no exit node set there is no block at all, by design.
+
+Next: fw13 VM check of step 3, then merge.
 
 ## 17. Nextcloud: what downloads first on a new machine (done)
 

@@ -60,6 +60,21 @@ func (p Policy) Managed() bool {
 	return len(p.TrustedWifis) > 0 || p.ExitNode != "" || len(p.WifiExitNodes) > 0 || p.RouterHome || p.SiteRouterTrust
 }
 
+// MayBlock reports whether some network can end up Blocked: an exit node
+// is wanted on untrusted networks or on a trusted Wi-Fi.
+func (p Policy) MayBlock() bool {
+	wants := func(choice string) bool { return choice != "" && choice != ExitNodeOff }
+	if wants(p.ExitNode) {
+		return true
+	}
+	for _, node := range p.WifiExitNodes {
+		if wants(node) {
+			return true
+		}
+	}
+	return false
+}
+
 func LoadPolicy(path string) (Policy, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {

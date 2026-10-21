@@ -104,6 +104,29 @@ assert vpn.systemd.paths.gjallar-vpn-trust.pathConfig.Unit == "gjallar-vpn-trust
 assert builtins.elem "timers.target" vpn.systemd.timers.gjallar-vpn-trust.wantedBy;
 assert nixpkgs.lib.hasInfix "restart --no-block gjallar-vpn-trust.service"
   vpn.systemd.services.tailscaled.postStart;
+# The boot block runs before networking with the policy the verdict uses,
+# and a rebuild never runs it under a running system.
+assert
+  let
+    boot = vpn.systemd.services.gjallar-vpn-boot-block;
+  in
+  boot.unitConfig.DefaultDependencies == false
+  && builtins.elem "sysinit.target" boot.wantedBy
+  && builtins.all (u: builtins.elem u boot.before) [
+    "network-pre.target"
+    "gjallar-vpn-trust.service"
+    "sysinit.target"
+  ]
+  && !boot.restartIfChanged
+  && builtins.elem pkgs.nftables boot.path
+  &&
+    builtins.unsafeDiscardStringContext boot.serviceConfig.ExecStart
+    ==
+      builtins.unsafeDiscardStringContext (
+        builtins.replaceStrings [ "vpn apply" ] [ "vpn boot-block" ]
+          vpn.systemd.services.gjallar-vpn-trust.serviceConfig.ExecStart
+      );
 assert !off.services.tailscale.enable;
 assert !(off.systemd.services ? gjallar-vpn-trust);
+assert !(off.systemd.services ? gjallar-vpn-boot-block);
 pkgs.runCommand "gjallar-tailscale-trust-check" { } "touch $out"

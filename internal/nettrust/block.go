@@ -19,6 +19,10 @@ const BlockTable = "gjallar_vpn_block"
 // blockRulesPath holds the last ruleset handed to nft.
 var blockRulesPath = "/run/gjallar/vpn-block.nft"
 
+// BootBlockPath marks that the boot table is still in place: no verdict
+// has replaced it since boot. Anyone may read it; it only reports.
+var BootBlockPath = "/run/gjallar/vpn-boot-block"
+
 // Kernel interface names; anything else is refused instead of quoted.
 var ifaceName = regexp.MustCompile(`^[A-Za-z0-9_.@-]{1,15}$`)
 
@@ -34,6 +38,9 @@ func BlockText(reason string) string {
 	}
 	return reason
 }
+
+// BootBlockText explains the boot table.
+const BootBlockText = "internet outside the tunnel is blocked until the first network check since boot"
 
 // BlockCause is the first half of BlockText as a sentence, for places with
 // little room: "Tailscale is not running."
@@ -60,6 +67,23 @@ func blockRules(uplinks []string, subnets []netip.Prefix) (string, error) {
 		}
 		quoted = append(quoted, `"`+dev+`"`)
 	}
+	set := fmt.Sprintf("\tset uplinks {\n\t\ttype ifname\n\t\telements = { %s }\n\t}\n", strings.Join(quoted, ", "))
+	return blockTable(set, []string{"oifname != @uplinks accept"}, subnets), nil
+}
+
+// bootBlockRules is the table installed at boot, before any network is up
+// and before the first verdict: the uplinks and the LAN are not known yet,
+// so everything but loopback and the tunnel is blocked, as in blockRules
+// with no local subnet. It has the table name of blockRules, so the first
+// verdict replaces or removes it in one step.
+func bootBlockRules() string {
+	return blockTable("", []string{`oifname "lo" accept`, `oifname "tailscale*" accept`}, nil)
+}
+
+// blockTable writes the block table: set holds extra set definitions and
+// pass the first rules of each chain, the traffic that never counts as
+// leaving through an uplink.
+func blockTable(set string, pass []string, subnets []netip.Prefix) string {
 	lan4 := []string{"169.254.0.0/16", "224.0.0.0/24", "255.255.255.255"}
 	lan6 := []string{"fe80::/10", "ff02::/16"}
 	for _, prefix := range subnets {
@@ -75,12 +99,14 @@ func blockRules(uplinks []string, subnets []netip.Prefix) (string, error) {
 	// the swap is one transaction: there is never a moment without rules.
 	fmt.Fprintf(&b, "table inet %s {}\ndelete table inet %s\n", BlockTable, BlockTable)
 	fmt.Fprintf(&b, "table inet %s {\n", BlockTable)
-	fmt.Fprintf(&b, "\tset uplinks {\n\t\ttype ifname\n\t\telements = { %s }\n\t}\n", strings.Join(quoted, ", "))
+	b.WriteString(set)
 	fmt.Fprintf(&b, "\tset lan4 {\n\t\ttype ipv4_addr\n\t\tflags interval\n\t\tauto-merge\n\t\telements = { %s }\n\t}\n", strings.Join(lan4, ", "))
 	fmt.Fprintf(&b, "\tset lan6 {\n\t\ttype ipv6_addr\n\t\tflags interval\n\t\tauto-merge\n\t\telements = { %s }\n\t}\n", strings.Join(lan6, ", "))
 	for _, chain := range []string{"output", "forward"} {
 		fmt.Fprintf(&b, "\tchain %s {\n\t\ttype filter hook %s priority filter; policy accept;\n", chain, chain)
-		b.WriteString("\t\toifname != @uplinks accept\n")
+		for _, rule := range pass {
+			b.WriteString("\t\t" + rule + "\n")
+		}
 		if chain == "output" {
 			// Only root can set this mark or bind the DHCP client ports.
 			fmt.Fprintf(&b, "\t\tmeta mark & 0x%x == 0x%x accept\n", tailscaleFwmarkMask, tailscaleBypassMark)
@@ -93,7 +119,7 @@ func blockRules(uplinks []string, subnets []netip.Prefix) (string, error) {
 		b.WriteString("\t\tcounter drop\n\t}\n")
 	}
 	b.WriteString("}\n")
-	return b.String(), nil
+	return b.String()
 }
 
 // parseDefaultDevices lists the devices of every default route, outside
@@ -120,10 +146,12 @@ func parseDefaultDevices(data []byte) ([]string, error) {
 func (s System) ApplyBlock(ctx context.Context, n *Network, block bool) error {
 	if !block {
 		if _, err := s.run(ctx, "nft", "list", "table", "inet", BlockTable); err != nil {
-			return nil // not installed
+			return clearBootBlock() // not installed
 		}
-		_, err := s.run(ctx, "nft", "delete", "table", "inet", BlockTable)
-		return err
+		if _, err := s.run(ctx, "nft", "delete", "table", "inet", BlockTable); err != nil {
+			return err
+		}
+		return clearBootBlock()
 	}
 	uplinks := []string{n.Device}
 	for _, family := range []string{"-4", "-6"} {
@@ -145,6 +173,22 @@ func (s System) ApplyBlock(ctx context.Context, n *Network, block bool) error {
 	if err != nil {
 		return err
 	}
+	if err := s.loadBlock(ctx, rules); err != nil {
+		return err
+	}
+	return clearBootBlock()
+}
+
+// ApplyBootBlock installs the boot table and the marker that reports it.
+func (s System) ApplyBootBlock(ctx context.Context) error {
+	if err := s.loadBlock(ctx, bootBlockRules()); err != nil {
+		return err
+	}
+	return os.WriteFile(BootBlockPath, nil, 0644)
+}
+
+// loadBlock hands rules to nft and checks the table is there.
+func (s System) loadBlock(ctx context.Context, rules string) error {
 	if err := os.MkdirAll(filepath.Dir(blockRulesPath), 0755); err != nil {
 		return err
 	}
@@ -154,6 +198,14 @@ func (s System) ApplyBlock(ctx context.Context, n *Network, block bool) error {
 	if _, err := s.run(ctx, "nft", "-f", blockRulesPath); err != nil {
 		return err
 	}
-	_, err = s.run(ctx, "nft", "list", "chain", "inet", BlockTable, "output")
+	_, err := s.run(ctx, "nft", "list", "chain", "inet", BlockTable, "output")
 	return err
+}
+
+// clearBootBlock removes the marker once a verdict owns the table.
+func clearBootBlock() error {
+	if err := os.Remove(BootBlockPath); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
 }

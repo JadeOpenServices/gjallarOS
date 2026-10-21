@@ -26,6 +26,10 @@ var (
 	}
 	vpnEUID = os.Geteuid
 	vpnNow  = time.Now
+	// vpnBootBlock installs the boot table.
+	vpnBootBlock = func(ctx context.Context) error {
+		return nettrust.NewSystem().ApplyBootBlock(ctx)
+	}
 	// vpnPauseTimer runs the trust decision again when a pause runs out.
 	vpnPauseTimer = func(after time.Duration) error {
 		exec.Command("systemctl", "stop", "gjallar-vpn-pause-end.timer").Run()
@@ -49,7 +53,10 @@ const vpnUsage = `usage: gjallarctl vpn status
        gjallarctl vpn notice               the desktop notice when the VPN blocks
                                            a network (runs in the session)
        gjallarctl vpn export               print the state.nix line for these changes
-       gjallarctl vpn apply --policy FILE [--override FILE]`
+       gjallarctl vpn apply --policy FILE [--override FILE]
+       gjallarctl vpn boot-block --policy FILE [--override FILE]
+                                           at boot, block the internet outside the
+                                           tunnel until the first network check`
 
 func runVPN(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
@@ -59,6 +66,8 @@ func runVPN(args []string, stdout, stderr io.Writer) int {
 	switch args[0] {
 	case "apply":
 		return runVPNApply(args[1:], stdout, stderr)
+	case "boot-block":
+		return runVPNBootBlock(args[1:], stdout, stderr)
 	case "status":
 		return runVPNStatus(stdout, stderr)
 	case "trust-wifi", "untrust-wifi", "exit-node":
@@ -178,6 +187,62 @@ func runVPNApply(args []string, stdout, stderr io.Writer) int {
 	return code
 }
 
+// runVPNBootBlock runs before networking starts. When the policy can ask
+// for an exit node, nothing may leave outside the tunnel until the first
+// verdict has looked at the network; that verdict replaces the table or
+// removes it.
+func runVPNBootBlock(args []string, stdout, stderr io.Writer) int {
+	flags := flag.NewFlagSet("vpn boot-block", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	policyPath := flags.String("policy", "", "network trust policy JSON")
+	overridePath := flags.String("override", "", "runtime override JSON layered over the policy")
+	if err := flags.Parse(args); err != nil {
+		return 2
+	}
+	if *policyPath == "" {
+		fmt.Fprintln(stderr, "ERROR: --policy is required")
+		return 2
+	}
+	if vpnEUID() != 0 {
+		fmt.Fprintln(stderr, "ERROR: gjallarctl vpn boot-block changes the firewall and must run as root")
+		return 1
+	}
+	// /run is empty at boot. A verdict here means the system is already
+	// up, and its table is the right one.
+	if _, err := os.Stat(vpnStatusPath); err == nil {
+		fmt.Fprintln(stdout, "VPN: the network is already checked; no boot block")
+		return 0
+	}
+
+	policy, err := nettrust.LoadPolicy(*policyPath)
+	if err != nil {
+		// The policy may want an exit node; the block stays until it can
+		// be read.
+		fmt.Fprintf(stderr, "WARN: %v; blocking anyway\n", err)
+	} else {
+		if *overridePath != "" {
+			if override, err := nettrust.LoadOverride(*overridePath); err != nil {
+				fmt.Fprintf(stderr, "WARN: ignoring override: %v\n", err)
+			} else {
+				policy = override.Apply(policy)
+			}
+		}
+		if !policy.MayBlock() {
+			fmt.Fprintln(stdout, "VPN: no exit node is required; no boot block")
+			return 0
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := vpnBootBlock(ctx); err != nil {
+		fmt.Fprintf(stderr, "ERROR: apply boot block: %v\n", err)
+		return 1
+	}
+	fmt.Fprintf(stdout, "VPN: %s\n", nettrust.BootBlockText)
+	return 0
+}
+
 // applyVPNPause lets a pause from the settings service carry a blocked
 // network's traffic without the tunnel, and ends a pause that no longer
 // holds: another network, past its end, or nothing blocked any more.
@@ -211,8 +276,14 @@ func applyVPNPause(v *nettrust.Verdict, stdout, stderr io.Writer) {
 }
 
 func runVPNStatus(stdout, stderr io.Writer) int {
+	_, err := os.Stat(nettrust.BootBlockPath)
+	bootBlocked := err == nil
 	data, err := os.ReadFile(vpnStatusPath)
 	if err != nil {
+		if bootBlocked && os.IsNotExist(err) {
+			fmt.Fprintf(stdout, "network:   not checked yet\nblocked:   %s (systemctl status gjallar-vpn-trust)\n", nettrust.BootBlockText)
+			return 0
+		}
 		fmt.Fprintf(stderr, "ERROR: no network trust decision yet: %v\n", err)
 		return 1
 	}
@@ -245,6 +316,10 @@ func runVPNStatus(stdout, stderr io.Writer) int {
 	fmt.Fprintf(stdout, "exit node: %s\nlocal:     %s\n", exit, local)
 	if v.Blocked != "" {
 		fmt.Fprintf(stdout, "blocked:   %s (gjallarctl vpn pause lets this network through for up to 1 hour)\n", nettrust.BlockText(v.Blocked))
+	}
+	if bootBlocked {
+		// The last verdict had no network to look at.
+		fmt.Fprintf(stdout, "blocked:   %s (systemctl status gjallar-vpn-trust)\n", nettrust.BootBlockText)
 	}
 	if p := v.Paused; p != nil {
 		fmt.Fprintf(stdout, "paused:    by %s until %s; traffic on this network goes out without the tunnel\n",

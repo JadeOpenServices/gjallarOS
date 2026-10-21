@@ -59,6 +59,43 @@ lib.mkIf config.gjallar.apps.tailscale.enable {
     };
   };
 
+  # From boot until the first verdict nothing goes out but the tunnel, when
+  # the policy can ask for an exit node: the network is not checked yet.
+  # Like Mullvad's early boot blocking, before network-pre.target. The first
+  # verdict replaces the table or removes it; until one runs, it stays.
+  systemd.services.gjallar-vpn-boot-block = {
+    description = "Block the internet outside the VPN until the first network check";
+    wantedBy = [ "sysinit.target" ];
+    wants = [ "network-pre.target" ];
+    after = [
+      "local-fs.target"
+      "systemd-modules-load.service"
+    ];
+    before = [
+      "network-pre.target"
+      "gjallar-vpn-trust.service"
+      "sysinit.target"
+    ];
+    unitConfig.DefaultDependencies = false;
+    # A running system has its verdict; the command keeps it anyway.
+    restartIfChanged = false;
+    path = [ pkgs.nftables ];
+    serviceConfig = {
+      Type = "oneshot";
+      ExecStart = "${gjallarctl}/bin/gjallarctl vpn boot-block --policy ${policyFile} --override /var/lib/gjallar/vpn-trust-override.json";
+      TimeoutStartSec = "30s";
+    };
+  };
+
+  # The nftables service with flushRuleset would drop the block table on
+  # every start and reload.
+  assertions = [
+    {
+      assertion = !(config.networking.nftables.enable && config.networking.nftables.flushRuleset);
+      message = "networking.nftables.flushRuleset removes the VPN block table (gjallar_vpn_block); keep it off.";
+    }
+  ];
+
   # gjallarctl vpn pause: the settings service writes the pause here, and
   # may write nothing else in /run.
   systemd.tmpfiles.rules = [ "d /run/gjallar/vpn-pause 0755 root root -" ];
