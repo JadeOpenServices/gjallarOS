@@ -172,11 +172,9 @@ let
         "@system-service"
         "@mount"
       ];
-      CapabilityBoundingSet = [
-        "CAP_SYS_ADMIN"
-        "CAP_FOWNER"
-        "CAP_DAC_OVERRIDE"
-      ];
+      # Root owns @snapshots, so creating, pruning and deleting snapshots
+      # needs only the mount and the btrfs ioctls (checked in a VM).
+      CapabilityBoundingSet = [ "CAP_SYS_ADMIN" ];
     };
   };
 in
