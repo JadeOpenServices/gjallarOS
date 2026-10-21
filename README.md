@@ -790,6 +790,19 @@ rebuild, then delete the override file.
 
 </details>
 
+### Time
+
+The clock is set only over NTS, which signs the time so nobody on the
+network can change it: Cloudflare, Netnod, PTB and time.nl, one server each.
+At least two of them have to agree before chrony moves the clock. Plain NTP,
+the NixOS pool and time servers handed out by DHCP are not used, on any
+network. When no NTS server answers, for example on a network that blocks
+TCP port 4460, the clock keeps running from where it was.
+`gjallarctl system status` shows `Time: confirmed by NTS at ...`, or
+`Time: not confirmed since ...` when no server has confirmed it in the last
+two hours. The design and the next steps are in section 18 of
+[ROADMAP.md](ROADMAP.md).
+
 <div align="right"><a href="#gjallaros">↑ back to top</a></div>
 
 ## 💜 Credits
