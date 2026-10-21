@@ -56,7 +56,7 @@ func useFakeSnapshots(t *testing.T, bus *fakeSnapshotsBus) string {
 	snapshotsConnect = func() (snapshotsBus, error) { return bus, nil }
 	settingsEUID = func() int { return 1000 }
 	if bus.names == nil {
-		bus.names = []string{"home.20261021T0300+0200", "home.20261021T0200+0200"}
+		bus.names = []string{"home.20261021T030000+0200", "home.20261021T020000+0200"}
 	}
 	if bus.mode == 0 {
 		bus.mode = 0o640
@@ -76,7 +76,7 @@ func TestSnapshotsListNames(t *testing.T) {
 	if code := run([]string{"snapshots", "list", "--names"}, &stdout, &stderr); code != 0 {
 		t.Fatalf("code %d: %s", code, stderr.String())
 	}
-	if stdout.String() != "home.20261021T0300+0200\nhome.20261021T0200+0200\n" {
+	if stdout.String() != "home.20261021T030000+0200\nhome.20261021T020000+0200\n" {
 		t.Fatalf("stdout %q", stdout.String())
 	}
 }
@@ -95,7 +95,7 @@ func TestSnapshotsRestoreWritesNewFile(t *testing.T) {
 	if len(bus.asked) != 1 || bus.asked[0] != original+"|" {
 		t.Fatalf("asked %v", bus.asked)
 	}
-	copied := filepath.Join(home, "notes.restored-20261021T0300.txt")
+	copied := filepath.Join(home, "notes.restored-20261021T030000.txt")
 	data, err := os.ReadFile(copied)
 	if err != nil || string(data) != bus.content {
 		t.Fatalf("copy %q, %v", data, err)
@@ -111,12 +111,12 @@ func TestSnapshotsRestoreWritesNewFile(t *testing.T) {
 func TestSnapshotsRestoreNeverOverwrites(t *testing.T) {
 	bus := &fakeSnapshotsBus{content: "SYNTHETIC old notes\n"}
 	home := useFakeSnapshots(t, bus)
-	existing := filepath.Join(home, "notes.restored-20261021T0200.txt")
+	existing := filepath.Join(home, "notes.restored-20261021T020000.txt")
 	if err := os.WriteFile(existing, []byte("SYNTHETIC kept\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"snapshots", "restore", filepath.Join(home, "notes.txt"), "--from", "home.20261021T0200+0200"}, &stdout, &stderr)
+	code := run([]string{"snapshots", "restore", filepath.Join(home, "notes.txt"), "--from", "home.20261021T020000+0200"}, &stdout, &stderr)
 	if code != 1 || !strings.Contains(stderr.String(), "already there") {
 		t.Fatalf("code %d: %s", code, stderr.String())
 	}
@@ -142,7 +142,7 @@ func TestSnapshotsRestoreToFolder(t *testing.T) {
 	if code = run([]string{"snapshots", "restore", gone, "--to", to}, &stdout, &stderr); code != 0 {
 		t.Fatalf("code %d: %s", code, stderr.String())
 	}
-	if _, err := os.Stat(filepath.Join(to, "report.restored-20261021T0300.md")); err != nil {
+	if _, err := os.Stat(filepath.Join(to, "report.restored-20261021T030000.md")); err != nil {
 		t.Fatal(err)
 	}
 	if len(bus.asked) != 1 || bus.asked[0] != gone+"|" {

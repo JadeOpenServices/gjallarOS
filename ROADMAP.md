@@ -1629,7 +1629,7 @@ store anyway.
    in the snapshot with `openat2` (no symlinks, no `..`, no other mount),
    only a regular file the caller owned, and hands back a read-only
    descriptor. `gjallarctl` writes the copy as the user under a new name
-   (`notes.restored-20261021T0300.txt`) and never overwrites. Folders
+   (`notes.restored-20261021T030000.txt`) and never overwrites. Folders
    are a later step: a folder descriptor would let `..` out of the home.
 4. A rollback of `@home` or `@config` runs only from the recovery boot
    entry, offline, as a new read-write snapshot (never a read-only one made

@@ -559,7 +559,7 @@ gjallarctl snapshots restore ~/Documents/notes.txt
 
 `restore` asks your password and takes the newest snapshot that has the
 file, or the one you name with `--from SNAPSHOT`. The copy goes next to the
-file, as `notes.restored-20261021T0300.txt`; your current file is never
+file, as `notes.restored-20261021T030000.txt`; your current file is never
 touched. If the folder is gone too, add `--to FOLDER`. Only plain files in
 your own home can be restored, one at a time.
 

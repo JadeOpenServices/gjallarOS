@@ -41,8 +41,8 @@ func newTestService(t *testing.T) (*service, *fakeSystem) {
 			t.Fatal(err)
 		}
 	}
-	write("home.20261021T0200+0200", "old.txt", "SYNTHETIC old")
-	write("home.20261021T0300+0200", "notes.txt", "SYNTHETIC notes")
+	write("home.20261021T020000+0200", "old.txt", "SYNTHETIC old")
+	write("home.20261021T030000+0200", "notes.txt", "SYNTHETIC notes")
 	if err := os.MkdirAll(filepath.Join(root, "home", "stray"), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +66,7 @@ func TestListNewestFirst(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(names) != 2 || names[0] != "home.20261021T0300+0200" {
+	if len(names) != 2 || names[0] != "home.20261021T030000+0200" {
 		t.Fatalf("List = %v", names)
 	}
 }
@@ -77,7 +77,7 @@ func TestRestoreFindsNewestSnapshotWithFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if name != "home.20261021T0200+0200" || read(t, file) != "SYNTHETIC old" {
+	if name != "home.20261021T020000+0200" || read(t, file) != "SYNTHETIC old" {
 		t.Fatalf("restored from %s", name)
 	}
 	if len(sys.asked) != 1 {
@@ -87,10 +87,10 @@ func TestRestoreFindsNewestSnapshotWithFile(t *testing.T) {
 
 func TestRestoreFromNamedSnapshot(t *testing.T) {
 	svc, _ := newTestService(t)
-	if _, _, err := svc.Restore(context.Background(), ":1.5", "/home/tester/old.txt", "home.20261021T0300+0200"); !errors.Is(err, snapshots.ErrNotFound) {
+	if _, _, err := svc.Restore(context.Background(), ":1.5", "/home/tester/old.txt", "home.20261021T030000+0200"); !errors.Is(err, snapshots.ErrNotFound) {
 		t.Fatalf("old.txt from the newer snapshot: %v", err)
 	}
-	file, _, err := svc.Restore(context.Background(), ":1.5", "/home/tester/notes.txt", "home.20261021T0300+0200")
+	file, _, err := svc.Restore(context.Background(), ":1.5", "/home/tester/notes.txt", "home.20261021T030000+0200")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,9 +105,9 @@ func TestRestoreRefusesBeforeAsking(t *testing.T) {
 	for _, tc := range [][2]string{
 		{"/home/other/notes.txt", ""},
 		{"/etc/shadow", ""},
-		{"/home/tester/notes.txt", "../home.20261021T0300+0200"},
+		{"/home/tester/notes.txt", "../home.20261021T030000+0200"},
 		{"/home/tester/notes.txt", "stray"},
-		{"/home/tester/notes.txt", "home.20261021T0400+0200"},
+		{"/home/tester/notes.txt", "home.20261021T040000+0200"},
 	} {
 		if _, _, err := svc.Restore(context.Background(), ":1.5", tc[0], tc[1]); !errors.Is(err, snapshots.ErrRefused) {
 			t.Errorf("Restore(%q, %q) = %v, want refused", tc[0], tc[1], err)

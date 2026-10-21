@@ -10,12 +10,12 @@ import (
 )
 
 func TestValidName(t *testing.T) {
-	for _, name := range []string{"home.20261021T0300+0200", "home.20261021T0300-0130_2"} {
+	for _, name := range []string{"home.20261021T030000+0200", "home.20261021T030000-0130_2"} {
 		if !ValidName(name) {
 			t.Errorf("%q refused", name)
 		}
 	}
-	for _, name := range []string{"", "home", "config.20261021T0300+0200", "home.20261021T0300+0200/..", "../home.20261021T0300+0200", "home.20261021T0300+0200_12345", "home.20261021T03+0200"} {
+	for _, name := range []string{"", "home", "config.20261021T030000+0200", "home.20261021T030000+0200/..", "../home.20261021T030000+0200", "home.20261021T030000+0200_12345", "home.20261021T03+0200", "home.20261021T0300+0200"} {
 		if ValidName(name) {
 			t.Errorf("%q accepted", name)
 		}
@@ -23,8 +23,8 @@ func TestValidName(t *testing.T) {
 }
 
 func TestNewest(t *testing.T) {
-	got := Newest([]string{"home.20261021T0300+0200", "junk", "home.20261021T0200+0000", "home.20261021T0300+0200_1"})
-	want := []string{"home.20261021T0200+0000", "home.20261021T0300+0200_1", "home.20261021T0300+0200"}
+	got := Newest([]string{"home.20261021T030000+0200", "junk", "home.20261021T020000+0000", "home.20261021T030000+0200_1"})
+	want := []string{"home.20261021T020000+0000", "home.20261021T030000+0200_1", "home.20261021T030000+0200"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("Newest = %v, want %v", got, want)
 	}
@@ -102,10 +102,10 @@ func TestOpen(t *testing.T) {
 
 func TestRestoredName(t *testing.T) {
 	for in, want := range map[[2]string]string{
-		{"notes.txt", "home.20261021T0300+0200"}: "notes.restored-20261021T0300.txt",
-		{".bashrc", "home.20261021T0300-0130_2"}: ".bashrc.restored-20261021T0300_2",
-		{"Makefile", "home.20261021T0300+0000"}:  "Makefile.restored-20261021T0300",
-		{"a.tar.gz", "home.20261021T0300+0200"}:  "a.tar.restored-20261021T0300.gz",
+		{"notes.txt", "home.20261021T030000+0200"}: "notes.restored-20261021T030000.txt",
+		{".bashrc", "home.20261021T030000-0130_2"}: ".bashrc.restored-20261021T030000_2",
+		{"Makefile", "home.20261021T030000+0000"}:  "Makefile.restored-20261021T030000",
+		{"a.tar.gz", "home.20261021T030000+0200"}:  "a.tar.restored-20261021T030000.gz",
 	} {
 		if got := RestoredName(in[0], in[1]); got != want {
 			t.Errorf("RestoredName(%q, %q) = %q, want %q", in[0], in[1], got, want)

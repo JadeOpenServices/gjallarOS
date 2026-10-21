@@ -40,9 +40,9 @@ var ErrRefused = errors.New("refused")
 // ErrNotFound means no snapshot holds the file.
 var ErrNotFound = errors.New("not in any snapshot")
 
-// btrbk's long-iso names (snapshots.nix): home.20261021T0300+0200, with
-// _N when two runs share a minute.
-var namePattern = regexp.MustCompile(`^home\.([0-9]{8}T[0-9]{4}[+-][0-9]{4})(_[0-9]{1,4})?$`)
+// btrbk's long-iso names (snapshots.nix): home.20261021T030000+0200, with
+// _N when two runs share a second.
+var namePattern = regexp.MustCompile(`^home\.([0-9]{8}T[0-9]{6}[+-][0-9]{4})(_[0-9]{1,4})?$`)
 
 // ValidName reports whether name is a home snapshot name btrbk makes.
 func ValidName(name string) bool {
@@ -55,7 +55,7 @@ func Time(name string) (time.Time, error) {
 	if match == nil {
 		return time.Time{}, fmt.Errorf("%w: %q is not a snapshot name", ErrRefused, name)
 	}
-	return time.Parse("20060102T1504-0700", match[1])
+	return time.Parse("20060102T150405-0700", match[1])
 }
 
 // Newest sorts snapshot names newest first and drops anything that is not
@@ -160,7 +160,7 @@ func Open(snapshot, homeName, rel string, uid int) (*os.File, error) {
 }
 
 // RestoredName is the new name next to the original: notes.txt restored
-// from home.20261021T0300+0200 becomes notes.restored-20261021T0300.txt.
+// from home.20261021T030000+0200 becomes notes.restored-20261021T030000.txt.
 func RestoredName(base, snapshot string) string {
 	stamp := strings.TrimPrefix(snapshot, "home.")
 	if i := strings.IndexAny(stamp, "+-"); i > 0 {
