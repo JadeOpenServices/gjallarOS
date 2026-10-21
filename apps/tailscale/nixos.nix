@@ -118,4 +118,15 @@ lib.mkIf config.gjallar.apps.tailscale.enable {
       OnUnitActiveSec = "5min";
     };
   };
+
+  # A new verdict can start or end the home router time fallback
+  # (system/services/time.nix). vpn apply rewrites the file only on change.
+  systemd.paths.gjallar-time-check = {
+    description = "Watch the network verdict for the time fallback";
+    wantedBy = [ "multi-user.target" ];
+    pathConfig = {
+      PathChanged = "/run/gjallar/vpn-trust.json";
+      Unit = "gjallar-time-check.service";
+    };
+  };
 }

@@ -2228,16 +2228,62 @@ Security pass for step 2:
 
 **Step 3, router fallback on a proven home or site network (Q31, Q32):**
 
-- Only when no NTS source works and the VPN verdict is home or site (a
-  router proven by its signed answer, see `internal/nettrust`).
-- The router's tailnet address when it serves NTP there; otherwise its
-  proven local address.
-- chronyd restarts with a fallback config that allows that one
-  unauthenticated source, with small corrections only: no steps, and a
-  low limit on how fast and how far the clock may move.
-- When the network stops being home or site, or an NTS source works
-  again, the strict config comes back.
-- Status says the time came from the router, not from NTS.
+- Only when no NTS source works and the VPN verdict is home or site with
+  a router proven by its signed answer (`internal/nettrust`). A home
+  verdict from a trusted Wi-Fi alone does not count. The verdict now
+  carries the router's tailnet addresses and the local address its proof
+  came from (`routerTailnet`, `routerVia`).
+- The verdict file must be for the network the device is on now: the
+  check compares its network key with the current one, so a verdict left
+  over from the last network never counts.
+- The router's tailnet address when it answers NTP there (WireGuard
+  carries it, so nobody on the LAN can answer in its name); otherwise its
+  proven local address. A plain NTP query checks the answer first: mode 4,
+  stratum 1 to 15, and our transmit time echoed back.
+- `gjallar-time-check` writes `/run/gjallar-time/chrony/router.conf` and
+  restarts chronyd. The confdir comes last in chrony.conf, so these lines
+  win: `authselectmode ignore` and `minsources 1` (with `prefer` chronyd
+  drops every unauthenticated source while an NTS source is configured),
+  `makestep 1 0` (never steps), `maxchange 60 0 -1` (an offset over 60 s
+  is ignored, every time), `maxslewrate 1000` and `maxdrift 500`, and the
+  one `server` line for the router.
+- Every later run (timer, and a path unit on `/run/gjallar/vpn-trust.json`)
+  keeps the fallback only while the verdict still names the same router on
+  the same network and fewer than two NTS sources are reachable. chronyd
+  counts a source reachable only after an authenticated answer, so two
+  reachable NTS sources mean NTS works again. Otherwise the file goes,
+  chronyd restarts strict, and the run waits for NTS as usual.
+- `vpn apply` writes the verdict file only when it changed, so the path
+  unit does not fire on every 5 minute recheck.
+- Router time never counts as confirmed: no stamp on disk, and status
+  shows `Time: set by the home router <name> at ..., not confirmed by NTS`
+  while the router is the source. The fallback state is
+  `/run/gjallar-time/router.json` (name, address, network key, since).
+
+Security pass for step 3:
+
+- Threat model: the router is a device the owner put on the tailnet, so
+  it is trusted to route, not to tell the time. A lying or taken-over
+  router, or someone on the LAN answering for the local address, is what
+  the limits are for. Sources: the chrony 4.8 manual and source
+  (`update_sel_options` in sources.c, `is_offset_ok` and
+  `is_step_limit_reached` in reference.c), RFC 8915 for what NTS protects.
+- Without steps and with `maxslewrate 1000`, the clock moves at most
+  86 seconds a day, and never by an offset over 60 s. Certificate
+  validity is days to months, so no certificate turns valid or expired
+  through this in practice. TOTP codes (30 s) can drift by a window or two
+  over a day of fallback; the status line says the time is not
+  confirmed.
+- A verdict from another network cannot carry over: the network key
+  includes the gateway's hardware address and the subnets.
+- Changing networks restarts the check through the path unit; until it
+  runs, chronyd may still ask the old local address. The tailnet address
+  is preferred for that reason, and the limits above hold either way.
+- Residual: during the fallback `minsources 1` and `ignore` also let a
+  single NTS operator be chosen on its own. It is still authenticated, and
+  the fallback ends as soon as two answer.
+- Residual: each restart of chronyd sets the clock from the RTC (`-s`);
+  that is the same as at boot.
 
 **Later:** the time line in the settings app, and a notice when the time
 has not been confirmed for a long time.

@@ -25,7 +25,9 @@ import (
 // It confirms the clock over NTS. When the clock is so far behind that no
 // NTS certificate is valid yet, it sets the clock once per boot with the
 // certificate date check off, then confirms it again with the check on
-// (ROADMAP section 18, step 2).
+// (ROADMAP section 18, step 2). When NTS does not work on a proven home or
+// site network, it lets chronyd take small corrections from the router
+// (step 3, system_timerouter.go).
 
 const (
 	timeRunDir       = "/run/gjallar-time"
@@ -212,6 +214,11 @@ type timeCheck struct {
 	probe    func(host string) ([]*x509.Certificate, error)
 	chronyd  func(action string) error
 	setClock func(time.Time) error
+
+	verdictPath  string
+	networkKey   func() string
+	ntpProbe     func(addr string) error
+	ntsReachable func(exclude string) int
 }
 
 func (c *timeCheck) bootstrapConf() string {
@@ -319,24 +326,52 @@ func (c *timeCheck) run() int {
 		}
 	}
 
-	if state, ok := c.waitSynced(c.wait, time.Time{}); ok {
+	// Router time never confirms the clock: keep the fallback while it
+	// holds, otherwise go back to strict NTS first.
+	var since time.Time
+	if active := c.readRouter(); active != nil {
+		reason := c.routerStays(active)
+		if reason == "" {
+			c.logf("INFO", "time from the home router %s; no NTS source works yet", active.Addr)
+			return 0
+		}
+		c.logf("INFO", "router fallback off: %s", reason)
+		c.dropRouter()
+		since = c.now()
+		if err := c.chronyd("restart"); err != nil {
+			c.logf("ERROR", "restart chronyd: %v", err)
+			return 1
+		}
+	}
+
+	rc, confirmed := c.confirm(start, since, floor, boot, ranThisBoot)
+	if !confirmed {
+		c.startRouter()
+	}
+	return rc
+}
+
+// confirm waits for NTS and, when the clock is behind every certificate,
+// runs the one-time exception. It reports whether NTS confirmed the clock.
+func (c *timeCheck) confirm(start, since, floor time.Time, boot timeBoot, ranThisBoot bool) (int, bool) {
+	if state, ok := c.waitSynced(c.wait, since); ok {
 		c.writeStamp(state.Ref)
 		if boot.State == "unconfirmed" {
 			// Every key since the strict restart came with the date check on.
 			boot.State = "confirmed"
 			c.writeState(boot)
 		}
-		return 0
+		return 0, true
 	}
 	if ranThisBoot {
 		c.logf("INFO", "time not confirmed; the exception already ran this boot (%s)", boot.State)
-		return 0
+		return 0, false
 	}
 
 	bundle, err := os.ReadFile(c.bundle)
 	if err != nil {
 		c.logf("ERROR", "%v", err)
-		return 1
+		return 1, false
 	}
 	roots, missing := pinnedRoots(bundle, c.roots)
 	for _, name := range missing {
@@ -344,7 +379,7 @@ func (c *timeCheck) run() int {
 	}
 	if len(roots) == 0 {
 		c.logf("ERROR", "none of the pinned roots is in %s", c.bundle)
-		return 1
+		return 1, false
 	}
 	pool := x509.NewCertPool()
 	for _, root := range roots {
@@ -376,7 +411,7 @@ func (c *timeCheck) run() int {
 	}
 	if ok, reason := bootstrapAllowed(verdicts); !ok {
 		c.logf("WARNING", "time not confirmed, no exception: %s", reason)
-		return 0
+		return 0, false
 	}
 
 	var pemRoots []byte
@@ -385,14 +420,14 @@ func (c *timeCheck) run() int {
 	}
 	if err := writePublicFile(c.rootsPath(), pemRoots); err != nil {
 		c.logf("ERROR", "%v", err)
-		return 1
+		return 1, false
 	}
 	c.writeState(timeBoot{State: "bootstrap"})
 	conf := "# gjallar-time-check: one-time exception, removed after the first update\n" +
 		"nocerttimecheck 1\nnosystemcert\nntstrustedcerts " + c.rootsPath() + "\n"
 	if err := writePublicFile(c.bootstrapConf(), []byte(conf)); err != nil {
 		c.logf("ERROR", "%v", err)
-		return 1
+		return 1, false
 	}
 	c.logf("WARNING", "the clock is behind every NTS certificate; setting it once with the certificate date check off")
 	restartErr := c.chronyd("restart")
@@ -410,7 +445,7 @@ func (c *timeCheck) run() int {
 			c.logf("ERROR", "restart chronyd: %v", err)
 		}
 		c.writeState(timeBoot{State: "failed"})
-		return 1
+		return 1, false
 	}
 
 	expected := start.Add(c.elapsed())
@@ -432,7 +467,7 @@ func (c *timeCheck) run() int {
 			c.logf("ERROR", "restart chronyd: %v", err)
 		}
 		c.writeState(timeBoot{State: "refused", Step: int64(step.Seconds())})
-		return 1
+		return 1, false
 	}
 
 	c.logf("INFO", "clock moved forward by %s; confirming with the date check on", step.Round(time.Second))
@@ -440,18 +475,18 @@ func (c *timeCheck) run() int {
 	if err := c.restartStrict(); err != nil {
 		c.logf("ERROR", "restart chronyd: %v", err)
 		c.writeState(timeBoot{State: "unconfirmed", Step: int64(step.Seconds())})
-		return 1
+		return 1, false
 	}
 	state, ok := c.waitSynced(timeSyncWait, restarted)
 	if !ok {
 		c.logf("WARNING", "time set, but not yet confirmed with the date check on")
 		c.writeState(timeBoot{State: "unconfirmed", Step: int64(step.Seconds())})
-		return 1
+		return 1, false
 	}
 	c.writeStamp(state.Ref)
 	c.writeState(timeBoot{State: "confirmed", Step: int64(step.Seconds())})
 	c.logf("INFO", "time confirmed with the date check on")
-	return 0
+	return 0, true
 }
 
 // writePublicFile writes a file every user may read: chronyd reads the
@@ -497,6 +532,10 @@ func systemTimeCheck(args []string, stderr io.Writer) int {
 			tv := syscall.NsecToTimeval(t.UnixNano())
 			return syscall.Settimeofday(&tv)
 		},
+		verdictPath:  vpnStatusPath,
+		networkKey:   currentNetworkKey,
+		ntpProbe:     probeNTP,
+		ntsReachable: chronySourcesReachable,
 	}
 	for i := 0; i < len(args); i++ {
 		if i+1 >= len(args) {

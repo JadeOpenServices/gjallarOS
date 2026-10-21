@@ -1,6 +1,7 @@
 package nettrust
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -417,11 +418,16 @@ func WriteStatus(path string, v Verdict) error {
 	if err != nil {
 		return err
 	}
+	data = append(data, '\n')
+	// Unchanged verdicts are not rewritten: path units watch this file.
+	if old, err := os.ReadFile(path); err == nil && bytes.Equal(old, data) {
+		return nil
+	}
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return err
 	}
 	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, append(data, '\n'), 0644); err != nil {
+	if err := os.WriteFile(tmp, data, 0644); err != nil {
 		return err
 	}
 	return os.Rename(tmp, path)

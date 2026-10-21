@@ -47,7 +47,8 @@ in
   };
 
   # The confdir is empty except while gjallar-time-check holds the one-time
-  # exception for a clock behind every certificate (step 2).
+  # exception for a clock behind every certificate (step 2) or the home
+  # router fallback (step 3).
   systemd.tmpfiles.rules = [
     "d /run/gjallar-time 0755 root root -"
     "d /run/gjallar-time/chrony 0755 root root -"
@@ -61,8 +62,13 @@ in
       "network-online.target"
     ];
     wants = [ "network-online.target" ];
+    # ip, ping and nmcli tell which network the device is on, for the home
+    # router fallback (step 3).
     path = [
       pkgs.chrony
+      pkgs.iproute2
+      pkgs.iputils
+      pkgs.networkmanager
       pkgs.systemd
     ];
     serviceConfig = {

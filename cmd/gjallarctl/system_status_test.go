@@ -30,11 +30,12 @@ func useRootCopy(t *testing.T, tree localchanges.Tree) {
 // useClock makes chronyd report state at the SYNTHETIC time now.
 func useClock(t *testing.T, state clockState, now time.Time) {
 	t.Helper()
-	oldRead, oldNow, oldBoot := readClock, clockNow, readTimeBoot
+	oldRead, oldNow, oldBoot, oldRouter := readClock, clockNow, readTimeBoot, readTimeRouter
 	readClock = func() clockState { return state }
 	clockNow = func() time.Time { return now }
 	readTimeBoot = func() timeBoot { return timeBoot{} }
-	t.Cleanup(func() { readClock, clockNow, readTimeBoot = oldRead, oldNow, oldBoot })
+	readTimeRouter = func() *timeRouter { return nil }
+	t.Cleanup(func() { readClock, clockNow, readTimeBoot, readTimeRouter = oldRead, oldNow, oldBoot, oldRouter })
 }
 
 func useBuildSource(t *testing.T, data string) {

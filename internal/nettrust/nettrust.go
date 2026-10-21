@@ -179,13 +179,18 @@ const (
 )
 
 type Verdict struct {
-	Trust    string   `json:"trust"`
-	Reason   string   `json:"reason"`
-	Device   string   `json:"device,omitempty"`
-	SSID     string   `json:"ssid,omitempty"`
-	Router   string   `json:"router,omitempty"`
-	Bypass   []string `json:"bypass"`
-	ExitNode string   `json:"exitNode"`
+	Trust  string `json:"trust"`
+	Reason string `json:"reason"`
+	Device string `json:"device,omitempty"`
+	SSID   string `json:"ssid,omitempty"`
+	Router string `json:"router,omitempty"`
+	// RouterVia is the local address the router's proof came from, and
+	// RouterTailnet its tailnet addresses. The time fallback reads them
+	// (ROADMAP section 18, step 3).
+	RouterVia     string   `json:"routerVia,omitempty"`
+	RouterTailnet []string `json:"routerTailnet,omitempty"`
+	Bypass        []string `json:"bypass"`
+	ExitNode      string   `json:"exitNode"`
 	// ManageExitNode is false when the policy names no exit node or
 	// Tailscale is not running; the exit node is then left alone.
 	ManageExitNode bool `json:"manageExitNode"`
@@ -260,6 +265,10 @@ func Decide(ctx context.Context, p Policy, net *Network, tn Tailnet, pr Prober) 
 	router, via := provenRouter(ctx, net, tn, pr)
 	if router != nil {
 		v.Router = router.HostName + " via " + via.String()
+		v.RouterVia = via.String()
+		for _, ip := range router.IPs {
+			v.RouterTailnet = append(v.RouterTailnet, ip.String())
+		}
 	}
 
 	switch {

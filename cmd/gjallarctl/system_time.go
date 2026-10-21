@@ -16,6 +16,8 @@ type clockState struct {
 	// Ref is the last time a source updated the clock; zero when none has
 	// since chronyd started.
 	Ref time.Time
+	// Source is the address of the source chronyd follows.
+	Source string
 	// Started is when chronyd started, as systemd prints it.
 	Started string
 }
@@ -39,7 +41,7 @@ func chronyClock() clockState {
 	if len(fields) < 14 {
 		return clockState{}
 	}
-	state := clockState{Running: true, Synced: fields[13] != "Not synchronised"}
+	state := clockState{Running: true, Synced: fields[13] != "Not synchronised", Source: fields[1]}
 	if ref, err := strconv.ParseFloat(fields[3], 64); err == nil && ref > 0 {
 		state.Ref = time.Unix(int64(ref), 0)
 	}
@@ -51,7 +53,8 @@ func chronyClock() clockState {
 
 // timeLine says whether an NTS source has confirmed the clock lately. Only
 // NTS sources can be selected (system/services/time.nix), so any update
-// counts as confirmed.
+// counts as confirmed; timeLines corrects that while the router fallback
+// is on.
 func timeLine(state clockState, now time.Time) string {
 	switch {
 	case !state.Running:
@@ -69,9 +72,20 @@ func timeLine(state clockState, now time.Time) string {
 
 // timeLines adds what gjallar-time-check did this boot. A clock set with
 // the certificate date check off is never shown as confirmed until a
-// source confirmed it with the check on.
-func timeLines(state clockState, boot timeBoot, now time.Time) []string {
+// source confirmed it with the check on, and time from the router never
+// is.
+func timeLines(state clockState, boot timeBoot, router *timeRouter, now time.Time) []string {
 	line := timeLine(state, now)
+	if router != nil {
+		if strings.HasPrefix(line, "Time: confirmed") {
+			from := "one NTS source"
+			if state.Source == router.Addr {
+				from = "the home router " + router.Name
+			}
+			line = "Time: set by " + from + " at " + state.Ref.Local().Format("2006-01-02 15:04 MST") + ", not confirmed by NTS"
+		}
+		return []string{line, "  No NTS source works on this network; the home router may correct the clock by small amounts only."}
+	}
 	behind := spanText(time.Duration(boot.Step) * time.Second)
 	switch boot.State {
 	case "bootstrap":

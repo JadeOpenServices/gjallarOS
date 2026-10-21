@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"net/netip"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -83,6 +85,9 @@ func TestHomeRouterProofWorksOnEthernet(t *testing.T) {
 	v := decide(t, policy, n, tn, fakeProber{via: map[string]string{"home-router": "192.168.8.1"}})
 	if v.Trust != TrustHome || v.Router != "home-router via 192.168.8.1" {
 		t.Fatalf("verdict = %+v", v)
+	}
+	if v.RouterVia != "192.168.8.1" || !slices.Equal(v.RouterTailnet, []string{"100.64.0.9"}) {
+		t.Fatalf("router addresses = %q %q", v.RouterVia, v.RouterTailnet)
 	}
 }
 
@@ -352,5 +357,30 @@ func TestGatewayOwnsProbesOutsideTheTunnel(t *testing.T) {
 	n.Device = "eth0" // routed out of another device: not this gateway
 	if s.GatewayOwns(context.Background(), n, netip.MustParseAddr("192.168.9.1")) {
 		t.Fatal("route via another device accepted")
+	}
+}
+
+func TestWriteStatusSkipsUnchanged(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "status.json")
+	v := Verdict{Trust: TrustHome, Bypass: []string{}}
+	if err := WriteStatus(path, v); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-time.Hour)
+	if err := os.Chtimes(path, old, old); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteStatus(path, v); err != nil {
+		t.Fatal(err)
+	}
+	if info, err := os.Stat(path); err != nil || !info.ModTime().Equal(old) {
+		t.Fatalf("unchanged verdict rewritten: %v %v", info.ModTime(), err)
+	}
+	v.Trust = TrustUntrusted
+	if err := WriteStatus(path, v); err != nil {
+		t.Fatal(err)
+	}
+	if info, err := os.Stat(path); err != nil || info.ModTime().Equal(old) {
+		t.Fatalf("changed verdict not written: %v", err)
 	}
 }

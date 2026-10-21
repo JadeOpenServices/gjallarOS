@@ -185,7 +185,7 @@ func TestTimeLines(t *testing.T) {
 		{timeBoot{State: "refused", Step: -3600}, []string{"Time: confirmed by NTS at ", "  An NTS update tried to move the clock back"}},
 		{timeBoot{State: "failed"}, []string{"Time: confirmed by NTS at ", "  The clock looks behind"}},
 	} {
-		got := timeLines(synced, c.boot, now)
+		got := timeLines(synced, c.boot, nil, now)
 		if len(got) != len(c.want) {
 			t.Fatalf("%s: %q", c.boot.State, got)
 		}
