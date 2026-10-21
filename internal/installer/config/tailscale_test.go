@@ -64,8 +64,8 @@ func TestSplitListQuotedNames(t *testing.T) {
 		"":         {},
 		"a, b ,,c": {"a", "b", "c"},
 		`synthetic-5Ghz, "cafe, upstairs", 'Mum's'`: nil,
-		`"cafe, upstairs", 'say "hi"' , " pad "`:   {"cafe, upstairs", `say "hi"`, " pad "},
-		`it's-wifi`:                                {"it's-wifi"},
+		`"cafe, upstairs", 'say "hi"' , " pad "`:    {"cafe, upstairs", `say "hi"`, " pad "},
+		`it's-wifi`:                                 {"it's-wifi"},
 	} {
 		got, err := SplitList(raw)
 		if want == nil {

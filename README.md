@@ -809,9 +809,9 @@ As root:
 
 ```bash
 gjallarctl vpn trust-wifi                       # the current Wi-Fi
-gjallarctl vpn trust-wifi "Shi 2,4" --exit-node OpenWrt   # trusted LAN, internet via OpenWrt
-gjallarctl vpn trust-wifi "Shi 2,4" --exit-node default   # trusted LAN, exit node off
-gjallarctl vpn untrust-wifi "Shi 2,4"
+gjallarctl vpn trust-wifi "Home WiFi" --exit-node OpenWrt   # trusted LAN, internet via OpenWrt
+gjallarctl vpn trust-wifi "Home WiFi" --exit-node default   # trusted LAN, exit node off
+gjallarctl vpn untrust-wifi "Home WiFi"
 gjallarctl vpn exit-node auto                   # or off, NAME, default
 ```
 

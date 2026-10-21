@@ -73,19 +73,19 @@ func TestExitNodeOffStaysOffOnUntrustedNetworks(t *testing.T) {
 func TestOverrideTrustsAndUntrustsWifis(t *testing.T) {
 	base := Policy{TrustedWifis: []string{"home", "sister"}, ExitNode: "home-router"}
 	var o Override
-	o.Trust(base, "Shi 2,4")
+	o.Trust(base, "Synthetic 2,4")
 	o.Untrust(base, "sister")
 	o.Trust(base, "home") // already trusted by the system: no entry
 	got := o.Apply(base)
-	if !slices.Equal(got.TrustedWifis, []string{"home", "Shi 2,4"}) {
+	if !slices.Equal(got.TrustedWifis, []string{"home", "Synthetic 2,4"}) {
 		t.Fatalf("trusted = %q", got.TrustedWifis)
 	}
-	if !slices.Equal(o.TrustWifis, []string{"Shi 2,4"}) || !slices.Equal(o.UntrustWifis, []string{"sister"}) {
+	if !slices.Equal(o.TrustWifis, []string{"Synthetic 2,4"}) || !slices.Equal(o.UntrustWifis, []string{"sister"}) {
 		t.Fatalf("override = %+v", o)
 	}
 
 	o.Trust(base, "sister")
-	o.Untrust(base, "Shi 2,4")
+	o.Untrust(base, "Synthetic 2,4")
 	if !o.Empty() {
 		t.Fatalf("override not back to empty: %+v", o)
 	}
@@ -114,7 +114,7 @@ func TestOverrideFileRoundTrip(t *testing.T) {
 		t.Fatalf("missing file: %+v %v", o, err)
 	}
 	node := ExitNodeAuto
-	want := Override{TrustWifis: []string{"Shi 2,4"}, ExitNode: &node}
+	want := Override{TrustWifis: []string{"Synthetic 2,4"}, ExitNode: &node}
 	if err := SaveOverride(path, want); err != nil {
 		t.Fatal(err)
 	}
@@ -133,11 +133,11 @@ func TestOverrideFileRoundTrip(t *testing.T) {
 func TestNixStateQuotesNames(t *testing.T) {
 	got := NixState(Policy{
 		HomeSubnets:   []string{"192.168.8.0/24"},
-		TrustedWifis:  []string{`Shi 2,4`, `a"b`, "${x}"},
+		TrustedWifis:  []string{`Synthetic 2,4`, `a"b`, "${x}"},
 		ExitNode:      ExitNodeAuto,
-		WifiExitNodes: map[string]string{"Shi 2,4": "OpenWrt", `a"b`: ExitNodeAuto},
+		WifiExitNodes: map[string]string{"Synthetic 2,4": "OpenWrt", `a"b`: ExitNodeAuto},
 	})
-	want := `tailscale = { enable = true; homeSubnets = [ "192.168.8.0/24" ]; trustedWifis = [ "Shi 2,4" "a\"b" "\${x}" ]; exitNode = "auto"; wifiExitNodes = { "Shi 2,4" = "OpenWrt"; "a\"b" = "auto"; }; routerHome = false; siteRouterTrust = false; siteRouterTargets = [ ]; };`
+	want := `tailscale = { enable = true; homeSubnets = [ "192.168.8.0/24" ]; trustedWifis = [ "Synthetic 2,4" "a\"b" "\${x}" ]; exitNode = "auto"; wifiExitNodes = { "Synthetic 2,4" = "OpenWrt"; "a\"b" = "auto"; }; routerHome = false; siteRouterTrust = false; siteRouterTargets = [ ]; };`
 	if got != want {
 		t.Fatalf("got\n%s\nwant\n%s", got, want)
 	}

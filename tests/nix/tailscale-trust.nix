@@ -75,7 +75,7 @@ in
 assert legacy.services.tailscale.enable;
 assert
   policyOf legacy == {
-    homeSubnets = [ "192.168.8.0/24" ];
+    homeSubnets = [ ];
     trustedWifis = [ ];
     exitNode = "";
     wifiExitNodes = { };

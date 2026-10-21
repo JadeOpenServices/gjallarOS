@@ -37,7 +37,7 @@ func TestVPNOverrideCommands(t *testing.T) {
 	reapplied := fakeVPNPaths(t)
 	var out, errOut bytes.Buffer
 	for _, args := range [][]string{
-		{"trust-wifi", "Shi 2,4"},
+		{"trust-wifi", "Synthetic 2,4"},
 		{"untrust-wifi", "home"},
 		{"exit-node", "auto"},
 	} {
@@ -48,7 +48,7 @@ func TestVPNOverrideCommands(t *testing.T) {
 	if *reapplied != 3 {
 		t.Fatalf("reapplied %d times", *reapplied)
 	}
-	if !strings.Contains(out.String(), `override:  trust "Shi 2,4", untrust "home", exit node auto`) {
+	if !strings.Contains(out.String(), `override:  trust "Synthetic 2,4", untrust "home", exit node auto`) {
 		t.Fatalf("status:\n%s", out.String())
 	}
 
@@ -56,12 +56,12 @@ func TestVPNOverrideCommands(t *testing.T) {
 	if code := runVPN([]string{"export"}, &out, &errOut); code != 0 {
 		t.Fatalf("export: %s", errOut.String())
 	}
-	want := `tailscale = { enable = true; homeSubnets = [ "192.168.8.0/24" ]; trustedWifis = [ "Shi 2,4" ]; exitNode = "auto"; wifiExitNodes = { }; routerHome = false; siteRouterTrust = false; siteRouterTargets = [ ]; };`
+	want := `tailscale = { enable = true; homeSubnets = [ "192.168.8.0/24" ]; trustedWifis = [ "Synthetic 2,4" ]; exitNode = "auto"; wifiExitNodes = { }; routerHome = false; siteRouterTrust = false; siteRouterTargets = [ ]; };`
 	if strings.TrimSpace(out.String()) != want {
 		t.Fatalf("export = %s", out.String())
 	}
 
-	for _, args := range [][]string{{"trust-wifi", "home"}, {"untrust-wifi", "Shi 2,4"}, {"exit-node", "default"}} {
+	for _, args := range [][]string{{"trust-wifi", "home"}, {"untrust-wifi", "Synthetic 2,4"}, {"exit-node", "default"}} {
 		if code := runVPN(args, &out, &errOut); code != 0 {
 			t.Fatalf("%q: %s", args, errOut.String())
 		}
@@ -75,27 +75,27 @@ func TestVPNTrustWifiWithExitNode(t *testing.T) {
 	fakeVPNPaths(t)
 	var out, errOut bytes.Buffer
 	for _, args := range [][]string{
-		{"trust-wifi", "--exit-node", "OpenWrt", "Shi 2,4"},
+		{"trust-wifi", "--exit-node", "OpenWrt", "Synthetic 2,4"},
 		{"trust-wifi", "home", "--exit-node=auto"},
 	} {
 		if code := runVPN(args, &out, &errOut); code != 0 {
 			t.Fatalf("%q: code %d: %s", args, code, errOut.String())
 		}
 	}
-	if !strings.Contains(out.String(), `exit node OpenWrt on "Shi 2,4", exit node auto on "home"`) {
+	if !strings.Contains(out.String(), `exit node OpenWrt on "Synthetic 2,4", exit node auto on "home"`) {
 		t.Fatalf("status:\n%s", out.String())
 	}
 	out.Reset()
 	if code := runVPN([]string{"export"}, &out, &errOut); code != 0 {
 		t.Fatalf("export: %s", errOut.String())
 	}
-	if !strings.Contains(out.String(), `trustedWifis = [ "home" "Shi 2,4" ]; exitNode = "OpenWrt"; wifiExitNodes = { "Shi 2,4" = "OpenWrt"; "home" = "auto"; };`) {
+	if !strings.Contains(out.String(), `trustedWifis = [ "home" "Synthetic 2,4" ]; exitNode = "OpenWrt"; wifiExitNodes = { "Synthetic 2,4" = "OpenWrt"; "home" = "auto"; };`) {
 		t.Fatalf("export = %s", out.String())
 	}
 
 	for _, args := range [][]string{
 		{"trust-wifi", "home", "--exit-node", "default"},
-		{"untrust-wifi", "Shi 2,4"},
+		{"untrust-wifi", "Synthetic 2,4"},
 	} {
 		if code := runVPN(args, &out, &errOut); code != 0 {
 			t.Fatalf("%q: %s", args, errOut.String())

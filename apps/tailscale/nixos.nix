@@ -8,14 +8,8 @@
 
 let
   # null: generated state from before the installer asked about Tailscale.
-  # Keep 192.168.8.0/24 local everywhere, as before.
-  intent =
-    if (settings.tailscale or null) == null then
-      {
-        homeSubnets = [ "192.168.8.0/24" ];
-      }
-    else
-      settings.tailscale;
+  # No subnet counts as home then.
+  intent = if (settings.tailscale or null) == null then { } else settings.tailscale;
 
   policy = {
     homeSubnets = intent.homeSubnets or [ ];
