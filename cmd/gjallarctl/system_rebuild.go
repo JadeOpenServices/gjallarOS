@@ -142,7 +142,7 @@ func startSystemRebuild(opts rebuildOptions, stdout, stderr io.Writer) int {
 }
 
 func runSystem(args []string, stdout, stderr io.Writer) int {
-	if len(args) == 0 || !slices.Contains([]string{"check", "rebuild", "apply", "status", "move", "clone", "developer-off"}, args[0]) {
+	if len(args) == 0 || !slices.Contains([]string{"check", "rebuild", "apply", "status", "move", "clone", "developer-off", "time-check"}, args[0]) {
 		fmt.Fprintln(stderr, "Usage: gjallarctl system check|rebuild [OPTIONS]\n       gjallarctl system apply|status|move\n       gjallarctl system clone --from DIR\n       gjallarctl system developer-off")
 		return 2
 	}
@@ -164,6 +164,10 @@ func runSystem(args []string, stdout, stderr io.Writer) int {
 	if os.Geteuid() != 0 {
 		fmt.Fprintf(stderr, "ERROR: gjallarctl system %s runs as root; use rebuild\n", args[0])
 		return 2
+	}
+	// time-check is the gjallar-time-check service, not a user command.
+	if args[0] == "time-check" {
+		return systemTimeCheck(args[1:], stderr)
 	}
 	if err := systemCheckoutMissing(); err != nil {
 		fmt.Fprintf(stderr, "[GjallarOS] Error: %v; nothing rebuilt\n", err)

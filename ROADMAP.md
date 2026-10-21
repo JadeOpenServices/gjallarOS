@@ -2131,18 +2131,100 @@ snapshots are ordered by it.
 - Nix check `checks.time` reads the chrony.conf the module generates and
   runs `chronyd -p` on it.
 
-**Step 2, the hardened first-update exception (Q33):**
+**Step 2, the hardened first-update exception (Q33), built 2026-10-21:**
 
-- Off by default; strict NTS is what runs.
-- A helper looks at chronyd shortly after start. Only when no NTS source
-  got past the key exchange and the reason is the certificate date, it
-  writes a config under `/run` with `nocerttimecheck 1` and restarts
-  chronyd once.
-- `minsources 2` stays: two operators have to agree on the first update,
-  so one bad key alone cannot set the clock.
-- The exception is used up by that first update (N = 1), lives only in
-  `/run`, is logged, and `gjallarctl system status` says the time was set
-  with the date check off until a normal NTS update confirms it.
+How others handle it:
+
+- Pop!_OS turns the certificate date check off on the first attempt by
+  default and falls back to unauthenticated time; users can turn both off
+  with `nocerttimecheck 0` and `authselectmode prefer` in
+  `/etc/chrony/conf.d` (https://system76.com/time).
+- Ubuntu adds a bootstrap pool, `ntp-bootstrap.ubuntu.com`, whose NTS
+  certificates come from Ubuntu's own long-lived CA, so the date check
+  passes with a wrong clock
+  (https://patches.ubuntu.com/c/chrony/chrony_4.7-1ubuntu3.patch).
+- chrony's default is `nocerttimecheck 0`. Its manual calls the directive
+  a last resort for machines without an RTC, because a server certificate
+  could be used after it expired
+  (https://chrony-project.org/doc/4.8/chrony.conf.html).
+- Chrome treats a wrong clock as a security problem of its own: whoever
+  controls the clock can get expired certificates accepted. Chrome gets
+  its time from a signed Google service, and Roughtime was started because
+  at least a quarter of Chrome's certificate errors came from wrong clocks
+  (https://www.chromium.org/developers/design-documents/sane-time/,
+  https://imperialviolet.org/2016/09/19/roughtime.html).
+- Q33 rejects our own bootstrap server, so the Ubuntu way is out; the
+  Pop!_OS way is too loose (every boot, any one server, fallback to plain
+  NTP). The design below keeps their idea and closes what they leave open.
+
+What the fw13 VM showed (chrony 4.8, clock set back to 2026-06-01,
+saved keys moved aside, SYNTHETIC test of the real servers):
+
+- Netnod, PTB and time.nl failed the key exchange ("certificate chain uses
+  not yet valid certificate"). Cloudflare's one-year certificate was still
+  valid and its key exchange worked.
+- With one source and `minsources 2`, chronyd did not move the clock and
+  stayed "Not synchronised". So a working key exchange is not proof of
+  sync; only the tracking state is.
+- A chrony RTC file that claimed a large RTC error was ignored after a
+  restart ("RTC time before last driftfile modification"), because
+  `chronyd -s` does not go back before the drift file
+  (https://chrony-project.org/doc/4.6/chronyd.html). Restarting chronyd
+  right after a step is therefore safe.
+
+Built (`system/services/time.nix`, `gjallarctl system time-check`):
+
+- chrony.conf has `confdir /run/gjallar-time/chrony`, empty on every boot.
+  The exception is only ever a file there, never part of the build.
+- The `gjallar-time-check` service runs after chronyd at boot and every
+  30 minutes. When chronyd confirms the clock within 90 seconds, it writes
+  the confirmed time to `/var/lib/gjallar-time/confirmed` and stops.
+- Otherwise, once per boot, it fetches the certificate chain from each of
+  the four operators (TLS on port 4460, nothing sent) and checks it
+  against the operators' own roots only: ISRG Root X1 and X2, Root YE and
+  YR, and SSL.com Root Certification Authority ECC.
+- The exception is allowed only when at least two operators send a chain
+  that verifies for their host name at some date, at least one shows the
+  clock behind the certificate's start, the certificate is still valid
+  after the last confirmed time, and no operator shows the clock ahead.
+  A clock ahead never gets the exception.
+- Then it writes `nocerttimecheck 1`, `nosystemcert` and
+  `ntstrustedcerts` (the pinned roots) into the confdir and restarts
+  chronyd. `minsources 2` and `authselectmode require` stay, so two
+  operators still have to agree.
+- After the first update, or after 2 minutes without one, the file is
+  removed. The clock may only move forward: never earlier than the clock
+  before plus the time that passed, never earlier than the last confirmed
+  time. A step back is refused: chronyd stops, the clock goes back, and
+  the drift file gets the right date so `-s` cannot bring the wrong one
+  back.
+- A forward step is confirmed again: chronyd restarts without the saved
+  keys, so every source does a new key exchange with the date check on.
+  Only that makes the time "confirmed".
+- `gjallarctl system status` shows what happened this boot (from
+  `/run/gjallar-time/state.json`): set with the check off and not yet
+  confirmed, confirmed afterwards (with how far the clock was behind),
+  refused, or failed. A run that stops halfway leaves the file in `/run`;
+  the next run removes it before anything else.
+
+Security pass for step 2:
+
+- Threat: someone who holds a leaked key of an expired operator
+  certificate and sits on the network path. The exception needs two such
+  keys from two operators, both for certificates that were still valid
+  after the last confirmed time, and the result can only move the clock
+  forward. The confirmed time on disk is the floor.
+- Threat: a clock pushed ahead to make old certificates look expired.
+  That leads to "no exception", not to a step.
+- Threat: a CA outside the four operators' roots. During the exception the
+  system bundle is off (`nosystemcert`); only the pinned roots count.
+- Residual: a clock far ahead, or behind with only one operator reachable,
+  stays wrong and shows "not confirmed" until step 3 or a person sets it.
+- Residual: the very first boot has no confirmed time, so the floor is the
+  build's `time-epoch`.
+- Residual: when an operator moves to a root not in the list, the
+  exception counts it as untrusted until the list is updated; strict NTS
+  is not affected.
 
 **Step 3, router fallback on a proven home or site network (Q31, Q32):**
 
@@ -2163,7 +2245,9 @@ has not been confirmed for a long time.
 **Tests:** step 1 has the Nix check and the e2e-fw13 run. Steps 2 and 3
 need NixOS VM tests: a plain NTP server on the LAN that the client must
 ignore, only one source answering (the clock must not move), and a clock
-months behind with the exception.
+months behind with the exception. Step 2 has unit tests for every decision
+and the e2e-fw13 run (clock months behind, port 4460 blocked, normal
+boot).
 
 ## 19. TPM bus protection (parameter encryption)
 

@@ -22,12 +22,21 @@ let
     }).config;
   pkgs = nixpkgs.legacyPackages.${system};
   chronyd = config.systemd.services.chronyd.serviceConfig.ExecStart;
+  check = config.systemd.services.gjallar-time-check.serviceConfig.ExecStart;
+  has = nixpkgs.lib.hasInfix;
   dispatchers = nixpkgs.lib.concatMapStringsSep " " (
     s: toString s.source
   ) config.networking.networkmanager.dispatcherScripts;
 in
 assert config.services.chrony.enable;
 assert !config.services.timesyncd.enable;
+# The first-update exception asks the same four operators and trusts only
+# their roots.
+assert has " system time-check --wait 90s " check;
+assert has "--server time.cloudflare.com" check;
+assert has "--server ntspool.time.nl" check;
+assert has "--root 'ISRG Root X1'" check;
+assert config.systemd.timers.gjallar-time-check.timerConfig.OnUnitInactiveSec == "30min";
 pkgs.runCommand "gjallar-time-check" { } ''
   set -- ${chronyd}
   conf=
@@ -45,12 +54,15 @@ pkgs.runCommand "gjallar-time-check" { } ''
   grep -qx 'authselectmode require' "$conf"
   grep -qx 'minsources 2' "$conf"
   grep -q '^ntsdumpdir ' "$conf"
+  # The exception is only ever a file in /run, never in the config.
+  grep -qx 'confdir /run/gjallar-time/chrony' "$conf"
   # No router, no plain pool, no servers from DHCP (loophole 25).
   ! grep -q '192\.168\.' "$conf"
   ! grep -q 'pool\.ntp\.org' "$conf"
-  ! grep -qE '^(sourcedir|nocerttimecheck)' "$conf"
+  ! grep -qE '^(sourcedir|nocerttimecheck|nosystemcert|ntstrustedcerts)' "$conf"
   ! grep -q 'dhcp' ${dispatchers}
-  # chronyd itself accepts the file.
+  # chronyd itself accepts the file, with the confdir missing as here.
+  [ ! -e /run/gjallar-time ]
   ${pkgs.chrony}/bin/chronyd -p -f "$conf" >/dev/null
   echo "${chronyd}" | grep -q -- ' -s'
   touch "$out"

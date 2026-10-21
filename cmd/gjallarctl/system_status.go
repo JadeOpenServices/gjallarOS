@@ -37,7 +37,9 @@ func systemStatus(args []string, stdout, stderr io.Writer) int {
 		}
 		fmt.Fprintf(stdout, "Running system: %s (oddc %s)\n", shortRevision(built.Revision), shortRevision(built.ODDC))
 	}
-	fmt.Fprintln(stdout, timeLine(readClock(), clockNow()))
+	for _, line := range timeLines(readClock(), readTimeBoot(), clockNow()) {
+		fmt.Fprintln(stdout, line)
+	}
 
 	developerMode := "unknown"
 	if bus, ok := openSettings(stderr); ok {
