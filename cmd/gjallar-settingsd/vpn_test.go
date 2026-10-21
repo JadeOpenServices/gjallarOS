@@ -114,3 +114,12 @@ func TestResumeVPNNeedsNoPassword(t *testing.T) {
 		t.Fatalf("resume outside a session: %v", err)
 	}
 }
+
+func TestPauseMessageFitsTheDialog(t *testing.T) {
+	for _, b := range []string{nettrust.BlockExitNodeOffline, nettrust.BlockNoExitNode, nettrust.BlockTailscaleDown} {
+		m := pauseMessage(b)
+		if len(m) > 230 || !strings.Contains(m, nettrust.BlockCause(b)) || !strings.Contains(m, "60 min") {
+			t.Fatalf("%d characters: %q", len(m), m)
+		}
+	}
+}

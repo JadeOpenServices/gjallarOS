@@ -31,10 +31,8 @@ func (s *service) PauseVPN(ctx context.Context, sender string) (nettrust.PauseSt
 	if err != nil {
 		return nettrust.PauseState{}, err
 	}
-	message := fmt.Sprintf("The VPN is blocking this network: %s. Pausing lets apps on this network reach the internet without the tunnel, so the network can see where they connect. The pause ends after %d minutes, when the network changes, or when the device sleeps or restarts.",
-		nettrust.BlockText(verdict.Blocked), int(nettrust.MaxPause.Minutes()))
 	if err := s.sys.Authorize(ctx, sender, pauseAction, map[string]string{
-		"polkit.message":        message,
+		"polkit.message":        pauseMessage(verdict.Blocked),
 		"org.gjallaros.network": verdict.Network,
 	}); err != nil {
 		return nettrust.PauseState{}, err
@@ -95,4 +93,11 @@ func (s *service) blockedVerdict() (nettrust.Verdict, error) {
 		return nettrust.Verdict{}, fmt.Errorf("%w: this network cannot be told apart from others, so it cannot be paused", errRefused)
 	}
 	return verdict, nil
+}
+
+// pauseMessage is the password dialog's text. The dialog shows about six
+// lines of 40 characters and cuts the rest, so it stays short.
+func pauseMessage(blocked string) string {
+	return fmt.Sprintf("Pause the VPN on this network? %s Apps here then skip the tunnel; this network sees where they connect. Ends after %d min, on a network change, sleep or restart.",
+		nettrust.BlockCause(blocked), int(nettrust.MaxPause.Minutes()))
 }

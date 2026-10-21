@@ -155,10 +155,7 @@ func showVPNNotice(ctx context.Context, v nettrust.Verdict) (string, error) {
 // notice popup shows about seven short lines, so the risk comes first and
 // the summary already says the network is blocked.
 func vpnNoticeText(v nettrust.Verdict) (summary, body string) {
-	reason, _, _ := strings.Cut(nettrust.BlockText(v.Blocked), ";")
-	if reason != "" {
-		reason = strings.ToUpper(reason[:1]) + reason[1:] + "."
-	}
+	reason := nettrust.BlockCause(v.Blocked)
 	if v.SSID != "" {
 		body = "Wi-Fi " + html.EscapeString(v.SSID) + ": " + reason
 	} else {

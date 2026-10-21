@@ -35,6 +35,16 @@ func BlockText(reason string) string {
 	return reason
 }
 
+// BlockCause is the first half of BlockText as a sentence, for places with
+// little room: "Tailscale is not running."
+func BlockCause(reason string) string {
+	cause, _, _ := strings.Cut(BlockText(reason), ";")
+	if cause == "" {
+		return ""
+	}
+	return strings.ToUpper(cause[:1]) + cause[1:] + "."
+}
+
 // blockRules builds the table that drops traffic leaving through an uplink,
 // except tailscaled's own packets, DHCP, the local subnets and link-local
 // addresses. DNS to the local network is dropped too: the queries would
