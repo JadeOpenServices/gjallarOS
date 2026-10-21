@@ -500,6 +500,8 @@ in
       ExecStart = lib.escapeShellArgs [
         "${pkgs.ghostty}/bin/ghostty"
         "--title=GjallarOS time"
+        "--window-width=84"
+        "--window-height=12"
         "-e"
         (pkgs.writeShellScript "gjallar-time-details" ''
           PATH=${lib.makeBinPath [ pkgs.chrony ]}:/run/current-system/sw/bin

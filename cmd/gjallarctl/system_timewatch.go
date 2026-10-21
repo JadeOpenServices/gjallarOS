@@ -271,7 +271,8 @@ func systemTime(args []string, stdout, stderr io.Writer) int {
 	} else {
 		fmt.Fprintln(stdout, "Last confirmed by NTS: "+stamp.Local().Format("2006-01-02 15:04 MST"))
 	}
-	fmt.Fprintln(stdout, "\nThe clock is confirmed only by NTS, time with a signature. Some networks block it")
-	fmt.Fprintln(stdout, "(TCP port 4460, UDP port 123); the clock then keeps running on its own.")
+	fmt.Fprintln(stdout, "\nThe clock is confirmed only by NTS, time with a signature.")
+	fmt.Fprintln(stdout, "Some networks block NTS (TCP port 4460, UDP port 123).")
+	fmt.Fprintln(stdout, "The clock then keeps running on its own.")
 	return 0
 }
