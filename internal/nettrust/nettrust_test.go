@@ -39,7 +39,7 @@ func (f fakeProber) Reach(_ context.Context, target string) error {
 
 var policy = Policy{
 	HomeSubnets:       []string{"192.168.8.0/24"},
-	TrustedWifis:      []string{"bakasifu-5Ghz", "bakasifu-2.4Ghz", "fizzlipuzzli"},
+	TrustedWifis:      []string{"synthetic-5Ghz", "synthetic-2.4Ghz", "synthetic-guest"},
 	ExitNode:          "home-router",
 	SiteRouterTrust:   true,
 	SiteRouterTargets: []string{"192.168.8.1:53"},
@@ -63,14 +63,14 @@ func decide(t *testing.T, p Policy, n *Network, tn Tailnet, pr Prober) Verdict {
 }
 
 func TestTrustedHomeWifiKeepsHomeLocal(t *testing.T) {
-	v := decide(t, policy, wifi("bakasifu-5Ghz", "wpa-psk", "192.168.8.0/24"), Tailnet{Running: true}, fakeProber{})
+	v := decide(t, policy, wifi("synthetic-5Ghz", "wpa-psk", "192.168.8.0/24"), Tailnet{Running: true}, fakeProber{})
 	if v.Trust != TrustHome || v.ExitNode != "" || !slices.Equal(v.Bypass, []string{"192.168.8.0/24"}) {
 		t.Fatalf("verdict = %+v", v)
 	}
 }
 
 func TestClonedOpenHomeWifiIsUntrusted(t *testing.T) {
-	v := decide(t, policy, wifi("bakasifu-5Ghz", "", "192.168.8.0/24"), Tailnet{Running: true}, fakeProber{})
+	v := decide(t, policy, wifi("synthetic-5Ghz", "", "192.168.8.0/24"), Tailnet{Running: true}, fakeProber{})
 	if v.Trust != TrustUntrusted || v.ExitNode != "home-router" || len(v.Bypass) != 0 {
 		t.Fatalf("verdict = %+v", v)
 	}
@@ -133,7 +133,7 @@ func TestSiteRouterTrustOffFallsBackToWifi(t *testing.T) {
 	p.SiteRouterTrust = false
 	tn := Tailnet{Running: true, Peers: []Peer{router("sis-router", "192.168.1.0/24")}}
 	pr := fakeProber{via: map[string]string{"sis-router": "192.168.1.1"}, reach: map[string]bool{"192.168.8.1:53": true}}
-	v := decide(t, p, wifi("fizzlipuzzli", "sae", "192.168.1.0/24"), tn, pr)
+	v := decide(t, p, wifi("synthetic-guest", "sae", "192.168.1.0/24"), tn, pr)
 	if v.Trust != TrustTrustedWifi || v.ExitNode != "" {
 		t.Fatalf("verdict = %+v", v)
 	}
@@ -190,7 +190,7 @@ func TestStoppedTailscaleLeavesExitNodeAloneButBlocks(t *testing.T) {
 }
 
 func TestTrustedHomeIsNeverBlocked(t *testing.T) {
-	v := decide(t, policy, wifi("bakasifu-5Ghz", "wpa-psk", "192.168.8.0/24"), Tailnet{}, fakeProber{})
+	v := decide(t, policy, wifi("synthetic-5Ghz", "wpa-psk", "192.168.8.0/24"), Tailnet{}, fakeProber{})
 	if v.Trust != TrustHome || v.Blocked != "" {
 		t.Fatalf("verdict = %+v", v)
 	}
@@ -253,7 +253,7 @@ func TestApplyExitNodeOnlyChangesOnDifference(t *testing.T) {
 }
 
 func TestRouterProofViaGatewayWANAddress(t *testing.T) {
-	n := wifi("bakasifu-5ghz", "wpa-psk", "192.168.8.0/24")
+	n := wifi("synthetic-5ghz", "wpa-psk", "192.168.8.0/24")
 	n.Gateway = netip.MustParseAddr("192.168.8.1")
 	tn := Tailnet{Running: true, Peers: []Peer{router("OpenWrt", "192.168.8.0/24")}}
 	pr := fakeProber{via: map[string]string{"OpenWrt": "192.168.9.1"}, gateway: map[string]bool{"192.168.9.1": true}}

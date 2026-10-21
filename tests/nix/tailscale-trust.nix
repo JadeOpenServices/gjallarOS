@@ -45,11 +45,11 @@ let
     tailscale = {
       homeSubnets = [ "192.168.8.0/24" ];
       trustedWifis = [
-        "bakasifu-5Ghz"
-        "fizzlipuzzli"
+        "synthetic-5Ghz"
+        "synthetic-guest"
       ];
       exitNode = "home-router";
-      wifiExitNodes.fizzlipuzzli = "auto";
+      wifiExitNodes.synthetic-guest = "auto";
       siteRouterTrust = true;
       siteRouterTargets = [ "192.168.8.1:53" ];
     };
@@ -90,11 +90,11 @@ assert nixpkgs.lib.hasInfix "--override /var/lib/gjallar/vpn-trust-override.json
 assert !(legacy.systemd.services ? tailscale-local-lan-bypass);
 assert
   (policyOf vpn).trustedWifis == [
-    "bakasifu-5Ghz"
-    "fizzlipuzzli"
+    "synthetic-5Ghz"
+    "synthetic-guest"
   ];
 assert (policyOf vpn).exitNode == "home-router";
-assert (policyOf vpn).wifiExitNodes == { fizzlipuzzli = "auto"; };
+assert (policyOf vpn).wifiExitNodes == { synthetic-guest = "auto"; };
 assert vpn.services.tailscale.useRoutingFeatures == "client";
 # The internet block (nettrust ApplyBlock) needs nft on the unit's path.
 assert builtins.elem pkgs.nftables vpn.systemd.services.gjallar-vpn-trust.path;

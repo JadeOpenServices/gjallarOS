@@ -156,16 +156,16 @@ func TestParseTailnetExitNodeOption(t *testing.T) {
 
 func TestTrustedWifiWithExitNodeKeepsLANLocal(t *testing.T) {
 	p := policy
-	p.WifiExitNodes = map[string]string{"fizzlipuzzli": ExitNodeAuto}
+	p.WifiExitNodes = map[string]string{"synthetic-guest": ExitNodeAuto}
 	tn := Tailnet{Running: true, Peers: []Peer{exitOption("home-router", "192.168.8.0/24", true)}}
-	v := decide(t, p, wifi("fizzlipuzzli", "wpa-psk", "10.1.0.0/24"), tn, fakeProber{})
+	v := decide(t, p, wifi("synthetic-guest", "wpa-psk", "10.1.0.0/24"), tn, fakeProber{})
 	if v.Trust != TrustTrustedWifi || !v.ManageExitNode || v.ExitNode != "home-router" ||
 		!slices.Equal(v.Bypass, []string{"10.1.0.0/24"}) {
 		t.Fatalf("verdict = %+v", v)
 	}
 
 	// Other trusted Wi-Fis keep the exit node off.
-	if v := decide(t, p, wifi("bakasifu-5Ghz", "wpa-psk", "10.2.0.0/24"), tn, fakeProber{}); v.ExitNode != "" || !v.ManageExitNode {
+	if v := decide(t, p, wifi("synthetic-5Ghz", "wpa-psk", "10.2.0.0/24"), tn, fakeProber{}); v.ExitNode != "" || !v.ManageExitNode {
 		t.Fatalf("verdict = %+v", v)
 	}
 

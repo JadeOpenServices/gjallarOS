@@ -2015,7 +2015,7 @@ func collectRecovery(ctx context.Context, ui prompt.UI, partitionable, secureBoo
 func collectAIServer(ctx context.Context, ui prompt.UI, running, u *config.User) error {
 	u.OverrideAISelection, u.OverrideModelWith = false, ""
 	fmt.Fprintln(ui.Out, "The central AI server must use HTTPS and a bearer token (e.g. Ollama behind a TLS proxy that checks it). The token is asked for later, hidden.")
-	endpoint, model, tokens := "https://192.168.8.205", "qwen3-coder:30b", "32768"
+	endpoint, model, tokens := "", "qwen3-coder:30b", "32768"
 	if running != nil && running.AIEndpoint != "" {
 		endpoint, model = running.AIEndpoint, running.AIRemoteModel
 		if running.AIRemoteContextTokens > 0 {
@@ -2023,7 +2023,7 @@ func collectAIServer(ctx context.Context, ui prompt.UI, running, u *config.User)
 		}
 	}
 	for {
-		endpoint, err := ui.Value(ctx, "AI server URL", endpoint)
+		endpoint, err := ui.Value(ctx, "AI server URL (e.g. https://ai.example.lan)", endpoint)
 		if err != nil {
 			return err
 		}
@@ -2037,6 +2037,9 @@ func collectAIServer(ctx context.Context, ui prompt.UI, running, u *config.User)
 		}
 		u.AIEndpoint, u.AIRemoteModel = strings.TrimRight(strings.TrimSpace(endpoint), "/"), strings.TrimSpace(model)
 		u.AIRemoteContextTokens, err = strconv.Atoi(strings.TrimSpace(tokens))
+		if err == nil && u.AIEndpoint == "" {
+			err = errors.New("enter the AI server URL")
+		}
 		if err == nil {
 			err = config.ValidateAIEndpoint(*u)
 		}
@@ -2328,7 +2331,7 @@ func collectTailscale(ctx context.Context, ui prompt.UI, running, u *config.User
 	t := &config.TailscaleIntent{HomeSubnets: []string{}, TrustedWifis: []string{}, SiteRouterTargets: []string{}}
 	u.Tailscale = t
 	// was holds the running answers on a rerun, else what a new install offers.
-	was := config.TailscaleIntent{HomeSubnets: []string{"192.168.8.0/24"}, RouterHome: true, SiteRouterTrust: true}
+	was := config.TailscaleIntent{HomeSubnets: []string{}, RouterHome: true, SiteRouterTrust: true}
 	if running != nil && running.Tailscale != nil {
 		was = *running.Tailscale
 	}
@@ -2351,7 +2354,7 @@ func collectTailscale(ctx context.Context, ui prompt.UI, running, u *config.User
 		}
 	}
 
-	if err := ask("Home LAN subnets kept out of the tunnel at home (comma-separated)", config.JoinList(was.HomeSubnets), func(v string) (err error) {
+	if err := ask("Home LAN subnets kept out of the tunnel at home, comma-separated (e.g. 192.168.1.0/24)", config.JoinList(was.HomeSubnets), func(v string) (err error) {
 		t.HomeSubnets, err = config.SplitList(v)
 		return err
 	}); err != nil {
@@ -2419,7 +2422,7 @@ func collectTailscale(ctx context.Context, ui prompt.UI, running, u *config.User
 	if len(was.SiteRouterTargets) > 0 {
 		targets = config.JoinList(was.SiteRouterTargets)
 	}
-	return ask("Home hosts that router must reach (host:port, comma-separated)", targets, func(v string) (err error) {
+	return ask("Home hosts that router must reach (host:port, comma-separated, e.g. 192.168.1.1:53)", targets, func(v string) (err error) {
 		t.SiteRouterTargets, err = config.SplitList(v)
 		return err
 	})
