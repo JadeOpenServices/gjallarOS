@@ -1,0 +1,128 @@
+--- a/src/openvfsfuse/main.cpp
++++ b/src/openvfsfuse/main.cpp
+@@ -44,7 +44,8 @@ std::optional<openVFSfuse_Args> processArgs(int argc, char *argv[])
+     // preset passed standard options which can not be set in fuse_config in
+     // the init function called openVFSfuse_init()
+     // auto_umount: Unmount the fuse layer automatically if the app crashes.
+-    std::vector<std::string> opts{"auto_unmount"};
++    // max_threads: libfuse defaults to 10 workers, see OpenVFSMaxWorkers.
++    std::vector<std::string> opts{"auto_unmount", "max_threads=" + std::to_string(OpenVFSMaxWorkers)};
+ 
+     while ((res = getopt(argc, argv, "hpfdi:o:s:")) != -1) {
+         switch (res) {
+--- a/src/openvfsfuse/openvfsfuse.cpp
++++ b/src/openvfsfuse/openvfsfuse.cpp
+@@ -31,11 +31,13 @@
+ #include <fuse3/fuse_lowlevel.h>
+ #include <grp.h>
+ #include <iostream>
++#include <mutex>
+ #include <pwd.h>
+ #include <string_view>
+ #include <stdarg.h>
+ #include <stdio.h>
+ #include <unistd.h>
++#include <unordered_map>
+ 
+ #include <nlohmann/json.hpp>
+ 
+@@ -205,6 +207,68 @@ static SocketThread _socketThread("SocketThread", _jobs);
+ 
+ static std::atomic<int> _transfer_id{12};
+ 
++// The client writes a hydrated file, and reads its sync database, through
++// this same mount. If every worker waited for a hydration, the client's own
++// requests would find no worker and no hydration could finish. So a
++// hydration wait first takes one of the limited slots; with none left the
++// open fails at once instead of taking the last free workers.
++class HydrationSlot
++{
++public:
++    explicit HydrationSlot(pid_t callerThreadId)
++        : _process(processOf(callerThreadId))
++    {
++        const std::lock_guard lock(_mutex);
++        auto &mine = _perProcess[_process];
++        if (_total < OpenVFSMaxWorkers - OpenVFSReservedWorkers && mine < OpenVFSWaitsPerProcess) {
++            ++_total;
++            ++mine;
++            _acquired = true;
++        } else if (mine == 0) {
++            _perProcess.erase(_process);
++        }
++    }
++    ~HydrationSlot()
++    {
++        if (!_acquired) {
++            return;
++        }
++        const std::lock_guard lock(_mutex);
++        --_total;
++        if (--_perProcess[_process] == 0) {
++            _perProcess.erase(_process);
++        }
++    }
++    HydrationSlot(const HydrationSlot &) = delete;
++    HydrationSlot &operator=(const HydrationSlot &) = delete;
++    explicit operator bool() const { return _acquired; }
++
++private:
++    // fuse_context::pid is the calling thread; its process is the Tgid.
++    static pid_t processOf(pid_t threadId)
++    {
++#ifndef __APPLE__
++        std::ifstream status(std::format("/proc/{}/status", threadId));
++        for (std::string line; std::getline(status, line);) {
++            if (line.starts_with("Tgid:")) {
++                try {
++                    return static_cast<pid_t>(std::stol(line.substr(5)));
++                } catch (const std::exception &) {
++                    break;
++                }
++            }
++        }
++#endif
++        return threadId;
++    }
++
++    static inline std::mutex _mutex;
++    static inline unsigned _total = 0;
++    static inline std::unordered_map<pid_t, unsigned> _perProcess;
++    const pid_t _process;
++    bool _acquired = false;
++};
++
+ 
+ void openvfsfuse_log(const std::string &path, const char *action, int returncode, const char *format, ...)
+ {
+@@ -588,6 +652,12 @@ static int openVFSfuse_open(const char *orig_path, struct fuse_file_info *fi)
+                     return -EPERM;
+                 }
+ 
++                const HydrationSlot slot(fuse_get_context()->pid);
++                if (!slot) {
++                    openvfsfuse_log(path, "open", -1, "no hydration slot free for %s", opener.c_str());
++                    return -EAGAIN;
++                }
++
+                 // Create message to send to worker thread 1
+                 std::shared_ptr<MsgData> msgData(new MsgData());
+                 msgData->msg = "V2/HYDRATE_FILE";
+--- a/src/openvfsfuse/openvfsfuse.h
++++ b/src/openvfsfuse/openvfsfuse.h
+@@ -27,5 +27,15 @@ struct openVFSfuse_Args
+     bool debugEnabled = false; // checked in the central logging function if logging is enabled
+ };
+ 
++// libfuse serves the whole mount from one pool of worker threads, and a
++// hydration wait holds its worker until the client has written the file.
++// Hydration waits may use at most OpenVFSMaxWorkers - OpenVFSReservedWorkers
++// workers; the rest stay free for short requests, the client's among them.
++// One process holds at most OpenVFSWaitsPerProcess of them, so a single app
++// opening many files cannot shut every other app out of hydrating.
++constexpr unsigned OpenVFSMaxWorkers = 64;
++constexpr unsigned OpenVFSReservedWorkers = 16;
++constexpr unsigned OpenVFSWaitsPerProcess = 16;
++
+ int initializeOpenVFSFuse(openVFSfuse_Args &openVFSArgs);
+ void openvfsfuse_log(const std::string &path, const char *action, int returncode, const char *format, ...);

@@ -85,6 +85,15 @@ Hydration patches:
   when it exits, and does not mount when it cannot reach the client. Upstream
   kept serving a mount after the client was killed; the restarted client's
   openvfs could not mount over it and the client aborted.
+- OpenVFS keeps FUSE workers free for the sync client. libfuse serves the
+  mount from one pool of 10 workers by default, and a hydration wait holds
+  its worker until the client has written the file through the same mount.
+  Ten apps opening online-only files at once took every worker, so the
+  client's own writes, and its sync database under `~/Nextcloud`, got none
+  and everything touching the mount hung, terminals included. openvfs now
+  runs 64 workers; hydration waits may hold 48 of them, at most 16 per
+  process, and an open past that fails at once with `EAGAIN` instead of
+  waiting.
 - OpenVFS placeholders always report themselves in sync. Upstream marked every
   unchanged file for a metadata update on each sync run, but OpenVFS cannot
   record that it finished, so tens of thousands of no-op jobs repeated forever.
@@ -112,7 +121,8 @@ python3 tests/openvfs-hydration.py /path/to/openvfs --timeout
 It checks concurrent opens, in-progress hydration, wrapped preview exclusion,
 server errors, cancellation with zero blocked requests, SIGTERM and sync
 client exit during a hydration (both must unmount), no mount without a sync
-client, the actual deadline, and a slow download that outlasts it.
+client, the actual deadline, a slow download that outlasts it, and a burst
+of 60 opens that leaves other processes and the client's own writes served.
 It does not replace an integration check against the rebuilt Nextcloud client.
 
 KIO 6.26 normally runs its file worker inside Dolphin. `dolphin.nix` uses
