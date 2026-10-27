@@ -180,10 +180,19 @@ Plymouth.SetDisplayQuestionFunction(question_callback);
 message = null;
 
 fun message_callback (text) {
-  global.message.text = text;
-  global.message.image = text_image(text, 0.78);
-  global.message.sprite = Sprite(message.image);
-  message.sprite.SetPosition(Math.Int(center_x - message.image.GetWidth() / 2), Math.Int(screen_h * 0.78), 1);
+  # The handoff scripts send this right before quit --retain-splash, which
+  # never calls the quit hook below. It is a signal, never shown.
+  if (text == handoff_message) {
+    global.prompt = null;
+    global.bullets = null;
+    global.answer = null;
+    stop_spinner();
+  } else {
+    global.message.text = text;
+    global.message.image = text_image(text, 0.78);
+    global.message.sprite = Sprite(message.image);
+    message.sprite.SetPosition(Math.Int(center_x - message.image.GetWidth() / 2), Math.Int(screen_h * 0.78), 1);
+  }
 }
 
 fun hide_message_callback (text) {
@@ -208,8 +217,7 @@ Plymouth.SetDisplayNormalFunction(normal_callback);
 
 ### QUIT ###
 
-# greetd quits with --retain-splash, which keeps this frame up: the mark
-# rests upright and the prompts are gone.
+# Only a quit that drops the splash gets here; see message_callback.
 fun quit_callback () {
   global.prompt = null;
   global.bullets = null;

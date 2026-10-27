@@ -877,5 +877,7 @@ later; see [LICENSE](LICENSE). Bundled parts keep their own licenses:
 - [`pkgs/monique`](https://github.com/vardstein/monique): GPL-3.0.
 - [`apps/nemu/module.nix`](apps/nemu/module.nix): nemu's upstream NixOS
   module, BSD-2-Clause, license text in the file header.
+- [`themes/brand/openjade`](themes/brand/openjade/README.md): the openJade
+  logo is a trademark and not covered by the AGPL.
 
 <div align="right"><a href="#gjallaros">↑ back to top</a></div>

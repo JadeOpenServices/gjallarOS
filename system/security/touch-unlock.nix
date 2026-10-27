@@ -47,6 +47,10 @@ let
   # disk locked.
   quitPlymouth = pkgs.writeShellScript "unl0kr-quit-plymouth" ''
     ${plymouth}/bin/plymouth --ping || exit 0
+    ${lib.optionalString (config.boot.plymouth.theme == "gjallar") ''
+      # The kept frame shows the mark upright, not frozen mid-turn.
+      ${plymouth}/bin/plymouth display-message --text=${config.gjallar.bootSplash.handoffMessage} || true
+    ''}
     if ! ${plymouth}/bin/plymouth quit --retain-splash --wait; then
       echo "unl0kr-quit-plymouth: plymouth quit failed, starting unl0kr anyway" >&2
     fi

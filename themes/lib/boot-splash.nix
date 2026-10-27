@@ -83,6 +83,7 @@ let
     prompt_font = "${cfg.font.family} 14";
     spin = ${if cfg.spin then "1" else "0"};
     has_wordmark = ${if cfg.wordmark == null then "0" else "1"};
+    handoff_message = "${cfg.handoffMessage}";
   ''
   + lib.concatMapStrings (
     mode:
@@ -264,6 +265,19 @@ in
       type = color;
       default = "#f6fbf8";
       description = "Colour of the lines, prompts and messages.";
+    };
+
+    handoffMessage = lib.mkOption {
+      type = lib.types.strMatching "[a-z-]+";
+      default = "gjallar-splash-handoff";
+      readOnly = true;
+      internal = true;
+      description = ''
+        Sent with plymouth display-message right before quit --retain-splash.
+        Plymouth skips the theme's quit hook when it keeps the splash, so the
+        mark would stay frozen mid-turn; this message stops it upright and
+        redraws at once. Only root can talk to plymouthd.
+      '';
     };
 
     background = lib.mkOption {
