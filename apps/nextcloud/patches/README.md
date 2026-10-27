@@ -67,7 +67,9 @@ Hydration patches:
   be able to write downloaded content without requesting hydration themselves.
 - OpenVFS registers requests before sending them, uses atomic request IDs,
   waits for files already being hydrated, and releases waiters on errors,
-  cancellation, or a five-minute deadline.
+  cancellation, or a five-minute deadline. A failed download fails the open
+  with EIO. Upstream returned ENOENT, so a program saw the file as gone and
+  could save a new file over the placeholder.
 - The five-minute deadline counts from the last write into the file, not from
   the request. The sync client writes the download through the mount, so a
   large file on a slow link keeps its reader waiting while data arrives.

@@ -144,7 +144,8 @@
 +                if (state != 0) {
                      // Fail, job with ID was errornous
                      openvfsfuse_log(path, "open", 1, "ERROR while retrieving: %d", state);
-                     return -ENOENT;
+-                    return -ENOENT;
++                    return -EIO;
                  }
  
 -                if (cnt >= MaxCnt) {
