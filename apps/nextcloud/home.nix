@@ -11,6 +11,7 @@ let
   enable = settings.nextcloudEnable or false;
   host = settings.nextcloudHost or "";
   preferredBrowser = settings.preferredBrowser or "firefox";
+  diagnosticsEnabled = settings.debugFunctions or false;
   loginRecipe =
     config.gjallar.loginBrowsers.${preferredBrowser}
       or (throw "Nextcloud login needs gjallar.loginBrowsers.${preferredBrowser}; add it in user/browsers/${preferredBrowser}.nix");
@@ -520,6 +521,47 @@ if isinstance(wid, int) and wid > 0:
 
     exec ${managedClient}/bin/nextcloud --background
   '';
+
+  # Debug mode only (Plane 258): failures of the client and its mount, for
+  # error reports. Lines are fixed words and numbers; the journal lines they
+  # come from can name the mount, so they are never copied as they are.
+  syncDiagnostics = pkgs.writeShellScript "nextcloud-sync-diagnostics" ''
+    set -u
+    state_dir="''${XDG_STATE_HOME:-$HOME/.local/state}/gjallar-diagnostics"
+    ${pkgs.coreutils}/bin/mkdir -p -m 0700 "$state_dir"
+    log_file="$state_dir/nextcloud-$(${pkgs.coreutils}/bin/cat /proc/sys/kernel/random/boot_id).log"
+    cursor="$state_dir/nextcloud-sync.cursor"
+
+    # Service events of this boot since the last run; the cursor file keeps
+    # the place.
+    ${pkgs.systemd}/bin/journalctl --user -b -u nextcloud-sync.service --cursor-file="$cursor" -o short-iso --no-pager -q \
+      | ${pkgs.gnused}/bin/sed -nE \
+        -e 's/^([^ ]+) .*Main process exited, code=([a-z]+), status=([^ ,]+).*/\1 client-exit code=\2 status=\3/p' \
+        -e "s/^([^ ]+) .*Failed with result '([a-z-]+)'.*/\1 failed result=\2/p" \
+        -e 's/^([^ ]+) .*Scheduled restart job, restart counter is at ([0-9]+).*/\1 restart count=\2/p' \
+        -e 's/^([^ ]+) .*Start request repeated too quickly.*/\1 start-limit-hit/p' \
+        -e 's/^([^ ]+) .*\] " finished (-?[0-9]+)$/\1 openvfs-exit code=\2/p' \
+        -e 's/^([^ ]+) .*openVFSfuse: ([0-9]+) opens refused, no hydration slot free$/\1 openvfs-refused count=\2/p' \
+      >>"$log_file"
+
+    # The mount must answer a stat within five seconds. Only changes are
+    # written, so a mount that stops answering gives one line, and one more
+    # when it answers again.
+    ${pkgs.systemd}/bin/systemctl --user -q is-active nextcloud-sync.service || exit 0
+    type="$(${pkgs.coreutils}/bin/timeout -s KILL 5 ${pkgs.coreutils}/bin/stat -f -c %T "$HOME/Nextcloud" 2>/dev/null)"
+    rc=$?
+    case "$rc:$type" in
+      0:fuse*) mount=answering ;;
+      0:*) mount=not-mounted ;;
+      137:*) mount=no-answer-in-5s ;;
+      *) mount="stat-failed-$rc" ;;
+    esac
+    last="$(${pkgs.coreutils}/bin/cat "$state_dir/nextcloud-mount.state" 2>/dev/null || echo answering)"
+    if [ "$mount" != "$last" ]; then
+      echo "$(${pkgs.coreutils}/bin/date --iso-8601=seconds) mount=$mount" >>"$log_file"
+      echo "$mount" >"$state_dir/nextcloud-mount.state"
+    fi
+  '';
 in
 lib.mkMerge [
 {
@@ -607,6 +649,30 @@ lib.mkMerge [
 
     };
 
+    Install.WantedBy = [
+      "graphical-session.target"
+    ];
+  };
+
+  # Records only; it never restarts or stops anything (wiki 752 Q71).
+  systemd.user.services.nextcloud-sync-diagnostics = lib.mkIf (enable && diagnosticsEnabled) {
+    Unit.Description = "Nextcloud failure diagnostics (debug mode)";
+    Service = {
+      Type = "oneshot";
+      ExecStart = syncDiagnostics;
+    };
+  };
+
+  systemd.user.timers.nextcloud-sync-diagnostics = lib.mkIf (enable && diagnosticsEnabled) {
+    Unit = {
+      Description = "Nextcloud failure diagnostics every minute (debug mode)";
+      After = [ "graphical-session.target" ];
+      PartOf = [ "graphical-session.target" ];
+    };
+    Timer = {
+      OnActiveSec = "1min";
+      OnUnitActiveSec = "1min";
+    };
     Install.WantedBy = [
       "graphical-session.target"
     ];

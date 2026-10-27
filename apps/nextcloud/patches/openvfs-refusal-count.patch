@@ -1,0 +1,58 @@
+--- a/src/openvfsfuse/openvfsfuse.cpp
++++ b/src/openvfsfuse/openvfsfuse.cpp
+@@ -269,6 +269,47 @@
+     bool _acquired = false;
+ };
+ 
++// Refused opens are counted for error reports, without the path or the
++// program: the first refusal is reported at once, later ones at most once a
++// minute with the count since the last line, and the rest at a clean exit.
++class RefusalReport
++{
++public:
++    static void count()
++    {
++        const auto now = std::chrono::steady_clock::now();
++        const std::lock_guard lock(_mutex);
++        ++_pending;
++        if (_reported && now - _last < std::chrono::minutes(1)) {
++            return;
++        }
++        flush();
++        _last = now;
++        _reported = true;
++    }
++    ~RefusalReport()
++    {
++        const std::lock_guard lock(_mutex);
++        flush();
++    }
++
++private:
++    static void flush()
++    {
++        if (_pending > 0) {
++            std::cerr << "openVFSfuse: " << _pending << " opens refused, no hydration slot free" << std::endl;
++            _pending = 0;
++        }
++    }
++
++    static inline std::mutex _mutex;
++    static inline unsigned long _pending = 0;
++    static inline bool _reported = false;
++    static inline std::chrono::steady_clock::time_point _last;
++};
++
++static RefusalReport _refusalReport;
++
+ 
+ void openvfsfuse_log(const std::string &path, const char *action, int returncode, const char *format, ...)
+ {
+@@ -655,6 +696,7 @@
+                 const HydrationSlot slot(fuse_get_context()->pid);
+                 if (!slot) {
+                     openvfsfuse_log(path, "open", -1, "no hydration slot free for %s", opener.c_str());
++                    RefusalReport::count();
+                     return -EAGAIN;
+                 }
+ 

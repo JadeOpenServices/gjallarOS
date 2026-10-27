@@ -100,6 +100,10 @@ Hydration patches:
   debug log (`-d`). Upstream printed every hydration, with the file path and
   the app that opened it, to the journal on every run. Errors are still
   logged.
+- OpenVFS counts opens refused for lack of a hydration slot and writes only
+  the count to the journal: the first refusal at once, later ones at most once
+  a minute, the rest at a clean exit. No path and no program name. Debug mode
+  copies these counts into the Nextcloud diagnostics log (Plane 258).
 - OpenVFS placeholders always report themselves in sync. Upstream marked every
   unchanged file for a metadata update on each sync run, but OpenVFS cannot
   record that it finished, so tens of thousands of no-op jobs repeated forever.
@@ -138,7 +142,8 @@ It checks concurrent opens, in-progress hydration, wrapped preview exclusion,
 server errors, cancellation with zero blocked requests, SIGTERM and sync
 client exit during a hydration (both must unmount), no mount without a sync
 client, the actual deadline, a slow download that outlasts it, and a burst
-of 60 opens that leaves other processes and the client's own writes served.
+of 60 opens that leaves other processes and the client's own writes served,
+with every refused open counted and no path in the count lines.
 It does not replace an integration check against the rebuilt Nextcloud client.
 
 KIO 6.26 normally runs its file worker inside Dolphin. `dolphin.nix` uses

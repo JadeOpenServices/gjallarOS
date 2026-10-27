@@ -24,6 +24,7 @@ let
     # Unmount when the sync client exits, and never mount without one.
     # Keep workers free for the client while hydrations wait.
     # Log file names only in debug mode.
+    # Count opens refused for lack of a slot, without names, for error reports.
     patches = [
       ./patches/openvfs-hydration-liveness.patch
       ./patches/openvfs-shutdown.patch
@@ -31,6 +32,7 @@ let
       ./patches/openvfs-exit-with-client.patch
       ./patches/openvfs-worker-reserve.patch
       ./patches/openvfs-quiet-socket-log.patch
+      ./patches/openvfs-refusal-count.patch
     ];
 
     nativeBuildInputs = [
