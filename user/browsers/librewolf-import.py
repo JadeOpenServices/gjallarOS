@@ -40,6 +40,9 @@ SKIP = {
     "compatibility.ini", "extensions.json", "addonStartup.json.lz4",
     "startupCache", "cache2", "crashes", "minidumps", "datareporting",
     "saved-telemetry-pings", "times.json",
+    # Module paths from the store that a garbage collection removes; Firefox
+    # writes a fresh one and its policies add the modules it needs.
+    "pkcs11.txt",
 }
 SQLITE_SIDE = ("-wal", "-shm", "-journal")
 EXT_MARKER = ".gjallar-librewolf-extensions-imported"

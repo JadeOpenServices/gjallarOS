@@ -1683,6 +1683,7 @@ func prepareHost(
 
 		if err := release.Align(
 			ctx,
+			opt.repo,
 			expected,
 			installerresume.WrapperPath,
 		); err != nil {

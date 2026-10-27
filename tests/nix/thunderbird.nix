@@ -28,10 +28,12 @@ let
   absent = evaluate { apps = [ ]; };
   policies = cfg: cfg.environment.etc."thunderbird/policies/policies.json".source;
   scdaemon = card.environment.etc."gnupg/scdaemon.conf".text;
+  opensc = card.environment.etc."gjallar/pkcs11/opensc-pkcs11.so".source;
 in
 assert !(absent.environment.etc ? "thunderbird/policies/policies.json");
 assert !plain.services.pcscd.enable;
 assert !(plain.environment.etc ? "gnupg/scdaemon.conf");
+assert !(plain.environment.etc ? "gjallar/pkcs11/opensc-pkcs11.so");
 assert card.services.pcscd.enable;
 assert card.programs.gnupg.agent.enable;
 # scdaemon has to share the reader with OpenSC.
@@ -64,7 +66,8 @@ nixpkgs.legacyPackages.${system}.runCommand "gjallar-thunderbird-check"
     test -s "''${start#file://}"
     if grep -Eq '(src|href)="https?:' "''${start#file://}"; then exit 1; fi
     jq -e '.policies | has("SecurityDevices") | not' "$p"
-    jq -e '.policies.SecurityDevices.Add.OpenSC | endswith("/lib/opensc-pkcs11.so")' "$c"
-    test -e "$(jq -r '.policies.SecurityDevices.Add.OpenSC' "$c")"
+    jq -e '.policies.SecurityDevices.Add["OpenSC smart card"] == "/etc/gjallar/pkcs11/opensc-pkcs11.so"' "$c"
+    jq -e '.policies.SecurityDevices.Delete == ["OpenSC"]' "$c"
+    test -e ${opensc}
     touch "$out"
   ''

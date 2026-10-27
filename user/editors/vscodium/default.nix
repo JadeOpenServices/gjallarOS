@@ -118,6 +118,17 @@ in
 
   # Keep the generated settings as first-run defaults, not a read-only live file.
   home.file.${settingsPath}.enable = false;
+  # The copy is written once and never refreshed, so a store path in it would
+  # outlive its garbage collection. Point at /run/current-system/sw instead.
+  assertions = [
+    {
+      assertion =
+        !lib.hasInfix builtins.storeDir (
+          builtins.unsafeDiscardStringContext (builtins.toJSON config.programs.vscodium.profiles.default.userSettings)
+        );
+      message = "VSCodium userSettings must not contain ${builtins.storeDir} paths; settings.json is copied once and is not updated.";
+    }
+  ];
   home.activation.vscodiumWritableSettings =
     lib.hm.dag.entryBetween [ "linkGeneration" ] [ "writeBoundary" ]
       ''

@@ -52,8 +52,9 @@
       nix-lampray = "nix develop path:${../../shells/lampray} -c zsh";
       nix-invoke = "nix develop path:${../../shells/invoke} -c zsh";
       nix-comfy = "nix develop path:${../../shells/comfy} -c zsh";
-      nix-pkg-build = "nix build -f default.nix --arg pkgs 'import <nixpkgs> {}'";
-      nix-pkg-shell = "nix shell -f default.nix --arg pkgs 'import <nixpkgs> {}'";
+      # The system's pinned nixpkgs; <nixpkgs> can name any channel.
+      nix-pkg-build = "nix build -f default.nix --arg pkgs 'import ${pkgs.path} {}'";
+      nix-pkg-shell = "nix shell -f default.nix --arg pkgs 'import ${pkgs.path} {}'";
       git-clean = "git clean -xfd; git submodule foreach git clean -xfd";
       nekoray = "xhost + local:; sudo nekoray";
       docker-run-ssh-agent = "sudo docker run --mount type=bind,source=$SSH_AUTH_SOCK,target=/ssh-agent --env SSH_AUTH_SOCK=/ssh-agent";

@@ -90,7 +90,14 @@ lib.mkIf config.gjallar.apps.thunderbird.enable (
         disable-ccid
         pcsc-shared
       '';
-      programs.thunderbird.policies.SecurityDevices.Add."OpenSC" = "${pkgs.opensc}/lib/opensc-pkcs11.so";
+      # Thunderbird keeps the module path in each profile, so it gets a path
+      # that survives OpenSC updates and garbage collection. "OpenSC" was the
+      # old entry with a store path; Delete runs before Add.
+      environment.etc."gjallar/pkcs11/opensc-pkcs11.so".source = "${pkgs.opensc}/lib/opensc-pkcs11.so";
+      programs.thunderbird.policies.SecurityDevices = {
+        Delete = [ "OpenSC" ];
+        Add."OpenSC smart card" = "/etc/gjallar/pkcs11/opensc-pkcs11.so";
+      };
     })
   ]
 )

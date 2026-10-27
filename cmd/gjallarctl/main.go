@@ -677,12 +677,20 @@ func runRelease(args []string, stdout, stderr io.Writer) int {
 		return 0
 	}
 	fmt.Fprintf(stdout, "NixOS %s detected; this checkout targets NixOS %s.\n", actual, expected)
-	fmt.Fprintf(stdout, "PLAN: sudo nix-channel --add https://channels.nixos.org/nixos-%s nixos\nPLAN: sudo nix-channel --update nixos\nPLAN: sudo nixos-rebuild boot --upgrade\n", expected)
+	src, err := release.Pinned(*repo, expected)
+	if err != nil {
+		fmt.Fprintf(stderr, "ERROR: %v\n", err)
+		return 1
+	}
+	fmt.Fprintf(stdout, "PLAN: fetch %s and check it against %s\n", src.URL, src.NarHash)
+	const nixosConfig = "/etc/nixos/configuration.nix"
+	for _, args := range release.Commands(src, "<fetched tree>", nixosConfig) {
+		fmt.Fprintf(stdout, "PLAN: sudo %s\n", strings.Join(args, " "))
+	}
 	if !*apply {
 		return 3
 	}
 
-	const nixosConfig = "/etc/nixos/configuration.nix"
 	if _, err := os.Stat(nixosConfig); err != nil {
 		fmt.Fprintf(
 			stderr,
@@ -695,6 +703,7 @@ func runRelease(args []string, stdout, stderr io.Writer) int {
 
 	if err := release.Align(
 		context.Background(),
+		*repo,
 		expected,
 		nixosConfig,
 	); err != nil {
@@ -2429,6 +2438,11 @@ func pullCheckout(repo string, stdout, stderr io.Writer) int {
 		}
 	} else if !isAncestor("HEAD", upstream) {
 		fmt.Fprintf(stdout, "[GjallarOS] %s is ahead of the %s channel; it stays at %s until %s reaches it\n", repo, channel, gitHead(repo), channel)
+	}
+	// The commit pins each submodule; a fast-forward alone leaves the old
+	// submodule tree in place. Same flags as the installer's clone.
+	if git("-c", "protocol.file.allow=never", "submodule", "update", "--quiet", "--init", "--recursive") != 0 {
+		return failed("git submodule update")
 	}
 	if after := gitHead(repo); before == after {
 		fmt.Fprintf(stdout, "[GjallarOS] %s already at %s\n", repo, after)

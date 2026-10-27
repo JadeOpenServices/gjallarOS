@@ -523,7 +523,9 @@ Plan agreed 2026-10-10. Channels decided 2026-10-20 (Q16): `main` became
       Open for Jade: poll interval, who may land these pull requests, and
       whether the data-only fast lane to `stable` is wanted.
 - [ ] **Verifying updates.** Goes through the research flow again before
-      any code. Ideas so far, from the sources below:
+      any code. Waits for the release key talk (Jade, Q37 and Q76): until
+      then `rebuild --update` trusts git over HTTPS alone, as the 2026-10-27
+      pin audit found. Ideas so far, from the sources below:
       - The trust root comes with the install, not from the server: the
         first commit the rule applies to and the key that signed it, like a
         Guix channel introduction.

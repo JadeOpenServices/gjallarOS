@@ -12,7 +12,10 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
-    sops-nix.url = "github:Mic92/sops-nix";
+    sops-nix = {
+      url = "github:Mic92/sops-nix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
 
     nur = {
       url = "github:nix-community/NUR";
@@ -23,8 +26,6 @@
       url = "github:danth/stylix/release-26.05";
       inputs.nixpkgs.follows = "nixpkgs";
     };
-
-    caelestia.url = "github:caelestia-dots/shell";
 
     noctalia-greeter = {
       url = "github:noctalia-dev/noctalia-greeter";
@@ -178,6 +179,8 @@
 
       checks.${system} = {
         build-entrypoint = import ./tests/nix/build-entrypoint.nix { inherit pkgs; };
+
+        bootstrap-pins = import ./tests/nix/bootstrap-pins.nix { inherit pkgs; };
 
         local-changes = import ./tests/nix/local-changes.nix { inherit pkgs; };
 

@@ -312,6 +312,10 @@ in
         findutils
         power-profiles-daemon
       ];
+      # `gh auth setup-git` writes its own path into ~/.gitconfig. Without this
+      # it writes a /nix/store path that a garbage collection later removes,
+      # and git falls back to password prompts GitHub no longer accepts.
+      environment.sessionVariables.GH_PATH = "/run/current-system/sw/bin/gh";
     }
     (lib.mkIf diagnosticsEnabled {
       home-manager.sharedModules = [ homeDiagnosticsModule ];

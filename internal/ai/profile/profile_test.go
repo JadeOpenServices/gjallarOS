@@ -1,8 +1,10 @@
 package profile
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -118,5 +120,47 @@ func TestOverrideErrorsNameFieldOnlyForFiles(t *testing.T) {
 	}
 	if _, err := LoadOverride(path); err == nil || !strings.HasPrefix(err.Error(), "overrideModelWith: ") {
 		t.Fatalf("file model error = %v", err)
+	}
+}
+
+// apps/ai/nixos.nix verifies the pulled base model against model-pins.json,
+// so every model the automatic selection picks needs a complete pin there.
+func TestModelPins(t *testing.T) {
+	data, err := os.ReadFile("model-pins.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var pins map[string]struct {
+		Config string   `json:"config"`
+		Model  string   `json:"model"`
+		Layers []string `json:"layers"`
+	}
+	if err := json.Unmarshal(data, &pins); err != nil {
+		t.Fatal(err)
+	}
+	digest := func(s string) bool {
+		hex := strings.TrimPrefix(s, "sha256:")
+		return hex != s && len(hex) == 64 && strings.Trim(hex, "0123456789abcdef") == ""
+	}
+	for _, p := range modelProfiles {
+		pin, ok := pins[p.Model]
+		if !ok {
+			t.Errorf("%s has no pin", p.Model)
+			continue
+		}
+		if !digest(pin.Config) || !digest(pin.Model) || !slices.Contains(pin.Layers, pin.Model) || !slices.IsSorted(pin.Layers) {
+			t.Errorf("%s pin is incomplete", p.Model)
+		}
+		for _, layer := range pin.Layers {
+			if !digest(layer) {
+				t.Errorf("%s layer %q is not a sha256 digest", p.Model, layer)
+			}
+		}
+	}
+	for model := range pins {
+		// The manifest path in apps/ai/nixos.nix assumes library/<name>/<tag>.
+		if strings.Count(model, ":") != 1 || strings.Contains(model, "/") {
+			t.Errorf("pin %q must be a library model with a tag", model)
+		}
 	}
 }
