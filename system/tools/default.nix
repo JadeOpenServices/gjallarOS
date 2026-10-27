@@ -62,7 +62,9 @@ let
     set -u
     log_file="/var/lib/gjallar-diagnostics/pressure-$(${coreutils}/cat /proc/sys/kernel/random/boot_id).log"
     max_bytes=$((4 * 1024 * 1024))
-    last_snapshot=0
+    # Each reason has its own limit, so an I/O stall at login does not hide
+    # a CPU stall a minute later.
+    declare -A last_snapshot=()
 
     # Integer part of avg10 on the "some" or "full" line.
     avg10() {
@@ -107,8 +109,15 @@ let
       [ "$(avg10 memory full)" -ge 10 ] && reasons="$reasons memory-full"
       [ "$(avg10 cpu some)" -ge 60 ] && reasons="$reasons cpu-some"
       now="$(${coreutils}/date +%s)"
-      if [ -n "$reasons" ] && [ $((now - last_snapshot)) -ge 120 ]; then
-        last_snapshot="$now"
+      due=""
+      for reason in $reasons; do
+        if [ $((now - ''${last_snapshot[$reason]:-0})) -ge 120 ]; then
+          last_snapshot[$reason]="$now"
+          due="$due $reason"
+        fi
+      done
+      if [ -n "$due" ]; then
+        reasons="$due"
         echo "gjallar-pressure-monitor: stall:$reasons"
         size="$(${coreutils}/stat -c %s "$log_file" 2>/dev/null || echo 0)"
         if [ "$size" -lt "$max_bytes" ]; then
@@ -163,7 +172,9 @@ let
         ${pkgs.hyprland}/bin/hyprctl version || true
         ${pkgs.hyprland}/bin/hyprctl configerrors || true
         ${pkgs.hyprland}/bin/hyprctl monitors || true
-        ${pkgs.hyprland}/bin/hyprctl clients || true
+        # Window titles can carry document names and web pages: app and
+        # workspace only.
+        ${pkgs.hyprland}/bin/hyprctl clients -j | ${pkgs.jq}/bin/jq -r '.[] | "client class=\(.class) workspace=\(.workspace.name) pid=\(.pid)"' || true
         ${lib.getExe config.programs.noctalia.package} config validate || true
         # Noctalia can start after this unit, so false here is no finding alone.
         noctalia_ready=false
@@ -171,8 +182,7 @@ let
           noctalia_ready=true
         fi
         log "noctalia-ipc-ready-at-diagnostics=$noctalia_ready"
-        ${pkgs.systemd}/bin/journalctl --user -b --no-pager -u hyprland-session-diagnostics.service || true
-        ${pkgs.procps}/bin/pgrep -f -a -u "$USER" 'Hyprland|noctalia|fuzzel|ghostty|swaybg|waybar' || true
+        ${pkgs.procps}/bin/pgrep -f -l -u "$USER" 'Hyprland|noctalia|fuzzel|ghostty|swaybg|waybar' || true
         log 'end'
       '';
     in
@@ -190,7 +200,7 @@ let
         };
         Install.WantedBy = [ "hyprland-session.target" ];
       };
-      systemd.user.tmpfiles.rules = [ "d %h/.local/state/gjallar-diagnostics 0755 - - 30d" ];
+      systemd.user.tmpfiles.rules = [ "d %h/.local/state/gjallar-diagnostics 0700 - - 30d" ];
     };
 in
 {
@@ -310,7 +320,7 @@ in
           ExecStart = bootDiagnostic;
           StandardOutput = "journal+console";
           StandardError = "journal+console";
-          StateDirectory = "gjallar-diagnostics";
+          UMask = "0027";
         };
       };
       systemd.services.gjallar-pressure-monitor = {
@@ -319,7 +329,8 @@ in
         serviceConfig = {
           ExecStart = pressureMonitor;
           Restart = "on-failure";
-          StateDirectory = "gjallar-diagnostics";
+          ReadWritePaths = [ "/var/lib/gjallar-diagnostics" ];
+          UMask = "0027";
           Nice = 10;
           IOSchedulingClass = "best-effort";
           IOSchedulingPriority = 7;
@@ -340,7 +351,9 @@ in
           MemoryMax = "64M";
         };
       };
-      systemd.tmpfiles.rules = [ "d /var/lib/gjallar-diagnostics 0755 root root 30d" ];
+      # Logs copy journal lines, so they get the journal's readers: root and
+      # wheel. The setgid bit gives new files the wheel group.
+      systemd.tmpfiles.rules = [ "d /var/lib/gjallar-diagnostics 2750 root wheel 30d" ];
     })
   ];
 }
