@@ -10,6 +10,8 @@ let
   cfg = config.gjallar.urlHandler;
   # The configured browser, with its policies and prefs.
   browser = lib.getExe config.programs.${settings.preferredBrowser}.finalPackage;
+  # Its desktop entry, named after the program (firefox.desktop).
+  browserDesktop = "${settings.preferredBrowser}.desktop";
 
   # One handler for every http/https link (xdg-open, portal OpenURI, $BROWSER).
   # Apps plug in exact https hosts; everything else goes to the browser.
@@ -76,6 +78,10 @@ in
       defaultApplications = {
         "x-scheme-handler/http" = [ "gjallar-url-handler.desktop" ];
         "x-scheme-handler/https" = [ "gjallar-url-handler.desktop" ];
+        # Local web pages too. Without an entry the first installed program
+        # that lists text/html won, alphabetically (Edge from Teams, 257).
+        "text/html" = [ browserDesktop ];
+        "application/xhtml+xml" = [ browserDesktop ];
       };
     };
 
