@@ -125,19 +125,9 @@ in
 lib.mkIf config.gjallar.apps.dolphin.enable {
   _module.args.gjallarFileManager = fileManager;
 
-  home.packages = with pkgs.kdePackages; [
+  home.packages = import ./kde-apps.nix pkgs ++ [
     dolphinTheme.package
     dolphinClient
-    dolphin-plugins
-    ark
-    gwenview
-    kio-extras
-    kio-fuse
-    kdegraphics-thumbnailers
-    ffmpegthumbs
-    konsole
-    kfind
-    filelight
     fileManager
     (pkgs.writeTextDir "share/zsh/site-functions/_file-manager" ''
       #compdef file-manager

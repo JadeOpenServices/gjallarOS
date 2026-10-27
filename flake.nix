@@ -152,29 +152,36 @@
           xdg-desktop-portal-hyprland
           ;
 
-        prebuilt = pkgs.linkFarmFromDrvs "gjallar-prebuilt" [
-          gjallarctl
-          gjallar-usbtrustd
-          gjallar-settingsd
-          noctalia
-          noctalia-greeter
-          monique
-          nextcloud-client-openvfs
-          openvfs
-          gjallar-opencode
-          systemd-partition-reread
-          qt6ct
-          _nemu
-          _wine
-          # pkgs/overlays patches these, so cache.nixos.org has other builds.
-          dolphin
-          ghostty
-          hyprland
-          udiskie
-          usbguard
-          wvkbd
-          xdg-desktop-portal-hyprland
-        ];
+        prebuilt = pkgs.linkFarmFromDrvs "gjallar-prebuilt" (
+          [
+            gjallarctl
+            gjallar-usbtrustd
+            gjallar-settingsd
+            noctalia
+            noctalia-greeter
+            monique
+            nextcloud-client-openvfs
+            openvfs
+            gjallar-opencode
+            systemd-partition-reread
+            qt6ct
+            _nemu
+            _wine
+            # pkgs/overlays patches these, so cache.nixos.org has other builds.
+            dolphin
+            ghostty
+            hyprland
+            udiskie
+            usbguard
+            wvkbd
+            xdg-desktop-portal-hyprland
+            # Built against the patched KDE libraries.
+            (import ./themes/apps/dolphin/darkly.nix { inherit pkgs; }).package
+          ]
+          # Cached, they spare every machine the build and the -dev outputs of
+          # the patched KDE libraries it needs.
+          ++ import ./apps/dolphin/kde-apps.nix pkgs
+        );
       };
 
       checks.${system} = {
