@@ -2441,7 +2441,8 @@ func pullCheckout(repo string, stdout, stderr io.Writer) int {
 	// channel, so after a switch HEAD and the channel often diverge. A HEAD
 	// that a newer channel holds waits until the channel promotes it; a
 	// HEAD that only older channels hold moves to the channel, which holds
-	// everything HEAD has (e2e-fw13, 2026-10-27).
+	// everything HEAD has, also when HEAD is the older channel's merge of the
+	// channel's own commit (e2e-fw13, 2026-10-27).
 	at := slices.Index(config.ReleaseChannels, channel)
 	heldBy := func(channels []string) bool {
 		for _, name := range channels {
@@ -2454,21 +2455,37 @@ func pullCheckout(repo string, stdout, stderr io.Writer) int {
 	ahead := func() {
 		fmt.Fprintf(stdout, "[GjallarOS] %s is ahead of the %s channel; it stays at %s until %s reaches it\n", repo, channel, gitHead(repo), channel)
 	}
+	// --keep stops on local edits to files the move would change.
+	moveToChannel := func() int {
+		if git("reset", "--quiet", "--keep", upstream) != 0 {
+			return failed("git reset --keep origin/" + channel)
+		}
+		return 0
+	}
+	newer, older := config.ReleaseChannels[:at], config.ReleaseChannels[at+1:]
 	switch {
 	case isAncestor(upstream, "HEAD"):
-		if !isAncestor("HEAD", upstream) {
+		switch {
+		case isAncestor("HEAD", upstream):
+		// An older channel's promotion merge holds the channel's commit but
+		// is not on the channel: the next promotion would not fast-forward
+		// (stable -> staging, e2e-fw13, 2026-10-27).
+		case heldBy(older) && !heldBy(newer):
+			if code := moveToChannel(); code != 0 {
+				return code
+			}
+		default:
 			ahead()
 		}
 	case isAncestor("HEAD", upstream):
 		if git("merge", "--quiet", "--ff-only", upstream) != 0 {
 			return failed("git merge --ff-only origin/" + channel)
 		}
-	case heldBy(config.ReleaseChannels[:at]):
+	case heldBy(newer):
 		ahead()
-	case heldBy(config.ReleaseChannels[at+1:]):
-		// --keep stops on local edits to files the move would change.
-		if git("reset", "--quiet", "--keep", upstream) != 0 {
-			return failed("git reset --keep origin/" + channel)
+	case heldBy(older):
+		if code := moveToChannel(); code != 0 {
+			return code
 		}
 	default:
 		fmt.Fprintf(stderr, "[GjallarOS] Error: %s has commits that the %s channel does not hold; nothing rebuilt\n", repo, channel)
