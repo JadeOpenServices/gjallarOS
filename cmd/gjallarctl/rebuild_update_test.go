@@ -142,6 +142,71 @@ func TestPullCheckoutAheadOfChannelStays(t *testing.T) {
 	}
 }
 
+// featureMerge promotes src to target the way releases do: a merge commit
+// with src's tree and parents target and src.
+func featureMerge(t *testing.T, upstream, target, src string) {
+	t.Helper()
+	cmd := exec.Command("git", "-C", upstream, "-c", "user.name=t", "-c", "user.email=t@t",
+		"commit-tree", src+"^{tree}", "-p", target, "-p", src, "-m", "promote "+src)
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("commit-tree: %v", err)
+	}
+	gitRun(t, upstream, "update-ref", "refs/heads/"+target, strings.TrimSpace(string(out)))
+}
+
+func TestPullCheckoutWaitsForPromotion(t *testing.T) {
+	// staging holds dev "one" through a feature merge; the checkout follows
+	// dev at "two", then moves to staging.
+	upstream, checkout := channelCheckout(t, "dev", "staging")
+	featureMerge(t, upstream, "staging", "dev")
+	gitRun(t, upstream, "commit", "-q", "--allow-empty", "-m", "dev two")
+	gitRun(t, checkout, "pull", "-q", "--ff-only")
+	head := gitOut(t, checkout, "rev-parse", "HEAD")
+
+	var stdout, stderr bytes.Buffer
+	if code := pullCheckout(checkout, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit %d: %s", code, stderr.String())
+	}
+	if got := gitOut(t, checkout, "rev-parse", "HEAD"); got != head {
+		t.Fatal("checkout went back to an older commit")
+	}
+	if !strings.Contains(stdout.String(), "until staging reaches it") {
+		t.Fatalf("stdout %q", stdout.String())
+	}
+
+	featureMerge(t, upstream, "staging", "dev")
+	stdout.Reset()
+	stderr.Reset()
+	if code := pullCheckout(checkout, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit %d: %s", code, stderr.String())
+	}
+	if got, want := gitOut(t, checkout, "rev-parse", "HEAD"), gitOut(t, upstream, "rev-parse", "staging"); got != want {
+		t.Fatalf("HEAD %s, want promoted staging %s", got, want)
+	}
+}
+
+func TestPullCheckoutMovesToNewerChannel(t *testing.T) {
+	// stable holds a promotion merge that staging never gets; staging moved
+	// on with its own promotion.
+	upstream, checkout := channelCheckout(t, "stable", "staging")
+	featureMerge(t, upstream, "stable", "staging")
+	gitRun(t, checkout, "pull", "-q", "--ff-only")
+	gitRun(t, upstream, "commit", "-q", "--allow-empty", "-m", "dev two")
+	featureMerge(t, upstream, "staging", "dev")
+
+	var stdout, stderr bytes.Buffer
+	if code := pullCheckout(checkout, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit %d: %s", code, stderr.String())
+	}
+	if got, want := gitOut(t, checkout, "rev-parse", "HEAD"), gitOut(t, upstream, "rev-parse", "staging"); got != want {
+		t.Fatalf("HEAD %s, want staging %s", got, want)
+	}
+	if got := gitOut(t, checkout, "symbolic-ref", "--short", "HEAD"); got != "staging" {
+		t.Fatalf("branch %q", got)
+	}
+}
+
 func TestPullCheckoutRefusesFeatureBranch(t *testing.T) {
 	_, checkout := channelCheckout(t, "dev", "dev")
 	gitRun(t, checkout, "checkout", "-q", "-b", "feature")

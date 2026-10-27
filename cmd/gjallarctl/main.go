@@ -2376,11 +2376,11 @@ func (p rebuildPlan) run(ctx context.Context, stdout, stderr io.Writer) int {
 
 // pullCheckout brings the checkout up to date before the rebuild. It
 // follows the release channel of the checkout's user.config.json
-// (ROADMAP §11) and only fast-forwards, so local commits or edits stop it
-// with git's own message and nothing is rebuilt. A checkout ahead of its
-// channel, as after a move to an older channel, stays where it is until
-// the channel catches up. A checkout on another channel's branch or on the
-// old main branch moves to the channel's branch first.
+// (ROADMAP §11) and never drops a commit, so local commits or edits stop it
+// and nothing is rebuilt. A checkout ahead of its channel, as after a move
+// to an older channel, stays where it is until the channel catches up. A
+// checkout on another channel's branch or on the old main branch moves to
+// the channel's branch first.
 func pullCheckout(repo string, stdout, stderr io.Writer) int {
 	user, err := config.Load(filepath.Join(repo, "user.config.json"))
 	if err != nil {
@@ -2436,12 +2436,43 @@ func pullCheckout(repo string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stdout, "[GjallarOS] %s now follows the %s channel (was %s)\n", repo, channel, branch)
 	}
 
-	if !isAncestor(upstream, "HEAD") {
+	// Promotions are feature merges (ROADMAP §11): a channel holds the
+	// commits it was promoted from, never the merge commits of another
+	// channel, so after a switch HEAD and the channel often diverge. A HEAD
+	// that a newer channel holds waits until the channel promotes it; a
+	// HEAD that only older channels hold moves to the channel, which holds
+	// everything HEAD has (e2e-fw13, 2026-10-27).
+	at := slices.Index(config.ReleaseChannels, channel)
+	heldBy := func(channels []string) bool {
+		for _, name := range channels {
+			if isAncestor("HEAD", "refs/remotes/origin/"+name) {
+				return true
+			}
+		}
+		return false
+	}
+	ahead := func() {
+		fmt.Fprintf(stdout, "[GjallarOS] %s is ahead of the %s channel; it stays at %s until %s reaches it\n", repo, channel, gitHead(repo), channel)
+	}
+	switch {
+	case isAncestor(upstream, "HEAD"):
+		if !isAncestor("HEAD", upstream) {
+			ahead()
+		}
+	case isAncestor("HEAD", upstream):
 		if git("merge", "--quiet", "--ff-only", upstream) != 0 {
 			return failed("git merge --ff-only origin/" + channel)
 		}
-	} else if !isAncestor("HEAD", upstream) {
-		fmt.Fprintf(stdout, "[GjallarOS] %s is ahead of the %s channel; it stays at %s until %s reaches it\n", repo, channel, gitHead(repo), channel)
+	case heldBy(config.ReleaseChannels[:at]):
+		ahead()
+	case heldBy(config.ReleaseChannels[at+1:]):
+		// --keep stops on local edits to files the move would change.
+		if git("reset", "--quiet", "--keep", upstream) != 0 {
+			return failed("git reset --keep origin/" + channel)
+		}
+	default:
+		fmt.Fprintf(stderr, "[GjallarOS] Error: %s has commits that the %s channel does not hold; nothing rebuilt\n", repo, channel)
+		return 1
 	}
 	// The commit pins each submodule; a fast-forward alone leaves the old
 	// submodule tree in place. Same flags as the installer's clone.
