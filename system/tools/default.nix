@@ -70,12 +70,20 @@ let
     avg10() {
       ${pkgs.gawk}/bin/awk -v line="$2" '$1 == line { split($2, a, "="); printf "%d", a[2] }' "/proc/pressure/$1"
     }
+    # getline skips a process that exited or may not be read; a plain awk
+    # input file stops awk at the first one, so the list came out empty.
     io_bytes() {
       ${pkgs.gawk}/bin/awk '
-        /^read_bytes:/ { split(FILENAME, p, "/"); total[p[3]] += $2 }
-        /^write_bytes:/ { split(FILENAME, p, "/"); total[p[3]] += $2 }
-        END { for (pid in total) print pid, total[pid] }
-      ' /proc/[0-9]*/io 2>/dev/null
+        BEGIN {
+          for (i = 1; i < ARGC; i++) {
+            split(ARGV[i], p, "/"); total = 0; found = 0
+            while ((getline line < ARGV[i]) > 0)
+              if (line ~ /^(read|write)_bytes:/) { split(line, f, " "); total += f[2]; found = 1 }
+            close(ARGV[i])
+            if (found) print p[3], total
+          }
+        }
+      ' /proc/[0-9]*/io
     }
     snapshot() {
       printf '=== %s %s\n' "$(${coreutils}/date --iso-8601=seconds)" "$1"
