@@ -62,5 +62,10 @@ in
     ./patches/nextcloud-remote-options-no-exit.patch
     # The folder list is titled "Sync folders", not "Classic sync".
     ./patches/nextcloud-sync-folders-title.patch
+    # Hydration counts the bytes it wrote. The Content-Length header is gone
+    # or counts compressed bytes when the server gzips a reply.
+    ./patches/nextcloud-hydration-encoded-size.patch
+    # A failed or running hydration is never uploaded as a local edit.
+    ./patches/nextcloud-openvfs-failed-hydration.patch
   ];
 }

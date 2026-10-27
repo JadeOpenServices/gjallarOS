@@ -114,6 +114,16 @@ Hydration patches:
   upstream ignore list therefore also applies to wrapped previews. KIO file
   protocol workers are exempt from the generic suffix rule so intentional copies
   can hydrate; explicit full-path exclusions still take precedence.
+- Hydration checks the bytes it wrote against the server's size. Upstream read
+  the Content-Length header, which Qt drops when it unpacks a gzip reply over
+  HTTP/1.1, so every file the server compressed (JSON, text) failed after a
+  complete download. Over HTTP/2 Qt keeps the compressed length, so the
+  download no longer compares it for encoded replies either.
+- A failed hydration empties the file and restores the dehydrated placeholder
+  with the server's size and mtime, and a file still marked Hydrating counts as
+  virtual during discovery. Upstream left the partial content, the Hydrating
+  state and the download time as mtime, so the next sync uploaded it as a local
+  edit and the reader retried, in a loop (Plane 254).
 
 The integration fixture uses a fake sync socket and a fresh temporary FUSE
 mount, never the user's Nextcloud directory:

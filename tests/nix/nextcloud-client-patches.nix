@@ -98,6 +98,14 @@ pkgs.stdenvNoCC.mkDerivation {
     # below it, as the other backends do.
     grep -A24 'bool OpenVFS::setPinState' "$f" | grep -Fq 'resetPinsBelow(folderPath);'
     grep -A12 'void OpenVFS::resetPinsBelow' "$f" | grep -Fq 'params().journal->getFilesBelowPath(path,'
+    # Gzip replies failed hydration and the leftover file was uploaded as a
+    # local edit, over and over (Plane 254, 2026-10-27).
+    grep -A16 'if (errorMsg.isEmpty()) {' src/libsync/hydrationjob.cpp | grep -Fq 'const auto size = _device->pos();'
+    ! grep -Fq '_job->resumeStart() + _job->contentLength()' src/libsync/hydrationjob.cpp
+    grep -A64 'void GETFileJob::slotMetaDataChanged' src/libsync/propagatedownload.cpp \
+      | grep -Fq 'if (ok && !encoded && _expectedContentLength != -1'
+    grep -Fq 'restoreDehydrated(hydration->targetFileName(), hydration->record());' "$f"
+    grep -A3 'States::Hydrating) {' "$f" | grep -Fq 'stat->type = ItemTypeVirtualFile;'
     touch $out
   '';
 }
