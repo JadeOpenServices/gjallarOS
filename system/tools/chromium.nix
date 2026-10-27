@@ -33,8 +33,8 @@ let
   };
 in
 {
-  # Policies for every ungoogled-chromium window: the plane and draw.io web
-  # applications and the key registration launcher. Only writes
+  # Policies for every ungoogled-chromium window: the Plane web application
+  # and the key registration launcher. Only writes
   # /etc/chromium/policies; the browser comes with the apps that use it.
   programs.chromium = {
     enable = true;

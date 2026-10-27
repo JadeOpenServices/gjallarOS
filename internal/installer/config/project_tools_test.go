@@ -20,18 +20,18 @@ func TestPlaneRequiresEndpoint(t *testing.T) {
 	}
 }
 
-func TestDrawioPublicModeDoesNotRequireEndpoint(t *testing.T) {
-	u := User{WebApplications: []WebApplicationIntent{{ID: WebApplicationDrawio}}}
+func TestTeamsDoesNotRequireEndpoint(t *testing.T) {
+	u := User{WebApplications: []WebApplicationIntent{{ID: WebApplicationTeams}}}
 
 	if err := ValidateProjectTools(u); err != nil {
-		t.Fatalf("public Draw.io mode should not require an endpoint: %v", err)
+		t.Fatalf("Teams should not require an endpoint: %v", err)
 	}
 }
 
 func TestProjectToolsAcceptConfiguredEndpoints(t *testing.T) {
 	u := User{WebApplications: []WebApplicationIntent{
 		{ID: WebApplicationPlane, Endpoint: "192.0.2.203"},
-		{ID: WebApplicationDrawio, Endpoint: "192.0.2.204:8080"},
+		{ID: WebApplicationTeams},
 	}}
 
 	if err := ValidateProjectTools(u); err != nil {
@@ -117,24 +117,19 @@ func TestNormalizeExternalServiceEndpointRejectsMalformedValues(t *testing.T) {
 
 func TestNormalizeProjectToolsCanonicalizesEnabledEndpoints(t *testing.T) {
 	u := User{WebApplications: []WebApplicationIntent{
-		{ID: WebApplicationPlane, Endpoint: "192.0.2.203"},
-		{ID: WebApplicationDrawio, Endpoint: "192.0.2.204:8080///"},
+		{ID: WebApplicationPlane, Endpoint: "192.0.2.203:8080///"},
 	}}
 
 	if err := NormalizeProjectTools(&u); err != nil {
 		t.Fatal(err)
 	}
 
-	if u.WebApplications[0].Endpoint != "http://192.0.2.203" {
+	if u.WebApplications[0].Endpoint != "http://192.0.2.203:8080" {
 		t.Fatalf("unexpected normalized Plane endpoint: %q", u.WebApplications[0].Endpoint)
-	}
-
-	if u.WebApplications[1].Endpoint != "http://192.0.2.204:8080" {
-		t.Fatalf("unexpected normalized Draw.io endpoint: %q", u.WebApplications[1].Endpoint)
 	}
 }
 
-func TestNormalizeExternalServiceEndpointPreservesDrawioQuery(t *testing.T) {
+func TestNormalizeExternalServiceEndpointPreservesQuery(t *testing.T) {
 	const input = "http://192.0.2.204:8080/?offline=1&https=0"
 
 	got, err := NormalizeExternalServiceEndpoint(input)
@@ -164,8 +159,7 @@ func TestProjectToolsRemainIndependentFromJODS(t *testing.T) {
 		name               string
 		planeEnable        bool
 		planeHost          string
-		drawioEnable       bool
-		drawioHost         string
+		teamsEnable        bool
 		jodsEnable         bool
 		wantProjectToolErr bool
 	}{
@@ -178,16 +172,14 @@ func TestProjectToolsRemainIndependentFromJODS(t *testing.T) {
 			planeHost:   "https://plane.example.test",
 		},
 		{
-			name:         "Draw.io only",
-			drawioEnable: true,
-			drawioHost:   "https://drawio.example.test",
+			name:        "Teams only",
+			teamsEnable: true,
 		},
 		{
-			name:         "both enabled",
-			planeEnable:  true,
-			planeHost:    "https://plane.example.test",
-			drawioEnable: true,
-			drawioHost:   "https://drawio.example.test",
+			name:        "both enabled",
+			planeEnable: true,
+			planeHost:   "https://plane.example.test",
+			teamsEnable: true,
 		},
 		{
 			name:               "Plane enabled with empty endpoint",
@@ -195,23 +187,21 @@ func TestProjectToolsRemainIndependentFromJODS(t *testing.T) {
 			wantProjectToolErr: true,
 		},
 		{
-			name:         "JODS disabled with project tools enabled",
-			planeEnable:  true,
-			planeHost:    "https://plane.example.test",
-			drawioEnable: true,
-			drawioHost:   "https://drawio.example.test",
+			name:        "JODS disabled with project tools enabled",
+			planeEnable: true,
+			planeHost:   "https://plane.example.test",
+			teamsEnable: true,
 		},
 		{
 			name:       "JODS enabled with project tools disabled",
 			jodsEnable: true,
 		},
 		{
-			name:         "JODS enabled with project tools enabled",
-			planeEnable:  true,
-			planeHost:    "https://plane.example.test",
-			drawioEnable: true,
-			drawioHost:   "https://drawio.example.test",
-			jodsEnable:   true,
+			name:        "JODS enabled with project tools enabled",
+			planeEnable: true,
+			planeHost:   "https://plane.example.test",
+			teamsEnable: true,
+			jodsEnable:  true,
 		},
 	}
 
@@ -221,8 +211,8 @@ func TestProjectToolsRemainIndependentFromJODS(t *testing.T) {
 			if tt.planeEnable {
 				u.WebApplications = append(u.WebApplications, WebApplicationIntent{ID: WebApplicationPlane, Endpoint: tt.planeHost})
 			}
-			if tt.drawioEnable {
-				u.WebApplications = append(u.WebApplications, WebApplicationIntent{ID: WebApplicationDrawio, Endpoint: tt.drawioHost})
+			if tt.teamsEnable {
+				u.WebApplications = append(u.WebApplications, WebApplicationIntent{ID: WebApplicationTeams})
 			}
 
 			if tt.jodsEnable {

@@ -3,13 +3,15 @@ package config
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
+
+	"github.com/JadeOpenServices/gjallarOS/apps"
 )
 
 const (
-	WebApplicationPlane  = "plane"
-	WebApplicationDrawio = "drawio"
-	WebApplicationTeams  = "teams"
+	WebApplicationPlane = "plane"
+	WebApplicationTeams = "teams"
 )
 
 // WebApplicationIntent describes which web application the user wants
@@ -27,7 +29,6 @@ type WebApplicationIntent struct {
 func SupportedWebApplicationIDs() []string {
 	return []string{
 		WebApplicationPlane,
-		WebApplicationDrawio,
 		WebApplicationTeams,
 	}
 }
@@ -42,12 +43,20 @@ func supportedWebApplication(id string) bool {
 }
 
 // NormalizeWebApplications canonicalizes the generic integration contract.
+// Retired web applications (see apps/retired.json) are dropped.
 func NormalizeWebApplications(user *User) error {
+	retired, err := apps.Retired()
+	if err != nil {
+		return err
+	}
 	normalized := make([]WebApplicationIntent, 0, len(user.WebApplications))
 	seen := make(map[string]bool, len(user.WebApplications))
 
 	for index, application := range user.WebApplications {
 		id := strings.ToLower(strings.TrimSpace(application.ID))
+		if slices.Contains(retired, id) {
+			continue
+		}
 		if !supportedWebApplication(id) {
 			return fmt.Errorf(
 				"webApplications[%d].id: unsupported web application %q",
@@ -98,6 +107,35 @@ func NormalizeWebApplications(user *User) error {
 // into webApplications.
 var legacyWebApplicationKeys = []string{"planeEnable", "planeHost", "drawioEnable", "drawioSelfHosted", "drawioHost"}
 
+// RetiredEntries returns the retired app and web application IDs that
+// configuration text still lists, so rebuild can write the result back.
+func RetiredEntries(contents []byte) []string {
+	var fields struct {
+		Apps            []string               `json:"apps"`
+		WebApplications []WebApplicationIntent `json:"webApplications"`
+	}
+	if json.Unmarshal(contents, &fields) != nil {
+		return nil
+	}
+	retired, err := apps.Retired()
+	if err != nil {
+		return nil
+	}
+	var found []string
+	for _, id := range fields.Apps {
+		if slices.Contains(retired, id) && !slices.Contains(found, id) {
+			found = append(found, id)
+		}
+	}
+	for _, application := range fields.WebApplications {
+		id := strings.ToLower(strings.TrimSpace(application.ID))
+		if slices.Contains(retired, id) && !slices.Contains(found, id) {
+			found = append(found, id)
+		}
+	}
+	return found
+}
+
 // HasLegacyWebApplications reports whether configuration text still needs the
 // one-time move into webApplications, so rebuild can write the result back.
 func HasLegacyWebApplications(contents []byte) bool {
@@ -120,17 +158,15 @@ func legacyWebApplications(fields map[string]json.RawMessage) bool {
 	return false
 }
 
-// migrateLegacyWebApplications moves pre-GJAL-95 Plane/Draw.io fields into
-// webApplications and drops them. A webApplications list that is already
-// there wins. Teams was always on back then, so it stays on.
+// migrateLegacyWebApplications moves pre-GJAL-95 Plane fields into
+// webApplications and drops them, Draw.io fields too (Draw.io is retired).
+// A webApplications list that is already there wins. Teams was always on
+// back then, so it stays on.
 func migrateLegacyWebApplications(fields map[string]json.RawMessage) error {
 	if value, ok := fields["webApplications"]; !ok || string(value) == "null" {
 		var legacy struct {
-			PlaneEnable      bool   `json:"planeEnable"`
-			PlaneHost        string `json:"planeHost"`
-			DrawioEnable     bool   `json:"drawioEnable"`
-			DrawioSelfHosted bool   `json:"drawioSelfHosted"`
-			DrawioHost       string `json:"drawioHost"`
+			PlaneEnable bool   `json:"planeEnable"`
+			PlaneHost   string `json:"planeHost"`
 		}
 		raw, err := json.Marshal(fields)
 		if err != nil {
@@ -146,16 +182,6 @@ func migrateLegacyWebApplications(fields map[string]json.RawMessage) error {
 				return fmt.Errorf("planeHost: %w", err)
 			}
 			applications = append(applications, WebApplicationIntent{ID: WebApplicationPlane, Endpoint: endpoint})
-		}
-		if legacy.DrawioEnable {
-			endpoint := ""
-			// Public diagrams.net mode does not need an endpoint.
-			if legacy.DrawioSelfHosted {
-				if endpoint, err = NormalizeExternalServiceEndpoint(legacy.DrawioHost); err != nil {
-					return fmt.Errorf("drawioHost: %w", err)
-				}
-			}
-			applications = append(applications, WebApplicationIntent{ID: WebApplicationDrawio, Endpoint: endpoint})
 		}
 		if fields["webApplications"], err = json.Marshal(applications); err != nil {
 			return err

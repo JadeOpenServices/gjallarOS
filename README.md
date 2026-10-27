@@ -101,7 +101,7 @@ Taken in a QEMU test VM at 1920×1080.</sub>
 | **App catalogue** | One list in `user.config.json` picks the apps; each app owns its whole module. |
 | **Local AI** | Optional localhost-only Ollama with hardware-aware model selection, or a central HTTPS server with a sealed token. |
 | **Recovery** | Trusted recovery boot entry, recovery ISO, generation rollback without deleting anything newer. |
-| **Apps** | VSCodium, Thunderbird, web apps (Teams, Plane, draw.io), system-wide Wine, optional Nemu. |
+| **Apps** | VSCodium, Thunderbird, web apps (Teams, Plane), system-wide Wine, optional Nemu. |
 | **Maintenance** | Helpers for rebuilding, cleanup, thermal status, and updates. |
 
 <details>
@@ -187,8 +187,10 @@ development shell intentionally uses unstable.
 
 Web apps are listed in `webApplications`, for example
 `[{"id": "teams"}, {"id": "plane", "endpoint": "https://plane.example"}]`.
-An older config with `planeEnable`/`planeHost`/`drawio*` is moved into the
-list once on the next rebuild, and the rebuild says so.
+An older config with `planeEnable`/`planeHost` is moved into the list once on
+the next rebuild, and the rebuild says so. draw.io was removed; a rebuild drops
+it from older configs once and says so. Its browser profile in
+`~/.config/gjallarOS/chromium-drawio` stays until you delete it.
 
 `"dolphinDriveUsage": true` shows used and total space next to each drive in
 the Dolphin places panel. It patches KIO, so KIO, Dolphin and the file dialogs

@@ -1995,13 +1995,14 @@ func rebuildCheckout(repo string, opts rebuildOptions, system bool, stdout, stde
 		return 1
 	}
 	legacyWebApplications := config.HasLegacyWebApplications(rawConfig)
+	retiredEntries := config.RetiredEntries(rawConfig)
 
 	intentChanged, err := normalizeRebuildUserIntent(&userConfig, repo)
 	if err != nil {
 		fmt.Fprintf(stderr, "[GjallarOS] Error: normalize user configuration: %v\n", err)
 		return 1
 	}
-	if intentChanged || legacyWebApplications {
+	if intentChanged || legacyWebApplications || len(retiredEntries) > 0 {
 		if err := config.WriteAtomic(configPath, userConfig); err != nil {
 			fmt.Fprintf(stderr, "[GjallarOS] Error: persist normalized user configuration: %v\n", err)
 			return 1
@@ -2012,6 +2013,9 @@ func rebuildCheckout(repo string, opts rebuildOptions, system bool, stdout, stde
 	}
 	if legacyWebApplications {
 		fmt.Fprintln(stdout, "[GjallarOS] Migrated planeEnable/planeHost/drawio* in user.config.json into webApplications (one-time).")
+	}
+	if len(retiredEntries) > 0 {
+		fmt.Fprintf(stdout, "[GjallarOS] Removed %s from user.config.json; GjallarOS no longer ships it (one-time).\n", strings.Join(retiredEntries, ", "))
 	}
 
 	if host == "" {

@@ -2444,8 +2444,6 @@ func collectProjectTools(ctx context.Context, ui prompt.UI, running, u *config.U
 		switch id {
 		case config.WebApplicationPlane:
 			label = "Plane"
-		case config.WebApplicationDrawio:
-			label = "Draw.io"
 		case config.WebApplicationTeams:
 			label = "Microsoft Teams"
 		}
@@ -2479,29 +2477,6 @@ func collectProjectTools(ctx context.Context, ui prompt.UI, running, u *config.U
 			}
 			if application.Endpoint == "" {
 				continue
-			}
-
-		case config.WebApplicationDrawio:
-			selfHosted, err := ui.Confirm(
-				ctx,
-				"Use a self-hosted Draw.io server?",
-				previous.Endpoint != "",
-			)
-			if err != nil {
-				return err
-			}
-
-			if selfHosted {
-				application.Endpoint, err = askEndpoint(
-					ctx,
-					ui,
-					"Draw.io endpoint (blank uses the public diagrams.net)",
-					previous.Endpoint,
-					checkEndpoint,
-				)
-				if err != nil {
-					return err
-				}
 			}
 
 		case config.WebApplicationTeams:

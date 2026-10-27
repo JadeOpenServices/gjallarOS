@@ -1043,8 +1043,8 @@ fails when a field has none. Decided with Jade 2026-10-19:
   wait. A name has to stay unique: the service refuses a new hostname that
   a peer on the user's tailnet or a device on the current network already
   uses, and says which one.
-- **Every service address is security**: the AI endpoint, Nextcloud, Plane,
-  draw.io and every web application, with their on/off switches. A changed
+- **Every service address is security**: the AI endpoint, Nextcloud, Plane
+  and every web application, with their on/off switches. A changed
   address can lead to a fake login page, so it shows old -> new and waits.
 - **Firefox add-ons are security**, both the collections and pinned store
   add-ons, because the browser installs them by policy.
@@ -2741,3 +2741,9 @@ Already decided for that phase:
 
 **Sources:** as linked above; Synology ransomware advisory and community
 threads on pull versus push.
+
+## 22. Apps to bring back later
+
+- draw.io was a test web application and is removed (2026-10-27, Jade).
+  It can come back as a regular catalogue app. Taking `drawio` out of
+  `apps/retired.json` is part of that job, so older configs keep it again.

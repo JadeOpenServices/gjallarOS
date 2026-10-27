@@ -16,14 +16,11 @@ func TestWebApplicationsRendersSingleLineNixLiteral(t *testing.T) {
 			Endpoint: "https://plane.example.test",
 		},
 		{
-			ID: config.WebApplicationDrawio,
-		},
-		{
 			ID: config.WebApplicationTeams,
 		},
 	})
 
-	want := `[ { id = "plane"; endpoint = "https://plane.example.test"; } { id = "drawio"; endpoint = ""; } { id = "teams"; endpoint = ""; } ]`
+	want := `[ { id = "plane"; endpoint = "https://plane.example.test"; } { id = "teams"; endpoint = ""; } ]`
 
 	if got != want {
 		t.Fatalf("WebApplications() = %q, want %q", got, want)
@@ -94,9 +91,6 @@ func TestRenderEmitsOnlyCanonicalWebApplicationSettings(t *testing.T) {
 				Endpoint: "https://plane.example.test",
 			},
 			{
-				ID: config.WebApplicationDrawio,
-			},
-			{
 				ID: config.WebApplicationTeams,
 			},
 		},
@@ -106,7 +100,7 @@ func TestRenderEmitsOnlyCanonicalWebApplicationSettings(t *testing.T) {
 
 	if !strings.Contains(
 		rendered,
-		`webApplications = [ { id = "plane"; endpoint = "https://plane.example.test"; } { id = "drawio"; endpoint = ""; } { id = "teams"; endpoint = ""; } ];`,
+		`webApplications = [ { id = "plane"; endpoint = "https://plane.example.test"; } { id = "teams"; endpoint = ""; } ];`,
 	) {
 		t.Fatalf(
 			"canonical webApplications missing:\n%s",

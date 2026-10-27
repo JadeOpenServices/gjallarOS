@@ -204,30 +204,28 @@ func webApplication(u config.User, id string) (config.WebApplicationIntent, bool
 
 func TestCollectProjectToolsSupportsIndependentSelection(t *testing.T) {
 	tests := []struct {
-		name                      string
-		input                     string
-		planeEnable, drawioEnable bool
-		planeHost, drawioHost     string
+		name                     string
+		input                    string
+		planeEnable, teamsEnable bool
+		planeHost                string
 	}{
 		{
 			name:        "plane only",
-			input:       "yes\nhttps://plane.example.test\nno\nno\nno\n",
+			input:       "yes\nhttps://plane.example.test\nno\nno\n",
 			planeEnable: true,
 			planeHost:   "https://plane.example.test",
 		},
 		{
-			name:         "drawio only",
-			input:        "no\nyes\nyes\nhttps://drawio.example.test\nno\nno\n",
-			drawioEnable: true,
-			drawioHost:   "https://drawio.example.test",
+			name:        "teams only",
+			input:       "no\nyes\nno\n",
+			teamsEnable: true,
 		},
 		{
-			name:         "both",
-			input:        "yes\nplane.internal:3000\nyes\nyes\ndrawio.internal:8080\nno\nno\n",
-			planeEnable:  true,
-			drawioEnable: true,
-			planeHost:    "http://plane.internal:3000",
-			drawioHost:   "http://drawio.internal:8080",
+			name:        "both",
+			input:       "yes\nplane.internal:3000\nyes\nno\n",
+			planeEnable: true,
+			teamsEnable: true,
+			planeHost:   "http://plane.internal:3000",
 		},
 	}
 
@@ -247,11 +245,10 @@ func TestCollectProjectToolsSupportsIndependentSelection(t *testing.T) {
 			}
 
 			plane, planeEnable := webApplication(u, config.WebApplicationPlane)
-			drawio, drawioEnable := webApplication(u, config.WebApplicationDrawio)
+			_, teamsEnable := webApplication(u, config.WebApplicationTeams)
 			if planeEnable != tt.planeEnable ||
-				drawioEnable != tt.drawioEnable ||
-				plane.Endpoint != tt.planeHost ||
-				drawio.Endpoint != tt.drawioHost {
+				teamsEnable != tt.teamsEnable ||
+				plane.Endpoint != tt.planeHost {
 				t.Fatalf("unexpected project-tool selection: %#v", u.WebApplications)
 			}
 		})
@@ -269,7 +266,7 @@ func TestCollectProjectToolsSupportsNextcloud(t *testing.T) {
 		context.Background(),
 		prompt.New(
 			strings.NewReader(
-				"no\nno\nno\nyes\nhttps://cloud.example.test\n",
+				"no\nno\nyes\nhttps://cloud.example.test\n",
 			),
 			&output,
 		),
@@ -302,7 +299,7 @@ func TestCollectProjectToolsReasksInvalidEndpoints(t *testing.T) {
 		context.Background(),
 		prompt.New(
 			strings.NewReader(
-				"yes\nftp://plane.example.test\nhttps://plane.example.test\nno\nno\nyes\nhttp://cloud.example.test\nhttps://cloud.example.test\n",
+				"yes\nftp://plane.example.test\nhttps://plane.example.test\nno\nyes\nhttp://cloud.example.test\nhttps://cloud.example.test\n",
 			),
 			&output,
 		),
@@ -332,7 +329,7 @@ func TestCollectProjectToolsBlankEndpointSkips(t *testing.T) {
 	err := collectProjectTools(
 		context.Background(),
 		prompt.New(
-			strings.NewReader("yes\n\nyes\nyes\n\nno\nyes\n\n"),
+			strings.NewReader("yes\n\nno\nyes\n\n"),
 			&output,
 		),
 		nil,
@@ -343,9 +340,6 @@ func TestCollectProjectToolsBlankEndpointSkips(t *testing.T) {
 	}
 	if plane, ok := webApplication(u, config.WebApplicationPlane); ok {
 		t.Fatalf("plane enabled with host %q", plane.Endpoint)
-	}
-	if drawio, ok := webApplication(u, config.WebApplicationDrawio); !ok || drawio.Endpoint != "" {
-		t.Fatalf("drawio enabled=%t host=%q", ok, drawio.Endpoint)
 	}
 	if u.NextcloudEnable || u.NextcloudHost != "" {
 		t.Fatalf("nextcloud enabled=%t host=%q", u.NextcloudEnable, u.NextcloudHost)

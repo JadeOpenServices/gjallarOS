@@ -313,6 +313,10 @@ func Parse(contents []byte) (User, error) {
 			return User{}, err
 		}
 	}
+	// Retired apps leave older configs here instead of failing Validate.
+	if user.Apps, _, err = apps.WithoutRetired(user.Apps); err != nil {
+		return User{}, err
+	}
 	// Missing collections get their defaults, missing add-ons are off.
 	user.FirefoxAddons = apps.CompleteFirefoxAddons(user.FirefoxAddons)
 	if user.FirefoxStoreAddons == nil {

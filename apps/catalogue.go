@@ -13,6 +13,13 @@ import (
 //go:embed */meta.json
 var metadata embed.FS
 
+// retired.json lists app IDs that were removed from the catalogue. A
+// config that still lists one keeps loading: the ID is dropped and never
+// offered again. Nix reads the same file (user/apps/default.nix).
+//
+//go:embed retired.json
+var retiredData []byte
+
 // App is one catalogue entry; its ID is the folder name.
 type App struct {
 	ID          string `json:"-"`
@@ -62,6 +69,35 @@ func Defaults() ([]string, error) {
 		}
 	}
 	return ids, nil
+}
+
+// Retired returns the removed app IDs.
+func Retired() ([]string, error) {
+	var ids []string
+	if err := json.Unmarshal(retiredData, &ids); err != nil {
+		return nil, fmt.Errorf("retired.json: %w", err)
+	}
+	return ids, nil
+}
+
+// WithoutRetired drops retired IDs and returns the ones it dropped.
+func WithoutRetired(ids []string) (kept, dropped []string, err error) {
+	retired, err := Retired()
+	if err != nil {
+		return nil, nil, err
+	}
+	if ids == nil {
+		return nil, nil, nil
+	}
+	kept = make([]string, 0, len(ids))
+	for _, id := range ids {
+		if slices.Contains(retired, id) {
+			dropped = append(dropped, id)
+			continue
+		}
+		kept = append(kept, id)
+	}
+	return kept, dropped, nil
 }
 
 // Validate rejects unknown and repeated app IDs.
