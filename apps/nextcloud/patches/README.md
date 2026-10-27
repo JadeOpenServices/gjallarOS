@@ -94,6 +94,10 @@ Hydration patches:
   runs 64 workers; hydration waits may hold 48 of them, at most 16 per
   process, and an open past that fails at once with `EAGAIN` instead of
   waiting.
+- OpenVFS writes the messages it exchanges with the sync client only to the
+  debug log (`-d`). Upstream printed every hydration, with the file path and
+  the app that opened it, to the journal on every run. Errors are still
+  logged.
 - OpenVFS placeholders always report themselves in sync. Upstream marked every
   unchanged file for a metadata update on each sync run, but OpenVFS cannot
   record that it finished, so tens of thousands of no-op jobs repeated forever.

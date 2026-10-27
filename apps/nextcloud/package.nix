@@ -23,12 +23,14 @@ let
     # Time a hydration out only when its download stops making progress.
     # Unmount when the sync client exits, and never mount without one.
     # Keep workers free for the client while hydrations wait.
+    # Log file names only in debug mode.
     patches = [
       ./patches/openvfs-hydration-liveness.patch
       ./patches/openvfs-shutdown.patch
       ./patches/openvfs-progress-deadline.patch
       ./patches/openvfs-exit-with-client.patch
       ./patches/openvfs-worker-reserve.patch
+      ./patches/openvfs-quiet-socket-log.patch
     ];
 
     nativeBuildInputs = [
