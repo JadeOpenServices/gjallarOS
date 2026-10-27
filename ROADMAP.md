@@ -1871,7 +1871,7 @@ Security pass for step 2:
   internet without the tunnel. That is the point of the pause; the dialog
   and the notice say so.
 
-### Step 3: block from boot until the first check (built, branch t190s3)
+### Step 3: block from boot until the first check (done dfe29ba3)
 
 Until `gjallar-vpn-trust` ran once after boot, nothing blocked: the window
 from network up to the first check, and longer if the service never ran.
@@ -1939,7 +1939,7 @@ Security pass for step 3:
   outside the table until the dispatcher reruns the service (step 1);
   with no exit node set there is no block at all, by design.
 
-Next: fw13 VM check of step 3, then merge.
+fw13 VM 2026-10-27 (EMULATED exit node): the boot block ran before network-pre, the table stayed through the first check, off-LAN traffic was cut while the LAN answered, and the revert removed the table.
 
 ## 17. Nextcloud: what downloads first on a new machine (done)
 
