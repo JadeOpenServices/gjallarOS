@@ -45,6 +45,7 @@
 
     ./recovery
     ../themes/lib/common.nix
+    ../themes/lib/boot-splash.nix
     ./tools
     ./users/privilege.nix
     ./users/shell.nix
