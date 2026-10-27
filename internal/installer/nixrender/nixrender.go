@@ -125,6 +125,7 @@ type Settings struct {
 	Apps                                                                                    []string
 	FirefoxAddons                                                                           map[string]string
 	FirefoxStoreAddons                                                                      []apps.FirefoxStoreAddon
+	ThunderbirdSmartCard                                                                    bool
 	NextcloudHost                                                                           string
 	NextcloudEnable                                                                         bool
 	ODDCModel                                                                               string
@@ -193,6 +194,7 @@ func FromUser(user config.User) Settings {
 		Apps:                                user.Apps,
 		FirefoxAddons:                       apps.ActiveFirefoxAddons(user.FirefoxAddons),
 		FirefoxStoreAddons:                  apps.ActiveStoreAddons(user.FirefoxStoreAddons),
+		ThunderbirdSmartCard:                user.ThunderbirdSmartCard,
 		NextcloudEnable:                     user.NextcloudEnable,
 		NextcloudHost:                       user.NextcloudHost,
 		AIAgentMode:                         user.AIAgentMode,
@@ -310,6 +312,7 @@ var userIntentKeys = []string{
 	"apps",
 	"firefoxAddons",
 	"firefoxStoreAddons",
+	"thunderbirdSmartCard",
 }
 
 // SyncUserIntent updates only direct user-owned assignments in an existing
@@ -575,6 +578,7 @@ func Render(s Settings) []byte {
 	list("apps", s.Apps)
 	fmt.Fprintf(&b, "    firefoxAddons = %s;\n", StringAttrs(s.FirefoxAddons))
 	fmt.Fprintf(&b, "    firefoxStoreAddons = %s;\n", FirefoxStoreAddons(s.FirefoxStoreAddons))
+	boolean("thunderbirdSmartCard", s.ThunderbirdSmartCard)
 	boolean("nextcloudEnable", s.NextcloudEnable)
 	str("nextcloudHost", s.NextcloudHost)
 	str("oddcModel", s.ODDCModel)

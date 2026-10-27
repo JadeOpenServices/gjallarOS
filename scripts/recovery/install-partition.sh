@@ -170,9 +170,15 @@ if $sign; then
       sbctl remove-file "$stale" >/dev/null
     done < <(grep -oE '"/tmp/tmp\.[A-Za-z0-9]+/EFI/Linux/gjallar-recovery\.efi"' /var/lib/sbctl/files.json | tr -d '"' | sort -u)
   fi
+  # sbctl verify is no check here: it exits 0 for an unsigned file, and its
+  # landlock sandbox cannot even read this temporary mount (e2e-fw13,
+  # 2026-10-27). sbverify fails unless the db certificate signed the file.
   while IFS= read -r -d '' executable; do
     sbctl sign "$executable" >/dev/null
-    sbctl verify "$executable" >/dev/null
+    sbverify --cert /var/lib/sbctl/keys/db/db.pem "$executable" >/dev/null 2>&1 || {
+      echo "ERROR: $executable is not signed by this endpoint's db key" >&2
+      exit 1
+    }
   done < <(find "$mount_dir/EFI" -type f -iname '*.efi' -print0)
 fi
 

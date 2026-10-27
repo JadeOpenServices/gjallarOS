@@ -13,7 +13,8 @@ let
   cavemanSrc = pkgs.fetchFromGitHub {
     owner = "JuliusBrussee";
     repo = "caveman";
-    rev = "v2.2.0";
+    # v2.2.0
+    rev = "9aa63945a349bef17206540650db48c30fafbdf2";
     hash = "sha256-wtGKsKtjPL1nG0LDH4vmfMy/nnuQaY6jvNhlwxhEm2E=";
   };
 
@@ -252,6 +253,20 @@ let
   remote = (settings.aiEndpoint or "") != "";
   upstream = if remote then settings.aiEndpoint else "http://127.0.0.1:11434";
   baseModel = if remote then settings.aiRemoteModel else settings.aiModel;
+  # Registry digests the base model must match. Ollama checks every blob
+  # against its digest when it downloads it, so matching the manifest pins the
+  # weights. A tag that moves upstream stops here until the pins are updated.
+  modelPins = builtins.fromJSON (builtins.readFile ../../internal/ai/profile/model-pins.json);
+  modelPin = modelPins.${baseModel} or null;
+  modelPinDigests = lib.concatStringsSep " " ([ modelPin.config ] ++ lib.sort lib.lessThan modelPin.layers);
+  modelManifest =
+    let
+      ref = lib.splitString ":" baseModel;
+    in
+    "/var/lib/ollama/models/manifests/registry.ollama.ai/library/${builtins.head ref}/${lib.last ref}";
+  modelNotPinned = ''
+    echo "NOTE: ${baseModel} has no pinned digest; it is used as the registry serves it." >&2
+  '';
   contextTokens = if remote then settings.aiRemoteContextTokens else settings.aiContextTokens;
 
   # The system logs in to a central server with a bearer token. It never
@@ -275,6 +290,12 @@ let
     builtins.toJSON {
       model = baseModel;
       stream = false;
+    }
+  );
+
+  remoteShowRequest = pkgs.writeText "gjallaros-caveman-ai-show.json" (
+    builtins.toJSON {
+      model = baseModel;
     }
   );
 
@@ -320,7 +341,10 @@ let
       or (throw "Unknown Ollama acceleration profile: ${accelerationProfileName}");
 
   modelDefinitionFile = pkgs.writeText "gjallaros-caveman-ai.Modelfile" modelDefinition;
-  modelDefinitionHash = builtins.hashString "sha256" modelDefinition;
+  # New pinned weights recreate the assistant model.
+  modelDefinitionHash = builtins.hashString "sha256" (
+    modelDefinition + lib.optionalString (modelPin != null) modelPinDigests
+  );
 
   agentMode = if settings ? aiAgentMode then settings.aiAgentMode else "workspace";
 
@@ -362,7 +386,8 @@ let
           "*.env.*": "deny",
           "**/.ssh/**": "deny",
           "**/.gnupg/**": "deny",
-          "**/.password-store/**": "deny"
+          "**/.password-store/**": "deny",
+          "**/.thunderbird/**": "deny"
         },
 
         "glob": "allow",
@@ -1222,6 +1247,19 @@ let
     # One check; gjallar-ai-session-start runs this unit again on every start.
     if ! api 30 /api/tags >/dev/null; then echo "ERROR: AI server ${upstream} did not answer with the token." >&2; exit 1; fi
     api 1800 /api/pull --data @${remotePullRequest} >/dev/null
+    ${
+      if modelPin == null then
+        modelNotPinned
+      else
+        ''
+          # Only the model blob shows through the API. The shared server keeps
+          # its copy; this client just refuses to build on it.
+          if ! api 60 /api/show --data @${remoteShowRequest} | grep -Fq ${lib.escapeShellArg "sha256-${lib.removePrefix "sha256:" modelPin.model}"}; then
+            echo "ERROR: ${baseModel} on ${upstream} does not match the pinned digest ${modelPin.model}." >&2
+            exit 1
+          fi
+        ''
+    }
     state="$STATE_DIRECTORY/definition.sha256"
     applied="$(cat "$state" 2>/dev/null || true)"
     present=false
@@ -1759,6 +1797,7 @@ lib.mkIf config.gjallar.apps.ai.enable (
           pkgs.curl
           pkgs.coreutils
           pkgs.gnugrep
+          pkgs.jq
         ];
         environment = {
           HOME = if remote then "/var/lib/gjallaros-agent" else "/var/lib/ollama";
@@ -1788,6 +1827,20 @@ lib.mkIf config.gjallar.apps.ai.enable (
             ''
               set -euo pipefail
               ollama pull ${lib.escapeShellArg baseModel}
+              ${
+                if modelPin == null then
+                  modelNotPinned
+                else
+                  ''
+                    actual="$(jq -r '[.config.digest] + (.layers | map(.digest) | sort) | join(" ")' ${lib.escapeShellArg modelManifest} 2>/dev/null || true)"
+                    if [ "$actual" != ${lib.escapeShellArg modelPinDigests} ]; then
+                      # The assistant model keeps the blobs it was built from.
+                      ollama rm ${lib.escapeShellArg baseModel} >/dev/null 2>&1 || true
+                      echo "ERROR: ${baseModel} from the registry does not match the pinned digests; it was removed." >&2
+                      exit 1
+                    fi
+                  ''
+              }
               state="$STATE_DIRECTORY/definition.sha256"
               applied="$(cat "$state" 2>/dev/null || true)"
               present=false

@@ -12,7 +12,10 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
-    sops-nix.url = "github:Mic92/sops-nix";
+    sops-nix = {
+      url = "github:Mic92/sops-nix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
 
     nur = {
       url = "github:nix-community/NUR";
@@ -23,8 +26,6 @@
       url = "github:danth/stylix/release-26.05";
       inputs.nixpkgs.follows = "nixpkgs";
     };
-
-    caelestia.url = "github:caelestia-dots/shell";
 
     noctalia-greeter = {
       url = "github:noctalia-dev/noctalia-greeter";
@@ -179,6 +180,8 @@
       checks.${system} = {
         build-entrypoint = import ./tests/nix/build-entrypoint.nix { inherit pkgs; };
 
+        bootstrap-pins = import ./tests/nix/bootstrap-pins.nix { inherit pkgs; };
+
         local-changes = import ./tests/nix/local-changes.nix { inherit pkgs; };
 
         nextcloud-client-patches = import ./tests/nix/nextcloud-client-patches.nix { inherit pkgs; };
@@ -236,10 +239,23 @@
           stockUdiskie = nixpkgs.legacyPackages.${system}.udiskie;
         };
 
+        kio-fuse-slow = import ./tests/nix/kio-fuse-slow.nix {
+          inherit pkgs;
+          stockKio = nixpkgs.legacyPackages.${system}.kdePackages.kio;
+        };
+
         tailscale-trust = import ./tests/nix/tailscale-trust.nix {
           inherit nixpkgs system;
           tailscaleModules = [
             ./apps/tailscale/nixos.nix
+            ./apps/nixos-options.nix
+          ];
+        };
+
+        thunderbird = import ./tests/nix/thunderbird.nix {
+          inherit nixpkgs system;
+          thunderbirdModules = [
+            ./apps/thunderbird/nixos.nix
             ./apps/nixos-options.nix
           ];
         };

@@ -24,21 +24,21 @@ func collectTailscaleAnswers(t *testing.T, answers ...string) (*config.Tailscale
 
 func TestCollectTailscaleHomeWifisAndSiteRouter(t *testing.T) {
 	got, _ := collectTailscaleAnswers(t,
-		"", // home subnets: default
+		"10.20.0.0/24",
 		"y",
 		"home-router",
-		"bakasifu-5Ghz, bakasifu-2.4Ghz,fizzlipuzzli",
+		"synthetic-5Ghz, synthetic-2.4Ghz,synthetic-guest",
 		"",  // no trusted Wi-Fi uses the exit node
 		"n", // router home
 		"",  // site router trust
-		"",  // targets: default
+		"",  // targets: default from the home subnet
 	)
 	want := config.TailscaleIntent{
-		HomeSubnets:       []string{"192.168.8.0/24"},
-		TrustedWifis:      []string{"bakasifu-5Ghz", "bakasifu-2.4Ghz", "fizzlipuzzli"},
+		HomeSubnets:       []string{"10.20.0.0/24"},
+		TrustedWifis:      []string{"synthetic-5Ghz", "synthetic-2.4Ghz", "synthetic-guest"},
 		ExitNode:          "home-router",
 		SiteRouterTrust:   true,
-		SiteRouterTargets: []string{"192.168.8.1:53"},
+		SiteRouterTargets: []string{"10.20.0.1:53"},
 	}
 	if got.ExitNode != want.ExitNode || !got.SiteRouterTrust ||
 		!slices.Equal(got.HomeSubnets, want.HomeSubnets) ||
@@ -50,7 +50,7 @@ func TestCollectTailscaleHomeWifisAndSiteRouter(t *testing.T) {
 
 func TestCollectTailscaleReasksInvalidAnswers(t *testing.T) {
 	got, out := collectTailscaleAnswers(t,
-		"192.168.8.0", // not a CIDR
+		"10.0.0.0", // not a CIDR
 		"10.0.0.0/24",
 		"y",
 		"bad name", // not a node name
@@ -74,7 +74,7 @@ func TestCollectTailscaleQuotedWifiNames(t *testing.T) {
 	got, out := collectTailscaleAnswers(t,
 		"", "y", "OpenWrt",
 		`"cafe, upstairs`, // unterminated quote is asked again
-		`bakasifu-5ghz, "cafe, upstairs", fizzlipuzzli`,
+		`synthetic-5ghz, "cafe, upstairs", synthetic-guest`,
 		"elsewhere", // not a trusted Wi-Fi: asked again
 		`"cafe, upstairs"`,
 		"n", "n",
@@ -82,7 +82,7 @@ func TestCollectTailscaleQuotedWifiNames(t *testing.T) {
 	if !strings.Contains(out, "missing closing") || !strings.Contains(out, `"elsewhere" is not a trusted Wi-Fi`) {
 		t.Fatalf("missing validation messages:\n%s", out)
 	}
-	if !slices.Equal(got.TrustedWifis, []string{"bakasifu-5ghz", "cafe, upstairs", "fizzlipuzzli"}) {
+	if !slices.Equal(got.TrustedWifis, []string{"synthetic-5ghz", "cafe, upstairs", "synthetic-guest"}) {
 		t.Fatalf("trustedWifis = %q", got.TrustedWifis)
 	}
 	if len(got.WifiExitNodes) != 1 || got.WifiExitNodes["cafe, upstairs"] != "OpenWrt" {

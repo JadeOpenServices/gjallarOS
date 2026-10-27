@@ -523,7 +523,9 @@ Plan agreed 2026-10-10. Channels decided 2026-10-20 (Q16): `main` became
       Open for Jade: poll interval, who may land these pull requests, and
       whether the data-only fast lane to `stable` is wanted.
 - [ ] **Verifying updates.** Goes through the research flow again before
-      any code. Ideas so far, from the sources below:
+      any code. Waits for the release key talk (Jade, Q37 and Q76): until
+      then `rebuild --update` trusts git over HTTPS alone, as the 2026-10-27
+      pin audit found. Ideas so far, from the sources below:
       - The trust root comes with the install, not from the server: the
         first commit the rule applies to and the key that signed it, like a
         Guix channel introduction.
@@ -1041,8 +1043,8 @@ fails when a field has none. Decided with Jade 2026-10-19:
   wait. A name has to stay unique: the service refuses a new hostname that
   a peer on the user's tailnet or a device on the current network already
   uses, and says which one.
-- **Every service address is security**: the AI endpoint, Nextcloud, Plane,
-  draw.io and every web application, with their on/off switches. A changed
+- **Every service address is security**: the AI endpoint, Nextcloud, Plane
+  and every web application, with their on/off switches. A changed
   address can lead to a fake login page, so it shows old -> new and waits.
 - **Firefox add-ons are security**, both the collections and pinned store
   add-ons, because the browser installs them by policy.
@@ -1800,8 +1802,8 @@ Security pass for step 1:
 - **Interface names** come from `ip -j route`; anything that is not a
   plain kernel name is refused instead of quoted into the ruleset.
 - **Open windows, recorded, not closed by step 1:**
-  - Boot: until `gjallar-vpn-trust` runs once, nothing blocks. Closing it
-    means a boot-time table before networking; that is step 3 below.
+  - Boot: until `gjallar-vpn-trust` runs once, nothing blocks. Closed by
+    step 3 below.
   - A new uplink (USB tethering, a second Wi-Fi) is outside the table
     until the dispatcher reruns the service, a second or so.
   - Signing in to Tailscale again through the browser is blocked on an
@@ -1871,7 +1873,75 @@ Security pass for step 2:
   internet without the tunnel. That is the point of the pause; the dialog
   and the notice say so.
 
-Next: step 3 is the boot-time block.
+### Step 3: block from boot until the first check (done dfe29ba3)
+
+Until `gjallar-vpn-trust` ran once after boot, nothing blocked: the window
+from network up to the first check, and longer if the service never ran.
+Built 2026-10-22:
+
+- `gjallar-vpn-boot-block` runs before `network-pre.target`, without
+  default dependencies, from `sysinit.target`, like the NixOS iptables
+  firewall. It runs `gjallarctl vpn boot-block`, which loads the same
+  table `inet gjallar_vpn_block`, with nothing let out but loopback, the
+  Tailscale device, tailscaled's own marked packets and the DHCP client.
+  Local subnets are not known yet, so the LAN is blocked too; link-local
+  and local multicast pass.
+- It writes the marker `/run/gjallar/vpn-boot-block`. The first verdict
+  of `gjallar-vpn-trust` swaps the table in one transaction (blocked) or
+  deletes it (not blocked), and removes the marker either way. A check
+  with no network yet keeps the table.
+- `gjallarctl vpn status` before the first check prints "not checked yet"
+  and names the boot block and `systemctl status gjallar-vpn-trust`.
+- No boot block when the policy wants no exit node (`exitNode = ""`, the
+  default, and e2e) or when a verdict already exists (a rebuild on a
+  running system). A policy file that does not load blocks anyway; a
+  broken override is ignored.
+- `networking.nftables.flushRuleset` would delete the table when
+  `nftables.service` starts, so an assertion refuses that combination.
+- VM test `tests/nix/vpn-fail-closed.nix`: the unit finished before
+  `network-pre.target`; with the trust service held back, only the tunnel
+  carries the internet and the LAN is cut, marked packets pass; the first
+  verdict lifts the block and status no longer says "not checked yet".
+  `tailscale-trust` checks the unit wiring and that it is absent without
+  an exit node. Passed 2026-10-22.
+
+How others handle it:
+
+- Mullvad ships `mullvad-early-boot-blocking.service`, ordered before
+  `network-pre.target` with `DefaultDependencies=no`, which blocks all
+  traffic until the daemon takes over
+  ([unit file](https://raw.githubusercontent.com/mullvad/mullvadvpn-app/main/dist-assets/linux/mullvad-early-boot-blocking.service)).
+  Its lockdown mode blocks the LAN too unless "allow LAN" is on
+  ([kill switch docs](https://mintlify.com/mullvad/mullvadvpn-app/security/kill-switch)).
+  NixOS packages it as `services.mullvad-vpn.enableEarlyBootBlocking`,
+  off by default.
+- ProtonVPN's permanent kill switch keeps its rules across reboots, so a
+  machine stays offline until the app connects; users who uninstall the
+  app without turning it off are left with no network
+  ([Fedora discussion](https://discussion.fedoraproject.org/t/how-to-proton-vpn-killswitch-stuck-on-a-solution/75457),
+  [System76](https://support.system76.com/articles/fix-pvpn-killswitch)).
+  Ours lives in `/run` and comes from the policy, so turning the exit
+  node off and rebuilding removes it.
+- `network-pre.target` is the point firewalls order before
+  ([freedesktop bug 79600](https://bugs.freedesktop.org/show_bug.cgi?id=79600)).
+
+Security pass for step 3:
+
+- **Fails closed when the trust service never runs.** The table stays
+  until a verdict replaces it; there is no timeout that opens it.
+- **The marker only reports.** Nothing reads it to decide on the block,
+  so a planted or deleted marker changes the status text, not the rules;
+  `/run/gjallar` is root-only.
+- **The LAN at boot.** Blocked like Mullvad without "allow LAN". The first
+  check opens the local subnets it can prove, a few seconds after the
+  network is up.
+- **Policy errors.** A policy that does not load blocks; a broken
+  override is ignored, so neither can switch the boot block off.
+- **Open windows, recorded:** a new uplink after the first check is still
+  outside the table until the dispatcher reruns the service (step 1);
+  with no exit node set there is no block at all, by design.
+
+fw13 VM 2026-10-27 (EMULATED exit node): the boot block ran before network-pre, the table stayed through the first check, off-LAN traffic was cut while the LAN answered, and the revert removed the table.
 
 ## 17. Nextcloud: what downloads first on a new machine (done)
 
@@ -2131,39 +2201,214 @@ snapshots are ordered by it.
 - Nix check `checks.time` reads the chrony.conf the module generates and
   runs `chronyd -p` on it.
 
-**Step 2, the hardened first-update exception (Q33):**
+**Step 2, the hardened first-update exception (Q33), built 2026-10-21:**
 
-- Off by default; strict NTS is what runs.
-- A helper looks at chronyd shortly after start. Only when no NTS source
-  got past the key exchange and the reason is the certificate date, it
-  writes a config under `/run` with `nocerttimecheck 1` and restarts
-  chronyd once.
-- `minsources 2` stays: two operators have to agree on the first update,
-  so one bad key alone cannot set the clock.
-- The exception is used up by that first update (N = 1), lives only in
-  `/run`, is logged, and `gjallarctl system status` says the time was set
-  with the date check off until a normal NTS update confirms it.
+How others handle it:
 
-**Step 3, router fallback on a proven home or site network (Q31, Q32):**
+- Pop!_OS turns the certificate date check off on the first attempt by
+  default and falls back to unauthenticated time; users can turn both off
+  with `nocerttimecheck 0` and `authselectmode prefer` in
+  `/etc/chrony/conf.d` (https://system76.com/time).
+- Ubuntu adds a bootstrap pool, `ntp-bootstrap.ubuntu.com`, whose NTS
+  certificates come from Ubuntu's own long-lived CA, so the date check
+  passes with a wrong clock
+  (https://patches.ubuntu.com/c/chrony/chrony_4.7-1ubuntu3.patch).
+- chrony's default is `nocerttimecheck 0`. Its manual calls the directive
+  a last resort for machines without an RTC, because a server certificate
+  could be used after it expired
+  (https://chrony-project.org/doc/4.8/chrony.conf.html).
+- Chrome treats a wrong clock as a security problem of its own: whoever
+  controls the clock can get expired certificates accepted. Chrome gets
+  its time from a signed Google service, and Roughtime was started because
+  at least a quarter of Chrome's certificate errors came from wrong clocks
+  (https://www.chromium.org/developers/design-documents/sane-time/,
+  https://imperialviolet.org/2016/09/19/roughtime.html).
+- Q33 rejects our own bootstrap server, so the Ubuntu way is out; the
+  Pop!_OS way is too loose (every boot, any one server, fallback to plain
+  NTP). The design below keeps their idea and closes what they leave open.
 
-- Only when no NTS source works and the VPN verdict is home or site (a
-  router proven by its signed answer, see `internal/nettrust`).
-- The router's tailnet address when it serves NTP there; otherwise its
-  proven local address.
-- chronyd restarts with a fallback config that allows that one
-  unauthenticated source, with small corrections only: no steps, and a
-  low limit on how fast and how far the clock may move.
-- When the network stops being home or site, or an NTS source works
-  again, the strict config comes back.
-- Status says the time came from the router, not from NTS.
+What the fw13 VM showed (chrony 4.8, clock set back to 2026-06-01,
+saved keys moved aside, SYNTHETIC test of the real servers):
 
-**Later:** the time line in the settings app, and a notice when the time
-has not been confirmed for a long time.
+- Netnod, PTB and time.nl failed the key exchange ("certificate chain uses
+  not yet valid certificate"). Cloudflare's one-year certificate was still
+  valid and its key exchange worked.
+- With one source and `minsources 2`, chronyd did not move the clock and
+  stayed "Not synchronised". So a working key exchange is not proof of
+  sync; only the tracking state is.
+- A chrony RTC file that claimed a large RTC error was ignored after a
+  restart ("RTC time before last driftfile modification"), because
+  `chronyd -s` does not go back before the drift file
+  (https://chrony-project.org/doc/4.6/chronyd.html). Restarting chronyd
+  right after a step is therefore safe.
+
+Built (`system/services/time.nix`, `gjallarctl system time-check`):
+
+- chrony.conf has `confdir /run/gjallar-time/chrony`, empty on every boot.
+  The exception is only ever a file there, never part of the build.
+- The `gjallar-time-check` service runs after chronyd at boot and every
+  30 minutes. When chronyd confirms the clock within 90 seconds, it writes
+  the confirmed time to `/var/lib/gjallar-time/confirmed` and stops.
+- Otherwise, once per boot, it fetches the certificate chain from each of
+  the four operators (TLS on port 4460, nothing sent) and checks it
+  against the operators' own roots only: ISRG Root X1 and X2, Root YE and
+  YR, and SSL.com Root Certification Authority ECC.
+- The exception is allowed only when at least two operators send a chain
+  that verifies for their host name at some date, at least one shows the
+  clock behind the certificate's start, the certificate is still valid
+  after the last confirmed time, and no operator shows the clock ahead.
+  A clock ahead never gets the exception.
+- Then it writes `nocerttimecheck 1`, `nosystemcert` and
+  `ntstrustedcerts` (the pinned roots) into the confdir and restarts
+  chronyd. `minsources 2` and `authselectmode require` stay, so two
+  operators still have to agree.
+- After the first update, or after 2 minutes without one, the file is
+  removed. The clock may only move forward: never earlier than the clock
+  before plus the time that passed, never earlier than the last confirmed
+  time. A step back is refused: chronyd stops, the clock goes back, and
+  the drift file gets the right date so `-s` cannot bring the wrong one
+  back.
+- A forward step is confirmed again: chronyd restarts without the saved
+  keys, so every source does a new key exchange with the date check on.
+  Only that makes the time "confirmed".
+- `gjallarctl system status` shows what happened this boot (from
+  `/run/gjallar-time/state.json`): set with the check off and not yet
+  confirmed, confirmed afterwards (with how far the clock was behind),
+  refused, or failed. A run that stops halfway leaves the file in `/run`;
+  the next run removes it before anything else.
+
+Security pass for step 2:
+
+- Threat: someone who holds a leaked key of an expired operator
+  certificate and sits on the network path. The exception needs two such
+  keys from two operators, both for certificates that were still valid
+  after the last confirmed time, and the result can only move the clock
+  forward. The confirmed time on disk is the floor.
+- Threat: a clock pushed ahead to make old certificates look expired.
+  That leads to "no exception", not to a step.
+- Threat: a CA outside the four operators' roots. During the exception the
+  system bundle is off (`nosystemcert`); only the pinned roots count.
+- Residual: a clock far ahead, or behind with only one operator reachable,
+  stays wrong and shows "not confirmed" until step 3 or a person sets it.
+- Residual: the very first boot has no confirmed time, so the floor is the
+  build's `time-epoch`.
+- Residual: when an operator moves to a root not in the list, the
+  exception counts it as untrusted until the list is updated; strict NTS
+  is not affected.
+
+**Step 3, router fallback on a proven home or site network (Q31, Q32),
+built 2026-10-21:**
+
+- Only when no NTS source works and the VPN verdict is home or site with
+  a router proven by its signed answer (`internal/nettrust`). A home
+  verdict from a trusted Wi-Fi alone does not count. The verdict now
+  carries the router's tailnet addresses and the local address its proof
+  came from (`routerTailnet`, `routerVia`).
+- The verdict file must be for the network the device is on now: the
+  check compares its network key with the current one, so a verdict left
+  over from the last network never counts.
+- The router's tailnet address when it answers NTP there (WireGuard
+  carries it, so nobody on the LAN can answer in its name); otherwise its
+  proven local address. A plain NTP query checks the answer first: mode 4,
+  stratum 1 to 15, and our transmit time echoed back.
+- `gjallar-time-check` writes `/run/gjallar-time/chrony/router.conf` and
+  restarts chronyd. The confdir comes last in chrony.conf, so these lines
+  win: `authselectmode ignore` and `minsources 1` (with `prefer` chronyd
+  drops every unauthenticated source while an NTS source is configured),
+  `makestep 1 0` (never steps), `maxchange 60 0 -1` (an offset over 60 s
+  is ignored, every time), `maxslewrate 1000` and `maxdrift 500`, and the
+  one `server` line for the router.
+- Every later run (timer, and a path unit on `/run/gjallar/vpn-trust.json`)
+  keeps the fallback only while the verdict still names the same router on
+  the same network and fewer than two NTS sources are reachable. chronyd
+  counts a source reachable only after an authenticated answer, so two
+  reachable NTS sources mean NTS works again. Otherwise the file goes,
+  chronyd restarts strict, and the run waits for NTS as usual.
+- `vpn apply` writes the verdict file only when it changed, so the path
+  unit does not fire on every 5 minute recheck.
+- Router time never counts as confirmed: no stamp on disk, and status
+  shows `Time: set by the home router <name> at ..., not confirmed by NTS`
+  while the router is the source. The fallback state is
+  `/run/gjallar-time/router.json` (name, address, network key, since).
+
+Security pass for step 3:
+
+- Threat model: the router is a device the owner put on the tailnet, so
+  it is trusted to route, not to tell the time. A lying or taken-over
+  router, or someone on the LAN answering for the local address, is what
+  the limits are for. Sources: the chrony 4.8 manual and source
+  (`update_sel_options` in sources.c, `is_offset_ok` and
+  `is_step_limit_reached` in reference.c), RFC 8915 for what NTS protects.
+- Without steps and with `maxslewrate 1000`, the clock moves at most
+  86 seconds a day, and never by an offset over 60 s. Certificate
+  validity is days to months, so no certificate turns valid or expired
+  through this in practice. TOTP codes (30 s) can drift by a window or two
+  over a day of fallback; the status line says the time is not
+  confirmed.
+- A verdict from another network cannot carry over: the network key
+  includes the gateway's hardware address and the subnets.
+- Changing networks restarts the check through the path unit; until it
+  runs, chronyd may still ask the old local address. The tailnet address
+  is preferred for that reason, and the limits above hold either way.
+- Residual: during the fallback `minsources 1` and `ignore` also let a
+  single NTS operator be chosen on its own. It is still authenticated, and
+  the fallback ends as soon as two answer.
+- Residual: each restart of chronyd sets the clock from the RTC (`-s`);
+  that is the same as at boot.
+
+**Step 4 (built, `1b51ff24`):** the time in the desktop (questions 60-62).
+
+- `gjallarctl system time-watch`, the user unit `gjallar-time-watch`,
+  asks chronyd every 30 s and writes `$XDG_RUNTIME_DIR/gjallar/time` for
+  the bar plugin `gjallar/time`. The clock shows only while the time is
+  not confirmed: `clock-exclamation` after 5 minutes without NTS (so a
+  normal boot never shows it), `clock-question` right away while the home
+  router sets the time. The tooltip says since when; a click opens
+  `gjallarctl system time` in a small window.
+- The card comes once per spell: the last NTS confirmation
+  (`/var/lib/gjallar-time/confirmed`) is 24 hours old or more, the device
+  has been online (NetworkManager `CONNECTED_GLOBAL`) for 15 minutes, and
+  the router fallback is off. The stamp names the spell, kept in
+  `~/.local/state/gjallar/time-notice-seen`; a new confirmation starts a
+  new one. Details opens the same window. The card closes when NTS
+  confirms the time while it is open. An install that never confirmed
+  counts the 24 hours from when the watch first saw that.
+- Offline the clock icon still shows after the 2 hours `clockFresh`
+  allows, but no card: without a network NTS cannot be asked, so there is
+  nothing to do.
+- e2e-fw13 passed on 2026-10-21: icon after the grace with NTS blocked,
+  click and card Details open the window, one card per spell across a unit
+  restart, router tooltip, icon gone after restore. The window is sized in
+  cells (84x12, `f341a3d0`) so no line wraps.
+
+**Later:** the time line in the settings app (Plane 218).
 
 **Tests:** step 1 has the Nix check and the e2e-fw13 run. Steps 2 and 3
 need NixOS VM tests: a plain NTP server on the LAN that the client must
 ignore, only one source answering (the clock must not move), and a clock
-months behind with the exception.
+months behind with the exception. Step 2 has unit tests for every decision
+and the e2e-fw13 run on 2026-10-21 at 86b6c787: normal boot, clock months
+behind (exception, then confirmed), clock ahead and port 4460 blocked (no
+exception). The refused step back has unit tests only; it needs a server
+that answers with an older time.
+
+Step 3 has unit tests for the candidate order, the reply check, the
+reachable count, the status lines, and start, keep and end of the
+fallback. The e2e-fw13 run on 2026-10-21 at 7e222547 used an EMULATED
+router (an NTP answerer in a network namespace) with SYNTHETIC home
+verdicts, NTS blocked by an nft table, and the clock 20 s behind:
+
+- Home verdict for the current network: the path unit started the check,
+  all four NTS sources unreachable, fallback on, the router selected,
+  status `Time: set by the home router ...`. The clock was slewed, not
+  stepped.
+- Router 300 s off: chronyd logged the adjustment as over 60 s and
+  ignored it; the clock did not move.
+- Verdict for another network: fallback off, chronyd strict again.
+- Home verdict again, then NTS unblocked: after four NTS sources were
+  reachable the next run ended the fallback ("NTS sources answer again"),
+  NTS stepped the clock to the right time and status showed `Time:
+  confirmed by NTS`.
 
 ## 19. TPM bus protection (parameter encryption)
 
@@ -2299,3 +2544,206 @@ arXiv 2608.14736 (Werling, Zahin, Seifert); TCG CPU to TPM Bus Protection
 Guidance (2023); kernel `Documentation/security/tpm/tpm-security.rst`;
 Phoronix and LKML on `TCG_TPM2_HMAC` off by default (6.18); Pulse Security,
 WithSecure, SCRT and NVISO write-ups on TPM sniffing.
+
+## 20. Thunderbird mail (built)
+
+Written 2026-10-21 for Plane GJALLAROS-249. Jade asked for Thunderbird with
+good defaults (encryption keys, a modern theme, ease of use). The user sets
+up every account. Decisions are Q50 to Q57 on the questionnaire page.
+
+### What Thunderbird does today
+
+- **OpenPGP keys** (built in since 78, RNP library). Secret keys are stored
+  under a random passphrase, and that passphrase is kept in the profile's
+  `key4.db`. Without a Primary Password, `key4.db` is not encrypted, so
+  anything that can read the profile (an app running as the user, a
+  snapshot, a backup, a copied home folder) can read the keys.
+- **Primary Password** encrypts `key4.db`: saved account passwords, login
+  tokens, OpenPGP keys and S/MIME certificates. It is asked once per
+  session and stays open until Thunderbird closes. A policy can require
+  it.
+- **Per-key passphrase** (since 115, bug 1679278): asked on every sign and
+  decrypt. There is no cache yet (bug 1834577 is open).
+- **Login keyring:** Thunderbird cannot unlock its Primary Password from
+  the desktop keyring.
+- **External GnuPG** (`mail.openpgp.allow_external_gnupg`): Thunderbird
+  hands secret-key work to gpg-agent. This is how smart cards work.
+- **Account autoconfig** asks the mail provider over plain HTTP by default
+  (`mailnews.auto_config.fetchFromISP.sslOnly` is false).
+
+### How others handle it
+
+- **Mozilla:** recommends a Primary Password for OpenPGP keys and documents
+  the policies used here (policy templates for Thunderbird 153).
+- **Hardening guides** (thunderbird-user.js, arkenfox style):
+  autoconfig over HTTPS only, remote content off, telemetry off, plain or
+  simple HTML reading.
+- **Tails:** ships Thunderbird with its built-in OpenPGP; mail over Tor.
+- **Distributions** (Fedora, Debian, NixOS): ship Thunderbird stock and
+  leave all of this to the user.
+
+### Decisions
+
+- Keys stay in Thunderbird, with a **Primary Password required** (Q54,
+  Q55). It is asked once per session. The opt-in **smart card** is the step
+  up: off by default, offered by the installer when Thunderbird is ticked,
+  declinable there (Q51). OpenPGP cards go through GnuPG (pcscd, scdaemon),
+  S/MIME cards through OpenSC as a security device.
+- No password-manager add-on. KeePassXC is being replaced (215); the
+  first-run guide tells the user to keep a key backup in their password
+  manager or on an offline copy.
+- The installer lists Thunderbird and ticks it (Q56). All mailto links on
+  the system open Thunderbird, whatever browser is installed (Q53).
+- Latest release, not ESR, like Firefox (Q57).
+- On by default: Simple HTML reading, key lookups only when the user asks,
+  a local first-run guide (account, Primary Password, key create or import,
+  key backup, Nextcloud calendar and contacts) (Q57).
+- Theme: follows the GjallarOS theme job (250, genbu Superbird look),
+  in the theme phase.
+
+### Security pass
+
+**Threat model.** (1) Someone with a copy of the home folder (snapshot,
+backup, old disk image). (2) An app running as the user. (3) A mail that
+tracks the reader or carries active content. (4) A network that sees or
+changes account setup. (5) The local AI agent reading mail data.
+
+- (1) The Primary Password encrypts `key4.db`; a copy without it is
+  useless. This is the main reason it is required. The disk is LUKS
+  encrypted; snapshots and backups are not, from inside the session.
+- (2) Not solved by any software option. While Thunderbird is open, an app
+  running as the user can use the unlocked keys. The smart card is the
+  only option that keeps the key itself off the computer. Said plainly in
+  the first-run guide.
+- (3) Remote content blocked (per-sender allow kept), Simple HTML, scam
+  detection on. Mail never runs JavaScript: Thunderbird has no switch for
+  it, and policies cannot set `javascript.*` prefs anyway.
+- (4) Autoconfig over HTTPS only (ISP fetch and guess), TLS 1.2 minimum.
+  Key lookups only on ask, since a lookup tells the key server who the user
+  writes to.
+- (5) The AI agent's read deny list gets `**/.thunderbird/**`, next to the
+  existing `.ssh`, `.gnupg` and `.password-store` lines.
+- Telemetry, data collection, promotions, in-app messages and chat are
+  locked off. Add-ons will follow the Firefox scheme (catalogue pins). Until
+  the catalogue has pins, only dictionaries, languages and themes install.
+- The smart card adds pcscd. It only runs on demand (socket), and only when
+  the option is on.
+
+**What stays open.** The Primary Password stays open for the whole session
+(no screen-lock timeout in Thunderbird). Logged on the security review
+page; a timeout would need upstream work (bug 1834577 covers the key cache).
+
+### Built (8a3890eb)
+
+- `apps/thunderbird/` in the app catalogue: `thunderbird-latest`, policies
+  in `/etc/thunderbird/policies/policies.json`. PrimaryPassword,
+  DisableTelemetry, DisableAppUpdate (Nix updates it), InAppNotification
+  off, `SSLVersionMin` tls1.2 (policies cannot set `security.tls.*`),
+  ExtensionSettings allows dictionary, locale and theme only.
+- Locked prefs: autoconfig HTTPS only (ISP fetch and guess), remote images
+  off, scam detection, data submission off, chat off, no remote "what's
+  new" page, start page = local guide, external GnuPG only with the smart
+  card. Presets the user can change: Simple HTML (`html_as` 3,
+  `disallow_mime_handlers` 3), no User-Agent header, no default-client
+  check.
+- Key lookups: Thunderbird already searches key servers only from the key
+  assistant or key manager, so nothing to set; the guide explains it.
+- Smart card (`thunderbirdSmartCard`, installer follow-up question,
+  `gjallarctl settings` security tier): pcscd (socket), gpg-agent with
+  pinentry-qt, `/etc/gnupg/scdaemon.conf` with `disable-ccid` and
+  `pcsc-shared` so scdaemon and OpenSC share the reader, OpenSC as a
+  security device.
+- mailto and `message/rfc822` go to Thunderbird (Home Manager mimeApps);
+  Firefox hands mailto to the system default when Thunderbird is on.
+- Nix check `checks.thunderbird`: policies, prefs, local start page with no
+  remote links, smart card parts only when on, no policies without the app.
+- Mozilla's "Know your rights" bar shows once on first start. It opens the
+  local about:rights page and is kept on purpose.
+
+VM results (e2e-fw13, 2026-10-21): rebuild rc 0; Thunderbird 157.0.1;
+policies and prefs as above; start page renders from the store in dark
+mode behind the account setup dialog; mailto and rfc822 defaults; Firefox
+mailto handler; AI deny line. Smart card off: no pcscd, no `/etc/gnupg`.
+Smart card on: pcscd.socket enabled, scdaemon.conf linked, GnuPG 2.4.9
+reads `/etc/gnupg` (`disable-ccid` set), agent and scdaemon answer, OpenSC
+module present. Not run: a real card (no reader in the VM).
+
+**Sources:** Mozilla support "Primary Password" and "OpenPGP in
+Thunderbird"; Thunderbird policy templates (policies-descriptions.ftl);
+bugzilla 1679278, 1834577, 1566458; cylab.be on Thunderbird key storage;
+GnuPG gpg-agent manual; Home Manager `programs.thunderbird`.
+
+## 21. Off-disk backup (later phase, Genbu/JODS)
+
+Moved to a later phase on 2026-10-21 (question 63): Genbu/JODS picks the
+backup server and runs it. Local snapshots (section 15) stay the only copy
+until then; they are not a backup when the disk dies.
+
+Already decided for that phase:
+
+- Key (question 64): one key per device, sealed to the TPM so the daily run
+  needs no one. It is shown once at setup, like the LUKS recovery key, for
+  paper or the password manager. A master public key can be added so JODS
+  can escrow a recovery copy.
+- Content (question 65): `@home` and `@config`, read from the newest local
+  read-only snapshot so the copy is consistent. The Nextcloud sync folder
+  is skipped (it already lives on the server). Never `@`, secrets under
+  `/var/lib` or `/nix`.
+- Timing (question 66): once a day when the server answers (home network
+  or tailnet), catching up after sleep, not on battery below 30%. A card
+  when nothing succeeded for 7 days.
+
+### Research so far
+
+- restic encrypts and authenticates everything (AES-256-CTR with
+  Poly1305-AES, scrypt for the key file). Its threat model says plainly
+  that it does not protect against deletion at the storage, and that a
+  compromised client can capture the key and steer `forget`
+  ([restic references](https://restic.readthedocs.io/en/stable/100_references.html)).
+  `rest-server --append-only` stops a client deleting, `--private-repos`
+  keeps devices apart ([rest-server](https://github.com/restic/rest-server)).
+  Pruning then needs the repository key on a trusted machine.
+- Borg's append-only mode only soft-deletes; the next normal-mode write by
+  a trusted machine makes the deletes final, and `rm` on the server still
+  works ([Borg notes](https://borgbackup.readthedocs.io/en/stable/usage/notes.html)).
+  Borg 1.2.5 fixed forged archives (CVE-2023-36811, TAM checks)
+  ([Borg changelog](https://borgbackup.readthedocs.io/en/latest/changes_1.x.html)).
+- Proxmox Backup Server encrypts on the client (AES-256-GCM), offers an RSA
+  master key for recovery and a paper key
+  ([PBS client](https://pbs.proxmox.com/docs-1/backup-client.html)). The
+  DatastoreBackup role can add and restore owned backups but not prune
+  ([PBS user management](https://pbs.proxmox.com/docs/user-management.html));
+  prune and garbage collection work on metadata on the server. The server
+  checks only a CRC on encrypted chunks
+  ([PBS technical overview](https://pbs.proxmox.com/docs/technical-overview.html)).
+  Proxmox recommends an off-site copy that pulls.
+- btrbk can send snapshots to a raw file target through GnuPG; the manual
+  marks it experimental and it sends full streams
+  ([btrbk.conf](https://www.mankier.com/5/btrbk.conf)).
+- Desktop tools: Déjà Dup uses restic, Pika Backup uses Borg; Time Machine
+  encrypts network backups with a password separate from the disk's.
+
+### Security pass (for that phase)
+
+- A device must never be able to delete or rewrite its own history: an
+  attacker with root on the device would wipe the backups first. The
+  device credential can only add and restore.
+- Pruning without handing the server the key: the server prunes from
+  metadata (PBS) or a separate trusted host prunes. A forged snapshot
+  shaped for the retention rule can push real ones out, so retention keeps
+  a time window, not a count.
+- The server must not read the data: encryption on the device, key per
+  device, nothing in the clear on the wire (TLS with a pinned server
+  certificate, like the AI endpoint).
+- What the server still sees: sizes, times, chunk counts. That is accepted.
+- The NixOS restic module runs as root without systemd hardening; we use
+  our own hardened units as for the snapshots.
+
+**Sources:** as linked above; Synology ransomware advisory and community
+threads on pull versus push.
+
+## 22. Apps to bring back later
+
+- draw.io was a test web application and is removed (2026-10-27, Jade).
+  It can come back as a regular catalogue app. Taking `drawio` out of
+  `apps/retired.json` is part of that job, so older configs keep it again.

@@ -1,0 +1,7 @@
+{
+  "name": "Thunderbird",
+  "description": "Mail, calendar and contacts with OpenPGP encryption.",
+  "category": "communication",
+  "default": true,
+  "installer": "Install Thunderbird for mail, calendar and contacts?"
+}

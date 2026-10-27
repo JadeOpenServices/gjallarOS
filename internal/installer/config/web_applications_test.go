@@ -7,7 +7,7 @@ import (
 
 func TestSupportedWebApplicationIDs(t *testing.T) {
 	got := SupportedWebApplicationIDs()
-	want := []string{"plane", "drawio", "teams"}
+	want := []string{"plane", "teams"}
 
 	if len(got) != len(want) {
 		t.Fatalf("SupportedWebApplicationIDs() = %#v, want %#v", got, want)
@@ -46,9 +46,6 @@ func TestNormalizeWebApplicationsCanonicalizesGenericIntent(t *testing.T) {
 			Endpoint: "http://plane.example.test",
 		},
 		{
-			ID: WebApplicationDrawio,
-		},
-		{
 			ID: WebApplicationTeams,
 		},
 	}
@@ -70,26 +67,28 @@ func TestNormalizeWebApplicationsCanonicalizesGenericIntent(t *testing.T) {
 
 }
 
-func TestNormalizeWebApplicationsKeepsSelfHostedDrawioEndpoint(t *testing.T) {
-	user := User{
-		WebApplications: []WebApplicationIntent{
-			{
-				ID:       WebApplicationDrawio,
-				Endpoint: "https://drawio.example.test///",
-			},
-		},
+func TestParseDropsRetiredDrawio(t *testing.T) {
+	contents := `{
+		"apps": ["git", "drawio"],
+		"webApplications": [{"id": "drawio", "endpoint": "https://drawio.example.test"}, {"id": "teams"}]
+	}`
+	if got := RetiredEntries([]byte(contents)); len(got) != 1 || got[0] != "drawio" {
+		t.Fatalf("RetiredEntries = %v, want [drawio]", got)
 	}
-
-	if err := NormalizeWebApplications(&user); err != nil {
+	user, err := parsePresetWith(t, contents)
+	if err != nil {
 		t.Fatal(err)
 	}
-
-	assertWebApplications(t, user.WebApplications, []WebApplicationIntent{
-		{ID: WebApplicationDrawio, Endpoint: "https://drawio.example.test"},
-	})
+	if len(user.Apps) != 1 || user.Apps[0] != "git" {
+		t.Fatalf("apps = %v, want [git]", user.Apps)
+	}
+	assertWebApplications(t, user.WebApplications, []WebApplicationIntent{{ID: WebApplicationTeams}})
+	if got := RetiredEntries([]byte(`{"apps": ["git"], "webApplications": [{"id": "teams"}]}`)); len(got) != 0 {
+		t.Fatalf("RetiredEntries = %v, want none", got)
+	}
 }
 
-func TestParseMigratesPublicDrawioWithoutEndpoint(t *testing.T) {
+func TestParseMigratesPlaneAndDropsDrawio(t *testing.T) {
 	user, err := parsePresetWith(t, `{
 		"planeEnable": true,
 		"planeHost": "plane.example.test/",
@@ -104,7 +103,6 @@ func TestParseMigratesPublicDrawioWithoutEndpoint(t *testing.T) {
 	assertWebApplications(t, user.WebApplications, []WebApplicationIntent{
 		{ID: WebApplicationTeams},
 		{ID: WebApplicationPlane, Endpoint: "http://plane.example.test"},
-		{ID: WebApplicationDrawio},
 	})
 }
 

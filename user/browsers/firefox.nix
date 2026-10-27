@@ -316,6 +316,13 @@ let
       FirefoxLabs = false;
       Locked = true;
     };
+  }
+  // lib.optionalAttrs config.gjallar.apps.thunderbird.enable {
+    # mailto links go to the desktop's mail app, Thunderbird.
+    Handlers.schemes.mailto = {
+      action = "useSystemDefault";
+      ask = false;
+    };
   };
 
   package = pkgs.firefox.override {

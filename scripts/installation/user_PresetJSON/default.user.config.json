@@ -7,7 +7,6 @@
   "apps": [
     "btop",
     "dolphin",
-    "drawio",
     "fastfetch",
     "gimp",
     "git",
@@ -20,6 +19,7 @@
     "rust",
     "tailscale",
     "teams",
+    "thunderbird",
     "vlc",
     "wine"
   ],
@@ -117,6 +117,7 @@
   "snapshotsKeepDays": 7,
   "snapshotsKeepHours": 24,
   "theme": "noctalia",
+  "thunderbirdSmartCard": false,
   "timezone": "Europe/Berlin",
   "touchpadWorkspaceSwipe": true,
   "unattendedInstall": false,

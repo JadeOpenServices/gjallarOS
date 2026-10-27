@@ -1,7 +1,7 @@
 diff --git a/src/gui/socketapi/socketapi.cpp b/src/gui/socketapi/socketapi.cpp
 --- a/src/gui/socketapi/socketapi.cpp
 +++ b/src/gui/socketapi/socketapi.cpp
-@@ -202,6 +202,34 @@
+@@ -202,6 +202,35 @@
      return text;
  }
  
@@ -11,9 +11,11 @@ diff --git a/src/gui/socketapi/socketapi.cpp b/src/gui/socketapi/socketapi.cpp
 +        return {};
 +    }
 +
++    // Folders count every file below them: the local icon only once all of
++    // them are on this machine.
 +    const auto availability = folder->vfs().availability(
 +        relativePath,
-+        OCC::Vfs::AvailabilityRecursivity::NotRecursiveAvailability);
++        OCC::Vfs::AvailabilityRecursivity::RecursiveAvailability);
 +
 +    if (!availability) {
 +        return {};
@@ -25,9 +27,8 @@ diff --git a/src/gui/socketapi/socketapi.cpp b/src/gui/socketapi/socketapi.cpp
 +        return QStringLiteral("+VFS_LOCAL");
 +    case OCC::VfsItemAvailability::AllDehydrated:
 +    case OCC::VfsItemAvailability::OnlineOnly:
-+        return QStringLiteral("+VFS_ONLINE_ONLY");
 +    case OCC::VfsItemAvailability::Mixed:
-+        return QStringLiteral("+VFS_HYDRATING");
++        return QStringLiteral("+VFS_ONLINE_ONLY");
 +    }
 +
 +    return {};
@@ -61,15 +62,13 @@ diff --git a/src/gui/socketapi/socketapi.cpp b/src/gui/socketapi/socketapi.cpp
 diff --git a/shell_integration/dolphin/ownclouddolphinoverlayplugin.cpp b/shell_integration/dolphin/ownclouddolphinoverlayplugin.cpp
 --- a/shell_integration/dolphin/ownclouddolphinoverlayplugin.cpp
 +++ b/shell_integration/dolphin/ownclouddolphinoverlayplugin.cpp
-@@ -56,7 +56,14 @@
+@@ -56,7 +56,12 @@
          }
  
          if (status.startsWith("OK")) {
 -            r << QStringLiteral("vcs-normal");
 +            if (status.contains("+VFS_ONLINE_ONLY")) {
 +                r << QStringLiteral("@onlineOnlyIcon@");
-+            } else if (status.contains("+VFS_HYDRATING")) {
-+                r << QStringLiteral("vcs-update-required");
 +            } else {
 +                // Any other OK state is fully synced and locally available.
 +                r << QStringLiteral("@localIcon@");

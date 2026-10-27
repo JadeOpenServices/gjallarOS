@@ -210,11 +210,23 @@ pkgs.testers.runNixOSTest {
         return json.loads(client.succeed("cat /run/gjallar/vpn-trust.json"))
 
 
+    with subtest("the boot block ran before networking"):
+        boot = "gjallar-vpn-boot-block.service"
+        assert client.succeed(f"systemctl show -p Result --value {boot}").strip() == "success"
+        client.succeed(f"journalctl -b -u {boot} -o cat | grep -q 'until the first network check since boot'")
+        done = int(client.succeed(f"systemctl show -p ExecMainExitTimestampMonotonic --value {boot}"))
+        pre = int(client.succeed("systemctl show -p ActiveEnterTimestampMonotonic --value network-pre.target"))
+        assert 0 < done <= pre, (done, pre)
+
     with subtest("online exit node carries the internet, no block"):
         v = apply()
         assert v["trust"] == "untrusted" and v["exitNode"] == "exit" and "blocked" not in v, v
         client.succeed(no_table)
+        client.succeed("test ! -e /run/gjallar/vpn-boot-block")
         client.wait_until_succeeds(internet, timeout=60)
+        # A rebuild or a manual start never blocks a checked network.
+        client.succeed("systemctl start gjallar-vpn-boot-block.service")
+        client.succeed(no_table)
 
     with subtest("exit node goes offline: it stays set and nothing leaks"):
         exit.succeed("systemctl stop tailscaled.service")
@@ -310,5 +322,33 @@ pkgs.testers.runNixOSTest {
         client.wait_until_succeeds("jq -e '.exitNode == \"exit\" and (has(\"blocked\") | not)' /run/gjallar/vpn-trust.json", timeout=60)
         client.succeed(no_table)
         client.wait_until_succeeds(internet, timeout=60)
+
+    with subtest("boot block: only the tunnel until the first verdict, however late"):
+        # As at boot: no verdict in /run, and the trust service does not
+        # run, as when it hangs or fails.
+        client.succeed(
+            "mkdir -p /run/systemd/system/gjallar-vpn-trust.service.d"
+            " && printf '[Unit]\\nConditionPathExists=/nonexistent\\n' > /run/systemd/system/gjallar-vpn-trust.service.d/off.conf"
+            " && systemctl daemon-reload && rm /run/gjallar/vpn-trust.json"
+            " && systemctl start gjallar-vpn-boot-block.service"
+        )
+        client.succeed("nft list chain inet gjallar_vpn_block output | grep -qF 'oifname \"tailscale*\" accept'")
+        client.succeed("gjallarctl vpn status | grep -q 'not checked yet'")
+        client.succeed("systemctl start gjallar-vpn-trust.service")
+        client.succeed("test -e /run/gjallar/vpn-boot-block && test ! -e /run/gjallar/vpn-trust.json")
+        # The exit node still carries the internet; nothing leaves through
+        # eth1 but tailscaled's own packets until a verdict says where the
+        # device is.
+        client.succeed(internet)
+        client.fail("ping -c 1 -W 2 -I eth1 192.168.1.3")
+        client.fail("curl -fsS -m 5 -o /dev/null --interface eth1 http://${internetAddress}:8000/hostname")
+        client.succeed("ping -c 1 -W 2 -m 524288 -I eth1 192.168.1.3")
+        client.succeed("rm -r /run/systemd/system/gjallar-vpn-trust.service.d && systemctl daemon-reload")
+        v = apply()
+        assert v["exitNode"] == "exit" and "blocked" not in v, v
+        client.succeed(no_table)
+        client.succeed("test ! -e /run/gjallar/vpn-boot-block")
+        client.succeed("ping -c 1 -W 2 -I eth1 192.168.1.3")
+        client.succeed("! gjallarctl vpn status | grep -q 'not checked yet'")
   '';
 }

@@ -135,7 +135,8 @@ in
           ++ lib.optional hasTouchKeyboard "gjallar/osk"
           ++ lib.optional hasEncryptedDisk "gjallar/disk-protection"
           ++ lib.optional hasDeveloperMode "gjallar/developer-mode"
-          ++ lib.optional hasVPN "gjallar/vpn";
+          ++ lib.optional hasVPN "gjallar/vpn"
+          ++ [ "gjallar/time" ];
         shell = {
           clipboard_enabled = false;
           corner_radius_scale = 2.0;
@@ -308,6 +309,11 @@ in
             scale = 0.98;
           };
 
+          time_status = {
+            type = "gjallar/time:status";
+            scale = 0.98;
+          };
+
           quick_keys = {
             type = "gjallar/quick-keys:preset";
             scale = 0.98;
@@ -393,6 +399,7 @@ in
           ++ lib.optional hasDeveloperMode "developer_mode"
           ++ lib.optional hasEncryptedDisk "disk_protection"
           ++ lib.optional hasVPN "vpn"
+          ++ [ "time_status" ]
           ++ lib.optional hasQuickKeys "quick_keys"
           ++ lib.optional hasTouchKeyboard "touch_keyboard"
           ++ [
@@ -438,6 +445,7 @@ in
   xdg.dataFile."noctalia/plugins/gjallar-vpn" = lib.mkIf hasVPN {
     source = ./plugins/vpn;
   };
+  xdg.dataFile."noctalia/plugins/gjallar-time".source = ./plugins/time;
   # Noctalia loads plugin scripts once at start; a changed plugin restarts
   # the bar like a changed config.toml does.
   systemd.user.services.noctalia.Unit.X-Restart-Triggers =
@@ -445,7 +453,8 @@ in
     ++ lib.optional hasTouchKeyboard "${./plugins/osk}"
     ++ lib.optional hasEncryptedDisk "${./plugins/disk-protection}"
     ++ lib.optional hasDeveloperMode "${./plugins/developer-mode}"
-    ++ lib.optional hasVPN "${./plugins/vpn}";
+    ++ lib.optional hasVPN "${./plugins/vpn}"
+    ++ [ "${./plugins/time}" ];
 
   # The developer-mode notice's click: the status in a terminal, readable
   # until Enter.
@@ -459,6 +468,44 @@ in
         "-e"
         (pkgs.writeShellScript "developer-mode-status" ''
           ${gjallarctlPackage}/bin/gjallarctl system status
+          printf '\nPress Enter to close. '
+          read -r _
+        '')
+      ];
+    };
+  };
+
+  # The clock in the bar and the card after 24 hours without NTS
+  # (ROADMAP section 18). Reads only what every user may read.
+  systemd.user.services.gjallar-time-watch = {
+    Unit = {
+      Description = "Watch whether NTS confirms the time";
+      After = [ "hyprland-session.target" ];
+      PartOf = [ "hyprland-session.target" ];
+    };
+    Service = {
+      Type = "exec";
+      ExecStart = "${gjallarctlPackage}/bin/gjallarctl system time-watch";
+      Environment = [ "PATH=${lib.makeBinPath [ pkgs.chrony ]}:/run/current-system/sw/bin" ];
+      Restart = "on-failure";
+    };
+    Install.WantedBy = [ "hyprland-session.target" ];
+  };
+
+  # The clock's click and the card's Details.
+  systemd.user.services.gjallar-time-details = {
+    Unit.Description = "Time details";
+    Service = {
+      Type = "exec";
+      ExecStart = lib.escapeShellArgs [
+        "${pkgs.ghostty}/bin/ghostty"
+        "--title=GjallarOS time"
+        "--window-width=84"
+        "--window-height=12"
+        "-e"
+        (pkgs.writeShellScript "gjallar-time-details" ''
+          PATH=${lib.makeBinPath [ pkgs.chrony ]}:/run/current-system/sw/bin
+          ${gjallarctlPackage}/bin/gjallarctl system time
           printf '\nPress Enter to close. '
           read -r _
         '')

@@ -1642,6 +1642,16 @@ func prepareHost(
 	out,
 	errOut io.Writer,
 ) int {
+	// A completed GjallarOS installation is flake-owned: the flake pins the
+	// NixOS release and brings every installer prerequisite. Staging a release
+	// or rebuilding the bootstrap /etc/nixos/configuration.nix would put the
+	// machine back on its pre-install base generation, and a clean redeploy
+	// once did that under the running desktop (Plane 199). The flake
+	// deployment later in the run is the only system change on a rerun.
+	if s.existing {
+		fmt.Fprintln(out, "Existing GjallarOS installation detected; skipping /etc/nixos release and bootstrap rebuilds.")
+		return offerFirmwareUpdates(ctx, ui, s, out, errOut)
+	}
 	expected, actual, err := release.Inspect(opt.repo, "/etc/os-release")
 	if err != nil {
 		return fail(errOut, err)
@@ -1683,6 +1693,7 @@ func prepareHost(
 
 		if err := release.Align(
 			ctx,
+			opt.repo,
 			expected,
 			installerresume.WrapperPath,
 		); err != nil {
@@ -1717,38 +1728,38 @@ func prepareHost(
 
 		return installerReleaseRebootScheduled
 	}
-	// A completed GjallarOS installation is flake-owned. Rebuilding the
-	// bootstrap /etc/nixos/configuration.nix on a rerun would switch the live
-	// machine back to its pre-install base generation before deploying the
-	// requested flake generation.
-	if s.existing && !opt.forceRedeploy {
-		fmt.Fprintln(out, "Existing GjallarOS installation detected; skipping /etc/nixos bootstrap rebuild.")
-	} else {
-		if s.existing && opt.forceRedeploy {
-			fmt.Fprintln(out, "Force redeployment requested; running prerequisite bootstrap despite existing-install detection.")
-		}
-		configPath := "/etc/nixos/configuration.nix"
-		data, err := os.ReadFile(configPath)
-		if err != nil {
-			return fail(errOut, err)
-		}
-		plan := bootstrap.Build(data, s.preset)
-		if len(plan.Missing) > 0 {
-			fmt.Fprintf(out, "Missing helpers/options: %s\nProposed configuration:\n%s\n", strings.Join(plan.Missing, ", "), plan.Updated)
-			if !s.user.EndpointManagedDevice && os.Getenv("GJALLAR_INSTALLER_RESUMED") != "1" {
-				yes, err := ui.Confirm(ctx, "Apply prerequisite configuration and rebuild?", false)
-				if err != nil {
-					return fail(errOut, err)
-				}
-				if !yes {
-					return fail(errOut, errors.New("required persistent prerequisites were not approved"))
-				}
-			}
-			if _, err := bootstrap.Apply(ctx, configPath, plan.Updated, time.Now()); err != nil {
+	configPath := "/etc/nixos/configuration.nix"
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return fail(errOut, err)
+	}
+	plan := bootstrap.Build(data, s.preset)
+	if len(plan.Missing) > 0 {
+		fmt.Fprintf(out, "Missing helpers/options: %s\nProposed configuration:\n%s\n", strings.Join(plan.Missing, ", "), plan.Updated)
+		if !s.user.EndpointManagedDevice && os.Getenv("GJALLAR_INSTALLER_RESUMED") != "1" {
+			yes, err := ui.Confirm(ctx, "Apply prerequisite configuration and rebuild?", false)
+			if err != nil {
 				return fail(errOut, err)
 			}
+			if !yes {
+				return fail(errOut, errors.New("required persistent prerequisites were not approved"))
+			}
+		}
+		if _, err := bootstrap.Apply(ctx, configPath, plan.Updated, time.Now()); err != nil {
+			return fail(errOut, err)
 		}
 	}
+	return offerFirmwareUpdates(ctx, ui, s, out, errOut)
+}
+
+func offerFirmwareUpdates(
+	ctx context.Context,
+	ui prompt.UI,
+	s state,
+	out,
+	errOut io.Writer,
+) int {
+	var err error
 	check := s.user.RunUpdateChecks
 	if !s.preset && os.Getenv("GJALLAR_INSTALLER_RESUMED") != "1" {
 		check, err = ui.Confirm(ctx, "Check for and install firmware updates?", false)
@@ -2015,7 +2026,7 @@ func collectRecovery(ctx context.Context, ui prompt.UI, partitionable, secureBoo
 func collectAIServer(ctx context.Context, ui prompt.UI, running, u *config.User) error {
 	u.OverrideAISelection, u.OverrideModelWith = false, ""
 	fmt.Fprintln(ui.Out, "The central AI server must use HTTPS and a bearer token (e.g. Ollama behind a TLS proxy that checks it). The token is asked for later, hidden.")
-	endpoint, model, tokens := "https://192.168.8.205", "qwen3-coder:30b", "32768"
+	endpoint, model, tokens := "", "qwen3-coder:30b", "32768"
 	if running != nil && running.AIEndpoint != "" {
 		endpoint, model = running.AIEndpoint, running.AIRemoteModel
 		if running.AIRemoteContextTokens > 0 {
@@ -2023,7 +2034,7 @@ func collectAIServer(ctx context.Context, ui prompt.UI, running, u *config.User)
 		}
 	}
 	for {
-		endpoint, err := ui.Value(ctx, "AI server URL", endpoint)
+		endpoint, err := ui.Value(ctx, "AI server URL (e.g. https://ai.example.lan)", endpoint)
 		if err != nil {
 			return err
 		}
@@ -2037,6 +2048,9 @@ func collectAIServer(ctx context.Context, ui prompt.UI, running, u *config.User)
 		}
 		u.AIEndpoint, u.AIRemoteModel = strings.TrimRight(strings.TrimSpace(endpoint), "/"), strings.TrimSpace(model)
 		u.AIRemoteContextTokens, err = strconv.Atoi(strings.TrimSpace(tokens))
+		if err == nil && u.AIEndpoint == "" {
+			err = errors.New("enter the AI server URL")
+		}
 		if err == nil {
 			err = config.ValidateAIEndpoint(*u)
 		}
@@ -2083,11 +2097,13 @@ func collectApps(ctx context.Context, ui prompt.UI, running, u *config.User) err
 		return err
 	}
 	followUp := map[string]func(context.Context, prompt.UI, *config.User, *config.User) error{
-		"ai":        collectAI,
-		"tailscale": collectTailscale,
+		"ai":          collectAI,
+		"tailscale":   collectTailscale,
+		"thunderbird": collectThunderbird,
 	}
 	u.Apps = []string{}
 	u.Tailscale = nil
+	u.ThunderbirdSmartCard = false
 	u.AIAgentMode, u.OverrideAISelection, u.OverrideModelWith = "", false, ""
 	u.AIEndpoint, u.AIRemoteModel, u.AIRemoteContextTokens = "", "", 0
 	for _, app := range catalogue {
@@ -2313,11 +2329,20 @@ func collectAI(ctx context.Context, ui prompt.UI, running, u *config.User) error
 	return err
 }
 
+// collectThunderbird offers smart card support for mail keys. It stays off
+// unless the user has a card: it starts pcscd and gpg-agent for them.
+func collectThunderbird(ctx context.Context, ui prompt.UI, running, u *config.User) error {
+	was := running != nil && running.ThunderbirdSmartCard
+	var err error
+	u.ThunderbirdSmartCard, err = ui.Confirm(ctx, "Use a smart card for mail encryption keys?", was)
+	return err
+}
+
 func collectTailscale(ctx context.Context, ui prompt.UI, running, u *config.User) error {
 	t := &config.TailscaleIntent{HomeSubnets: []string{}, TrustedWifis: []string{}, SiteRouterTargets: []string{}}
 	u.Tailscale = t
 	// was holds the running answers on a rerun, else what a new install offers.
-	was := config.TailscaleIntent{HomeSubnets: []string{"192.168.8.0/24"}, RouterHome: true, SiteRouterTrust: true}
+	was := config.TailscaleIntent{HomeSubnets: []string{}, RouterHome: true, SiteRouterTrust: true}
 	if running != nil && running.Tailscale != nil {
 		was = *running.Tailscale
 	}
@@ -2340,7 +2365,7 @@ func collectTailscale(ctx context.Context, ui prompt.UI, running, u *config.User
 		}
 	}
 
-	if err := ask("Home LAN subnets kept out of the tunnel at home (comma-separated)", config.JoinList(was.HomeSubnets), func(v string) (err error) {
+	if err := ask("Home LAN subnets kept out of the tunnel at home, comma-separated (e.g. 192.168.1.0/24)", config.JoinList(was.HomeSubnets), func(v string) (err error) {
 		t.HomeSubnets, err = config.SplitList(v)
 		return err
 	}); err != nil {
@@ -2408,7 +2433,7 @@ func collectTailscale(ctx context.Context, ui prompt.UI, running, u *config.User
 	if len(was.SiteRouterTargets) > 0 {
 		targets = config.JoinList(was.SiteRouterTargets)
 	}
-	return ask("Home hosts that router must reach (host:port, comma-separated)", targets, func(v string) (err error) {
+	return ask("Home hosts that router must reach (host:port, comma-separated, e.g. 192.168.1.1:53)", targets, func(v string) (err error) {
 		t.SiteRouterTargets, err = config.SplitList(v)
 		return err
 	})
@@ -2429,8 +2454,6 @@ func collectProjectTools(ctx context.Context, ui prompt.UI, running, u *config.U
 		switch id {
 		case config.WebApplicationPlane:
 			label = "Plane"
-		case config.WebApplicationDrawio:
-			label = "Draw.io"
 		case config.WebApplicationTeams:
 			label = "Microsoft Teams"
 		}
@@ -2464,29 +2487,6 @@ func collectProjectTools(ctx context.Context, ui prompt.UI, running, u *config.U
 			}
 			if application.Endpoint == "" {
 				continue
-			}
-
-		case config.WebApplicationDrawio:
-			selfHosted, err := ui.Confirm(
-				ctx,
-				"Use a self-hosted Draw.io server?",
-				previous.Endpoint != "",
-			)
-			if err != nil {
-				return err
-			}
-
-			if selfHosted {
-				application.Endpoint, err = askEndpoint(
-					ctx,
-					ui,
-					"Draw.io endpoint (blank uses the public diagrams.net)",
-					previous.Endpoint,
-					checkEndpoint,
-				)
-				if err != nil {
-					return err
-				}
 			}
 
 		case config.WebApplicationTeams:

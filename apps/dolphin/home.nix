@@ -83,6 +83,44 @@ let
       vscode = "code.desktop";
     }
     .${settings.preferredEditor} or null;
+
+  # KService lists apps only through the XDG menu. Plasma ships one, a
+  # Hyprland session has none, so KDE apps saw no apps at all and Dolphin
+  # asked what to open every file with, mimeapps.list or not.
+  applicationsMenu = pkgs.writeText "applications.menu" ''
+    <!DOCTYPE Menu PUBLIC "-//freedesktop//DTD Menu 1.0//EN"
+     "http://www.freedesktop.org/standards/menu-spec/1.0/menu.dtd">
+    <Menu>
+      <Name>Applications</Name>
+      <DefaultAppDirs/>
+      <DefaultDirectoryDirs/>
+      <DefaultMergeDirs/>
+      <Include><All/></Include>
+    </Menu>
+  '';
+
+  imageTypes = [
+    "image/png"
+    "image/jpeg"
+    "image/gif"
+    "image/webp"
+    "image/x-webp"
+    "image/avif"
+    "image/heif"
+    "image/jxl"
+    "image/bmp"
+    "image/tiff"
+    "image/svg+xml"
+    "image/svg+xml-compressed"
+    "image/x-ico"
+    "image/x-icns"
+    "image/x-tga"
+    "image/x-portable-bitmap"
+    "image/x-portable-graymap"
+    "image/x-portable-pixmap"
+    "image/x-xbitmap"
+    "image/x-xpixmap"
+  ];
 in
 lib.mkIf config.gjallar.apps.dolphin.enable {
   _module.args.gjallarFileManager = fileManager;
@@ -92,6 +130,7 @@ lib.mkIf config.gjallar.apps.dolphin.enable {
     dolphinClient
     dolphin-plugins
     ark
+    gwenview
     kio-extras
     kio-fuse
     kdegraphics-thumbnailers
@@ -231,6 +270,20 @@ lib.mkIf config.gjallar.apps.dolphin.enable {
       ''
     );
 
+  xdg.configFile."menus/applications.menu".source = applicationsMenu;
+
+  # A cache built without the menu holds no apps, and KDE's own check only
+  # looks at the folders it saw, so it never notices the new menu. Drop the
+  # caches when the menu changes; the next KDE app builds a fresh one.
+  home.activation.gjallarKdeServiceCache = lib.hm.dag.entryAfter [ "linkGeneration" ] ''
+    stamp="''${XDG_STATE_HOME:-$HOME/.local/state}/gjallar/kde-applications-menu"
+    if [ "$(${pkgs.coreutils}/bin/readlink "$stamp")" != ${applicationsMenu} ]; then
+      run ${pkgs.coreutils}/bin/rm -f "''${XDG_CACHE_HOME:-$HOME/.cache}"/ksycoca6_*
+      run ${pkgs.coreutils}/bin/mkdir -p "$(${pkgs.coreutils}/bin/dirname "$stamp")"
+      run ${pkgs.coreutils}/bin/ln -sfn ${applicationsMenu} "$stamp"
+    fi
+  '';
+
   xdg.desktopEntries."org.kde.dolphin" = {
     name = "Dolphin";
     genericName = "File Manager";
@@ -253,6 +306,7 @@ lib.mkIf config.gjallar.apps.dolphin.enable {
     defaultApplications = {
       "inode/directory" = [ "org.kde.dolphin.desktop" ];
     }
+    // lib.genAttrs imageTypes (_: [ "org.kde.gwenview.desktop" ])
     // lib.optionalAttrs (editorDesktop != null) (
       lib.genAttrs [
         "text/plain"

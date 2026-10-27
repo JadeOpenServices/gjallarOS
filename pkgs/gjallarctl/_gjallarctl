@@ -25,6 +25,8 @@ _gjallarctl_system() {
     'rebuild:rebuild from the system checkout (root only, started by rebuild)'
     'apply:copy ~/GjallarOS-local into the system and rebuild (developer mode)'
     'status:show what the running system was built from'
+    'time:show whether NTS confirmed the clock'
+    'time-watch:keep the bar clock and the time card current (user unit)'
     'move:show what moving to the root-owned system checkout leaves behind'
     'clone:create the root-owned system checkout (root only)'
     'developer-off:turn developer mode off and build the official system (recovery entry, root only)'
@@ -121,6 +123,7 @@ _gjallarctl_vpn() {
     'notice:show the desktop notice when the VPN blocks a network'
     'export:print the state.nix line for these changes'
     'apply:apply a network trust policy'
+    'boot-block:block the internet outside the tunnel until the first network check'
   )
   if (( CURRENT == 2 )); then
     _describe -t commands 'vpn command' cmds
@@ -133,7 +136,7 @@ _gjallarctl_vpn() {
       _arguments '--exit-node[exit node]:node:(auto default)' '1:network name:' ;;
     exit-node)
       _arguments '1:exit node:(auto off default)' ;;
-    apply)
+    apply|boot-block)
       _arguments '--policy[network trust policy JSON]:file:_files -g "*.json"' \
         '--override[runtime override JSON]:file:_files -g "*.json"' ;;
   esac

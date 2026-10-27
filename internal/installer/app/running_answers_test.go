@@ -35,6 +35,7 @@ func runningFixture(t *testing.T) config.User {
 	u.USBTrustTPMHandle = "0x81000043"
 	u.Theme = "example-theme"
 	u.NextcloudEnable, u.NextcloudHost = true, "https://cloud.example.test"
+	u.ThunderbirdSmartCard = true
 	u.Apps = append(slices.DeleteFunc(slices.Clone(u.Apps), func(id string) bool { return id == "ai" || id == "tailscale" }), "ai", "tailscale")
 	slices.Sort(u.Apps)
 	u.AIEndpoint, u.AIRemoteModel, u.AIRemoteContextTokens = "https://ai.example.test", "example-model", 8192
@@ -76,7 +77,7 @@ func TestRerunInterviewOffersRunningAnswers(t *testing.T) {
 		"DotfilesDir", "Shell", "Editors", "PreferredEditor", "PrintingEnable", "NetworkPrintingEnable",
 		"USBGuardEnable", "USBTrustEnforce", "USBTrustLapseDays", "USBTrustTPMHandle", "Theme",
 		"NextcloudEnable", "NextcloudHost", "Apps", "AIEndpoint", "AIRemoteModel",
-		"AIRemoteContextTokens", "AIAgentMode", "Tailscale",
+		"AIRemoteContextTokens", "AIAgentMode", "Tailscale", "ThunderbirdSmartCard",
 	} {
 		got := reflect.ValueOf(u).FieldByName(field).Interface()
 		want := reflect.ValueOf(running).FieldByName(field).Interface()

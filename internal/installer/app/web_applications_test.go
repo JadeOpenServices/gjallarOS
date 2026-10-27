@@ -19,7 +19,6 @@ func TestCollectProjectToolsSupportsTeamsWebApplication(t *testing.T) {
 		prompt.New(
 			strings.NewReader(
 				"no\n"+
-					"no\n"+
 					"yes\n"+
 					"no\n",
 			),
@@ -76,8 +75,6 @@ func TestCollectProjectToolsProducesCanonicalWebApplicationIntent(t *testing.T) 
 				"yes\n"+
 					"plane.example.test\n"+
 					"yes\n"+
-					"no\n"+
-					"yes\n"+
 					"no\n",
 			),
 			&output,
@@ -93,9 +90,6 @@ func TestCollectProjectToolsProducesCanonicalWebApplicationIntent(t *testing.T) 
 		{
 			ID:       config.WebApplicationPlane,
 			Endpoint: "http://plane.example.test",
-		},
-		{
-			ID: config.WebApplicationDrawio,
 		},
 		{
 			ID: config.WebApplicationTeams,

@@ -15,13 +15,13 @@ func TestTailscaleRender(t *testing.T) {
 	}
 	got := Tailscale(&config.TailscaleIntent{
 		HomeSubnets:       []string{"192.168.8.0/24"},
-		TrustedWifis:      []string{"bakasifu-5Ghz", "${evil}"},
+		TrustedWifis:      []string{"synthetic-5Ghz", "${evil}"},
 		ExitNode:          "home-router",
 		WifiExitNodes:     map[string]string{"${evil}": "auto"},
 		SiteRouterTrust:   true,
 		SiteRouterTargets: []string{"192.168.8.1:53"},
 	})
-	want := `{ homeSubnets = [ "192.168.8.0/24" ]; trustedWifis = [ "bakasifu-5Ghz" "\${evil}" ]; exitNode = "home-router"; wifiExitNodes = { "\${evil}" = "auto"; }; routerHome = false; siteRouterTrust = true; siteRouterTargets = [ "192.168.8.1:53" ]; }`
+	want := `{ homeSubnets = [ "192.168.8.0/24" ]; trustedWifis = [ "synthetic-5Ghz" "\${evil}" ]; exitNode = "home-router"; wifiExitNodes = { "\${evil}" = "auto"; }; routerHome = false; siteRouterTrust = true; siteRouterTargets = [ "192.168.8.1:53" ]; }`
 	if got != want {
 		t.Fatalf("got  %s\nwant %s", got, want)
 	}

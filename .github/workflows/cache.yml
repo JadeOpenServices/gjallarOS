@@ -14,7 +14,7 @@ permissions:
 jobs:
   build:
     if: github.repository == 'JadeOpenServices/gjallarOS'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # Holds NIX_SIGNING_KEY. Its rules (v* tags only, required reviewer)
     # decide whether this job ever sees it.
     environment: release-cache

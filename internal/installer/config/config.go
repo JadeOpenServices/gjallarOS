@@ -67,6 +67,9 @@ type User struct {
 	// pinned to one file.
 	FirefoxStoreAddons []apps.FirefoxStoreAddon `json:"firefoxStoreAddons" tier:"security"`
 
+	// ThunderbirdSmartCard adds smart card support for Thunderbird keys.
+	ThunderbirdSmartCard bool `json:"thunderbirdSmartCard" tier:"security"`
+
 	NextcloudEnable           bool   `json:"nextcloudEnable" tier:"security"`
 	NextcloudHost             string `json:"nextcloudHost" tier:"security"`
 	Theme                     string `json:"theme" tier:"everyday"`
@@ -309,6 +312,10 @@ func Parse(contents []byte) (User, error) {
 		if user.Apps, err = apps.Defaults(); err != nil {
 			return User{}, err
 		}
+	}
+	// Retired apps leave older configs here instead of failing Validate.
+	if user.Apps, _, err = apps.WithoutRetired(user.Apps); err != nil {
+		return User{}, err
 	}
 	// Missing collections get their defaults, missing add-ons are off.
 	user.FirefoxAddons = apps.CompleteFirefoxAddons(user.FirefoxAddons)

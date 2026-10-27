@@ -1,0 +1,571 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index f59c6d7..1a848af 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -136,8 +136,10 @@ set_package_properties(ACL PROPERTIES DESCRIPTION "LibACL"
+ 
+ # Used by KMountPoint
+ if (CMAKE_SYSTEM_NAME MATCHES "Linux")
+-    find_package(LibMount REQUIRED)
++    find_package(LibMount 2.26 REQUIRED)
+     set(HAVE_LIB_MOUNT ${LibMount_FOUND})
++    set_package_properties(LibMount PROPERTIES TYPE REQUIRED
++                           PURPOSE "Reading and watching the mount table in KMountPoint")
+ endif()
+ 
+ ecm_set_disabled_deprecation_versions(
+diff --git a/autotests/kmountpointtest.cpp b/autotests/kmountpointtest.cpp
+index fea591c..2ca51b5 100644
+--- a/autotests/kmountpointtest.cpp
++++ b/autotests/kmountpointtest.cpp
+@@ -9,6 +9,7 @@
+ #include "kmountpoint.h"
+ #include <QDebug>
+ #include <QTest>
++#include <limits>
+ #include <qplatformdefs.h>
+ 
+ QTEST_MAIN(KMountPointTest)
+@@ -188,4 +189,55 @@ void KMountPointTest::testPossibleMountPoints()
+ #endif
+ }
+ 
++void KMountPointTest::testCachedMountPointLookup()
++{
++#ifdef Q_OS_WIN
++    QSKIP("Skipping test on Windows, KMountPoint only has pseudo mounts for drive letters");
++#endif
++
++    const KMountPoint::List mountPoints = KMountPoint::currentMountPoints();
++    if (mountPoints.isEmpty()) { // can happen in chroot jails
++        QSKIP("mtab is empty");
++    }
++
++    const KMountPoint::Ptr root = mountPoints.findByPath(QStringLiteral("/"));
++    QVERIFY(root);
++
++    // The cached path lookup agrees with findByPath(), and a second call (served
++    // from the cache) gives the same answer.
++    const KMountPoint::Ptr byPath = KMountPoint::currentMountPointForPath(QStringLiteral("/"));
++    QVERIFY(byPath);
++    QCOMPARE(byPath->mountPoint(), QStringLiteral("/"));
++    const KMountPoint::Ptr byPathAgain = KMountPoint::currentMountPointForPath(QStringLiteral("/"));
++    QVERIFY(byPathAgain);
++    QCOMPARE(byPathAgain->mountPoint(), QStringLiteral("/"));
++
++    const quint64 rootId = root->mountId();
++    if (rootId == 0) {
++        // The kernel is older than STATX_MNT_ID_UNIQUE, so there is no unique id to
++        // look up or cache; the path lookup above still works via the fallback.
++        QSKIP("No unique mount id available on this kernel");
++    }
++
++    // Zero is never a valid id.
++    QVERIFY(!KMountPoint::currentMountPointForUniqueId(0));
++
++    // Looking up the root's unique id returns the root mount, and repeated lookups
++    // (cache hits) stay consistent.
++    for (int i = 0; i < 3; ++i) {
++        const KMountPoint::Ptr byId = KMountPoint::currentMountPointForUniqueId(rootId);
++        QVERIFY(byId);
++        QCOMPARE(byId->mountPoint(), QStringLiteral("/"));
++        QCOMPARE(byId->mountId(), rootId);
++    }
++
++    // The path and id accessors resolve to the same mount for "/".
++    const KMountPoint::Ptr byPathId = KMountPoint::currentMountPointForPath(QStringLiteral("/"));
++    QVERIFY(byPathId);
++    QCOMPARE(byPathId->mountId(), rootId);
++
++    // An id that does not belong to any current mount has no mount point.
++    QVERIFY(!KMountPoint::currentMountPointForUniqueId(std::numeric_limits<quint64>::max()));
++}
++
+ #include "moc_kmountpointtest.cpp"
+diff --git a/autotests/kmountpointtest.h b/autotests/kmountpointtest.h
+index b4c5b64..6a7a0b2 100644
+--- a/autotests/kmountpointtest.h
++++ b/autotests/kmountpointtest.h
+@@ -18,6 +18,7 @@ private Q_SLOTS:
+     void testCurrentMountPoints();
+     void testCurrentMountPointOptions();
+     void testPossibleMountPoints();
++    void testCachedMountPointLookup();
+ 
+ private:
+ };
+diff --git a/src/core/kfileitem.cpp b/src/core/kfileitem.cpp
+index b9d5440..0a4c146 100644
+--- a/src/core/kfileitem.cpp
++++ b/src/core/kfileitem.cpp
+@@ -37,7 +37,6 @@
+ #include <knfsshare.h>
+ #include <ksambashare.h>
+ #endif
+-#include <KFileSystemType>
+ #include <KProtocolManager>
+ #include <KShell>
+ 
+@@ -973,11 +972,23 @@ bool KFileItemPrivate::isSlow() const
+ {
+     if (m_slow == SlowUnknown) {
+         const QString path = localPath();
+-        if (!path.isEmpty()) {
+-            const KFileSystemType::Type fsType = KFileSystemType::fileSystemType(path);
+-            m_slow = (fsType == KFileSystemType::Nfs || fsType == KFileSystemType::Smb) ? Slow : Fast;
+-        } else {
++        if (path.isEmpty()) {
++            // No local path means a remote worker URL, which is always slow.
+             m_slow = Slow;
++        } else {
++            // Ask the mount this item lives on. probablySlow() is backed by libmount's own
++            // network-filesystem detection plus autofs/subfs/kio-fuse, so it recognizes remote
++            // filesystems (nfs, cifs, sshfs, ftpfs, kio-fuse, ...) even when they are mounted
++            // locally. Prefer the unique mount id from the stat when present (a cache lookup),
++            // otherwise resolve by path.
++            KMountPoint::Ptr mountPoint;
++            if (const auto mountId = m_entry.numberValue(KIO::UDSEntry::UDS_MOUNT_ID, 0)) {
++                mountPoint = KMountPoint::currentMountPointForUniqueId(mountId);
++            }
++            if (!mountPoint) {
++                mountPoint = KMountPoint::currentMountPointForPath(path);
++            }
++            m_slow = (mountPoint && mountPoint->probablySlow()) ? Slow : Fast;
+         }
+     }
+     return m_slow == Slow;
+diff --git a/src/core/kmountpoint.cpp b/src/core/kmountpoint.cpp
+index 24aeea1..00f93e6 100644
+--- a/src/core/kmountpoint.cpp
++++ b/src/core/kmountpoint.cpp
+@@ -14,10 +14,13 @@
+ #include <config-kmountpoint.h>
+ #include <kioglobal_p.h> // Defines QT_LSTAT on windows to kio_windows_lstat
+ 
++#include <QCache>
+ #include <QDebug>
+ #include <QDir>
+ #include <QFile>
+ #include <QFileInfo>
++#include <QGlobalStatic>
++#include <QMutex>
+ #include <QTextStream>
+ 
+ #include <qplatformdefs.h>
+@@ -49,7 +52,7 @@ static const Qt::CaseSensitivity cs = Qt::CaseSensitive;
+ #if HAVE_LIB_MOUNT
+ #include <libmount/libmount.h>
+ #include <sys/sysmacros.h>
+-#if HAVE_STATX_MNT_ID
++#if HAVE_STATX_MNT_ID_UNIQUE
+ #include <fcntl.h>
+ #include <sys/stat.h>
+ #endif
+@@ -159,7 +162,7 @@ public:
+     QString m_mountType;
+     QStringList m_mountOptions;
+     dev_t m_deviceId = 0;
+-    // the mount id seems to start at 1. 0 should be safe as a undefined default
++    // The unique mount id (STATX_MNT_ID_UNIQUE) when the kernel provides it, 0 otherwise.
+     quint64 m_mountId = 0;
+     bool m_isNetFs = false;
+     bool m_isPseudoFs = false;
+@@ -445,14 +448,15 @@ KMountPoint::List KMountPoint::currentMountPoints(DetailsNeededFlags infoNeeded)
+ 
+                 uint mask_mnt_id = 0;
+ #if HAVE_STATX_MNT_ID_UNIQUE
+-                mask_mnt_id = STATX_MNT_ID_UNIQUE | STATX_MNT_ID;
+-#elif HAVE_STATX_MNT_ID
+-                mask_mnt_id = STATX_MNT_ID;
++                // Only the unique mount id, which is never reused while the system is up and
++                // is therefore safe to cache. A non-zero m_mountId always means a unique id;
++                // on a kernel too old to provide it statx clears the bit and m_mountId stays 0.
++                mask_mnt_id = STATX_MNT_ID_UNIQUE;
+ #endif
+ 
+                 if (struct statx buff; statx(AT_FDCWD, target, AT_STATX_DONT_SYNC | AT_NO_AUTOMOUNT, STATX_INO | mask_mnt_id, &buff) == 0) {
+                     mp->d->m_deviceId = makedev(buff.stx_dev_major, buff.stx_dev_minor);
+-#if HAVE_STATX_MNT_ID
++#if HAVE_STATX_MNT_ID_UNIQUE
+                     if (buff.stx_mask & mask_mnt_id) {
+                         mp->d->m_mountId = (quint64)buff.stx_mnt_id;
+                     }
+@@ -547,11 +551,8 @@ KMountPoint::Ptr KMountPoint::List::findByPath(const QString &path) const
+ #endif
+ 
+     KMountPoint::Ptr result;
+-#if HAVE_STATX_MNT_ID
+-    uint mask = STATX_MNT_ID;
+ #if HAVE_STATX_MNT_ID_UNIQUE
+-    mask |= STATX_MNT_ID_UNIQUE;
+-#endif
++    uint mask = STATX_MNT_ID_UNIQUE;
+     // If we have statx, there is no need to guess. take the mount id from statx and get the mountpoint.
+     if (struct statx buff; statx(0, QFile::encodeName(path).constData(), AT_SYMLINK_NOFOLLOW | AT_NO_AUTOMOUNT, mask, &buff) == 0 && (buff.stx_mask & mask)) {
+         auto it = std::find_if(this->cbegin(), this->cend(), [&buff](const KMountPoint::Ptr &mountPtr) {
+@@ -564,7 +565,6 @@ KMountPoint::Ptr KMountPoint::List::findByPath(const QString &path) const
+     }
+ #endif
+ 
+-
+     if (QT_STATBUF buff; QT_LSTAT(QFile::encodeName(realPath).constData(), &buff) == 0) {
+         auto it = std::find_if(this->cbegin(), this->cend(), [&buff, &realPath](const KMountPoint::Ptr &mountPtr) {
+             // For a bind mount, the deviceId() is that of the base mount point, e.g. /mnt/foo,
+@@ -597,7 +597,7 @@ KMountPoint::Ptr KMountPoint::List::findByDevice(const QString &device) const
+ 
+ KMountPoint::Ptr KMountPoint::List::findByMountId(quint64 mountId) const
+ {
+-#if HAVE_STATX_MNT_ID
++#if HAVE_STATX_MNT_ID_UNIQUE
+     Q_ASSERT(mountId);
+     for (const KMountPoint::Ptr &mountPoint : *this) {
+         if (mountPoint->d->m_mountId == mountId) {
+@@ -610,6 +610,136 @@ KMountPoint::Ptr KMountPoint::List::findByMountId(quint64 mountId) const
+     return Ptr();
+ }
+ 
++namespace
++{
++// Small process-wide cache of unique-mount-id -> mount point. A STATX_MNT_ID_UNIQUE
++// id is never reused while the system is running and always denotes the same mount, so
++// a cached entry never points at a different mount; a miss means a mount we have not seen
++// yet and the table is re-read once. QCache bounds the size and drops the least recently
++// used entries. The cache only ever holds unique ids, so on a kernel without
++// STATX_MNT_ID_UNIQUE it stays empty and every lookup falls through to a reparse.
++//
++// A mount can, however, keep its unique id while its mountPoint()/mountOptions() change
++// under it ("mount --move", "mount -o remount"). To avoid serving a stale snapshot, a
++// libmount monitor watches the kernel mount table and the entries still in the cache are
++// refreshed from a single re-read whenever anything has changed since the last lookup.
++struct MountIdCache {
++    QMutex mutex;
++    QCache<quint64, KMountPoint::Ptr> byUniqueId;
++    // A copy touches its source and destination mount; browsing spans a few mounts.
++    MountIdCache()
++        : byUniqueId(16)
++    {
++    }
++
++// The monitor only matters when the cache can hold entries, which needs a unique
++// mount id; without STATX_MNT_ID_UNIQUE the cache stays empty and there is nothing
++// to invalidate, so do not compile or arm it.
++#if HAVE_LIB_MOUNT && HAVE_STATX_MNT_ID_UNIQUE
++    struct libmnt_monitor *monitor = nullptr;
++    bool monitorSetUp = false;
++
++    ~MountIdCache()
++    {
++        if (monitor) {
++            mnt_unref_monitor(monitor);
++        }
++    }
++
++    // Called with mutex held. When the mount table has changed since the last check,
++    // refresh the entries we currently hold from a single re-read: a mount keeps its
++    // unique id across "mount --move"/"mount -o remount", so its mountPoint()/
++    // mountOptions() may have changed, and a mount that went away is dropped. Only
++    // bothers when the cache actually stores entries.
++    void refreshCacheIfMountsChanged()
++    {
++        if (byUniqueId.maxCost() <= 1) {
++            return;
++        }
++        if (!monitorSetUp) {
++            monitorSetUp = true;
++            monitor = mnt_new_monitor();
++            if (monitor && mnt_monitor_enable_kernel(monitor, 1) < 0) {
++                mnt_unref_monitor(monitor);
++                monitor = nullptr;
++            }
++        }
++        if (!monitor) {
++            return;
++        }
++        // Non-blocking poll: has anything changed since we last drained the monitor?
++        if (mnt_monitor_wait(monitor, 0) <= 0) {
++            return;
++        }
++        // Drain the queued events so the monitor is armed for the next change.
++        const char *filename = nullptr;
++        int eventType = 0;
++        while (mnt_monitor_next_change(monitor, &filename, &eventType) == 0) { }
++        // Re-read the table once and update only the ids we still hold.
++        const QList<quint64> cachedIds = byUniqueId.keys();
++        if (cachedIds.isEmpty()) {
++            return;
++        }
++        const KMountPoint::List mounts = KMountPoint::currentMountPoints();
++        for (const quint64 id : cachedIds) {
++            if (const KMountPoint::Ptr fresh = mounts.findByMountId(id)) {
++                byUniqueId.insert(id, new KMountPoint::Ptr(fresh));
++            } else {
++                byUniqueId.remove(id);
++            }
++        }
++    }
++#else
++    void refreshCacheIfMountsChanged()
++    {
++    }
++#endif
++};
++}
++Q_GLOBAL_STATIC(MountIdCache, s_mountIdCache)
++
++KMountPoint::Ptr KMountPoint::currentMountPointForUniqueId(quint64 uniqueMountId)
++{
++    if (uniqueMountId == 0) {
++        return Ptr();
++    }
++#if HAVE_STATX_MNT_ID_UNIQUE
++    MountIdCache *cache = s_mountIdCache();
++    {
++        QMutexLocker locker(&cache->mutex);
++        cache->refreshCacheIfMountsChanged();
++        if (Ptr *hit = cache->byUniqueId.object(uniqueMountId)) {
++            return *hit;
++        }
++    }
++    // Miss: re-read the mount table once (done outside the lock) and look the id up.
++    const List mounts = currentMountPoints();
++    const Ptr mp = mounts.findByMountId(uniqueMountId);
++    if (mp) {
++        // m_mountId only ever holds a unique id (see currentMountPoints()), so a match
++        // here will keep denoting this same mount and is safe to cache.
++        QMutexLocker locker(&cache->mutex);
++        cache->byUniqueId.insert(uniqueMountId, new Ptr(mp));
++    }
++    return mp;
++#else
++    return currentMountPoints().findByMountId(uniqueMountId);
++#endif
++}
++
++KMountPoint::Ptr KMountPoint::currentMountPointForPath(const QString &path)
++{
++#if HAVE_STATX_MNT_ID_UNIQUE
++    // Resolve the path's unique mount id with a single statx and serve it from the id
++    // cache, so repeated lookups under the same mount do not re-read the mount table.
++    if (struct statx buff; statx(AT_FDCWD, QFile::encodeName(path).constData(), AT_SYMLINK_NOFOLLOW | AT_NO_AUTOMOUNT, STATX_MNT_ID_UNIQUE, &buff) == 0
++        && (buff.stx_mask & STATX_MNT_ID_UNIQUE)) {
++        return currentMountPointForUniqueId(buff.stx_mnt_id);
++    }
++#endif
++    return currentMountPoints().findByPath(path);
++}
++
+ bool KMountPoint::probablySlow() const
+ {
+     /* clang-format off */
+@@ -618,7 +748,9 @@ bool KMountPoint::probablySlow() const
+         || d->m_mountType == QLatin1String("subfs")
+         // Technically KIOFUSe mounts local workers as well,
+         // such as recents:/, but better safe than sorry...
+-        || d->m_mountType == QLatin1String("fuse.kio-fuse");
++        || d->m_mountType == QLatin1String("fuse.kio-fuse")
++        // Naive check, would be better for KmountPoint to distinguish fuse blk from fuse dev itself in the future
++        || (d->m_mountType.startsWith(QLatin1String("fuse.")) && !d->m_mountedFrom.startsWith(QLatin1String("/dev/")));
+     /* clang-format on */
+ }
+ 
+diff --git a/src/core/kmountpoint.h b/src/core/kmountpoint.h
+index 0847007..b081174 100644
+--- a/src/core/kmountpoint.h
++++ b/src/core/kmountpoint.h
+@@ -25,7 +25,7 @@ class KMountPointPrivate;
+  *
+  * \brief The KMountPoint class provides information about mounted and unmounted disks.
+  *
+- * It provides a system independent interface to fstab.
++ * It provides a system independent interface to fstab or libmount.
+  */
+ class KIOCORE_EXPORT KMountPoint : public QSharedData
+ {
+@@ -108,6 +108,33 @@ public:
+      */
+     static List currentMountPoints(DetailsNeededFlags infoNeeded = BasicInfoNeeded);
+ 
++    /*!
++     * Returns the current mount point that has the given unique mount id, as
++     * reported by statx() with STATX_MNT_ID_UNIQUE, or nullptr if no current mount has this id.
++     *
++     * It is guaranteed to return for any mounted mountpoint on Linux 6.8+.
++     *
++     * \sa KIO::UDSEntry::UDS_MOUNT_ID
++     *
++     * \note This is only useful on Linux; elsewhere it re-reads the mount table
++     * on every call, like currentMountPoints().
++     * \warning uniqueMountId must not be zero.
++     *
++     * \since 6.30
++     */
++    static Ptr currentMountPointForUniqueId(quint64 uniqueMountId);
++
++    /*!
++     * Returns the current mount point that \a path resides on, using the same cache
++     * as currentMountPointForUniqueId(). Falls back to currentMountPoints().findByPath()
++     * when unique mount ids are not available.
++     *
++     * Returns the mount point, or nullptr if none matches.
++     *
++     * \since 6.30
++     */
++    static Ptr currentMountPointForPath(const QString &path);
++
+     /*!
+      * Where this filesystem gets mounted from.
+      * This can refer to a device, a remote server or something else.
+diff --git a/src/gui/filepreviewjob.cpp b/src/gui/filepreviewjob.cpp
+index b878186..b6f9f7c 100644
+--- a/src/gui/filepreviewjob.cpp
++++ b/src/gui/filepreviewjob.cpp
+@@ -29,7 +29,6 @@
+ #include <KConfigGroup>
+ #include <KFileUtils>
+ #include <KLocalizedString>
+-#include <KMountPoint>
+ #include <KProtocolInfo>
+ #include <KSharedConfig>
+ #include <Solid/Device>
+@@ -218,22 +217,6 @@ bool FilePreviewJob::preparePluginForMimetype(const QString &mimeType)
+     }
+ }
+ 
+-static bool isSlow(const KFileItem &fileItem, const KIO::UDSEntry &entry)
+-{
+-    const auto mountId = entry.numberValue(KIO::UDSEntry::UDS_MOUNT_ID, 0);
+-    // No Mount ID, fall back to blocking KFileItem::isSlow.
+-    if (!mountId) {
+-        return fileItem.isSlow();
+-    }
+-
+-    const auto mountPoint = KMountPoint::currentMountPoints().findByMountId(mountId);
+-    if (!mountPoint) {
+-        return fileItem.isSlow();
+-    }
+-
+-    return mountPoint->probablySlow();
+-}
+-
+ void FilePreviewJob::slotStatFile(KJob *job)
+ {
+     if (job->error()) {
+@@ -290,7 +273,7 @@ void FilePreviewJob::slotStatFile(KJob *job)
+ 
+     bool skipCurrentItem = false;
+     const KConfigGroup cg(KSharedConfig::openConfig(), QStringLiteral("PreviewSettings"));
+-    if ((itemUrl.isLocalFile() || KProtocolInfo::protocolClass(itemUrl.scheme()) == QLatin1String(":local")) && !isSlow(m_fileItem, statResult)) {
++    if ((itemUrl.isLocalFile() || KProtocolInfo::protocolClass(itemUrl.scheme()) == QLatin1String(":local")) && !m_fileItem.isSlow()) {
+         const KIO::filesize_t maximumLocalSize = cg.readEntry("MaximumSize", std::numeric_limits<KIO::filesize_t>::max());
+         skipCurrentItem = !m_options.ignoreMaximumSize && size > maximumLocalSize && !m_plugin.value(QStringLiteral("IgnoreMaximumSize"), false);
+     } else {
+diff --git a/src/kioworkers/file/file_unix.cpp b/src/kioworkers/file/file_unix.cpp
+index 554210b..6a44dcd 100644
+--- a/src/kioworkers/file/file_unix.cpp
++++ b/src/kioworkers/file/file_unix.cpp
+@@ -31,6 +31,7 @@
+ #include <KConfigGroup>
+ #include <KFileSystemType>
+ #include <KLocalizedString>
++#include <KNetworkMounts>
+ #include <QDebug>
+ #include <kmountpoint.h>
+ 
+@@ -86,7 +87,7 @@ bool FileProtocol::isExtendedACL(acl_t acl)
+ 
+ static bool isOnCifsMount(const QString &filePath)
+ {
+-    const auto mount = KMountPoint::currentMountPoints().findByPath(filePath);
++    const auto mount = KMountPoint::currentMountPointForPath(filePath);
+     if (!mount) {
+         return false;
+     }
+@@ -100,6 +101,26 @@ using StatStruct = struct statx;
+ using StatStruct = QT_STATBUF;
+ #endif
+ 
++static QMimeDatabase::MatchMode mimeMatchModeFor(const StatStruct &buf, const QString &fallbackPath)
++{
++    if (KNetworkMounts::self()->isSlowPath(fallbackPath)) {
++        return QMimeDatabase::MatchExtension;
++    }
++
++#if HAVE_STATX_MNT_ID_UNIQUE
++    if (buf.stx_mask & STATX_MNT_ID_UNIQUE) {
++        const KMountPoint::Ptr mount = KMountPoint::currentMountPointForUniqueId(stat_mnt_id(buf));
++        return mount && mount->probablySlow() ? QMimeDatabase::MatchExtension : QMimeDatabase::MatchDefault;
++    }
++#else
++    Q_UNUSED(buf);
++#endif
++
++    const KFileSystemType::Type fsType = KFileSystemType::fileSystemType(fallbackPath);
++    const bool isSlowFs = fsType == KFileSystemType::Nfs || fsType == KFileSystemType::Smb;
++    return isSlowFs ? QMimeDatabase::MatchExtension : QMimeDatabase::MatchDefault;
++}
++
+ static QByteArray readlinkToBuffer(const StatStruct &buf, const QByteArray &path)
+ {
+     // Use readlink on Unix because symLinkTarget turns relative targets into absolute (#352927)
+@@ -309,7 +330,7 @@ static bool createUDSEntry(const QString &filename, const QByteArray &path, UDSE
+     if (details & KIO::StatMimeType) {
+         if (type == 0 || type != S_IFDIR) {
+             QMimeDatabase db;
+-            entry.fastInsert(KIO::UDSEntry::UDS_MIME_TYPE, db.mimeTypeForFile(fullPath).name());
++            entry.fastInsert(KIO::UDSEntry::UDS_MIME_TYPE, db.mimeTypeForFile(fullPath, mimeMatchModeFor(buff, fullPath)).name());
+         } else {
+             // fast path for directories
+             entry.fastInsert(KIO::UDSEntry::UDS_MIME_TYPE, QStringLiteral("inode/directory"));
+@@ -877,7 +898,7 @@ WorkerResult FileProtocol::listDir(const QUrl &url)
+                     // Bug 392913: NTFS root volume is always "hidden", ignore this
+                     if (ep->d_type == DT_DIR || ep->d_type == DT_UNKNOWN || ep->d_type == DT_LNK) {
+                         const QString fullFilePath = QDir(filename).canonicalPath();
+-                        auto mountPoint = KMountPoint::currentMountPoints().findByPath(fullFilePath);
++                        auto mountPoint = KMountPoint::currentMountPointForPath(fullFilePath);
+                         if (mountPoint && mountPoint->mountPoint() == fullFilePath) {
+                             ntfsHidden = false;
+                         }
+diff --git a/src/kioworkers/file/stat_unix.h b/src/kioworkers/file/stat_unix.h
+index 94e8bbe..78c3fa5 100644
+--- a/src/kioworkers/file/stat_unix.h
++++ b/src/kioworkers/file/stat_unix.h
+@@ -53,7 +53,7 @@ inline int LSTAT(const char *path, struct statx *buff, KIO::StatDetails details)
+     }
+ #endif
+ #if HAVE_STATX_MNT_ID_UNIQUE
+-    if (details & KIO::StatMountId) {
++    if (details & (KIO::StatMountId | KIO::StatMimeType)) {
+         // mount unique id
+         mask |= STATX_MNT_ID_UNIQUE;
+     }
+@@ -87,7 +87,7 @@ inline int STAT(const char *path, struct statx *buff, const KIO::StatDetails &de
+     }
+ #endif
+ #if HAVE_STATX_MNT_ID_UNIQUE
+-    if (details & KIO::StatMountId) {
++    if (details & (KIO::StatMountId | KIO::StatMimeType)) {
+         // mount unique id
+         mask |= STATX_MNT_ID_UNIQUE;
+     }
+diff --git a/src/kioworkers/trash/trashimpl.cpp b/src/kioworkers/trash/trashimpl.cpp
+index 36835bc..bfc9a28 100644
+--- a/src/kioworkers/trash/trashimpl.cpp
++++ b/src/kioworkers/trash/trashimpl.cpp
+@@ -53,7 +53,7 @@ TrashImpl::TrashImpl()
+     // so better have a separate one, for faster parsing by e.g. kmimetype.cpp
+     m_config(QStringLiteral("trashrc"), KConfig::SimpleConfig)
+ {
+-    KMountPoint::Ptr home_mp = KMountPoint::currentMountPoints().findByPath(QDir::homePath());
++    KMountPoint::Ptr home_mp = KMountPoint::currentMountPointForPath(QDir::homePath());
+     if (home_mp) {
+         m_homeDevice = home_mp->deviceId();
+     } else {
+@@ -931,7 +931,7 @@ void TrashImpl::insertTrashDir(quint64 id, const QString &trashDir, const QStrin
+ 
+ std::optional<quint64> TrashImpl::findTrashDirectory(const QString &origPath)
+ {
+-    const KMountPoint::Ptr mp = KMountPoint::currentMountPoints().findByPath(origPath);
++    const KMountPoint::Ptr mp = KMountPoint::currentMountPointForPath(origPath);
+     if (!mp) {
+         qCWarning(KIO_TRASH) << "KMountPoint found no mountpoint for" << origPath;
+         return {};

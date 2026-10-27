@@ -422,8 +422,6 @@ func TestForceRedeployPreservesExistingInstallState(t *testing.T) {
 		`forceRedeploy := opt.forceRedeploy || s.user.ForceRedeploy`,
 		`opt.forceRedeploy = forceRedeploy`,
 		`if opt.forceRedeploy {`,
-		`if s.existing && !opt.forceRedeploy {`,
-		`Force redeployment requested; running prerequisite bootstrap despite existing-install detection.`,
 		`--force-redeploy cannot be combined with --no-rebuild`,
 	} {
 		if !strings.Contains(body, want) {
@@ -443,6 +441,21 @@ func TestForceRedeployPreservesExistingInstallState(t *testing.T) {
 
 	if strings.Contains(prepareHost, "s.existing = false") {
 		t.Fatal("force redeployment must not erase existing-install state")
+	}
+
+	// An installed system, clean redeploy or not, never reaches the release
+	// staging or the /etc/nixos bootstrap switch (Plane 199).
+	guard := strings.Index(prepareHost, "if s.existing {\n\t\tfmt.Fprintln(out, \"Existing GjallarOS installation detected; skipping /etc/nixos release and bootstrap rebuilds.\")\n\t\treturn offerFirmwareUpdates(")
+	if guard < 0 {
+		t.Fatal("an existing installation must leave prepareHost before release and bootstrap rebuilds")
+	}
+	for _, step := range []string{"release.Inspect(", "bootstrap.Apply("} {
+		if at := strings.Index(prepareHost, step); at < guard {
+			t.Fatalf("%s runs before the existing-install guard", step)
+		}
+	}
+	if strings.Contains(prepareHost, "s.existing && ") {
+		t.Fatal("a redeploy path still runs host preparation on an existing installation")
 	}
 
 	if strings.Contains(body, "forceBootstrap") ||

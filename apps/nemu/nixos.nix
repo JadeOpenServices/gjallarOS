@@ -56,6 +56,26 @@ in
       group = "root";
     };
 
+    # Older ~/.nemu.cfg copies hold viewer and QEMU paths from the store that a
+    # garbage collection removes; point them at the system profile.
+    home-manager.sharedModules = [
+      (
+        { lib, ... }:
+        {
+          home.activation.nemuStablePaths = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+            cfg="$HOME/.nemu.cfg"
+            if [ -f "$cfg" ] && [ ! -L "$cfg" ] && grep -q -E '^(vnc_bin|spice_bin|qemu_bin_path) = /nix/store/' "$cfg"; then
+              run ${pkgs.gnused}/bin/sed -i -E \
+                -e 's|^vnc_bin = /nix/store/.*|vnc_bin = /run/current-system/sw/bin/vncviewer|' \
+                -e 's|^spice_bin = /nix/store/.*|spice_bin = /run/current-system/sw/bin/remote-viewer|' \
+                -e 's|^qemu_bin_path = /nix/store/.*|qemu_bin_path = /run/current-system/sw/bin|' \
+                "$cfg"
+            fi
+          '';
+        }
+      )
+    ];
+
     programs.nemu = {
       package = pkgs._nemu;
       enable = true;

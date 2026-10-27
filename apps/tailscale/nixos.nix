@@ -8,14 +8,8 @@
 
 let
   # null: generated state from before the installer asked about Tailscale.
-  # Keep 192.168.8.0/24 local everywhere, as before.
-  intent =
-    if (settings.tailscale or null) == null then
-      {
-        homeSubnets = [ "192.168.8.0/24" ];
-      }
-    else
-      settings.tailscale;
+  # No subnet counts as home then.
+  intent = if (settings.tailscale or null) == null then { } else settings.tailscale;
 
   policy = {
     homeSubnets = intent.homeSubnets or [ ];
@@ -64,6 +58,43 @@ lib.mkIf config.gjallar.apps.tailscale.enable {
       ExecStart = "${gjallarctl}/bin/gjallarctl vpn apply --policy ${policyFile} --override /var/lib/gjallar/vpn-trust-override.json";
     };
   };
+
+  # From boot until the first verdict nothing goes out but the tunnel, when
+  # the policy can ask for an exit node: the network is not checked yet.
+  # Like Mullvad's early boot blocking, before network-pre.target. The first
+  # verdict replaces the table or removes it; until one runs, it stays.
+  systemd.services.gjallar-vpn-boot-block = {
+    description = "Block the internet outside the VPN until the first network check";
+    wantedBy = [ "sysinit.target" ];
+    wants = [ "network-pre.target" ];
+    after = [
+      "local-fs.target"
+      "systemd-modules-load.service"
+    ];
+    before = [
+      "network-pre.target"
+      "gjallar-vpn-trust.service"
+      "sysinit.target"
+    ];
+    unitConfig.DefaultDependencies = false;
+    # A running system has its verdict; the command keeps it anyway.
+    restartIfChanged = false;
+    path = [ pkgs.nftables ];
+    serviceConfig = {
+      Type = "oneshot";
+      ExecStart = "${gjallarctl}/bin/gjallarctl vpn boot-block --policy ${policyFile} --override /var/lib/gjallar/vpn-trust-override.json";
+      TimeoutStartSec = "30s";
+    };
+  };
+
+  # The nftables service with flushRuleset would drop the block table on
+  # every start and reload.
+  assertions = [
+    {
+      assertion = !(config.networking.nftables.enable && config.networking.nftables.flushRuleset);
+      message = "networking.nftables.flushRuleset removes the VPN block table (gjallar_vpn_block); keep it off.";
+    }
+  ];
 
   # gjallarctl vpn pause: the settings service writes the pause here, and
   # may write nothing else in /run.
@@ -116,6 +147,17 @@ lib.mkIf config.gjallar.apps.tailscale.enable {
     timerConfig = {
       OnBootSec = "1min";
       OnUnitActiveSec = "5min";
+    };
+  };
+
+  # A new verdict can start or end the home router time fallback
+  # (system/services/time.nix). vpn apply rewrites the file only on change.
+  systemd.paths.gjallar-time-check = {
+    description = "Watch the network verdict for the time fallback";
+    wantedBy = [ "multi-user.target" ];
+    pathConfig = {
+      PathChanged = "/run/gjallar/vpn-trust.json";
+      Unit = "gjallar-time-check.service";
     };
   };
 }

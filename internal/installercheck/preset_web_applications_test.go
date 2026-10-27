@@ -104,8 +104,8 @@ func TestPresetSchemaAcceptsCanonicalAndLegacyWebApplications(t *testing.T) {
 
 func TestPresetTailscaleSchema(t *testing.T) {
 	for raw, want := range map[string]bool{
-		`{"homeSubnets":["192.168.8.0/24"],"trustedWifis":["bakasifu-5Ghz"],"exitNode":"r","siteRouterTrust":true,"siteRouterTargets":["192.168.8.1:53"]}`: true,
-		`{"trustedWifis":["mum"],"exitNode":"r","wifiExitNodes":{"mum":"auto"}}`:                                                                           true,
+		`{"homeSubnets":["192.168.8.0/24"],"trustedWifis":["synthetic-5Ghz"],"exitNode":"r","siteRouterTrust":true,"siteRouterTargets":["192.168.8.1:53"]}`: true,
+		`{"trustedWifis":["mum"],"exitNode":"r","wifiExitNodes":{"mum":"auto"}}`:                                                                            true,
 		`{"wifiExitNodes":["mum"]}`: false,
 		`{}`:                        true,
 		`{"enable":true}`:           false, // selected by apps

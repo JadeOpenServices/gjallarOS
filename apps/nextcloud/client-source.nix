@@ -29,6 +29,12 @@ in
     # A mount left from an earlier start is a setup error, not a started
     # VFS, and the client does not spawn a second openvfs onto it.
     ./patches/nextcloud-openvfs-stale-mount.patch
+    # A folder answers for the files below it, so the file manager shows
+    # the cloud until every file is local.
+    ./patches/nextcloud-openvfs-folder-availability.patch
+    # A folder's keep or free-up choice covers the folders below it, also
+    # those that had their own choice.
+    ./patches/nextcloud-openvfs-folder-pin-below.patch
     # New accounts start as virtual-files folders on Linux too.
     ./patches/nextcloud-vfs-default.patch
     # Windows, menus and popups follow the Qt palette (Noctalia via qt6ct,

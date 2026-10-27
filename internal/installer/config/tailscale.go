@@ -10,8 +10,8 @@ import (
 )
 
 // TailscaleIntent configures Tailscale, selected as the tailscale app, and
-// when its exit node acts as a VPN. A nil intent keeps 192.168.8.0/24
-// always local, as before the installer asked.
+// when its exit node acts as a VPN. A nil intent (state from before
+// the installer asked) treats no subnet as home.
 type TailscaleIntent struct {
 	// HomeSubnets are the LANs behind the home router, kept local at home.
 	HomeSubnets []string `json:"homeSubnets"`

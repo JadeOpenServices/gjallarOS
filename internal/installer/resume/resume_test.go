@@ -199,6 +199,57 @@ func TestFinishToleratesHandedOverRun(t *testing.T) {
 	}
 }
 
+// The store root lives until the last continuation finishes.
+func TestFinishReleasesStoreRoot(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		succeeded bool
+		handover  bool
+		keep      bool
+	}{
+		{"succeeded", true, false, false},
+		{"failed", false, false, false},
+		{"handed over", true, true, true},
+		{"failed after handover", false, true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := armedDir(t, "pending.json")
+			if _, err := Claim(dir); err != nil {
+				t.Fatal(err)
+			}
+			root := filepath.Join(dir, "gcroot")
+			if err := os.Symlink("/nix/store/does-not-matter", root); err != nil {
+				t.Fatal(err)
+			}
+			if tc.handover {
+				if err := os.WriteFile(filepath.Join(dir, "pending.json"), nil, 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := Finish(dir, tc.succeeded, false); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := os.Lstat(root); (err == nil) != tc.keep {
+				t.Fatalf("store root kept = %v, want %v", err == nil, tc.keep)
+			}
+		})
+	}
+}
+
+func TestStoreRoot(t *testing.T) {
+	for in, want := range map[string]string{
+		"/nix/store/abc-gjallar-installer/bin/gjallar-installer": "/nix/store/abc-gjallar-installer",
+		"/nix/store/abc-gjallar-installer":                       "/nix/store/abc-gjallar-installer",
+		"/nix/store/":                                            "",
+		"/var/lib/gjallarOS/installer-resume/gjallar-installer":  "",
+		"/nix/storex/abc/bin/x":                                  "",
+	} {
+		if got := storeRoot(in); got != want {
+			t.Errorf("storeRoot(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 func TestModuleMatchesPermanentUnit(t *testing.T) {
 	module := Module()
 
