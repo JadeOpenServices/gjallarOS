@@ -152,23 +152,38 @@ in
         deviceRulesWithPort = false;
       };
 
-      systemd.services.usbguard.preStart = lib.mkBefore ''
-        rm -f -- /var/lib/usbguard/IPCAccessControl.d/${lib.escapeShellArg settings.username}
-      '';
+      systemd.services.usbguard.preStart = lib.mkMerge [
+        (lib.mkBefore ''
+          rm -f -- /var/lib/usbguard/IPCAccessControl.d/${lib.escapeShellArg settings.username}
+        '')
+        # The fallback in /etc follows the blocking flag. A machine armed in
+        # the signed state whose flag was turned off before the disarm would
+        # boot with allow until the broker reconciles (loophole 23, Plane
+        # 194), so USBGuard starts from a copy in /run whose fallback is
+        # block while the stored state says armed or cannot be read.
+        (lib.mkAfter ''
+          ${usbtrustd}/bin/gjallar-usbguard-boot /var/lib/gjallar-usbtrust \
+            /etc/usbguard/usbguard-daemon.conf /run/gjallar-usbguard/usbguard-daemon.conf
+        '')
+      ];
 
       # nixpkgs passes a store copy of the settings on the command line, so
       # switching between audit and enforce changed the unit and restarted
       # USBGuard. On start it applies PresentDevicePolicy with the new
       # blocking fallback and pulled a mounted card before the broker could
-      # keep it (REGRESSION 734). Reading the settings from /etc keeps the
-      # unit the same across that switch; the broker sets the fallback at
-      # runtime. Any other settings change still restarts USBGuard.
+      # keep it (REGRESSION 734). Reading the settings from /etc (through the
+      # copy in /run above) keeps the unit the same across that switch; the
+      # broker sets the fallback at runtime. Any other settings change still
+      # restarts USBGuard.
       environment.etc."usbguard/usbguard-daemon.conf".text = usbguardConf usbguard.implicitPolicyTarget;
       systemd.services.usbguard.restartTriggers = [
         (pkgs.writeText "usbguard-daemon-conf" (usbguardConf "set-by-broker"))
       ];
+
+      systemd.services.usbguard.serviceConfig.RuntimeDirectory = "gjallar-usbguard";
+      systemd.services.usbguard.serviceConfig.RuntimeDirectoryMode = "0700";
       systemd.services.usbguard.serviceConfig.ExecStart =
-        lib.mkForce "${usbguard.package}/bin/usbguard-daemon -P -k -c /etc/usbguard/usbguard-daemon.conf";
+        lib.mkForce "${usbguard.package}/bin/usbguard-daemon -P -k -c /run/gjallar-usbguard/usbguard-daemon.conf";
 
       systemd.services.usbguard.serviceConfig.ReadWritePaths = lib.mkForce [
         "-/dev/shm"

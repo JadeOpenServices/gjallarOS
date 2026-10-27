@@ -1,0 +1,19 @@
+--- a/src/libsync/vfs/openvfs/vfs_openvfs.cpp
++++ b/src/libsync/vfs/openvfs/vfs_openvfs.cpp
+@@ -227,6 +227,16 @@ void OpenVFS::startImpl(const VfsSetupParams &params)
+         return;
+     }
+ 
++#ifdef Q_OS_LINUX
++    // A mount left by an earlier openvfs would pass the start gate below,
++    // our own openvfs would fail to mount and its exit would abort the client.
++    if (isOpenVfsMountPoint(params.filesystemPath)) {
++        qCWarning(lcOpenVFS) << "Already mounted by an earlier start" << params.filesystemPath;
++        Q_EMIT error(tr("Files on demand for %1 are still mounted from an earlier start. Restart Nextcloud in a moment.").arg(params.filesystemPath));
++        return;
++    }
++#endif
++
+     qCDebug(lcOpenVFS) << "Mounting" << openVFSExePath().toString() << params.filesystemPath;
+     _openVfsProcess = new QProcess(this);
+     // merging the channels and piping the output to our log lead to deadlocks

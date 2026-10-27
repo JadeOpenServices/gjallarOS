@@ -52,3 +52,59 @@ func TestValidateReleaseChannel(t *testing.T) {
 		t.Fatalf("default channel = %q", user.Channel())
 	}
 }
+
+func TestValidateSettingsSigningKey(t *testing.T) {
+	user, err := Defaults()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// SYNTHETIC key: 32 bytes of 'k' in the OpenSSH wire format.
+	const key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGtra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tr"
+	for _, value := range []string{"", key, key + " SYNTHETIC comment"} {
+		user.SettingsSigningKey = value
+		if err := Validate(user); err != nil {
+			t.Errorf("settingsSigningKey %q rejected: %v", value, err)
+		}
+	}
+	for _, value := range []string{"ssh-rsa AAAA", "SYNTHETIC not a key", `from="x" ` + key} {
+		user.SettingsSigningKey = value
+		if err := Validate(user); err == nil || !strings.Contains(err.Error(), "settingsSigningKey") {
+			t.Errorf("settingsSigningKey %q: %v", value, err)
+		}
+	}
+}
+
+func TestValidateTimezoneAndLocale(t *testing.T) {
+	user, err := Defaults()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, zone := range []string{"Europe/Berlin", "Etc/UTC", "UTC", "Etc/GMT+5", "Etc/GMT-14", "America/Argentina/Buenos_Aires", "America/Port-au-Prince", "EST5EDT"} {
+		u := user
+		u.Timezone = zone
+		if err := Validate(u); err != nil {
+			t.Errorf("timezone %q rejected: %v", zone, err)
+		}
+	}
+	for _, zone := range []string{`"Etc/UTC"`, "Etc/../../etc/shadow", "/etc/shadow", "Europe/", "Europe Berlin", "Europe//Berlin", "../UTC", strings.Repeat("A", 65)} {
+		u := user
+		u.Timezone = zone
+		if err := Validate(u); err == nil {
+			t.Errorf("timezone %q accepted", zone)
+		}
+	}
+	for _, locale := range []string{"en_US.UTF-8", "de_DE.UTF-8", "C.UTF-8", "C", "POSIX", "eo", "ast_ES.UTF-8", "sr_RS@latin", "ca_ES.UTF-8@valencia"} {
+		u := user
+		u.Locale = locale
+		if err := Validate(u); err != nil {
+			t.Errorf("locale %q rejected: %v", locale, err)
+		}
+	}
+	for _, locale := range []string{`"en_US.UTF-8"`, "en_US.UTF-8/UTF-8", "en US", "../en_US", "EN_us"} {
+		u := user
+		u.Locale = locale
+		if err := Validate(u); err == nil {
+			t.Errorf("locale %q accepted", locale)
+		}
+	}
+}

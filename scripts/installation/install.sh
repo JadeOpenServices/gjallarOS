@@ -32,8 +32,10 @@ if [[ ! -f "$script_file" || ! -f "$(dirname "$script_file")/../../flake.nix" ]]
     repo_url="${GJALLAR_REPO_URL:-https://github.com/JadeOpenServices/gjallarOS.git}"
     checkout="${GJALLAR_DIR:-$HOME/Documents/gjallarOS}"
     git_cmd=(git)
+    # No checkout yet to take nixpkgs from: use the revision flake.lock pins,
+    # checked against its hash (tests/nix/bootstrap-pins.nix keeps them equal).
     command -v git >/dev/null 2>&1 ||
-        git_cmd=(nix shell nixpkgs#git --command git)
+        git_cmd=(nix shell 'github:nixos/nixpkgs/8ce73368d1efd4d657e9064d29b144a52046b4e8?narHash=sha256-F7meJtbqGttmUoMmYjRRgkVs42sn7bh7vvRvLPlUN98%3D#git' --command git)
     if [[ -e "$checkout/.git" ]]; then
         printf 'Using the existing checkout in %s\n' "$checkout"
         "${git_cmd[@]}" -C "$checkout" submodule update --init --recursive

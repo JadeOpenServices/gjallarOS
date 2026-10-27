@@ -98,6 +98,7 @@ func run(
 			fmt.Fprintf(stderr, "FAIL: configure TPM signing key: %v\n", err)
 			return 1
 		}
+		signer.PinFile = filepath.Join(cfg.stateDir, usbtrust.KeyPinFile)
 		control.Signer = signer
 		control.Provision = func(ctx context.Context) error { return usbtrust.ProvisionTPM(ctx, cfg.stateDir, cfg.tpmHandle) }
 
@@ -112,6 +113,14 @@ func run(
 			}
 		} else {
 			err = errors.Join(presentErr, usbtrust.ValidateSigner(probeCtx, signer))
+			if err == nil {
+				// Installs from before the key pin: pin the key that signed
+				// the state on disk.
+				var pinned bool
+				if pinned, err = usbtrust.PinExistingKey(probeCtx, cfg.stateDir, signer); pinned {
+					fmt.Fprintf(stderr, "INFO: USB trust signing key pinned\n")
+				}
+			}
 		}
 		cancel()
 		if err != nil {
@@ -403,6 +412,7 @@ func buildReader(
 		if err != nil {
 			return readmodel.Reader{}, err
 		}
+		tpmSigner.PinFile = filepath.Join(cfg.stateDir, usbtrust.KeyPinFile)
 
 		signer = tpmSigner
 	}

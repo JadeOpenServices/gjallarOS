@@ -40,6 +40,7 @@ let
       SUBSYSTEM=="input", KERNEL=="event*", DEVPATH=="/devices/virtual/input/*", ENV{ID_INPUT_SWITCH}=="1", ENV{ID_INPUT_KEY}!="1", ATTRS{name}=="${tabletSwitchName}", TAG+="uaccess"
     '';
   };
+  diagnosticsEnabled = settings.debugFunctions or false;
   gjallarctl = pkgs.callPackage ../../../pkgs/gjallarctl { };
   moniquePackage = pkgs.callPackage ../../../pkgs/monique/nix/package.nix { };
   hyprlandSession = pkgs.writeShellScriptBin "gjallar-hyprland-session" ''
@@ -89,7 +90,34 @@ let
         printf '%s\n' "''${AQ_DRM_DEVICES-}" >"$XDG_RUNTIME_DIR/gjallar/render-gpu"
 
         export HYPRLAND_CONFIG="$hypr_config_dir/hyprland.conf"
-        exec ${pkgs.hyprland}/bin/start-hyprland >>"$state_dir/startup.log" 2>&1
+        # Nothing in startup.log has a time, so mark where each session starts
+        # and ends; a session that died shows up as an end with a failed
+        # status (or, after a hard power-off, no end at all).
+        printf '=== session start %s boot %s\n' "$(date --iso-8601=seconds)" \
+          "$(cat /proc/sys/kernel/random/boot_id)" >>"$state_dir/startup.log"
+        ${pkgs.hyprland}/bin/start-hyprland >>"$state_dir/startup.log" 2>&1
+        status=$?
+        printf '=== session end %s status %s\n' "$(date --iso-8601=seconds)" "$status" \
+          >>"$state_dir/startup.log"
+    ${lib.optionalString diagnosticsEnabled ''
+      # Hyprland's own log lives in the runtime dir and is gone once the user
+      # logs out, so keep its end after a failed session. Lines naming windows
+      # stay out: titles can carry document names and web pages.
+      if [ "$status" -ne 0 ]; then
+        hypr_log="$(ls -t "$XDG_RUNTIME_DIR"/hypr/*/hyprland.log 2>/dev/null | head -n 1)"
+        if [ -n "$hypr_log" ]; then
+          diag_dir="''${XDG_STATE_HOME:-$HOME/.local/state}/gjallar-diagnostics"
+          mkdir -p "$diag_dir"
+          (
+            umask 077
+            tail -n 300 "$hypr_log" |
+              grep -viE 'title|class|token|password|cookie|bearer|auth' \
+                >"$diag_dir/failed-session-$(date +%Y%m%dT%H%M%S).log"
+          )
+        fi
+      fi
+    ''}
+        exit "$status"
   '';
   hyprlandSessionEntry =
     pkgs.runCommand "gjallar-hyprland-session-entry"

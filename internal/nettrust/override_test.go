@@ -34,7 +34,29 @@ func TestAutoExitNodePrefersTheHomeRouter(t *testing.T) {
 
 	tn.Peers = tn.Peers[1:]
 	v = decide(t, p, wifi("cafe", "wpa-psk", "172.16.5.0/24"), tn, fakeProber{})
-	if !v.ManageExitNode || v.ExitNode != "" || v.ExitNodeError == "" {
+	if !v.ManageExitNode || v.ExitNode != "b-offline-home" || v.Blocked != BlockExitNodeOffline {
+		t.Fatalf("no online exit node: want the offline home router set, got %+v", v)
+	}
+}
+
+func TestAutoExitNodeKeepsTheCurrentNodeWhenNoneIsOnline(t *testing.T) {
+	p := policy
+	p.ExitNode = ExitNodeAuto
+	current := exitOption("z-cloud", "10.9.0.0/24", false)
+	current.ExitNode = true
+	tn := Tailnet{Running: true, Peers: []Peer{exitOption("a-home", "192.168.8.0/24", false), current}}
+	v := decide(t, p, wifi("cafe", "wpa-psk", "172.16.5.0/24"), tn, fakeProber{})
+	if v.ExitNode != "z-cloud" || v.Blocked != BlockExitNodeOffline || len(v.Warnings) != 1 {
+		t.Fatalf("verdict = %+v", v)
+	}
+}
+
+func TestAutoWithoutAnyExitNodeIsBlocked(t *testing.T) {
+	p := policy
+	p.ExitNode = ExitNodeAuto
+	tn := Tailnet{Running: true, Peers: []Peer{router("home-router", "192.168.8.0/24")}}
+	v := decide(t, p, wifi("cafe", "", "172.16.5.0/24"), tn, fakeProber{})
+	if v.ExitNode != "" || v.ExitNodeError == "" || v.Blocked != BlockNoExitNode {
 		t.Fatalf("verdict = %+v", v)
 	}
 }
@@ -43,7 +65,7 @@ func TestExitNodeOffStaysOffOnUntrustedNetworks(t *testing.T) {
 	p := policy
 	p.ExitNode = ExitNodeOff
 	v := decide(t, p, wifi("cafe", "wpa-psk", "172.16.5.0/24"), Tailnet{Running: true}, fakeProber{})
-	if v.Trust != TrustUntrusted || !v.ManageExitNode || v.ExitNode != "" {
+	if v.Trust != TrustUntrusted || !v.ManageExitNode || v.ExitNode != "" || v.Blocked != "" {
 		t.Fatalf("verdict = %+v", v)
 	}
 }
@@ -51,19 +73,19 @@ func TestExitNodeOffStaysOffOnUntrustedNetworks(t *testing.T) {
 func TestOverrideTrustsAndUntrustsWifis(t *testing.T) {
 	base := Policy{TrustedWifis: []string{"home", "sister"}, ExitNode: "home-router"}
 	var o Override
-	o.Trust(base, "Shi 2,4")
+	o.Trust(base, "Synthetic 2,4")
 	o.Untrust(base, "sister")
 	o.Trust(base, "home") // already trusted by the system: no entry
 	got := o.Apply(base)
-	if !slices.Equal(got.TrustedWifis, []string{"home", "Shi 2,4"}) {
+	if !slices.Equal(got.TrustedWifis, []string{"home", "Synthetic 2,4"}) {
 		t.Fatalf("trusted = %q", got.TrustedWifis)
 	}
-	if !slices.Equal(o.TrustWifis, []string{"Shi 2,4"}) || !slices.Equal(o.UntrustWifis, []string{"sister"}) {
+	if !slices.Equal(o.TrustWifis, []string{"Synthetic 2,4"}) || !slices.Equal(o.UntrustWifis, []string{"sister"}) {
 		t.Fatalf("override = %+v", o)
 	}
 
 	o.Trust(base, "sister")
-	o.Untrust(base, "Shi 2,4")
+	o.Untrust(base, "Synthetic 2,4")
 	if !o.Empty() {
 		t.Fatalf("override not back to empty: %+v", o)
 	}
@@ -92,7 +114,7 @@ func TestOverrideFileRoundTrip(t *testing.T) {
 		t.Fatalf("missing file: %+v %v", o, err)
 	}
 	node := ExitNodeAuto
-	want := Override{TrustWifis: []string{"Shi 2,4"}, ExitNode: &node}
+	want := Override{TrustWifis: []string{"Synthetic 2,4"}, ExitNode: &node}
 	if err := SaveOverride(path, want); err != nil {
 		t.Fatal(err)
 	}
@@ -111,11 +133,11 @@ func TestOverrideFileRoundTrip(t *testing.T) {
 func TestNixStateQuotesNames(t *testing.T) {
 	got := NixState(Policy{
 		HomeSubnets:   []string{"192.168.8.0/24"},
-		TrustedWifis:  []string{`Shi 2,4`, `a"b`, "${x}"},
+		TrustedWifis:  []string{`Synthetic 2,4`, `a"b`, "${x}"},
 		ExitNode:      ExitNodeAuto,
-		WifiExitNodes: map[string]string{"Shi 2,4": "OpenWrt", `a"b`: ExitNodeAuto},
+		WifiExitNodes: map[string]string{"Synthetic 2,4": "OpenWrt", `a"b`: ExitNodeAuto},
 	})
-	want := `tailscale = { enable = true; homeSubnets = [ "192.168.8.0/24" ]; trustedWifis = [ "Shi 2,4" "a\"b" "\${x}" ]; exitNode = "auto"; wifiExitNodes = { "Shi 2,4" = "OpenWrt"; "a\"b" = "auto"; }; routerHome = false; siteRouterTrust = false; siteRouterTargets = [ ]; };`
+	want := `tailscale = { enable = true; homeSubnets = [ "192.168.8.0/24" ]; trustedWifis = [ "Synthetic 2,4" "a\"b" "\${x}" ]; exitNode = "auto"; wifiExitNodes = { "Synthetic 2,4" = "OpenWrt"; "a\"b" = "auto"; }; routerHome = false; siteRouterTrust = false; siteRouterTargets = [ ]; };`
 	if got != want {
 		t.Fatalf("got\n%s\nwant\n%s", got, want)
 	}
@@ -127,23 +149,23 @@ func TestParseTailnetExitNodeOption(t *testing.T) {
 	if err != nil || len(tn.Peers) != 1 || !tn.Peers[0].ExitNodeOption {
 		t.Fatalf("tailnet = %+v %v", tn, err)
 	}
-	if autoExitNode(tn, []netip.Prefix{netip.MustParsePrefix("192.168.8.0/24")}) == nil {
+	if autoExitNode(tn, []netip.Prefix{netip.MustParsePrefix("192.168.8.0/24")}, true) == nil {
 		t.Fatal("no auto exit node")
 	}
 }
 
 func TestTrustedWifiWithExitNodeKeepsLANLocal(t *testing.T) {
 	p := policy
-	p.WifiExitNodes = map[string]string{"fizzlipuzzli": ExitNodeAuto}
+	p.WifiExitNodes = map[string]string{"synthetic-guest": ExitNodeAuto}
 	tn := Tailnet{Running: true, Peers: []Peer{exitOption("home-router", "192.168.8.0/24", true)}}
-	v := decide(t, p, wifi("fizzlipuzzli", "wpa-psk", "10.1.0.0/24"), tn, fakeProber{})
+	v := decide(t, p, wifi("synthetic-guest", "wpa-psk", "10.1.0.0/24"), tn, fakeProber{})
 	if v.Trust != TrustTrustedWifi || !v.ManageExitNode || v.ExitNode != "home-router" ||
 		!slices.Equal(v.Bypass, []string{"10.1.0.0/24"}) {
 		t.Fatalf("verdict = %+v", v)
 	}
 
 	// Other trusted Wi-Fis keep the exit node off.
-	if v := decide(t, p, wifi("bakasifu-5Ghz", "wpa-psk", "10.2.0.0/24"), tn, fakeProber{}); v.ExitNode != "" || !v.ManageExitNode {
+	if v := decide(t, p, wifi("synthetic-5Ghz", "wpa-psk", "10.2.0.0/24"), tn, fakeProber{}); v.ExitNode != "" || !v.ManageExitNode {
 		t.Fatalf("verdict = %+v", v)
 	}
 

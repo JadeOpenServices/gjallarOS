@@ -354,6 +354,13 @@ PY
     root="$HOME/Nextcloud"
     logdir="''${XDG_STATE_HOME:-$HOME/.local/state}/nextcloud"
 
+    # A running client takes over a second start's options. Start options
+    # would hide a plain launch (no window) and restart its logging, and the
+    # policies already ran for it.
+    if ${lib.getExe' pkgs.systemd "busctl"} --user status com.nextcloud.desktopclient.nextcloud >/dev/null 2>&1; then
+      exec ${lib.getExe client} "$@"
+    fi
+
     ${pkgs.coreutils}/bin/install -d -m 0700 "$logdir"
     ${nextcloudConfigPolicy} "$config"
 
@@ -380,6 +387,30 @@ PY
     ${dolphinPlace} || true
 
     if [ "$policy_status" -eq 10 ]; then
+      if ${pkgs.util-linux}/bin/mountpoint -q "$root"; then
+        echo "Nextcloud enrollment refused: $root is still mounted from an earlier session. Log out and back in, then try again." >&2
+        exit 78
+      fi
+
+      # No account and an empty folder: a sync-root claim left by an
+      # earlier account is stale and would block the new one.
+      ${lib.getExe pkgs.python3} - "$root" <<'PY' || exit 78
+import errno, os, sys
+
+root = sys.argv[1]
+try:
+    os.removexattr(root, "user.openvfs.registration")
+except OSError as exc:
+    if exc.errno not in (errno.ENODATA, errno.ENOTSUP):
+        print(
+            f"Nextcloud enrollment refused: cannot clear the old sync-root claim on {root}: {exc}",
+            file=sys.stderr,
+        )
+        raise SystemExit(78)
+else:
+    print(f"Nextcloud: cleared an old sync-root claim on {root}.")
+PY
+
       auth_session="$$-$RANDOM-$RANDOM"
       export NEXTCLOUD_AUTH_SESSION="$auth_session"
       export NEXTCLOUD_BROWSER_OPENER=${nextcloudBrowserOpener}
@@ -516,14 +547,33 @@ lib.mkMerge [
   wayland.windowManager.hyprland.settings.windowrule = lib.optionals enable [
     "match:class ^(${loginClass})$, float on, center on, size (monitor_w*0.5) (monitor_h*0.75)"
     "match:class ^([Nn]extcloud|com\\.nextcloud\\.desktopclient\\.nextcloud)$, focus_on_activate on"
+    # The client's windows are dialogs with a minimum size (settings 950x500).
+    # Tiled, they got a smaller slot and were cut off (wiki 752 Q44). The
+    # title is localized, so the rule matches the class.
+    "match:class ^([Nn]extcloud|com\\.nextcloud\\.desktopclient\\.nextcloud)$, float on, center on, max_size (monitor_w*0.95) (monitor_h*0.9)"
   ];
 
 
+  # Clients before 164bc3f3 wrote their own autostart entry on first start;
+  # the session starts the client. Remove those entries once per user, then
+  # leave the folder alone so a later choice in the client stays (wiki 752
+  # Q3). Drop this migration once every install has run it.
   home.activation.nextcloudAutostartOwnership = lib.mkIf enable (
     lib.hm.dag.entryAfter [ "writeBoundary" ] ''
-      ${pkgs.coreutils}/bin/rm -f \
-        "$HOME/.config/autostart/Nextcloud.desktop" \
-        "$HOME/.config/autostart/com.nextcloud.desktopclient.nextcloud.desktop"
+      marker=${lib.escapeShellArg "${config.xdg.stateHome}/gjallar/nextcloud-autostart-migrated"}
+      if [ ! -e "$marker" ]; then
+        for entry in \
+          "$HOME/.config/autostart/Nextcloud.desktop" \
+          "$HOME/.config/autostart/com.nextcloud.desktopclient.nextcloud.desktop"
+        do
+          if [ -e "$entry" ]; then
+            run ${pkgs.coreutils}/bin/rm -f "$entry"
+            echo "GjallarOS: removed the old Nextcloud autostart entry $entry; the session starts the client"
+          fi
+        done
+        run ${pkgs.coreutils}/bin/mkdir -p "$(${pkgs.coreutils}/bin/dirname "$marker")"
+        run ${pkgs.coreutils}/bin/touch "$marker"
+      fi
     ''
   );
 
@@ -538,13 +588,22 @@ lib.mkMerge [
       Description = "Nextcloud synchronization";
       After = [ "graphical-session.target" ];
       PartOf = [ "graphical-session.target" ];
+      # Five starts in five minutes, then it stays stopped instead of looping
+      # on a client that crashes at every start.
+      StartLimitIntervalSec = 300;
+      StartLimitBurst = 5;
     };
 
     Service = {
       Type = "simple";
       ExecStart = syncRunner;
 
-      Restart = "no";
+      # A crashed client comes back; OpenVFS unmounted when it died (wiki 752
+      # Q43). Quit from the tray exits 0 and stays quit. 64 and 78 are policy
+      # errors that a new start would only repeat.
+      Restart = "on-failure";
+      RestartSec = 10;
+      RestartPreventExitStatus = "64 78";
 
     };
 

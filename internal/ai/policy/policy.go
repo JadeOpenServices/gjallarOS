@@ -45,7 +45,7 @@ type Decision struct {
 	Reason     string
 }
 
-var secretParts = []string{"/.ssh/", "/.gnupg/", "/.password-store/", "/keyrings/", "/credentials/", "/secrets/"}
+var secretParts = []string{"/.ssh/", "/.gnupg/", "/.password-store/", "/.thunderbird/", "/keyrings/", "/credentials/", "/secrets/"}
 
 func DefaultProfile(mode string) (Profile, error) {
 	switch mode {

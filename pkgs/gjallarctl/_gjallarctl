@@ -25,6 +25,8 @@ _gjallarctl_system() {
     'rebuild:rebuild from the system checkout (root only, started by rebuild)'
     'apply:copy ~/GjallarOS-local into the system and rebuild (developer mode)'
     'status:show what the running system was built from'
+    'time:show whether NTS confirmed the clock'
+    'time-watch:keep the bar clock and the time card current (user unit)'
     'move:show what moving to the root-owned system checkout leaves behind'
     'clone:create the root-owned system checkout (root only)'
     'developer-off:turn developer mode off and build the official system (recovery entry, root only)'
@@ -116,8 +118,12 @@ _gjallarctl_vpn() {
     'trust-wifi:trust a Wi-Fi network'
     'untrust-wifi:stop trusting a Wi-Fi network'
     'exit-node:pick the exit node'
+    'pause:let a blocked network through without the tunnel for up to 1 hour'
+    'resume:end the VPN pause now'
+    'notice:show the desktop notice when the VPN blocks a network'
     'export:print the state.nix line for these changes'
     'apply:apply a network trust policy'
+    'boot-block:block the internet outside the tunnel until the first network check'
   )
   if (( CURRENT == 2 )); then
     _describe -t commands 'vpn command' cmds
@@ -130,7 +136,7 @@ _gjallarctl_vpn() {
       _arguments '--exit-node[exit node]:node:(auto default)' '1:network name:' ;;
     exit-node)
       _arguments '1:exit node:(auto off default)' ;;
-    apply)
+    apply|boot-block)
       _arguments '--policy[network trust policy JSON]:file:_files -g "*.json"' \
         '--override[runtime override JSON]:file:_files -g "*.json"' ;;
   esac
@@ -197,6 +203,7 @@ _gjallarctl_settings() {
     'cancel:drop a waiting change'
     'export:save the settings in a file signed with your key'
     'import:ask for the change a saved settings file makes'
+    'pair:trust settings files of your account on another device'
   )
   if (( CURRENT == 2 )); then
     _describe -t commands 'settings command' cmds
@@ -220,6 +227,52 @@ _gjallarctl_settings() {
       ids=(${(f)"$(gjallarctl settings pending --ids 2>/dev/null)"})
       _arguments "1:change id:(${ids[*]})" ;;
     export|import) _arguments '1:settings file:_files' ;;
+    pair) _gjallarctl_settings_pair ;;
+  esac
+}
+
+_gjallarctl_settings_pair() {
+  local -a cmds=(
+    'export:save a pairing file for your other device'
+    'add:pair with the device that made a pairing file'
+    'list:show the paired devices'
+    'remove:stop trusting a paired device'
+  )
+  if (( CURRENT == 2 )); then
+    _describe -t commands 'pair command' cmds
+    return
+  fi
+  shift words
+  (( CURRENT-- ))
+  local -a ids
+  case $words[1] in
+    export|add) _arguments '1:pairing file:_files' ;;
+    list) _arguments '--ids[print only the pairing ids]' ;;
+    remove)
+      ids=(${(f)"$(gjallarctl settings pair list --ids 2>/dev/null)"})
+      _arguments "1:pairing id:(${ids[*]})" ;;
+  esac
+}
+
+_gjallarctl_snapshots() {
+  local -a cmds=(
+    'list:show the snapshots of /home, newest first'
+    'restore:copy one of your files back from a snapshot'
+  )
+  if (( CURRENT == 2 )); then
+    _describe -t commands 'snapshots command' cmds
+    return
+  fi
+  shift words
+  (( CURRENT-- ))
+  local -a names
+  case $words[1] in
+    list) _arguments '--names[print only the snapshot names]' ;;
+    restore)
+      names=(${(f)"$(gjallarctl snapshots list --names 2>/dev/null)"})
+      _arguments '1:file:_files' \
+        "--from[snapshot to restore from]:snapshot:(${names[*]})" \
+        '--to[folder for the copy]:folder:_files -/' ;;
   esac
 }
 
@@ -267,6 +320,7 @@ _gjallarctl() {
     'vpn:VPN and trusted Wi-Fi'
     'addons:Firefox add-ons'
     'settings:change GjallarOS settings'
+    'snapshots:restore your files from the /home snapshots'
     'tpm2:TPM2 disk unlock'
     'luks:system disk unlock methods and recovery key'
     'secure-boot:Secure Boot with GjallarOS keys'
@@ -297,6 +351,7 @@ _gjallarctl() {
         vpn) _gjallarctl_vpn ;;
         addons) _gjallarctl_addons ;;
         settings) _gjallarctl_settings ;;
+        snapshots) _gjallarctl_snapshots ;;
         oddc) _gjallarctl_oddc ;;
         helpme) _arguments '--text[print instead of opening a window]' ;;
         tpm2) _arguments '1:tpm2 command:((reenroll\:"enroll the TPM2 key again"))' ;;

@@ -38,6 +38,8 @@
     ./services/printing.nix
     ./services/removable-media.nix
     ./services/settings-service.nix
+    ./services/snapshots.nix
+    ./services/time.nix
 
     inputs.oddc.nixosModules.default
 
@@ -77,9 +79,6 @@
 
   networking.hostName = settings.hostname;
   time.timeZone = settings.timezone;
-  services.chrony.enable = true;
-  # Site router first; the default pool stays as fallback off-site.
-  services.chrony.extraConfig = "server 192.168.8.1 iburst prefer";
 
   i18n.defaultLocale = settings.locale;
   i18n.extraLocaleSettings.LC_ALL = settings.locale;

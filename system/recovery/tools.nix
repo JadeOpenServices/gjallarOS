@@ -23,6 +23,7 @@ let
     name = "gjallar-recover";
     runtimeInputs = with pkgs; [
       config.nix.package
+      btrfs-progs
       coreutils
       cryptsetup
       gawk
@@ -47,6 +48,9 @@ let
           '  gjallar-recover open-root DEVICE [NAME]' \
           '  gjallar-recover generations ROOT' \
           '  gjallar-recover rollback ROOT GENERATION' \
+          '  gjallar-recover snapshots ROOT' \
+          '  gjallar-recover snapshot-rollback ROOT SNAPSHOT' \
+          '  gjallar-recover snapshot-drop ROOT COPY' \
           '  gjallar-recover repair-boot ROOT' \
           '  gjallar-recover rebuild ROOT FLAKE#HOST' \
           '  gjallar-recover developer-off' \
@@ -69,6 +73,58 @@ let
           printf '%s\n' 'Cancelled.' >&2
           exit 1
         }
+      }
+
+      # Snapshot rollbacks run only in recovery (ROADMAP section 15, step 4):
+      # the recovery partition with the system at /mnt, or the trusted
+      # recovery boot entry.
+      recovery_only() {
+        if [ "$(realpath "$1")" = / ] && [ ! -e /etc/gjallar/recovery ]; then
+          printf '%s\n' 'ERROR: run this in the trusted recovery boot entry or the recovery partition.' >&2
+          exit 1
+        fi
+      }
+
+      # btrbk's long-iso names (system/services/snapshots.nix). A copy
+      # replaced by a rollback has the same form without the _N.
+      snapshot_name='^(home|config)\.[0-9]{8}T[0-9]{6}[+-][0-9]{4}(_[0-9]{1,4})?$'
+      replaced_name='^(home|config)\.[0-9]{8}T[0-9]{6}[+-][0-9]{4}$'
+
+      # Mounts the top level of ROOT's Btrfs in a private folder for this
+      # command; only the subvolume layout has snapshots.
+      open_top() {
+        root="$1"
+        [ -e "$root/etc/NIXOS" ] || {
+          printf '%s\n' 'ERROR: target is not a mounted NixOS installation.' >&2
+          exit 1
+        }
+        if [ "$(findmnt -nro FSROOT --mountpoint "$root")" != /@ ]; then
+          printf '%s\n' "ERROR: $root has no snapshots; only installs with the subvolume layout have them." >&2
+          exit 1
+        fi
+        device="$(findmnt -nvro SOURCE --mountpoint "$root")"
+        top="$(mktemp -d /run/gjallar-recover-top.XXXXXX)"
+        trap close_top EXIT
+        mount -o subvolid=5,nosuid,nodev,noexec "$device" "$top"
+      }
+
+      close_top() {
+        umount "$top" 2>/dev/null || true
+        rmdir "$top" 2>/dev/null || true
+      }
+
+      subvolume_mounted() {
+        id="$(btrfs inspect-internal rootid "$1")"
+        findmnt -rn -t btrfs -o OPTIONS | grep -Eq "(^|,)subvolid=$id(,|$)"
+      }
+
+      # A replaced copy that is still mounted stays writable until the
+      # restart; the next recovery command makes it read-only.
+      seal_replaced() {
+        for copy in "$top"/@snapshots/replaced/*; do
+          [ -d "$copy" ] || continue
+          subvolume_mounted "$copy" || btrfs property set -ts "$copy" ro true
+        done
       }
 
       prepare_installer_device_config() {
@@ -195,7 +251,7 @@ let
           fi
 
           source="$(
-            findmnt -nro SOURCE --mountpoint "$target"
+            findmnt -nvro SOURCE --mountpoint "$target"
           )"
 
           options="$(
@@ -217,6 +273,19 @@ let
               exit 1
               ;;
           esac
+
+          # Installs since snapshots (ROADMAP section 15) keep / on the
+          # default subvolume @ and the rest on their own; generations and
+          # nixos-enter need /nix. The snapshots stay unmounted.
+          if [ "$(findmnt -nro FSROOT --mountpoint "$target")" = /@ ]; then
+            for sub in @nix:nix @home:home @config:etc/gjallar/system; do
+              if ! mount -o rw,subvol="''${sub%%:*}" "$mapping" "$target/''${sub#*:}"; then
+                umount -R "$target" >/dev/null 2>&1 || true
+                printf '%s\n' "ERROR: subvolume ''${sub%%:*} could not be mounted at $target/''${sub#*:}." >&2
+                exit 1
+              fi
+            done
+          fi
 
           cleanup_mapping=false
           trap - EXIT
@@ -252,6 +321,110 @@ let
             nixos-enter --root "$root" -c "$switch"
           fi
           printf '%s\n' "PASS: generation $generation is the next boot."
+          ;;
+        snapshots)
+          require_root
+          open_top "''${2:?installed ROOT mountpoint required}"
+          seal_replaced
+          for kind in home config; do
+            printf '%s\n' "=== $kind (snapshot-rollback ROOT NAME) ==="
+            ls -1r "$top/@snapshots/$kind" 2>/dev/null || true
+          done
+          printf '%s\n' '=== replaced by a rollback (snapshot-drop ROOT NAME) ==='
+          ls -1r "$top/@snapshots/replaced" 2>/dev/null || true
+          ;;
+        snapshot-rollback)
+          require_root
+          root="''${2:?installed ROOT mountpoint required}"
+          name="''${3:?SNAPSHOT required, see gjallar-recover snapshots ROOT}"
+          recovery_only "$root"
+          [[ $name =~ $snapshot_name ]] || {
+            printf '%s\n' "ERROR: $name is not a snapshot name; see gjallar-recover snapshots ROOT." >&2
+            exit 1
+          }
+          kind="''${name%%.*}"
+          case "$kind" in
+            home) mountpoint=/home ;;
+            config) mountpoint=/etc/gjallar/system ;;
+          esac
+          open_top "$root"
+          snapshot="$top/@snapshots/$kind/$name"
+          if [ "$(btrfs property get -ts "$snapshot" ro 2>/dev/null)" != ro=true ]; then
+            printf '%s\n' "ERROR: there is no snapshot $name." >&2
+            exit 1
+          fi
+          target="''${root%/}$mountpoint"
+          stamp="$(date +%Y%m%dT%H%M%S%z)"
+          replaced="$top/@snapshots/replaced/$kind.$stamp"
+          printf '%s\n' "This puts $mountpoint back to the snapshot $name." \
+            "What is there now is kept as $kind.$stamp (gjallar-recover snapshots ROOT)."
+          # A snapshot never holds the subvolumes inside it.
+          nested="$(btrfs subvolume list -o "$top/@$kind" | awk '{ print "  " $NF }')"
+          if [ -n "$nested" ]; then
+            printf '%s\n' 'These subvolumes are not in snapshots; they stay in the kept copy:' "$nested"
+          fi
+          confirm_phrase "ROLLBACK-''${kind^^}"
+          if [ "$(realpath "$root")" = / ]; then
+            # This boot's timers would snapshot the old copy again; the next
+            # boot starts them.
+            systemctl stop gjallar-snapshot-home.timer gjallar-snapshot-config.timer \
+              gjallar-snapshot-home.service gjallar-snapshot-config.service 2>/dev/null || true
+          fi
+          mounted=false
+          offline=true
+          if findmnt -rn --mountpoint "$target" >/dev/null 2>&1; then
+            mounted=true
+            umount "$target" 2>/dev/null || offline=false
+          fi
+          mkdir -p "$top/@snapshots/replaced"
+          chmod 0700 "$top/@snapshots/replaced"
+          # A new writable snapshot; the read-only one stays as it is.
+          btrfs subvolume snapshot "$snapshot" "$top/@$kind.new-$stamp" >/dev/null
+          # One rename swaps both, so a power cut leaves either the old or
+          # the new one at @$kind.
+          mv --exchange --no-target-directory "$top/@$kind.new-$stamp" "$top/@$kind"
+          mv --no-target-directory "$top/@$kind.new-$stamp" "$replaced"
+          seal_replaced
+          if [ "$offline" = true ]; then
+            if [ "$mounted" = true ]; then
+              if [ "$(realpath "$root")" = / ]; then
+                mount "$target"
+              else
+                mount -o rw,subvol="@$kind" "$device" "$target"
+              fi
+            fi
+            printf '%s\n' "PASS: $mountpoint is back to $name."
+          else
+            printf '%s\n' "PASS: $mountpoint is back to $name from the next start." \
+              "$target is in use, so this boot still sees the old files; changes made now end up in the kept copy."
+          fi
+          if [ "$kind" = config ]; then
+            printf '%s\n' 'The settings are back; the system built from them is not. Run rebuild once the system is up.'
+          fi
+          ;;
+        snapshot-drop)
+          require_root
+          root="''${2:?installed ROOT mountpoint required}"
+          name="''${3:?COPY required, see gjallar-recover snapshots ROOT}"
+          recovery_only "$root"
+          [[ $name =~ $replaced_name ]] || {
+            printf '%s\n' "ERROR: $name is not a copy kept by a rollback; see gjallar-recover snapshots ROOT." >&2
+            exit 1
+          }
+          open_top "$root"
+          copy="$top/@snapshots/replaced/$name"
+          btrfs subvolume show "$copy" >/dev/null 2>&1 || {
+            printf '%s\n' "ERROR: there is no kept copy $name." >&2
+            exit 1
+          }
+          if subvolume_mounted "$copy"; then
+            printf '%s\n' "ERROR: $name is still in use until the next start." >&2
+            exit 1
+          fi
+          printf '%s\n' "This deletes $name for good."
+          confirm_phrase DELETE
+          btrfs subvolume delete "$copy" >/dev/null
+          printf '%s\n' "PASS: $name is deleted."
           ;;
         repair-boot)
           require_root
@@ -386,6 +559,9 @@ let
       'open-root:unlock the encrypted root and mount it on /mnt'
       'generations:list the system generations of a mounted root'
       'rollback:make an older generation the next boot'
+      'snapshots:list the snapshots of a mounted root'
+      'snapshot-rollback:put /home or the system settings back to a snapshot'
+      'snapshot-drop:delete a copy kept by a snapshot rollback'
       'repair-boot:write the boot entries of a mounted root again'
       'rebuild:rebuild a mounted root from FLAKE#HOST'
       'developer-off:turn developer mode off and go back to the official system'
@@ -407,7 +583,7 @@ let
           _directories
         fi
         ;;
-      generations|rollback|repair-boot|rebuild)
+      generations|rollback|repair-boot|rebuild|snapshots|snapshot-rollback|snapshot-drop)
         (( CURRENT == 3 )) && _directories
         ;;
       jods)

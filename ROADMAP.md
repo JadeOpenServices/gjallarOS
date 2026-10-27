@@ -523,7 +523,9 @@ Plan agreed 2026-10-10. Channels decided 2026-10-20 (Q16): `main` became
       Open for Jade: poll interval, who may land these pull requests, and
       whether the data-only fast lane to `stable` is wanted.
 - [ ] **Verifying updates.** Goes through the research flow again before
-      any code. Ideas so far, from the sources below:
+      any code. Waits for the release key talk (Jade, Q37 and Q76): until
+      then `rebuild --update` trusts git over HTTPS alone, as the 2026-10-27
+      pin audit found. Ideas so far, from the sources below:
       - The trust root comes with the install, not from the server: the
         first commit the rule applies to and the key that signed it, like a
         Guix channel introduction.
@@ -902,11 +904,13 @@ way to root.
       `user.config.json` key (34ea9a04), the service itself with its
       `gjallarctl settings` front end (3.3, 887c1c5b) and the unique
       hostname check, signed export and import for the device's own users
-      (3.4a), key wipe on user removal (3.4b), and the user-side writers
-      (add-ons, USB review, Secure Boot) asking the service on a system
-      checkout, with each inner value of a change listed (3.5, e511f5cb).
-      Next: pairing and the installer opt-out (rest of 3.4). Factory reset
-      waits for a recovery mode that does one.
+      (3.4a), key wipe on user removal (3.4b), pairing two devices of one
+      person with a file each way and a code (3.4c, fbf8cc67), own
+      OpenSSH keys with the installer question (3.4d, 46a02b61, fw13 VM
+      passed), and the user-side writers (add-ons, USB review, Secure
+      Boot) asking the service on a system checkout, with each inner value
+      of a change listed (3.5, e511f5cb).
+      Next: factory reset waits for a recovery mode that does one.
 - [x] **Checkpoint 3b: developer mode.** `~/GjallarOS-local/`, the copy
       into `/etc/gjallar/developer/local`, the staged `.gjallar-local/`, notice,
       boot entry name and the recovery exit. Steps: 3b.1 the
@@ -1039,8 +1043,8 @@ fails when a field has none. Decided with Jade 2026-10-19:
   wait. A name has to stay unique: the service refuses a new hostname that
   a peer on the user's tailnet or a device on the current network already
   uses, and says which one.
-- **Every service address is security**: the AI endpoint, Nextcloud, Plane,
-  draw.io and every web application, with their on/off switches. A changed
+- **Every service address is security**: the AI endpoint, Nextcloud, Plane
+  and every web application, with their on/off switches. A changed
   address can lead to a fake login page, so it shows old -> new and waits.
 - **Firefox add-ons are security**, both the collections and pinned store
   add-ons, because the browser installs them by policy.
@@ -1223,12 +1227,13 @@ profiles show "not signed" but still install, which is what phishing uses.
   on this device or a device you paired". A valid file still only loads
   as a draft, with the usual tier rules: a signature says where the file
   came from, not that the change is wanted now.
-- **Pairing own devices.** Both devices show the same short code; the
-  user confirms on both with their password. Each then trusts the other's
-  public key for that user. Unpairing removes it.
+- **Pairing own devices.** A pairing file goes each way; both devices
+  show the same code made from both public keys, and the user confirms on
+  both with their password. Each then trusts the other's public key for
+  that user. Unpairing removes it. See "Pairing and own keys" below.
 - **Opting out in the installer.** "Let GjallarOS manage signing keys
-  (recommended)". Saying no lets the person add their own public key (for
-  example an SSH or hardware key) as the only signer instead.
+  (recommended)". Saying no lets the person add their own OpenSSH public
+  key (ed25519 file or FIDO hardware key) as the only signer instead.
 - **Nothing is locked behind the key.** Login, disk unlock, applying
   settings in the editor and recovery never need it. Losing it only stops
   export until a new one is made; old exports still import, because the
@@ -1255,7 +1260,11 @@ How 3.4a does it (`internal/settings/signed.go`,
   secret where there is a TPM, no PCR binding, so turning on Secure Boot
   keeps it. systemd hands it to the service with `LoadCredentialEncrypted=`;
   the service never touches the TPM. Without it export is off and import
-  still works.
+  still works. The key unit runs before every start of the service and
+  replaces a key that no longer decrypts. A cleared TPM or a changed
+  `/etc/machine-id` loses the key; systemd deletes its host secret when
+  the machine id changes. Without this check the service would fail until
+  the next boot.
 - **User keys.** Made on the first export. Each user's Ed25519 seed is
   HKDF-SHA256 of the host key with a random salt and the uid and name.
   `/var/lib/gjallarOS/settings/keys/<uid>.json` (root, 0600) holds the salt
@@ -1316,6 +1325,130 @@ design does about it:
   It only ever brings back that user's own earlier settings, as a draft
   with the tier rules and the password, and the note shows its age.
   Logged on the security review page.
+
+### Pairing and own keys
+
+Decided with Jade 2026-10-20 (wiki 752 Q13, Q14): pairing is a file each
+way plus a code made from both public keys, with no network listener; an
+own key is an OpenSSH key used with `ssh-keygen -Y sign`.
+
+How others do it:
+
+- Signal shows a 60-digit safety number: two 30-digit halves, one per
+  person, each an iterated SHA-512 over that person's key and identifier,
+  in groups of five digits. Both phones show the same number because the
+  halves are put in a fixed order
+  ([moderncrypto messaging list](https://moderncrypto.org/mail-archive/messaging/2017/002381.html)).
+- KDE Connect's pairing review
+  ([oss-security 2020-11-30](https://www.openwall.com/lists/oss-security/2020/11/30/1),
+  CVE-2020-26164): device names are chosen by the other side, and the
+  fix shows a hash over both keys, but by default only 8 hex digits.
+- Short key ids: 32-bit PGP key ids were collided for every key of the
+  web of trust, and fake kernel developer keys turned up on key servers
+  in 2016 ([LWN](https://lwn.net/Articles/697538/)). A short code that
+  someone can search for offline proves little.
+- OpenSSH signatures
+  ([PROTOCOL.sshsig](https://github.com/openssh/openssh-portable/blob/master/PROTOCOL.sshsig))
+  sign a namespace with the message hash, so a signature made for git
+  (namespace `git`) or anything else never counts for another use. FIDO
+  keys carry a user-presence flag, and `ssh-keygen -Y verify` refuses a
+  signature without it unless the signer line says `no-touch-required`.
+
+**Pairing (3.4c).**
+
+- **File.** `gjallaros-pairing-v1`, then the `key` and `sig` lines as in a
+  settings file, then JSON with schema, device, user, uid, time and the
+  hostname. Signed by the user's own key, so it shows the sender holds it.
+  The other magic line means a pairing file never opens as a settings
+  file, nor the other way round.
+- **Code.** One half per side, Signal-style: SHA-512 over
+  `gjallaros-pair-v1`, the device id, uid, user name and key, then 5200
+  more rounds over the hash and the key; the first 30 bytes give 30
+  digits. The two halves are put in byte order, so both screens show the
+  same 60 digits in groups of five. Changing either key changes its half,
+  so a swapped file needs a match for the whole 30-digit half of a key it
+  does not have.
+- **Flow.** `gjallarctl settings pair export FILE` on each device (own
+  password, `auth_self`, makes the key when there is none yet), then the
+  files go across by any way the user likes (USB stick, Nextcloud, mail).
+  `gjallarctl settings pair add FILE` shows the code and what the other
+  device says it is, and asks to compare it with the other screen, at the
+  same time, both devices in front of the user. A code sent by message
+  proves nothing; on a difference, stop. The user then confirms with their
+  own password. The service computes the code again from the bytes it gets
+  and adds the pairing only when it equals the code the user saw.
+  `pair list` shows pairings with a short id; `pair remove ID` drops one.
+- **Store.** `/var/lib/gjallarOS/settings/pairings/<uid>.json` (root,
+  0600), one per local user: the other device's key, device id, uid, user
+  name, claimed hostname and when it was added. A removed user loses their
+  pairings, as with keys. A key of this device, or a file naming this
+  device, is refused.
+- **Import from a paired device.** The signer must be one of the caller's
+  pairings, and the file's device, uid and user must be the ones stored
+  with it. Keys that describe the device rather than the person (struct
+  tag `scope:"device"` on `config.User`: hostname, username, disk, boot,
+  recovery, USB blocking, JODS, firmware, channel, developer mode,
+  tailscale, dotfiles folder, clamshell) are left out and the note says how
+  many. Everything else goes the way of `settings set`, with the tier
+  rules, waits and password, and a note naming the paired device.
+- **Key changes.** When the other device's host key changes (a cleared
+  TPM), its files no longer import here; pair again.
+
+**Own key (3.4d, done 46a02b61).**
+
+- The installer asks "Let GjallarOS sign your settings files for you?"
+  (recommended). No: the user gives an OpenSSH public key line
+  (`ssh-ed25519` or `sk-ssh-ed25519@openssh.com`), checked before the
+  interview goes on. It is stored as `settingsSigningKey` (critical tier,
+  device scope) and belongs to the account named by `username`. That key
+  is then the only signer for that account: managed files and pairing are
+  refused. It can be set, changed or cleared later with the password and
+  the hour's wait; the change says what it does to export, import and
+  pairing.
+- Export writes the settings without a signature, under its own magic
+  line (`gjallaros-settings-ssh-v1`). The user signs it:
+  `ssh-keygen -Y sign -n gjallaros-settings -f KEY FILE` gives `FILE.sig`.
+- Import checks with `ssh-keygen -Y verify -n gjallaros-settings` from the
+  Nix store path, no shell, a cleared environment, a size cap and a
+  timeout, inside the sandboxed settings service. The allowed-signers
+  line is written by the service from a parsed key only: comment dropped,
+  `namespaces="gjallaros-settings"`, never `no-touch-required`. Only then
+  is the payload parsed, with the same strict parser.
+- `gjallarctl settings export FILE` prints the `ssh-keygen` line to run;
+  `gjallarctl settings import FILE` reads `FILE.sig` next to it and fails
+  with that line when it is missing. The change shows the key's SHA256
+  fingerprint and where the file was made. A file made on another device
+  leaves out `scope:"device"` keys, as from a paired device.
+- OpenSSH's own code checks the signature, so no new Go dependency
+  (`golang.org/x/crypto` has no sshsig).
+
+Security pass (2026-10-20). What went wrong elsewhere, and what this
+design does about it:
+
+- Short codes that can be searched for offline (KDE's 8 hex digits, 32-bit
+  PGP ids). File exchange has no commit step, so each half is long (30
+  digits per key) and slow to compute.
+- Names chosen by the other side (KDE review). The hostname is only shown
+  as "says it is", never used to decide anything, and text with control
+  characters is refused.
+- A file or signature made for one purpose used for another. Distinct
+  magic lines for settings, pairing and SSH files; the SSH namespace
+  `gjallaros-settings` keeps git or other SSH signatures out.
+- The file changing between showing the code and adding it. Add takes the
+  code the user saw and checks it against the bytes it gets.
+- Comparing over the same channel the file came by. The pairing screen
+  says to compare on both screens at once; the docs say a code sent by
+  message does not count.
+- FIDO keys without touch. The service never writes `no-touch-required`.
+- A root tool parsing untrusted signatures. `ssh-keygen` runs inside the
+  service's sandbox (no network, no capabilities, private /tmp) with fixed
+  arguments; the payload is parsed only after it says yes.
+- Device settings carried to another device. `scope:"device"` keys never
+  come from a paired device.
+- Residual, as with settings files: an old file from a paired device stays
+  valid until the pairing is removed. It only brings back that person's
+  settings as a draft with the tier rules. Logged on the security review
+  page.
 
 ### Developer mode and the local folder
 
@@ -1379,12 +1512,16 @@ GjallarOS managing the keys by default; Nix code only in developer mode
 with a local folder. Migration on the one existing install: whatever does
 not break the running system. New installs get no `~/Documents` clone.
 
-## 15. Snapshots (draft, to discuss)
+## 15. Snapshots (done)
 
-Draft written 2026-10-20 for Plane GJALLAROS-198. Nothing is built yet; the
-open choices are questions 18 to 22 on the questionnaire. Jade's frame:
-read-only snapshots, root-only, retention, rollback through recovery, no
-secrets in snapshots.
+Plane GJALLAROS-198. Jade decided questions 18 to 22 and 22a on the
+questionnaire (2026-10-20 and 2026-10-21): read-only snapshots, root-only,
+btrbk-style retention, rollback only through recovery, no secrets and no
+`/nix` in snapshots, settings in `user.config.json`, and only new installs
+get the layout. Step 1 (installer subvolumes), step 2 (snapshot
+units, settings, rebuild snapshots), step 3 (restoring your own
+files) and step 4 (rollback in recovery) are built and passed the VM test
+(2026-10-21, a new install on a throwaway VM).
 
 Today a fresh install puts everything on the top level of one encrypted
 Btrfs (no subvolumes). NixOS generations already roll back the system
@@ -1426,7 +1563,7 @@ Snapshots are for that.
   snapshot is deleted
   ([openSUSE forum](https://forums.opensuse.org/t/secure-remove-from-btrfs/152004)).
   Design: machine secrets (`/var/lib/sbctl`, sealed tokens and keys under
-  `/var/lib/gjallar`) sit on a subvolume that is never snapshotted. Home
+  `/var/lib/gjallar`) stay on `@`, which is never snapshotted. Home
   data cannot be split like that, so a rotation the system performs on a
   user's behalf says which snapshots still hold the old key and offers to
   delete them.
@@ -1442,28 +1579,94 @@ Snapshots are for that.
   overwrites.
 - **Disk filling.** Snapshots of `/nix` would keep every garbage-collected
   store path alive. `/nix` gets its own subvolume and is never
-  snapshotted; a free-space floor drops the oldest timeline snapshots
-  first.
+  snapshotted. Below a free-space floor (10% of the disk, at most 10 GiB)
+  a run makes no new snapshot and says so in the journal; old ones still
+  age out.
+- **The NixOS btrbk module is too wide.** In the pinned nixpkgs it runs
+  btrbk as its own user with a sudo rule for any `btrfs` command. `btrfs`
+  with free arguments can write or delete anywhere, so that user is root
+  in all but name. Design: own root oneshot units with no sudo rule,
+  `ProtectSystem=strict`, write access only to the snapshot paths, no
+  network, `NoNewPrivileges`, and a narrow capability set. A note for
+  upstream goes to the human-session queue.
 - Snapshots stay inside the LUKS volume, so nothing new is stored in the
   clear. They are not a backup.
 
-### Proposed design
+### Design (decided)
 
-1. New installs: subvolumes `@` (`/`), `@home`, `@nix`, `@keys` (machine
-   secrets, never snapshotted), `@snapshots` on the top level, mounted at
-   `/.snapshots` root-only.
-2. Snapshots by root timers (btrbk, no D-Bus service), read-only. Sets:
-   `home` hourly, `state` (`/var/lib`, `/etc/gjallar`) before every
-   rebuild and daily.
-3. Users restore their own files through the settings service
-   (`gjallarctl snapshots list`, `gjallarctl snapshots restore PATH`);
-   only their own home, copied next to the original.
-4. A full state rollback runs only from the recovery boot entry, offline,
-   and keeps the replaced state as a snapshot.
-5. Existing installs keep their layout until a decision on migration
-   (question 19).
+Only what is listed gets snapshots (question 22a). `/` and `/var/lib` never
+do: NixOS generations bring the system back, and the secrets live there.
 
-## 16. VPN: exit node down (draft, to discuss)
+| Subvolume | Mounted at | Snapshots |
+| --- | --- | --- |
+| `@` | `/` | never; default subvolume, so a plain mount of the disk (recovery tools) lands here |
+| `@home` | `/home` | hourly |
+| `@nix` | `/nix` | never |
+| `@config` | `/etc/gjallar/system` (the checkout: `user.config.json`, state, hardware) | daily and before every rebuild |
+| `@snapshots` | nowhere | holds the snapshots; 0700 root; only the snapshot units mount it, in their own mount namespace, `nosuid,nodev,noexec` |
+
+`/etc/gjallar` itself stays on `@`, because NixOS writes its own links
+there. The checkout holds no secrets: its content is in the world-readable
+store anyway.
+
+1. New installs get the layout above. The recovery `open-root` command
+   mounts `@nix`, `@home` and `@config` below `/mnt` when it finds it,
+   never `@snapshots`. The snapshot units turn themselves on only where
+   `/home` is `@home`.
+2. Snapshots by hardened root timers (btrbk retention rules:
+   `snapshot_create onchange`, `preserve_min` plus `preserve`, long ISO
+   timestamps, a lock file, a free-space floor before each run).
+   `snapshotsEnable` (on), `snapshotsKeepHours` (24) and
+   `snapshotsKeepDays` (7) in `user.config.json` set them; a config
+   without the keys gets these values.
+3. Users restore their own files (`gjallarctl snapshots list`,
+   `gjallarctl snapshots restore PATH [--from SNAPSHOT] [--to FOLDER]`);
+   only their own home, copied next to the original. This is not the
+   settings service but its own bus-started service, gjallar-snapshotd
+   (`org.gjallaros.Snapshots1`), so `gjallar-settingsd` keeps an empty
+   capability set; the restore service holds only `CAP_SYS_ADMIN` (to
+   mount `@snapshots` read-only in its own mount namespace) and
+   `CAP_DAC_READ_SEARCH`, and exits after two idle minutes. It checks the
+   snapshot name and that the path is in the caller's home before it asks
+   the caller's password, every time. It walks to the file beneath that
+   home in the snapshot one name at a time with `openat` and
+   `O_NOFOLLOW` (no symlinks, no `..`, no other file system), opens only a
+   regular file the caller owned, and hands back a read-only descriptor.
+   `openat2` would do the walk in one call, but systemd's
+   `RestrictSUIDSGID` blocks it, and that filter stays: it stops a
+   remount from making setuid files. `gjallarctl` writes the copy as the user under a new name
+   (`notes.restored-20261021T030000.txt`) and never overwrites. Folders
+   are a later step: a folder descriptor would let `..` out of the home.
+4. A rollback of `@home` or `@config` runs only in recovery: the trusted
+   recovery boot entry or the recovery partition (with the system at
+   `/mnt` from `open-root`). `gjallar-recover snapshots ROOT` lists the
+   snapshots, `gjallar-recover snapshot-rollback ROOT NAME` puts one back,
+   `gjallar-recover snapshot-drop ROOT NAME` deletes a copy a rollback
+   kept. The rollback:
+   - takes only a name of the btrbk form from the list and a snapshot that
+     is read-only, and asks a typed confirmation (`ROLLBACK-HOME`,
+     `ROLLBACK-CONFIG`);
+   - makes a new writable snapshot of it; the read-only snapshot is never
+     made writable, so it stays as it was;
+   - swaps it with the current `@home` or `@config` in one rename
+     (`RENAME_EXCHANGE`), so a power cut leaves one of the two in place,
+     never none;
+   - keeps the replaced one in `@snapshots/replaced` (0700, root only,
+     never pruned by btrbk) and makes it read-only as soon as nothing
+     mounts it;
+   - unmounts the target first; when it is in use (the recovery boot entry
+     with a signed-in user), the swap takes effect at the next start and
+     says so;
+   - lists the nested subvolumes, because a snapshot never holds them and
+     they stay with the kept copy;
+   - for `@config`, says that the settings are back but the system built
+     from them is not, so a `rebuild` follows.
+   btrbk keeps finding the older snapshots after a swap (it follows the
+   whole parent chain), so they still age out normally.
+5. Existing installs keep their layout and get no snapshots until they
+   are reinstalled (question 19).
+
+## 16. VPN: exit node down (steps 1 and 2 built)
 
 Draft written 2026-10-20 for Plane GJALLAROS-190: tell the user when the
 exit node is down and offer a pause that holds only for this network.
@@ -1553,61 +1756,994 @@ untrusted network carries the traffic in the clear (loophole 24, below).
    zsh completion; the bar shows the paused state.
 6. Loophole 24 fixed as above, once question 25 is answered.
 
-## 17. Nextcloud: what syncs first on a new machine (draft, to discuss)
+### Step 1: fail closed (built, branch vpn-fail-closed)
+
+Question 25 answered: `auto` blocks, and the pause is the way out. Built
+2026-10-21:
+
+- `auto` with no exit node online keeps the current exit node, else sets
+  an offline exit node (home router first), else reports "no exit node in
+  this tailnet". It never clears the exit node on an untrusted network.
+- The verdict carries `blocked`: `exit-node-offline`, `no-exit-node` or
+  `tailscale-down`. `gjallarctl vpn status` prints it in plain words.
+- Found on the way and closed with it: with Tailscale stopped, a wanted
+  exit node did nothing and the network carried the traffic in the clear.
+  That is now `tailscale-down`.
+- Backstop: while blocked, `gjallar-vpn-trust` loads the nftables table
+  `inet gjallar_vpn_block`. It drops traffic that leaves through an uplink
+  (every device with an IPv4 or IPv6 default route, not the Tailscale
+  device), in the output and forward chains. Let through: tailscaled's own
+  packets (its bypass mark), the DHCP client, the local subnets,
+  link-local and local multicast. DNS (ports 53 and 853) is dropped even
+  to the LAN. The table is swapped in one `nft -f` transaction, so there
+  is no moment without rules. The block goes away when the verdict is no
+  longer blocked, for example after `gjallarctl vpn exit-node off`.
+- VM test `tests/nix/vpn-fail-closed.nix`: headscale, one exit node, a
+  router and a client on its own LAN. It checks each blocked reason, that
+  the internet is cut and the LAN still answers, that marked packets pass
+  and that `exit-node off` lifts the block.
+
+Security pass for step 1:
+
+- **The bypass mark.** Tailscale marks its own control, DERP and
+  WireGuard sockets with 0x80000 in the 0xff0000 bits it owns
+  ([tailscale.com/util/linuxfw](https://pkg.go.dev/tailscale.com/util/linuxfw),
+  [netns_linux.go](https://github.com/tailscale/tailscale/blob/main/net/netns/netns_linux.go)).
+  Setting a mark (`SO_MARK`) needs `CAP_NET_ADMIN`, so trusting it trusts
+  root only; root can drop the table anyway. Mullvad's split tunnel
+  exempts traffic the same way, by mark
+  ([Mullvad split tunneling](https://mullvad.net/en/help/split-tunneling-with-linux-advanced)).
+- **LAN DNS.** Mullvad blocks DNS to the LAN by default in lockdown mode
+  ([Mullvad app docs](https://mintlify.com/mullvad/mullvadvpn-app/security/kill-switch)).
+  We do the same: queries to a hostile resolver say what the user looks
+  up even when nothing else leaves.
+- **DHCP is let through** by port pair, outgoing only. Root-only ports
+  (68, 546) on the source side, so a user process cannot use them.
+- **Interface names** come from `ip -j route`; anything that is not a
+  plain kernel name is refused instead of quoted into the ruleset.
+- **Open windows, recorded, not closed by step 1:**
+  - Boot: until `gjallar-vpn-trust` runs once, nothing blocks. Closed by
+    step 3 below.
+  - A new uplink (USB tethering, a second Wi-Fi) is outside the table
+    until the dispatcher reruns the service, a second or so.
+  - Signing in to Tailscale again through the browser is blocked on an
+    untrusted network; the pause (step 2) is the way out.
+- **Default stays off.** With `exitNode = ""` (fresh installs, e2e) the
+  block is never loaded.
+
+### Step 2: notice and pause (built, branch vpn-fail-closed)
+
+Questions 23 and 24 answered: the local seat and an administrator's
+password, admins too; the pause ends on a network change, before sleep,
+on reboot, and after one hour at most. Built 2026-10-21:
+
+- **Notice.** `gjallarctl vpn notice` runs in the session at login and
+  each time `/run/gjallar/vpn-trust.json` changes
+  (`apps/tailscale/home.nix`). One notice per network join: it says which
+  network, what failed, and what a pause gives away, with "Pause VPN on
+  this network" and "Keep blocked". It closes by itself when the network
+  changes or the block ends. A network without a key (no gateway hardware
+  address) gets the notice without the pause button.
+- **Bar.** The `gjallar/vpn` noctalia plugin shows a shield while the VPN
+  blocks this network or a pause lets it through. A click pauses, or ends
+  the pause.
+- **Pause.** `gjallarctl vpn pause` asks the settings service
+  (`PauseVPN`). It checks the caller sits in a login session, asks the
+  polkit action `org.gjallaros.vpn.pause` (an administrator's password,
+  every time), checks again that the same network is still blocked, and
+  writes `/run/gjallar/vpn-pause/pause.json` for one hour. `gjallarctl
+  vpn resume` ends it without a password.
+- **Ends.** A transient timer at the end time, the sleep hook
+  `gjallar-vpn-pause-sleep`, a network change (the key no longer
+  matches), and a reboot (`/run`). `gjallarctl vpn status` prints who
+  paused it and until when.
+- VM test `tests/nix/vpn-fail-closed.nix` covers the pause: it lets the
+  network through, a new address on the uplink ends it, it runs out on
+  its own, `resume` and the sleep hook end it, and a pause without the
+  settings service is refused. Passed 2026-10-21, with `tailscale-trust`
+  still passing.
+- Trust runs no longer wait 30 s for a tailscaled that systemd reports
+  stopped or failed; that wait held up every decision, a pause among
+  them, while Tailscale was down. The block stays in place meanwhile.
+- fw13 VM check 2026-10-21 (eaaf444b): the notice and the password
+  dialog fit Noctalia (the notice cuts each line after about three rows,
+  so the body is three short lines); pause from the notice and from the
+  bar, Cancel, "Keep blocked", ending the pause from the bar, a rebuild
+  during a pause (the pause survives it) and the `exit-node default`
+  undo all passed. Rows in `.vm/installer-e2e/REGRESSION.md` under VPN.
+
+Security pass for step 2:
+
+- **What the pause holds to.** The network key is a hash of the device,
+  Wi-Fi name, key management, gateway address, gateway hardware address
+  and the subnets. A cloned Wi-Fi name alone does not match; any of these
+  changing ends the pause.
+- **The pause file.** `gjallar-vpn-trust` uses it only when root owns it,
+  nobody else can write it, it names this network, and it lasts at most
+  one hour from its start. Anything else counts as no pause, so a broken
+  or planted file fails closed.
+- **Who may pause.** Only a process in a login session (user units count
+  for the display session, as with polkit), and only with an
+  administrator's password. The password dialog names the network risk.
+  Ending a pause only tightens, so it needs no password.
+- **Notice text.** The Wi-Fi name is escaped before it goes into the
+  notice body; the bar shows a name with quotes or escapes as "this
+  network".
+- **Open window, recorded:** while paused, apps on that network reach the
+  internet without the tunnel. That is the point of the pause; the dialog
+  and the notice say so.
+
+### Step 3: block from boot until the first check (done dfe29ba3)
+
+Until `gjallar-vpn-trust` ran once after boot, nothing blocked: the window
+from network up to the first check, and longer if the service never ran.
+Built 2026-10-22:
+
+- `gjallar-vpn-boot-block` runs before `network-pre.target`, without
+  default dependencies, from `sysinit.target`, like the NixOS iptables
+  firewall. It runs `gjallarctl vpn boot-block`, which loads the same
+  table `inet gjallar_vpn_block`, with nothing let out but loopback, the
+  Tailscale device, tailscaled's own marked packets and the DHCP client.
+  Local subnets are not known yet, so the LAN is blocked too; link-local
+  and local multicast pass.
+- It writes the marker `/run/gjallar/vpn-boot-block`. The first verdict
+  of `gjallar-vpn-trust` swaps the table in one transaction (blocked) or
+  deletes it (not blocked), and removes the marker either way. A check
+  with no network yet keeps the table.
+- `gjallarctl vpn status` before the first check prints "not checked yet"
+  and names the boot block and `systemctl status gjallar-vpn-trust`.
+- No boot block when the policy wants no exit node (`exitNode = ""`, the
+  default, and e2e) or when a verdict already exists (a rebuild on a
+  running system). A policy file that does not load blocks anyway; a
+  broken override is ignored.
+- `networking.nftables.flushRuleset` would delete the table when
+  `nftables.service` starts, so an assertion refuses that combination.
+- VM test `tests/nix/vpn-fail-closed.nix`: the unit finished before
+  `network-pre.target`; with the trust service held back, only the tunnel
+  carries the internet and the LAN is cut, marked packets pass; the first
+  verdict lifts the block and status no longer says "not checked yet".
+  `tailscale-trust` checks the unit wiring and that it is absent without
+  an exit node. Passed 2026-10-22.
+
+How others handle it:
+
+- Mullvad ships `mullvad-early-boot-blocking.service`, ordered before
+  `network-pre.target` with `DefaultDependencies=no`, which blocks all
+  traffic until the daemon takes over
+  ([unit file](https://raw.githubusercontent.com/mullvad/mullvadvpn-app/main/dist-assets/linux/mullvad-early-boot-blocking.service)).
+  Its lockdown mode blocks the LAN too unless "allow LAN" is on
+  ([kill switch docs](https://mintlify.com/mullvad/mullvadvpn-app/security/kill-switch)).
+  NixOS packages it as `services.mullvad-vpn.enableEarlyBootBlocking`,
+  off by default.
+- ProtonVPN's permanent kill switch keeps its rules across reboots, so a
+  machine stays offline until the app connects; users who uninstall the
+  app without turning it off are left with no network
+  ([Fedora discussion](https://discussion.fedoraproject.org/t/how-to-proton-vpn-killswitch-stuck-on-a-solution/75457),
+  [System76](https://support.system76.com/articles/fix-pvpn-killswitch)).
+  Ours lives in `/run` and comes from the policy, so turning the exit
+  node off and rebuilding removes it.
+- `network-pre.target` is the point firewalls order before
+  ([freedesktop bug 79600](https://bugs.freedesktop.org/show_bug.cgi?id=79600)).
+
+Security pass for step 3:
+
+- **Fails closed when the trust service never runs.** The table stays
+  until a verdict replaces it; there is no timeout that opens it.
+- **The marker only reports.** Nothing reads it to decide on the block,
+  so a planted or deleted marker changes the status text, not the rules;
+  `/run/gjallar` is root-only.
+- **The LAN at boot.** Blocked like Mullvad without "allow LAN". The first
+  check opens the local subnets it can prove, a few seconds after the
+  network is up.
+- **Policy errors.** A policy that does not load blocks; a broken
+  override is ignored, so neither can switch the boot block off.
+- **Open windows, recorded:** a new uplink after the first check is still
+  outside the table until the dispatcher reruns the service (step 1);
+  with no exit node set there is no block at all, by design.
+
+fw13 VM 2026-10-27 (EMULATED exit node): the boot block ran before network-pre, the table stayed through the first check, off-LAN traffic was cut while the LAN answered, and the revert removed the table.
+
+## 17. Nextcloud: what downloads first on a new machine (done)
 
 Job 173. On a fresh book12 install the client went through about 2100
 Music files before `claude/` (lower case sorts last), and ODDC work waited
-over half an hour. Jade: a new machine syncs only the folders the user
-picks first; everything else is opt-in. Folder names come from the user,
-never from this repository.
+over half an hour. Jade: everything is a placeholder; content comes down
+only for folders the user picks, or for a file the user opens. Folder
+names come from the user, never from this repository.
 
 ### Today
 
 - New accounts start in virtual-files mode (OpenVFS, patch
-  `nextcloud-vfs-default.patch`). Files are placeholders until opened.
-- Upstream turns "Choose what to sync" off when virtual files are on:
-  `Folder::supportsSelectiveSync()` returns false for VFS folders
-  (`src/gui/folder.cpp`). The sync engine still reads the exclude list
-  from the folder's journal database on every run (`SyncEngine::startSync`
-  in `src/libsync/syncengine.cpp`); upstream uses that for end-to-end
-  encrypted folders even with VFS on.
-- The list lives in the journal database (`.sync_*.db` in the sync
-  folder), not in `nextcloud.cfg`. Writing it from outside while the
-  client runs races with the client, so it has to go through the client.
+  `nextcloud-vfs-default.patch`) with the root pinned online-only. Files
+  are placeholders until opened.
+- gjallarOS starts the wizard with `--overrideserverurl` and
+  `--overridelocaldir`, so it skips the sync options page and creates the
+  folder right after login (`AccountWizardController`, client 34.x).
+- A folder can already be kept on the device later: the Dolphin menu
+  offers "Always available locally" and "Free up local space" for OpenVFS
+  (`socketApiPinStateActionsShown()` is true). There is no way to pick
+  before the first sync.
+- OpenVFS keeps the pin in an xattr on the placeholder
+  (`OpenVFS::setPinState`), so a folder can only be pinned once its
+  placeholder exists. During discovery a new folder inherits the pin of
+  its parent (`ProcessDirectoryJob::computePinState`).
 - Open fact (asked ODDC b12, answer 11.2): was book12 in virtual-files
-  mode during that sync? With placeholders only, half an hour means the
-  first listing is slow, which a folder list fixes the same way.
+  mode during that sync? If not, the half hour was downloads, and this
+  design fixes it. If it was, the first listing itself is slow and needs
+  its own look.
 
 ### How others handle it
 
-- Nextcloud: folder selection only with virtual files off
-  ([forum](https://help.nextcloud.com/t/choose-what-to-sync-not-available/243421)).
-- OneDrive: "Choose folders" and Files On-Demand work together; unticked
-  folders stay in the cloud and per device
-  ([UW guide](https://asais.uw.edu/kb/onedrive-file-status-sync-settings)).
+- OneDrive: Files On-Demand is the default; a folder marked "Always keep
+  on this device" downloads, and so do new files added to it later
+  ([Microsoft](https://support.microsoft.com/office/save-disk-space-with-onedrive-files-on-demand-0e6860d3-d9f3-4971-b321-7092438fb38e)).
+- Dropbox: folders not excluded are online-only by default; "available
+  offline" downloads one folder. Selective sync is a separate tool that
+  hides a folder completely
+  ([Dropbox](https://help.dropbox.com/sync/make-files-online-only),
+  [UMich](https://teamdynamix.umich.edu/TDClient/30/Portal/KB/ArticleDet?ID=6670)).
+- Google Drive for desktop, streaming mode: "Available offline" per file
+  or folder, new items in such a folder come down too
+  ([Google](https://support.google.com/drive/answer/2375012)).
+- Nextcloud: "Choose what to sync" (exclude) works only with virtual
+  files off (`Folder::supportsSelectiveSync()`).
+
+All three big ones use placeholders by default and a per-folder "keep on
+this device" pin. None asks at first login; gjallarOS adds that one
+question because a fresh machine is exactly when the user knows what
+they need first.
+
+### Decisions (Jade, 2026-10-20 and 2026-10-21)
+
+- Q27: the picker opens right after the account wizard.
+- Q28: new top-level folders made on another device show up as
+  placeholders, like everything else.
+- Closing the picker without a pick: everything stays a placeholder.
+- The pick is not saved anywhere outside this device's client. A
+  reinstall or a second machine starts with an empty picker. (Considered:
+  `user.config.json`, which reaches the world-readable Nix store, build
+  agents and the recovery image; a 0600 file in home, which needs an
+  unencrypted export to travel; a hidden file in the user's own Nextcloud,
+  which would expose names of end-to-end encrypted folders.)
 
 ### Security pass
 
-- Folder names are private data. They stay in the user's own config and
-  the client database; no logs with names, no handoff copies.
-- Taking a folder out of sync removes its local copy. A folder with local
-  changes that have not been uploaded must never be taken out silently:
-  the client refuses and says which folder still has changes. (Upstream
-  behaviour here still needs a VM check before the patch.)
-- New top-level folders made on another device follow the opt-in rule:
-  they wait for a yes instead of syncing on their own (question 28).
-- No change to the server side; the list only limits what this device
-  fetches.
+- Folder names are private data. The pick stays in the client's journal
+  database inside the sync folder, which already holds every name. The
+  patch logs counts, never names.
+- A pin downloads every file in that folder, also files others add later
+  to a shared folder inside it. The picker says so in one line. A new
+  share lands where the server's share folder setting puts it; inside a
+  pinned folder it downloads too, anywhere else it is a placeholder.
+- Disk space: upstream already stops downloads before the disk is full
+  (`criticalFreeSpaceLimit`, `freeSpaceLimit` in
+  `owncloudpropagator.cpp`). The picker shows the size of the pick next to
+  the free space, so the user sees it before saying OK.
+- A hostile or broken server can send odd folder names (control
+  characters, right-to-left marks). The worst outcome is a wrong folder
+  downloaded, not data leaving the device; names are shown the way Qt
+  shows file names everywhere else.
+- No server change, nothing excluded: the server copy is never touched,
+  and unpinning later ("Free up local space") keeps files with local
+  changes: OpenVFS refuses to turn a file changed since the last sync
+  back into a placeholder (`OpenVFS::createPlaceholder`).
 
-### Proposed design
+### Design
 
-1. Client patch: under OpenVFS, "Choose what to sync" works like without
-   virtual files, using the engine's existing exclude list.
-2. First login on a new machine: right after the account wizard, the
-   folder picker opens with the real server folders, nothing ticked
-   except what the user picks. Sync starts after the pick.
-3. The picked list is saved in the user config so a reinstall or a second
-   machine of the same user can offer it again (question 27).
-4. Later changes go through the same picker; a terminal form
-   `gjallarctl nextcloud folders` with zsh completion is optional
-   (question 27).
+1. Client patch, wizard side: when the wizard created the folder without
+   showing sync options (the gjallarOS override case) and the folder is
+   OpenVFS, the folder starts paused and the picker opens: the account's
+   folder tree with sizes, nothing ticked, title "Keep on this device",
+   buttons OK and "Not now". The tree is the existing
+   `SelectiveSyncWidget`; ticked folders become the pick.
+2. The pick goes into the journal database as its own list type, then
+   the folder un-pauses. "Not now" writes nothing.
+3. Client patch, engine side: during discovery a folder on that list
+   counts as pinned "always local" even before its placeholder exists, so
+   its files download in the first sync instead of becoming
+   placeholders. After each finished sync the client writes the real pin
+   on every listed folder that now exists and drops it from the list. A
+   folder that is gone from the server after a full sync is dropped too.
+4. Later changes stay with the Dolphin menu ("Always available locally",
+   "Free up local space"); README says where.
+5. Tests: client patch check in `tests/nix/nextcloud-client-patches.nix`;
+   e2e-fw13 against a SYNTHETIC test account and folder tree: pick one of
+   three folders, check that only it is hydrated and pinned after the
+   first sync, a new top-level folder arrives as a placeholder, "Not now"
+   leaves all placeholders, and a quit during the first sync keeps the
+   pick.
+
+### Built (2026-10-21)
+
+All passed on the fw13 VM against a local SYNTHETIC test server.
+
+- Picker and placeholders: 8ee44c2e. The pick survives a kill during the
+  first sync and applies after the restart.
+- Q42: openvfs unmounts when the client exits; a mount left from before
+  the client started is a setup error (713c504b).
+- A second start with a bad option no longer exits the running client
+  (5630fd4c). A plain launch opens the settings window (713395d8).
+- Q43: a crashed client restarts after 10 s, five starts in five minutes
+  at most. Quit stays quit (27c1646f).
+- Q44: the settings window floats at its own size instead of being cut
+  off, and the folder list is titled "Sync folders" (74f1fb25).
+
+## 18. Time sync: authenticated, the same on every network
+
+Written 2026-10-20 for Plane GJALLAROS-200 ("time sync follows the VPN").
+Jade answered questions 30 to 33 on 2026-10-20; step 1 is built, steps 2
+and 3 are next.
+
+Until step 1, `system/default.nix` turns on chrony with
+`server 192.168.8.1 iburst prefer` plus the NixOS default pool
+(`0-3.nixos.pool.ntp.org`). All of it is plain NTP: nothing proves who
+answered. The router line is the same on every install and every network,
+and 192.168.8.0/24 is a common router default, so a laptop on a foreign
+network with its own 192.168.8.1 prefers that box's time (loophole 25).
+The clock matters here: USB and Thunderbolt approvals lapse by time
+(section on `lastUsed`, above), TLS checks certificate dates, and logs and
+snapshots are ordered by it.
+
+### How others handle it
+
+- Ubuntu 25.10 and later ship chrony with NTS on by default: four
+  `ntp.ubuntu.com` NTS pools, plus a bootstrap server
+  `ntp-bootstrap.ubuntu.com` whose certificate comes from Ubuntu's own CA
+  so a machine with a badly wrong clock can still start. Time from DHCP is
+  commented out. If NTS-KE (TCP 4460) is blocked, there is no sync
+  ([Ubuntu chrony client docs](https://ubuntu.com/server/docs/how-to/networking/chrony-client/),
+  [Phoronix](https://www.phoronix.com/news/Ubuntu-25.10-Chrony),
+  [OMG! Ubuntu](https://www.omgubuntu.co.uk/2025/06/ubuntu-chrony-nts-default-25-10)).
+- Fedora ships chrony with the plain pool; NTS is opt-in. Fedora Magazine
+  and the Fedora NTS change page show NTS servers such as
+  `time.cloudflare.com` and Netnod's `nts.netnod.se`
+  ([Fedora Magazine](https://fedoramagazine.org/secure-ntp-with-nts/),
+  [Fedora change page](https://fedoraproject.org/wiki/Changes/NetworkTimeSecurity)).
+- GrapheneOS does not use NTP at all, NTS included; it reads the time from
+  an HTTPS response header of its own server
+  ([GrapheneOS forum](https://discuss.grapheneos.org/d/2609-ntphtpdate-and-other-servers/24)).
+- Hardening guides for chrony say the same three things: NTS sources only,
+  more than one operator, no DHCP-supplied servers
+  ([dev.to guide](https://dev.to/lyraalishaikh/stop-trusting-plain-ntp-practical-network-time-security-with-chrony-on-linux-2g5a)).
+
+### Security pass
+
+- **Plain NTP can be moved by anyone on the path.** A café network, a
+  hotel or anything between the laptop and the pool can answer with any
+  time. With the router line, the attacker does not even need to be on the
+  path: owning a 192.168.8.1 on the local network is enough.
+- **NTS stops forged time, not blocked or delayed time.** chrony's own
+  manual: with authenticated sources an attacker can drop or delay
+  packets, up to the `maxdelay` and `maxdistance` limits, but cannot change
+  the timestamps; the damage is a limited slew or step. It also says the
+  unauthenticated sources must go, or they become the way in
+  (chrony.conf(5), `authselectmode`).
+- **One operator should not set the clock alone.** `minsources 2` with
+  sources from different operators means a single wrong or hostile server
+  cannot move the clock; with one source left, chrony holds the clock
+  instead (chrony.conf(5), `minsources`).
+- **A wrong clock breaks NTS itself.** NTS-KE is TLS, so a clock far off
+  rejects every certificate. chrony offers `nocerttimecheck N`, which skips
+  the date check for the first N updates; its manual calls this a last
+  resort with "important security implications" because an expired, leaked
+  key would be accepted while the check is off. Ubuntu avoids it with its
+  own bootstrap CA, which we do not have. Most laptops keep a working RTC,
+  so the window is small, but it is a real trade (question 33).
+- **Blocked port means no time.** A network that blocks TCP 4460 stops NTS.
+  On an untrusted network the exit node carries the traffic, so the block
+  only bites on trusted networks or with the VPN off. Falling back to plain
+  NTP would hand the attacker the clock again, so the fallback is "keep
+  the current clock and say so" (question 32).
+- **Privacy.** Each NTS operator sees the laptop's address and that it runs
+  NTS. On untrusted networks that is the exit node's address.
+- **What the VPN adds.** The tunnel is already authenticated: a router
+  reached at its tailnet address over WireGuard is a source nobody on the
+  local network can forge. That is the one place where "follows the VPN"
+  helps, if the router serves time there (question 31).
+
+### Decisions (questions 30 to 33)
+
+- **Q30:** four operators: Cloudflare, Netnod, PTB, time.nl.
+- **Q31:** the router is a fallback only when no NTS server works, and
+  only on a proven home network (its tailnet address if the router serves
+  time there).
+- **Q32:** plain NTP fallback only on a proven home or site network, with
+  small corrections only; elsewhere keep the clock and show "time not
+  confirmed since ...".
+- **Q33:** no own bootstrap server and no manual setting. Research further
+  (JODS as a time server later, maybe); if the first-update exception
+  stays, harden it.
+
+### Research for question 33 (2026-10-21)
+
+- All four operators answered NTS-KE on TCP 4460 with a certificate that
+  verified: `time.cloudflare.com`, `nts.netnod.se`, `ptbtime1.ptb.de` to
+  `ptbtime4.ptb.de` and `ntspool.time.nl`. Netnod, PTB and time.nl use
+  90-day Let's Encrypt certificates, Cloudflare a one-year certificate.
+  A clock that is behind fails a certificate only when it is earlier than
+  the certificate's start date, so with renewals every 60 days or so the
+  clock has to be about two months or more behind to break NTS.
+- Three things keep the clock close without any exception: the RTC, which
+  works on most laptops; `chronyd -s`, which starts from the time chronyd
+  last stopped when that is later than the RTC; and the NixOS clock floor
+  (`time-epoch`, the release date of the build). NTS cookies saved in
+  `ntsdumpdir` let chronyd skip the TLS key exchange after a restart, so a
+  clock that starts wrong can still be corrected with saved cookies.
+- The cases left are a dead RTC on a machine that was off for months, or a
+  machine that comes back from storage. There the only tools are
+  `nocerttimecheck` or a second time protocol.
+- Roughtime (RFC 10049, Experimental) gives signed time without
+  certificates: the client knows the server's long-term key and needs no
+  date check. time.nl runs a pilot at `rough.time.nl` port 2002. There is
+  no Roughtime client in nixpkgs and chrony does not speak it. It fits
+  "JODS as a time server later": a JODS server could answer Roughtime with
+  a key that ships with the install. Not built now.
+
+### Design
+
+**Step 1, built 2026-10-21 (`system/services/time.nix`):**
+
+- The router line and the NixOS pool are gone from every install. This
+  closes loophole 25.
+- One NTS source per operator: `time.cloudflare.com`, `nts.netnod.se`,
+  `ptbtime1.ptb.de`, and `ntspool.time.nl` as a pool with
+  `maxsources 1`. With `minsources 2`, one operator alone never moves the
+  clock.
+- `authselectmode require`: chrony selects authenticated sources only.
+- No servers from DHCP: the NixOS chrony dispatcher only switches sources
+  on and off line.
+- `chronyd -s` and `enableNTS` (which sets `ntsdumpdir`) keep a clock that
+  starts wrong within reach of NTS.
+- `gjallarctl system status` shows `Time: confirmed by NTS at <time>`, or
+  `Time: not confirmed since <time>` when no source updated the clock in
+  the last two hours or chronyd lost sync. Read from `chronyc tracking`,
+  which every user may run.
+- Nix check `checks.time` reads the chrony.conf the module generates and
+  runs `chronyd -p` on it.
+
+**Step 2, the hardened first-update exception (Q33), built 2026-10-21:**
+
+How others handle it:
+
+- Pop!_OS turns the certificate date check off on the first attempt by
+  default and falls back to unauthenticated time; users can turn both off
+  with `nocerttimecheck 0` and `authselectmode prefer` in
+  `/etc/chrony/conf.d` (https://system76.com/time).
+- Ubuntu adds a bootstrap pool, `ntp-bootstrap.ubuntu.com`, whose NTS
+  certificates come from Ubuntu's own long-lived CA, so the date check
+  passes with a wrong clock
+  (https://patches.ubuntu.com/c/chrony/chrony_4.7-1ubuntu3.patch).
+- chrony's default is `nocerttimecheck 0`. Its manual calls the directive
+  a last resort for machines without an RTC, because a server certificate
+  could be used after it expired
+  (https://chrony-project.org/doc/4.8/chrony.conf.html).
+- Chrome treats a wrong clock as a security problem of its own: whoever
+  controls the clock can get expired certificates accepted. Chrome gets
+  its time from a signed Google service, and Roughtime was started because
+  at least a quarter of Chrome's certificate errors came from wrong clocks
+  (https://www.chromium.org/developers/design-documents/sane-time/,
+  https://imperialviolet.org/2016/09/19/roughtime.html).
+- Q33 rejects our own bootstrap server, so the Ubuntu way is out; the
+  Pop!_OS way is too loose (every boot, any one server, fallback to plain
+  NTP). The design below keeps their idea and closes what they leave open.
+
+What the fw13 VM showed (chrony 4.8, clock set back to 2026-06-01,
+saved keys moved aside, SYNTHETIC test of the real servers):
+
+- Netnod, PTB and time.nl failed the key exchange ("certificate chain uses
+  not yet valid certificate"). Cloudflare's one-year certificate was still
+  valid and its key exchange worked.
+- With one source and `minsources 2`, chronyd did not move the clock and
+  stayed "Not synchronised". So a working key exchange is not proof of
+  sync; only the tracking state is.
+- A chrony RTC file that claimed a large RTC error was ignored after a
+  restart ("RTC time before last driftfile modification"), because
+  `chronyd -s` does not go back before the drift file
+  (https://chrony-project.org/doc/4.6/chronyd.html). Restarting chronyd
+  right after a step is therefore safe.
+
+Built (`system/services/time.nix`, `gjallarctl system time-check`):
+
+- chrony.conf has `confdir /run/gjallar-time/chrony`, empty on every boot.
+  The exception is only ever a file there, never part of the build.
+- The `gjallar-time-check` service runs after chronyd at boot and every
+  30 minutes. When chronyd confirms the clock within 90 seconds, it writes
+  the confirmed time to `/var/lib/gjallar-time/confirmed` and stops.
+- Otherwise, once per boot, it fetches the certificate chain from each of
+  the four operators (TLS on port 4460, nothing sent) and checks it
+  against the operators' own roots only: ISRG Root X1 and X2, Root YE and
+  YR, and SSL.com Root Certification Authority ECC.
+- The exception is allowed only when at least two operators send a chain
+  that verifies for their host name at some date, at least one shows the
+  clock behind the certificate's start, the certificate is still valid
+  after the last confirmed time, and no operator shows the clock ahead.
+  A clock ahead never gets the exception.
+- Then it writes `nocerttimecheck 1`, `nosystemcert` and
+  `ntstrustedcerts` (the pinned roots) into the confdir and restarts
+  chronyd. `minsources 2` and `authselectmode require` stay, so two
+  operators still have to agree.
+- After the first update, or after 2 minutes without one, the file is
+  removed. The clock may only move forward: never earlier than the clock
+  before plus the time that passed, never earlier than the last confirmed
+  time. A step back is refused: chronyd stops, the clock goes back, and
+  the drift file gets the right date so `-s` cannot bring the wrong one
+  back.
+- A forward step is confirmed again: chronyd restarts without the saved
+  keys, so every source does a new key exchange with the date check on.
+  Only that makes the time "confirmed".
+- `gjallarctl system status` shows what happened this boot (from
+  `/run/gjallar-time/state.json`): set with the check off and not yet
+  confirmed, confirmed afterwards (with how far the clock was behind),
+  refused, or failed. A run that stops halfway leaves the file in `/run`;
+  the next run removes it before anything else.
+
+Security pass for step 2:
+
+- Threat: someone who holds a leaked key of an expired operator
+  certificate and sits on the network path. The exception needs two such
+  keys from two operators, both for certificates that were still valid
+  after the last confirmed time, and the result can only move the clock
+  forward. The confirmed time on disk is the floor.
+- Threat: a clock pushed ahead to make old certificates look expired.
+  That leads to "no exception", not to a step.
+- Threat: a CA outside the four operators' roots. During the exception the
+  system bundle is off (`nosystemcert`); only the pinned roots count.
+- Residual: a clock far ahead, or behind with only one operator reachable,
+  stays wrong and shows "not confirmed" until step 3 or a person sets it.
+- Residual: the very first boot has no confirmed time, so the floor is the
+  build's `time-epoch`.
+- Residual: when an operator moves to a root not in the list, the
+  exception counts it as untrusted until the list is updated; strict NTS
+  is not affected.
+
+**Step 3, router fallback on a proven home or site network (Q31, Q32),
+built 2026-10-21:**
+
+- Only when no NTS source works and the VPN verdict is home or site with
+  a router proven by its signed answer (`internal/nettrust`). A home
+  verdict from a trusted Wi-Fi alone does not count. The verdict now
+  carries the router's tailnet addresses and the local address its proof
+  came from (`routerTailnet`, `routerVia`).
+- The verdict file must be for the network the device is on now: the
+  check compares its network key with the current one, so a verdict left
+  over from the last network never counts.
+- The router's tailnet address when it answers NTP there (WireGuard
+  carries it, so nobody on the LAN can answer in its name); otherwise its
+  proven local address. A plain NTP query checks the answer first: mode 4,
+  stratum 1 to 15, and our transmit time echoed back.
+- `gjallar-time-check` writes `/run/gjallar-time/chrony/router.conf` and
+  restarts chronyd. The confdir comes last in chrony.conf, so these lines
+  win: `authselectmode ignore` and `minsources 1` (with `prefer` chronyd
+  drops every unauthenticated source while an NTS source is configured),
+  `makestep 1 0` (never steps), `maxchange 60 0 -1` (an offset over 60 s
+  is ignored, every time), `maxslewrate 1000` and `maxdrift 500`, and the
+  one `server` line for the router.
+- Every later run (timer, and a path unit on `/run/gjallar/vpn-trust.json`)
+  keeps the fallback only while the verdict still names the same router on
+  the same network and fewer than two NTS sources are reachable. chronyd
+  counts a source reachable only after an authenticated answer, so two
+  reachable NTS sources mean NTS works again. Otherwise the file goes,
+  chronyd restarts strict, and the run waits for NTS as usual.
+- `vpn apply` writes the verdict file only when it changed, so the path
+  unit does not fire on every 5 minute recheck.
+- Router time never counts as confirmed: no stamp on disk, and status
+  shows `Time: set by the home router <name> at ..., not confirmed by NTS`
+  while the router is the source. The fallback state is
+  `/run/gjallar-time/router.json` (name, address, network key, since).
+
+Security pass for step 3:
+
+- Threat model: the router is a device the owner put on the tailnet, so
+  it is trusted to route, not to tell the time. A lying or taken-over
+  router, or someone on the LAN answering for the local address, is what
+  the limits are for. Sources: the chrony 4.8 manual and source
+  (`update_sel_options` in sources.c, `is_offset_ok` and
+  `is_step_limit_reached` in reference.c), RFC 8915 for what NTS protects.
+- Without steps and with `maxslewrate 1000`, the clock moves at most
+  86 seconds a day, and never by an offset over 60 s. Certificate
+  validity is days to months, so no certificate turns valid or expired
+  through this in practice. TOTP codes (30 s) can drift by a window or two
+  over a day of fallback; the status line says the time is not
+  confirmed.
+- A verdict from another network cannot carry over: the network key
+  includes the gateway's hardware address and the subnets.
+- Changing networks restarts the check through the path unit; until it
+  runs, chronyd may still ask the old local address. The tailnet address
+  is preferred for that reason, and the limits above hold either way.
+- Residual: during the fallback `minsources 1` and `ignore` also let a
+  single NTS operator be chosen on its own. It is still authenticated, and
+  the fallback ends as soon as two answer.
+- Residual: each restart of chronyd sets the clock from the RTC (`-s`);
+  that is the same as at boot.
+
+**Step 4 (built, `1b51ff24`):** the time in the desktop (questions 60-62).
+
+- `gjallarctl system time-watch`, the user unit `gjallar-time-watch`,
+  asks chronyd every 30 s and writes `$XDG_RUNTIME_DIR/gjallar/time` for
+  the bar plugin `gjallar/time`. The clock shows only while the time is
+  not confirmed: `clock-exclamation` after 5 minutes without NTS (so a
+  normal boot never shows it), `clock-question` right away while the home
+  router sets the time. The tooltip says since when; a click opens
+  `gjallarctl system time` in a small window.
+- The card comes once per spell: the last NTS confirmation
+  (`/var/lib/gjallar-time/confirmed`) is 24 hours old or more, the device
+  has been online (NetworkManager `CONNECTED_GLOBAL`) for 15 minutes, and
+  the router fallback is off. The stamp names the spell, kept in
+  `~/.local/state/gjallar/time-notice-seen`; a new confirmation starts a
+  new one. Details opens the same window. The card closes when NTS
+  confirms the time while it is open. An install that never confirmed
+  counts the 24 hours from when the watch first saw that.
+- Offline the clock icon still shows after the 2 hours `clockFresh`
+  allows, but no card: without a network NTS cannot be asked, so there is
+  nothing to do.
+- e2e-fw13 passed on 2026-10-21: icon after the grace with NTS blocked,
+  click and card Details open the window, one card per spell across a unit
+  restart, router tooltip, icon gone after restore. The window is sized in
+  cells (84x12, `f341a3d0`) so no line wraps.
+
+**Later:** the time line in the settings app (Plane 218).
+
+**Tests:** step 1 has the Nix check and the e2e-fw13 run. Steps 2 and 3
+need NixOS VM tests: a plain NTP server on the LAN that the client must
+ignore, only one source answering (the clock must not move), and a clock
+months behind with the exception. Step 2 has unit tests for every decision
+and the e2e-fw13 run on 2026-10-21 at 86b6c787: normal boot, clock months
+behind (exception, then confirmed), clock ahead and port 4460 blocked (no
+exception). The refused step back has unit tests only; it needs a server
+that answers with an older time.
+
+Step 3 has unit tests for the candidate order, the reply check, the
+reachable count, the status lines, and start, keep and end of the
+fallback. The e2e-fw13 run on 2026-10-21 at 7e222547 used an EMULATED
+router (an NTP answerer in a network namespace) with SYNTHETIC home
+verdicts, NTS blocked by an nft table, and the clock 20 s behind:
+
+- Home verdict for the current network: the path unit started the check,
+  all four NTS sources unreachable, fallback on, the router selected,
+  status `Time: set by the home router ...`. The clock was slewed, not
+  stepped.
+- Router 300 s off: chronyd logged the adjustment as over 60 s and
+  ignored it; the clock did not move.
+- Verdict for another network: fallback off, chronyd strict again.
+- Home verdict again, then NTS unblocked: after four NTS sources were
+  reachable the next run ended the fallback ("NTS sources answer again"),
+  NTS stepped the clock to the right time and status showed `Time:
+  confirmed by NTS`.
+
+## 19. TPM bus protection (parameter encryption)
+
+Written 2026-10-21 for Plane GJALLAROS-248. Jade asked whether we use TPM
+parameter encryption against the bus attacks from a CypherCon talk.
+
+Short answer: yes for disk unlock. systemd encrypts that traffic, and our
+LUKS tokens carry what it needs. Parameter encryption does not close the
+bigger gap: on a machine with a separate TPM chip, unlock without a PIN can
+be beaten by someone who has the device and the tools.
+
+### The talk
+
+I found no CypherCon talk by Cook on this (CypherCon 9 speaker page,
+Sessionize, web search). Dale Cook published a low-cost tool in March 2025
+that records the traffic between the CPU and a separate TPM chip and shows
+the BitLocker volume key in plain, because BitLocker sends it unencrypted.
+CVE-2026-0714 (Moxa UC-1222A) is the same flaw for a LUKS key on an SPI
+TPM. The attack class is public: reading or changing the traffic on the
+wire between the CPU and a separate TPM chip.
+
+### What we use today
+
+- **Disk unlock, PIN change, re-enroll:** systemd-cryptsetup and
+  systemd-cryptenroll (260.5 on the e2e-fw13 staging checkout; code read in
+  the v255, v260 and v261 sources of `src/shared/tpm2-util.c`).
+  - Every seal and unseal runs in a salted HMAC session with AES-128-CFB
+    parameter encryption in both directions
+    (`tpm2_make_encryption_session`). The salt is encrypted to the storage
+    root key (SRK), so a listener on the wire cannot work out the session
+    keys.
+  - The SRK's public part is stored in the LUKS token (`tpm2_srk`) at
+    enrollment, and unseal uses that stored key. A fake chip cannot answer
+    a session started against it.
+  - With a startup PIN the session is also bound to the PIN of the sealed
+    object. systemd's comment says this is against an active interposer
+    that relays to the real chip.
+  - e2e-fw13 token (2026-10-21): `tpm2_srk` present, `tpm2-pin` true,
+    `tpm2_salt`, `tpm2_pcrlock`. Secure Boot keys are our own, and
+    `tpm2-measure-pcr=yes` extends PCR 15 after unlock.
+- **Settings key** (`systemd-creds`, credstore): the same systemd code.
+- **USB trust signing** (`tpm2_sign`, `tpm2_readpublic`): no secret
+  crosses the wire, only the message digest and the signature. The public
+  key is read once per daemon start and is not compared with a stored
+  copy.
+- **Kernel:** `CONFIG_TCG_TPM2_HMAC` is off in our kernel. Upstream turned
+  the default off in 6.18 (and stable from 6.10) because of slow boots and
+  TPMs that failed to start with it. This covers the kernel's own TPM use
+  (PCR extends, random numbers), not disk unlock.
+
+### How others handle it
+
+- **BitLocker:** no parameter encryption. Public research has read the
+  volume key off the wire of separate TPM chips many times; the vendor
+  advice is a startup PIN.
+- **systemd (Fedora, Arch, NixOS and others):** encrypted sessions as
+  above; the SRK in the token since v255.
+- **Linux kernel:** HMAC and encrypted sessions for its own TPM use,
+  optional, off by default since 6.18.
+- **TCG bus protection guidance (2023):** parameter encryption against
+  passive listeners; it says this does not stop active attacks.
+
+### Security pass
+
+Threat model: a laptop lost or stolen, switched off or locked, and an
+attacker with time, the device and hardware tools.
+
+- **Listener on the TPM wire:** covered by the encrypted session. Checked in
+  the source and in the token.
+- **Device on the wire that relays and changes traffic:** the unsealed key
+  stays encrypted to the session, because the SRK is pinned in the token.
+  The PIN binding adds to it.
+- **Faked boot measurements on a separate TPM chip:** not covered by any
+  bus protection. Werling, Zahin and Seifert (ACSAC Workshops 2025) show
+  that a separate TPM can be brought to the measured state of a normal
+  boot from another system, and then gives out keys sealed only to that
+  state. Their conclusion: sealed keys need a PIN. TPMs inside the CPU
+  (firmware TPMs) have no outside wire and are much harder to attack this
+  way.
+- **So:** with a PIN, the DA lockout (15 tries, 2 h, Jade 2026-10-19)
+  limits guessing on every TPM type. Without a PIN, "Automatic" holds
+  against reading the removed disk, but not against a skilled attacker
+  with the machine on separate-chip models. The installer text today does
+  not say that.
+- **Unknown TPM type:** handled as a separate chip, shown as "not
+  confirmed" (rule for security facts from ODDC).
+- **USB trust key not pinned:** low. Swapping the key also needs writing
+  root-owned files on the encrypted disk.
+- **Kernel HMAC off:** low for us; no disk key goes through the kernel's
+  TPM use.
+
+### Design (Jade, 2026-10-21, Q46-Q49)
+
+Jade: "do whats sane and secure here" (Q46), "Suggest once" (Q47), "all
+security bs goes in" (Q48), kernel HMAC "Leave off for now" (Q49).
+
+1. ODDC fact per model: TPM inside the CPU or separate chip, and its bus
+   (asked as ODDC answer item 103). Until ODDC answers, every model counts
+   as unknown, which is handled like a separate chip.
+2. Installer: on separate-chip or unknown models, "PIN at startup" is
+   preselected and marked recommended, and a plain line under "Automatic"
+   says what it does not cover there. Automatic stays the default on
+   models ODDC confirms as firmware TPM.
+3. `gjallarctl luks status` shows the TPM type and whether a PIN is set.
+   On separate-chip or unknown models without a PIN, a card suggests a PIN
+   once: Add PIN, Later, Don't ask again.
+4. Status flags a TPM token without `tpm2_srk` (only systemd before 255
+   wrote those) and points at `gjallarctl tpm2 reenroll`.
+5. USB trust: store a SHA-256 fingerprint of the signing key's public key
+   (`tpm-key.sha256`, 0600) at provision and compare it every time the key
+   is read. Installs from before the pin get it only after the signed
+   state on disk verifies with that key. A different key at the handle is
+   an error, never a new trust root.
+6. Kernel HMAC stays off (Q49). It would need a self-built kernel on every
+   device and some TPM chips fail to start with it, which would leave the
+   disk on the recovery key. Look again when upstream fixes that or our
+   release cache builds kernels. Logged on the security page.
+
+**Status (2026-10-21):** items 2-6 built in e4078c7f. e2e-fw13 passed:
+status shows the chip type and no hint with a PIN set, the record carries
+`pin=1`, the old install got its USB key pinned after its signed state
+verified, and a wrong pin is refused. Item 1 waits on ODDC 103; until then
+every model is unknown and gets the PIN preselected. Still to test: the
+card on an install without a PIN, and fresh provisioning.
+
+**Tests:** unit tests for the token check and the status lines; installer
+text test per TPM type; e2e-fw13 for status and card. Wire attacks cannot
+be tested in a VM (swtpm has no bus); the source review above stands in
+for that, marked as such.
+
+**Sources:** systemd `src/shared/tpm2-util.c` (v255, v260, v261);
+arXiv 2608.14736 (Werling, Zahin, Seifert); TCG CPU to TPM Bus Protection
+Guidance (2023); kernel `Documentation/security/tpm/tpm-security.rst`;
+Phoronix and LKML on `TCG_TPM2_HMAC` off by default (6.18); Pulse Security,
+WithSecure, SCRT and NVISO write-ups on TPM sniffing.
+
+## 20. Thunderbird mail (built)
+
+Written 2026-10-21 for Plane GJALLAROS-249. Jade asked for Thunderbird with
+good defaults (encryption keys, a modern theme, ease of use). The user sets
+up every account. Decisions are Q50 to Q57 on the questionnaire page.
+
+### What Thunderbird does today
+
+- **OpenPGP keys** (built in since 78, RNP library). Secret keys are stored
+  under a random passphrase, and that passphrase is kept in the profile's
+  `key4.db`. Without a Primary Password, `key4.db` is not encrypted, so
+  anything that can read the profile (an app running as the user, a
+  snapshot, a backup, a copied home folder) can read the keys.
+- **Primary Password** encrypts `key4.db`: saved account passwords, login
+  tokens, OpenPGP keys and S/MIME certificates. It is asked once per
+  session and stays open until Thunderbird closes. A policy can require
+  it.
+- **Per-key passphrase** (since 115, bug 1679278): asked on every sign and
+  decrypt. There is no cache yet (bug 1834577 is open).
+- **Login keyring:** Thunderbird cannot unlock its Primary Password from
+  the desktop keyring.
+- **External GnuPG** (`mail.openpgp.allow_external_gnupg`): Thunderbird
+  hands secret-key work to gpg-agent. This is how smart cards work.
+- **Account autoconfig** asks the mail provider over plain HTTP by default
+  (`mailnews.auto_config.fetchFromISP.sslOnly` is false).
+
+### How others handle it
+
+- **Mozilla:** recommends a Primary Password for OpenPGP keys and documents
+  the policies used here (policy templates for Thunderbird 153).
+- **Hardening guides** (thunderbird-user.js, arkenfox style):
+  autoconfig over HTTPS only, remote content off, telemetry off, plain or
+  simple HTML reading.
+- **Tails:** ships Thunderbird with its built-in OpenPGP; mail over Tor.
+- **Distributions** (Fedora, Debian, NixOS): ship Thunderbird stock and
+  leave all of this to the user.
+
+### Decisions
+
+- Keys stay in Thunderbird, with a **Primary Password required** (Q54,
+  Q55). It is asked once per session. The opt-in **smart card** is the step
+  up: off by default, offered by the installer when Thunderbird is ticked,
+  declinable there (Q51). OpenPGP cards go through GnuPG (pcscd, scdaemon),
+  S/MIME cards through OpenSC as a security device.
+- No password-manager add-on. KeePassXC is being replaced (215); the
+  first-run guide tells the user to keep a key backup in their password
+  manager or on an offline copy.
+- The installer lists Thunderbird and ticks it (Q56). All mailto links on
+  the system open Thunderbird, whatever browser is installed (Q53).
+- Latest release, not ESR, like Firefox (Q57).
+- On by default: Simple HTML reading, key lookups only when the user asks,
+  a local first-run guide (account, Primary Password, key create or import,
+  key backup, Nextcloud calendar and contacts) (Q57).
+- Theme: follows the GjallarOS theme job (250, genbu Superbird look),
+  in the theme phase.
+
+### Security pass
+
+**Threat model.** (1) Someone with a copy of the home folder (snapshot,
+backup, old disk image). (2) An app running as the user. (3) A mail that
+tracks the reader or carries active content. (4) A network that sees or
+changes account setup. (5) The local AI agent reading mail data.
+
+- (1) The Primary Password encrypts `key4.db`; a copy without it is
+  useless. This is the main reason it is required. The disk is LUKS
+  encrypted; snapshots and backups are not, from inside the session.
+- (2) Not solved by any software option. While Thunderbird is open, an app
+  running as the user can use the unlocked keys. The smart card is the
+  only option that keeps the key itself off the computer. Said plainly in
+  the first-run guide.
+- (3) Remote content blocked (per-sender allow kept), Simple HTML, scam
+  detection on. Mail never runs JavaScript: Thunderbird has no switch for
+  it, and policies cannot set `javascript.*` prefs anyway.
+- (4) Autoconfig over HTTPS only (ISP fetch and guess), TLS 1.2 minimum.
+  Key lookups only on ask, since a lookup tells the key server who the user
+  writes to.
+- (5) The AI agent's read deny list gets `**/.thunderbird/**`, next to the
+  existing `.ssh`, `.gnupg` and `.password-store` lines.
+- Telemetry, data collection, promotions, in-app messages and chat are
+  locked off. Add-ons will follow the Firefox scheme (catalogue pins). Until
+  the catalogue has pins, only dictionaries, languages and themes install.
+- The smart card adds pcscd. It only runs on demand (socket), and only when
+  the option is on.
+
+**What stays open.** The Primary Password stays open for the whole session
+(no screen-lock timeout in Thunderbird). Logged on the security review
+page; a timeout would need upstream work (bug 1834577 covers the key cache).
+
+### Built (8a3890eb)
+
+- `apps/thunderbird/` in the app catalogue: `thunderbird-latest`, policies
+  in `/etc/thunderbird/policies/policies.json`. PrimaryPassword,
+  DisableTelemetry, DisableAppUpdate (Nix updates it), InAppNotification
+  off, `SSLVersionMin` tls1.2 (policies cannot set `security.tls.*`),
+  ExtensionSettings allows dictionary, locale and theme only.
+- Locked prefs: autoconfig HTTPS only (ISP fetch and guess), remote images
+  off, scam detection, data submission off, chat off, no remote "what's
+  new" page, start page = local guide, external GnuPG only with the smart
+  card. Presets the user can change: Simple HTML (`html_as` 3,
+  `disallow_mime_handlers` 3), no User-Agent header, no default-client
+  check.
+- Key lookups: Thunderbird already searches key servers only from the key
+  assistant or key manager, so nothing to set; the guide explains it.
+- Smart card (`thunderbirdSmartCard`, installer follow-up question,
+  `gjallarctl settings` security tier): pcscd (socket), gpg-agent with
+  pinentry-qt, `/etc/gnupg/scdaemon.conf` with `disable-ccid` and
+  `pcsc-shared` so scdaemon and OpenSC share the reader, OpenSC as a
+  security device.
+- mailto and `message/rfc822` go to Thunderbird (Home Manager mimeApps);
+  Firefox hands mailto to the system default when Thunderbird is on.
+- Nix check `checks.thunderbird`: policies, prefs, local start page with no
+  remote links, smart card parts only when on, no policies without the app.
+- Mozilla's "Know your rights" bar shows once on first start. It opens the
+  local about:rights page and is kept on purpose.
+
+VM results (e2e-fw13, 2026-10-21): rebuild rc 0; Thunderbird 157.0.1;
+policies and prefs as above; start page renders from the store in dark
+mode behind the account setup dialog; mailto and rfc822 defaults; Firefox
+mailto handler; AI deny line. Smart card off: no pcscd, no `/etc/gnupg`.
+Smart card on: pcscd.socket enabled, scdaemon.conf linked, GnuPG 2.4.9
+reads `/etc/gnupg` (`disable-ccid` set), agent and scdaemon answer, OpenSC
+module present. Not run: a real card (no reader in the VM).
+
+**Sources:** Mozilla support "Primary Password" and "OpenPGP in
+Thunderbird"; Thunderbird policy templates (policies-descriptions.ftl);
+bugzilla 1679278, 1834577, 1566458; cylab.be on Thunderbird key storage;
+GnuPG gpg-agent manual; Home Manager `programs.thunderbird`.
+
+## 21. Off-disk backup (later phase, Genbu/JODS)
+
+Moved to a later phase on 2026-10-21 (question 63): Genbu/JODS picks the
+backup server and runs it. Local snapshots (section 15) stay the only copy
+until then; they are not a backup when the disk dies.
+
+Already decided for that phase:
+
+- Key (question 64): one key per device, sealed to the TPM so the daily run
+  needs no one. It is shown once at setup, like the LUKS recovery key, for
+  paper or the password manager. A master public key can be added so JODS
+  can escrow a recovery copy.
+- Content (question 65): `@home` and `@config`, read from the newest local
+  read-only snapshot so the copy is consistent. The Nextcloud sync folder
+  is skipped (it already lives on the server). Never `@`, secrets under
+  `/var/lib` or `/nix`.
+- Timing (question 66): once a day when the server answers (home network
+  or tailnet), catching up after sleep, not on battery below 30%. A card
+  when nothing succeeded for 7 days.
+
+### Research so far
+
+- restic encrypts and authenticates everything (AES-256-CTR with
+  Poly1305-AES, scrypt for the key file). Its threat model says plainly
+  that it does not protect against deletion at the storage, and that a
+  compromised client can capture the key and steer `forget`
+  ([restic references](https://restic.readthedocs.io/en/stable/100_references.html)).
+  `rest-server --append-only` stops a client deleting, `--private-repos`
+  keeps devices apart ([rest-server](https://github.com/restic/rest-server)).
+  Pruning then needs the repository key on a trusted machine.
+- Borg's append-only mode only soft-deletes; the next normal-mode write by
+  a trusted machine makes the deletes final, and `rm` on the server still
+  works ([Borg notes](https://borgbackup.readthedocs.io/en/stable/usage/notes.html)).
+  Borg 1.2.5 fixed forged archives (CVE-2023-36811, TAM checks)
+  ([Borg changelog](https://borgbackup.readthedocs.io/en/latest/changes_1.x.html)).
+- Proxmox Backup Server encrypts on the client (AES-256-GCM), offers an RSA
+  master key for recovery and a paper key
+  ([PBS client](https://pbs.proxmox.com/docs-1/backup-client.html)). The
+  DatastoreBackup role can add and restore owned backups but not prune
+  ([PBS user management](https://pbs.proxmox.com/docs/user-management.html));
+  prune and garbage collection work on metadata on the server. The server
+  checks only a CRC on encrypted chunks
+  ([PBS technical overview](https://pbs.proxmox.com/docs/technical-overview.html)).
+  Proxmox recommends an off-site copy that pulls.
+- btrbk can send snapshots to a raw file target through GnuPG; the manual
+  marks it experimental and it sends full streams
+  ([btrbk.conf](https://www.mankier.com/5/btrbk.conf)).
+- Desktop tools: Déjà Dup uses restic, Pika Backup uses Borg; Time Machine
+  encrypts network backups with a password separate from the disk's.
+
+### Security pass (for that phase)
+
+- A device must never be able to delete or rewrite its own history: an
+  attacker with root on the device would wipe the backups first. The
+  device credential can only add and restore.
+- Pruning without handing the server the key: the server prunes from
+  metadata (PBS) or a separate trusted host prunes. A forged snapshot
+  shaped for the retention rule can push real ones out, so retention keeps
+  a time window, not a count.
+- The server must not read the data: encryption on the device, key per
+  device, nothing in the clear on the wire (TLS with a pinned server
+  certificate, like the AI endpoint).
+- What the server still sees: sizes, times, chunk counts. That is accepted.
+- The NixOS restic module runs as root without systemd hardening; we use
+  our own hardened units as for the snapshots.
+
+**Sources:** as linked above; Synology ransomware advisory and community
+threads on pull versus push.
+
+## 22. Apps to bring back later
+
+- draw.io was a test web application and is removed (2026-10-27, Jade).
+  It can come back as a regular catalogue app. Taking `drawio` out of
+  `apps/retired.json` is part of that job, so older configs keep it again.

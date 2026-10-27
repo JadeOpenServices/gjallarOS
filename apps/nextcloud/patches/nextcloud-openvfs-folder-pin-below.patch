@@ -1,0 +1,69 @@
+--- a/src/libsync/vfs/openvfs/vfs_openvfs.cpp
++++ b/src/libsync/vfs/openvfs/vfs_openvfs.cpp
+@@ -683,16 +683,50 @@ bool OpenVFS::setPinState(const QString &folderPath, PinState state)
+     }
+     // Every xattr write is an inotify event for the folder watcher. Rewriting
+     // an unchanged pin on each sync woke the watcher for every excluded file.
+-    if (attribs.pinState == convertPinState(state)) {
+-        return true;
++    if (attribs.pinState != convertPinState(state)) {
++        attribs.pinState = convertPinState(state);
++        if (!setPlaceholderAttributes(attribs)) {
++            return false;
++        }
+     }
+-    attribs.pinState = convertPinState(state);
+-    if (!setPlaceholderAttributes(attribs)) {
+-        return false;
++    // A folder's choice covers everything below it, as in the other
++    // backends: pins set earlier on items below go back to Inherited. Before,
++    // freeing up a folder kept a subfolder pinned AlwaysLocal on disk.
++    // Excluded pins follow the ignore list, not a choice, and stay.
++    if (state != PinState::Excluded) {
++        resetPinsBelow(folderPath);
+     }
+     return true;
+ }
+ 
++void OpenVFS::resetPinsBelow(const QString &folderPath)
++{
++    auto path = folderPath.toUtf8();
++    while (path.endsWith('/')) {
++        path.chop(1);
++    }
++    // Collect first: the journal stays locked while the callback runs.
++    QList<QByteArray> below;
++    if (!params().journal->getFilesBelowPath(path, [&below](const SyncJournalFileRecord &record) {
++            below.append(record._path);
++        })) {
++        qCWarning(lcOpenVFS) << "Could not read the items below" << folderPath;
++        return;
++    }
++    const auto inherited = convertPinState(PinState::Inherited);
++    const auto excluded = convertPinState(PinState::Excluded);
++    for (const auto &item : std::as_const(below)) {
++        auto attribs = placeHolderAttributes(params().root() / QString::fromUtf8(item));
++        if (!attribs || attribs.pinState == inherited || attribs.pinState == excluded) {
++            continue;
++        }
++        attribs.pinState = inherited;
++        if (!setPlaceholderAttributes(attribs)) {
++            qCWarning(lcOpenVFS) << "Could not reset the pin of" << item;
++        }
++    }
++}
++
+ Optional<PinState> OpenVFS::pinState(const QString &folderPath)
+ {
+     for (auto relativePath = FileSystem::Path::relative(folderPath).get();; relativePath = relativePath.parent_path()) {
+--- a/src/libsync/vfs/openvfs/vfs_openvfs.h
++++ b/src/libsync/vfs/openvfs/vfs_openvfs.h
+@@ -78,6 +78,8 @@ protected:
+     void startImpl(const VfsSetupParams &params) override;
+ 
+ private:
++    void resetPinsBelow(const QString &folderPath);
++
+     QMap<QByteArray, HydrationJob *> _hydrationJobs;
+     QPointer<QProcess> _openVfsProcess;
+ };

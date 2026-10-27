@@ -30,7 +30,6 @@ func TestParseMigratesAllLegacyWebApplicationFields(t *testing.T) {
 	assertWebApplications(t, user.WebApplications, []WebApplicationIntent{
 		{ID: WebApplicationTeams},
 		{ID: WebApplicationPlane, Endpoint: "http://plane.example.test"},
-		{ID: WebApplicationDrawio, Endpoint: "http://drawio.example.test"},
 	})
 }
 

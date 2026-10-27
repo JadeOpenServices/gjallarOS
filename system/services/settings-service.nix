@@ -70,6 +70,24 @@ let
           <allow_active>auth_self</allow_active>
         </defaults>
       </action>
+      <action id="org.gjallaros.vpn.pause">
+        <description>Let this network reach the internet without the VPN for up to 1 hour</description>
+        <message>Authentication is required to let this network reach the internet without the VPN</message>
+        <defaults>
+          <allow_any>no</allow_any>
+          <allow_inactive>no</allow_inactive>
+          <allow_active>auth_admin</allow_active>
+        </defaults>
+      </action>
+      <action id="org.gjallaros.settings.pair">
+        <description>Pair your account with your account on another device</description>
+        <message>Authentication is required to pair your account with another device</message>
+        <defaults>
+          <allow_any>no</allow_any>
+          <allow_inactive>no</allow_inactive>
+          <allow_active>auth_self</allow_active>
+        </defaults>
+      </action>
     </policyconfig>
   '';
 
@@ -100,7 +118,10 @@ lib.mkIf (settings.dotfilesDir == "/etc/gjallar/system") {
   # is one, else to this host's credential key, without PCR binding, so
   # turning on Secure Boot keeps it. A key that no longer decrypts (a
   # cleared TPM) is replaced; the service then gives each user a new key and
-  # keeps the old public key, so earlier files still import.
+  # keeps the old public key, so earlier files still import. The unit does
+  # not stay active, so every start of the service runs this check first: a
+  # key lost while the system runs (systemd drops its credential key when
+  # /etc/machine-id changes) would otherwise fail the service until reboot.
   systemd.services.gjallar-settings-key = {
     description = "Create the GjallarOS settings signing key";
     wantedBy = [ "multi-user.target" ];
@@ -108,7 +129,6 @@ lib.mkIf (settings.dotfilesDir == "/etc/gjallar/system") {
     path = [ pkgs.coreutils ];
     serviceConfig = {
       Type = "oneshot";
-      RemainAfterExit = true;
       UMask = "0077";
       PrivateNetwork = true;
       ProtectHome = true;
@@ -129,12 +149,41 @@ lib.mkIf (settings.dotfilesDir == "/etc/gjallar/system") {
     '';
   };
 
-  systemd.tmpfiles.rules = [ "d /etc/gjallar/developer 0755 root root -" ];
+  # The settings service has no device access, so this unit checks at boot
+  # whether the system runs from a USB disk. The service refuses USB
+  # blocking when it does, or when this answer is missing (wiki 752 Q11).
+  systemd.services.gjallar-system-disk = {
+    description = "Check whether the GjallarOS system disk is on USB";
+    wantedBy = [ "multi-user.target" ];
+    before = [ "gjallar-settingsd.service" ];
+    path = [ pkgs.util-linux ];
+    serviceConfig = {
+      Type = "oneshot";
+      RemainAfterExit = true;
+      ExecStart = "${settingsd}/bin/gjallar-system-disk /run/gjallar/system-disk.json";
+      ProtectSystem = "strict";
+      ReadWritePaths = [ "/run/gjallar" ];
+      PrivateNetwork = true;
+      ProtectHome = true;
+      NoNewPrivileges = true;
+    };
+  };
+
+  systemd.tmpfiles.rules = [
+    "d /etc/gjallar/developer 0755 root root -"
+    "d /run/gjallar 0755 root root -"
+  ];
 
   systemd.services.gjallar-settingsd = {
     description = "GjallarOS settings service";
-    wants = [ "gjallar-settings-key.service" ];
-    after = [ "gjallar-settings-key.service" ];
+    wants = [
+      "gjallar-settings-key.service"
+      "gjallar-system-disk.service"
+    ];
+    after = [
+      "gjallar-settings-key.service"
+      "gjallar-system-disk.service"
+    ];
     # tailscale status lists the tailnet a new hostname must not clash with.
     path = lib.optional config.services.tailscale.enable config.services.tailscale.package;
     serviceConfig = {
@@ -155,6 +204,8 @@ lib.mkIf (settings.dotfilesDir == "/etc/gjallar/system") {
       ReadWritePaths = [
         "-/etc/gjallar/system"
         "-/etc/gjallar/developer"
+        # The VPN pause (gjallarctl vpn pause), when Tailscale is on.
+        "-/run/gjallar/vpn-pause"
       ];
       # Users' signing key records (keys/<uid>.json).
       StateDirectory = "gjallarOS/settings";

@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/config"
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/diskcrypto"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/prompt"
 )
 
@@ -127,17 +128,21 @@ func TestFirmwareSecureBootNotice(t *testing.T) {
 
 func TestCollectStartupUnlock(t *testing.T) {
 	for _, tc := range []struct {
+		kind  diskcrypto.TPMKind
 		input string
 		pin   bool
 	}{
-		{"\n", false},
-		{"1\n", false},
-		{"2\n", true},
-		{"PIN at startup\n", true},
+		{diskcrypto.TPMFirmware, "\n", false},
+		{diskcrypto.TPMFirmware, "1\n", false},
+		{diskcrypto.TPMFirmware, "2\n", true},
+		{diskcrypto.TPMFirmware, "PIN at startup\n", true},
+		{diskcrypto.TPMSeparate, "\n", true},
+		{diskcrypto.TPMUnknown, "\n", true},
+		{diskcrypto.TPMUnknown, "1\n", false},
 	} {
 		var out bytes.Buffer
 		u := config.User{}
-		if err := collectStartupUnlock(context.Background(), prompt.New(strings.NewReader(tc.input), &out), "10", false, &u); err != nil {
+		if err := collectStartupUnlock(context.Background(), prompt.New(strings.NewReader(tc.input), &out), tc.kind, "10", false, &u); err != nil {
 			t.Fatalf("%q: %v", tc.input, err)
 		}
 		if !u.LUKSTPM2Enable || u.LUKSTPM2PIN != tc.pin {
@@ -152,11 +157,24 @@ func TestCollectStartupUnlock(t *testing.T) {
 func TestStartupUnlockKeepsPINDefault(t *testing.T) {
 	var out bytes.Buffer
 	u := config.User{LUKSTPM2Enable: true, LUKSTPM2PIN: true}
-	if err := collectStartupUnlock(context.Background(), prompt.New(strings.NewReader("\n"), &out), "", false, &u); err != nil {
+	if err := collectStartupUnlock(context.Background(), prompt.New(strings.NewReader("\n"), &out), diskcrypto.TPMFirmware, "", false, &u); err != nil {
 		t.Fatal(err)
 	}
 	if !u.LUKSTPM2PIN {
 		t.Fatal("empty answer dropped the PIN chosen before")
+	}
+}
+
+func TestStartupUnlockTextPerKind(t *testing.T) {
+	firmware := startupUnlockText(diskcrypto.TPMFirmware)
+	if !strings.Contains(firmware, "Automatic (recommended for most)") || strings.Contains(firmware, "separate part") {
+		t.Fatalf("firmware TPM text:\n%s", firmware)
+	}
+	for _, kind := range []diskcrypto.TPMKind{diskcrypto.TPMSeparate, diskcrypto.TPMUnknown} {
+		text := startupUnlockText(kind)
+		if !strings.Contains(text, "PIN at startup (recommended on this device)") || !strings.Contains(text, "separate part") || strings.Contains(text, "recommended for most") {
+			t.Fatalf("%q text:\n%s", kind, text)
+		}
 	}
 }
 

@@ -3,6 +3,7 @@ package app
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -34,6 +35,7 @@ func runningFixture(t *testing.T) config.User {
 	u.USBTrustTPMHandle = "0x81000043"
 	u.Theme = "example-theme"
 	u.NextcloudEnable, u.NextcloudHost = true, "https://cloud.example.test"
+	u.ThunderbirdSmartCard = true
 	u.Apps = append(slices.DeleteFunc(slices.Clone(u.Apps), func(id string) bool { return id == "ai" || id == "tailscale" }), "ai", "tailscale")
 	slices.Sort(u.Apps)
 	u.AIEndpoint, u.AIRemoteModel, u.AIRemoteContextTokens = "https://ai.example.test", "example-model", 8192
@@ -65,7 +67,7 @@ func TestRerunInterviewOffersRunningAnswers(t *testing.T) {
 
 	var output bytes.Buffer
 	ui := prompt.New(strings.NewReader(strings.Repeat("\n", 200)), &output)
-	if err := collectInteractive(context.Background(), ui, "/home/alex/gjallarOS", true, true, true, "SYNTHETIC: no JODS in this test", discovery.Hardware{}, o, &running, &u); err != nil {
+	if err := collectInteractive(context.Background(), ui, "/home/alex/gjallarOS", true, "", true, true, "SYNTHETIC: no JODS in this test", discovery.Hardware{}, o, &running, &u); err != nil {
 		t.Fatalf("%v\n%s", err, output.String())
 	}
 
@@ -75,7 +77,7 @@ func TestRerunInterviewOffersRunningAnswers(t *testing.T) {
 		"DotfilesDir", "Shell", "Editors", "PreferredEditor", "PrintingEnable", "NetworkPrintingEnable",
 		"USBGuardEnable", "USBTrustEnforce", "USBTrustLapseDays", "USBTrustTPMHandle", "Theme",
 		"NextcloudEnable", "NextcloudHost", "Apps", "AIEndpoint", "AIRemoteModel",
-		"AIRemoteContextTokens", "AIAgentMode", "Tailscale",
+		"AIRemoteContextTokens", "AIAgentMode", "Tailscale", "ThunderbirdSmartCard",
 	} {
 		got := reflect.ValueOf(u).FieldByName(field).Interface()
 		want := reflect.ValueOf(running).FieldByName(field).Interface()
@@ -186,5 +188,33 @@ func TestJoinListRoundTrips(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, items) {
 		t.Fatalf("SplitList(JoinList(%q)) = %q", items, got)
+	}
+}
+
+func TestAskSigningKey(t *testing.T) {
+	// SYNTHETIC: 32 bytes of "k" as an Ed25519 key, not a real key.
+	blob := []byte{0, 0, 0, 11}
+	blob = append(blob, "ssh-ed25519"...)
+	blob = append(blob, 0, 0, 0, 32)
+	blob = append(blob, strings.Repeat("k", 32)...)
+	line := "ssh-ed25519 " + base64.StdEncoding.EncodeToString(blob) + " SYNTHETIC"
+	for _, tc := range []struct {
+		name, running, input, want, shows string
+	}{
+		{"managed by default", "", "\n", "", "[Y/n]"},
+		{"own key", "", "n\n" + line + "\n", line, "alex@example"},
+		{"bad key asked again", "", "n\nssh-rsa AAAA\n" + line + "\n", line, "not an OpenSSH"},
+		{"rerun keeps the own key", line, "\n\n", line, "[y/N]"},
+		{"rerun back to managed", line, "y\n", "", "[y/N]"},
+	} {
+		var output bytes.Buffer
+		ui := prompt.New(strings.NewReader(tc.input), &output)
+		got, err := askSigningKey(context.Background(), ui, tc.running)
+		if err != nil {
+			t.Fatalf("%s: %v\n%s", tc.name, err, output.String())
+		}
+		if got != tc.want || !strings.Contains(output.String(), tc.shows) {
+			t.Errorf("%s: key %q, want %q; output:\n%s", tc.name, got, tc.want, output.String())
+		}
 	}
 }

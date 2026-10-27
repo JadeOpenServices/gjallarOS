@@ -1,0 +1,13 @@
+diff --git a/src/gui/accountsettings.cpp b/src/gui/accountsettings.cpp
+--- a/src/gui/accountsettings.cpp
++++ b/src/gui/accountsettings.cpp
+@@ -2085,6 +2085,9 @@
+         _ui->fileProviderConflictBannerIcon->setPixmap(warningIcon.pixmap(iconSize, iconSize));
+     }
+ #else
++    // "Classic sync" only names the contrast with File Provider, which this
++    // build does not have; next to virtual-file folders it was wrong.
++    _ui->syncFoldersPanelTitle->setText(tr("Sync folders"));
+     _ui->syncFoldersPanel->setVisible(true);
+     _ui->fileProviderConflictBanner->setVisible(false);
+     _ui->fileProviderMaintenancePanel->setVisible(false);

@@ -10,6 +10,7 @@
   gnused,
   openssl,
   sbctl,
+  sbsigntool,
   util-linux,
   xorriso,
 }:
@@ -27,6 +28,7 @@ let
     gnused
     openssl
     sbctl
+    sbsigntool
     util-linux
     xorriso
   ];

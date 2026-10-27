@@ -39,7 +39,10 @@ def pack(x):
 def attrs(name, state):
     return pack(dict(etag='test', fileid=name, size=0 if state == 0 else 7, state=state, pinstate=1))
 os.setxattr(mount, 'user.openvfs.registration', pack(dict(owner='test', version=0)))
-for name in ('duplicate', 'inflight', 'preview', 'error', 'cancel', 'timeout', 'copy', 'real-kio', 'gone', 'slow'):
+BURST = 60
+bursts = [f'burst{i}' for i in range(BURST)]
+hogs = [f'bursthog{i}' for i in range(20)]
+for name in ('duplicate', 'inflight', 'preview', 'error', 'cancel', 'timeout', 'copy', 'real-kio', 'gone', 'slow', *bursts, *hogs):
     p = mount / name
     p.touch()
     os.setxattr(p, 'user.openvfs.data', attrs(name, 2 if name == 'inflight' else 1))
@@ -52,6 +55,7 @@ requests = []
 errors = []
 conn = None
 pending = {}
+held = []
 
 def slow_download(req):
     # One byte every 50 s: the whole file takes longer than the deadline, but
@@ -89,6 +93,10 @@ def server():
                 name = Path(req['arguments']['file']).name
                 requests.append((name, req['id']))
                 if name in ('cancel', 'timeout'):
+                    continue
+                if name.startswith('burst'):
+                    # Held until the test plays the client writing them.
+                    held.append(req)
                     continue
                 if name == 'slow':
                     threading.Thread(target=slow_download, args=(req,), daemon=True).start()
@@ -184,6 +192,60 @@ try:
             break
         time.sleep(0.1)
     assert int(waiting.read_text()) == 0, 'FUSE requests remain blocked after cancellation'
+    # Many readers at once, while the client still holds every download. The
+    # waits must leave workers free, or the client's own write never gets
+    # through and nothing finishes (2026-10-27, ten workers all waiting).
+    # One process opening 20 files from threads gets 16 waits, not all.
+    slots, per_process = 48, 16
+    hog_code = ('import errno, sys, threading\n'
+                'res = []\n'
+                'def r(p):\n'
+                '    try: res.append(open(p, "rb").read())\n'
+                '    except OSError as e: res.append(e.errno)\n'
+                'ts = [threading.Thread(target=r, args=(p,)) for p in sys.argv[1:]]\n'
+                '[t.start() for t in ts]; [t.join() for t in ts]\n'
+                'print(sum(x == b"fixture" for x in res), sum(x == errno.EAGAIN for x in res))\n')
+    hog = subprocess.Popen([sys.executable, '-I', '-c', hog_code, *(str(mount / n) for n in hogs)],
+                           stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    children.append(hog)
+    for _ in range(100):
+        if len(held) >= per_process:
+            break
+        time.sleep(0.1)
+    time.sleep(1)
+    assert len(held) == per_process, f'one process got {len(held)} hydration waits, want {per_process}'
+    readers = [cat(n) for n in bursts]
+    for _ in range(100):
+        if len(held) >= slots and sum(p.poll() is not None for p in readers) >= BURST - (slots - per_process):
+            break
+        time.sleep(0.1)
+    assert len(held) == slots, f'{len(held)} hydrations requested, want {slots}'
+    refused = [p for p in readers if p.poll() is not None]
+    assert len(refused) == BURST - (slots - per_process) and all(p.returncode != 0 for p in refused)
+    print(f'PASS: {slots} hydration waits at most, {per_process} per process, the rest fail at once', flush=True)
+    probe = subprocess.run(['stat', str(mount / 'duplicate')], capture_output=True, timeout=5)
+    assert probe.returncode == 0
+    done = threading.Event()
+
+    def client_writes():
+        # Plays the sync client: write each download through the mount.
+        for r in held:
+            name = Path(r['arguments']['file']).name
+            f = os.open(mount / name, os.O_WRONLY)
+            os.write(f, b'fixture')
+            os.setxattr(f, 'user.openvfs.data', attrs(name, 0))
+            os.close(f)
+            reply = {'id': r['id'], 'arguments': {'status': 'OK'}}
+            conn.sendall(b'V2/HYDRATE_FILE_RESULT:' + json.dumps(reply).encode() + b'\n')
+        done.set()
+    threading.Thread(target=client_writes, daemon=True).start()
+    assert done.wait(10), 'sync client write blocked behind hydration waits'
+    waited = [p for p in readers if p not in refused]
+    for p in waited:
+        assert p.communicate(timeout=10)[0] == b'fixture' and p.returncode == 0
+    out = hog.communicate(timeout=10)[0].split()
+    assert out == [str(per_process).encode(), str(len(hogs) - per_process).encode()], out
+    print('PASS: other processes and the sync client stay served during the burst', flush=True)
     if '--timeout' in sys.argv[2:]:
         start = time.monotonic()
         p = cat('timeout')
@@ -238,15 +300,27 @@ try:
     p.communicate(timeout=5)
     assert p.returncode != 0 and not os.path.ismount(mount2)
     print(f'PASS: SIGTERM during hydration exits and unmounts in {time.monotonic() - start:.1f} s', flush=True)
-    # Last case: it ends the fake client. The waiter and later opens fail fast.
+    # No sync client listening: openvfs must not mount at all. A mount
+    # nobody serves blocked the next client's openvfs (2026-10-21).
+    mount3 = base / 'mount3'
+    mount3.mkdir()
+    os.setxattr(mount3, 'user.openvfs.registration', pack(dict(owner='test', version=0)))
+    lonely = subprocess.run([sys.argv[1], '-f', '-i', str(config), '-o', 'test', '-s', str(base / 'no-socket'), str(mount3)],
+                            stdout=log, stderr=log, timeout=10)
+    assert lonely.returncode != 0 and not os.path.ismount(mount3)
+    print('PASS: no sync client, no mount', flush=True)
+    # Last case: it ends the fake client. The waiter fails fast and openvfs
+    # unmounts, so a restarted client can mount again.
     start = time.monotonic()
     p = cat('gone')
     p.communicate(timeout=5)
     assert p.returncode != 0
-    p = cat('gone')
-    p.communicate(timeout=5)
-    assert p.returncode != 0 and time.monotonic() - start < 5
-    print('PASS: sync client exit releases the waiter and later opens fail fast', flush=True)
+    try:
+        daemon.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        raise AssertionError('openvfs outlived its sync client') from None
+    assert not os.path.ismount(mount) and time.monotonic() - start < 10
+    print(f'PASS: sync client exit releases the waiter and unmounts in {time.monotonic() - start:.1f} s', flush=True)
     assert not errors, errors
 finally:
     subprocess.run(['fusermount3', '-uz', str(mount)], capture_output=True, timeout=5)

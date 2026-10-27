@@ -19,6 +19,10 @@ type Keyslots struct {
 	All     []int
 	TPM2    []int
 	TPM2PIN bool
+	// A TPM2 token without the stored storage root key (tpm2_srk). Only
+	// systemd before 255 wrote those; their unlock trusts whatever chip
+	// answers. gjallar-tpm2-reenroll replaces them.
+	TPM2NoSRK bool
 	// Token id of each TPM2 slot.
 	TPM2Token map[int]string
 	Recovery  []int
@@ -33,6 +37,7 @@ func ParseKeyslots(raw []byte) (Keyslots, error) {
 			Type     string   `json:"type"`
 			Keyslots []string `json:"keyslots"`
 			TPM2PIN  bool     `json:"tpm2-pin"`
+			TPM2SRK  string   `json:"tpm2_srk"`
 		} `json:"tokens"`
 	}
 	if err := json.Unmarshal(raw, &header); err != nil {
@@ -62,6 +67,7 @@ func ParseKeyslots(raw []byte) (Keyslots, error) {
 				}
 				k.TPM2Token[slot] = tokenID
 				k.TPM2PIN = k.TPM2PIN || token.TPM2PIN
+				k.TPM2NoSRK = k.TPM2NoSRK || token.TPM2SRK == ""
 			case "systemd-recovery":
 				k.Recovery = append(k.Recovery, slot)
 			}

@@ -15,14 +15,17 @@ import (
 	"strings"
 
 	"github.com/JadeOpenServices/gjallarOS/apps"
+	"github.com/JadeOpenServices/gjallarOS/internal/sshsig"
 )
 
 // User is user.config.json. Every field carries a tier tag that says how the
 // settings service confirms a change after install (ROADMAP §14); see
-// TierOf.
+// TierOf. Keys tagged scope:"device" describe this device rather than the
+// person and never come from another device's settings file; see
+// DeviceScoped.
 type User struct {
-	Hostname               string                 `json:"hostname" tier:"security"`
-	Username               string                 `json:"username" tier:"security"`
+	Hostname               string                 `json:"hostname" tier:"security" scope:"device"`
+	Username               string                 `json:"username" tier:"security" scope:"device"`
 	Timezone               string                 `json:"timezone" tier:"everyday"`
 	Locale                 string                 `json:"locale" tier:"everyday"`
 	KeyboardLayout         string                 `json:"keyboardLayout" tier:"everyday"`
@@ -30,28 +33,31 @@ type User struct {
 	WeatherCity            string                 `json:"weatherCity" tier:"everyday"`
 	WeatherCountry         string                 `json:"weatherCountry" tier:"everyday"`
 	TouchpadWorkspaceSwipe bool                   `json:"touchpadWorkspaceSwipe" tier:"everyday"`
-	ClamshellEnable        bool                   `json:"clamshellEnable" tier:"everyday"`
+	ClamshellEnable        bool                   `json:"clamshellEnable" tier:"everyday" scope:"device"`
 	ConsoleLoginEnable     bool                   `json:"consoleLoginEnable" tier:"security"`
-	USBGuardEnable         bool                   `json:"usbguardEnable" tier:"security"`
-	USBTrustEnforce        bool                   `json:"usbTrustEnforce" tier:"security"`
-	USBTrustTPMHandle      string                 `json:"usbTrustTpmHandle" tier:"security"`
-	USBTrustLapseDays      int                    `json:"usbTrustLapseDays" tier:"security"`
+	USBGuardEnable         bool                   `json:"usbguardEnable" tier:"security" scope:"device"`
+	USBTrustEnforce        bool                   `json:"usbTrustEnforce" tier:"security" scope:"device"`
+	USBTrustTPMHandle      string                 `json:"usbTrustTpmHandle" tier:"security" scope:"device"`
+	USBTrustLapseDays      int                    `json:"usbTrustLapseDays" tier:"security" scope:"device"`
 	USBReviewTechnical     bool                   `json:"usbReviewTechnicalView" tier:"everyday"`
 	PrintingEnable         bool                   `json:"printingEnable" tier:"everyday"`
 	NetworkPrintingEnable  bool                   `json:"networkPrintingEnable" tier:"security"`
 	DolphinDriveUsage      bool                   `json:"dolphinDriveUsage" tier:"everyday"`
-	FirmwareFlashReadEntry bool                   `json:"firmwareFlashReadEntry" tier:"critical"`
+	FirmwareFlashReadEntry bool                   `json:"firmwareFlashReadEntry" tier:"critical" scope:"device"`
+	SnapshotsEnable        bool                   `json:"snapshotsEnable" tier:"security" scope:"device"`
+	SnapshotsKeepHours     int                    `json:"snapshotsKeepHours" tier:"security" scope:"device"`
+	SnapshotsKeepDays      int                    `json:"snapshotsKeepDays" tier:"security" scope:"device"`
 	Name                   string                 `json:"name" tier:"everyday"`
 	Email                  string                 `json:"email" tier:"everyday"`
 	GitHubUsername         string                 `json:"githubUsername" tier:"everyday"`
-	DotfilesDir            string                 `json:"dotfilesDir" tier:"security"`
+	DotfilesDir            string                 `json:"dotfilesDir" tier:"security" scope:"device"`
 	Shell                  string                 `json:"shell" tier:"everyday"`
 	Editors                []string               `json:"editors" tier:"everyday"`
 	Browsers               []string               `json:"browsers" tier:"everyday"`
 	PreferredEditor        string                 `json:"preferredEditor" tier:"everyday"`
 	PreferredBrowser       string                 `json:"preferredBrowser" tier:"everyday"`
 	WebApplications        []WebApplicationIntent `json:"webApplications" tier:"security"`
-	Tailscale              *TailscaleIntent       `json:"tailscale,omitempty" tier:"security"`
+	Tailscale              *TailscaleIntent       `json:"tailscale,omitempty" tier:"security" scope:"device"`
 	// Apps are the selected catalogue app IDs (apps/<id>/meta.json).
 	Apps []string `json:"apps" tier:"everyday"`
 	// FirefoxAddons holds the add-on collections (apps/firefox-addons.json)
@@ -60,6 +66,9 @@ type User struct {
 	// FirefoxStoreAddons are extra add-ons from addons.mozilla.org, each
 	// pinned to one file.
 	FirefoxStoreAddons []apps.FirefoxStoreAddon `json:"firefoxStoreAddons" tier:"security"`
+
+	// ThunderbirdSmartCard adds smart card support for Thunderbird keys.
+	ThunderbirdSmartCard bool `json:"thunderbirdSmartCard" tier:"security"`
 
 	NextcloudEnable           bool   `json:"nextcloudEnable" tier:"security"`
 	NextcloudHost             string `json:"nextcloudHost" tier:"security"`
@@ -71,28 +80,32 @@ type User struct {
 	AIEndpoint                string `json:"aiEndpoint" tier:"security"`
 	AIRemoteModel             string `json:"aiRemoteModel" tier:"everyday"`
 	AIRemoteContextTokens     int    `json:"aiRemoteContextTokens" tier:"everyday"`
-	LUKSTPM2Enable            bool   `json:"luksTpm2Enable" tier:"critical"`
-	LUKSTPM2PIN               bool   `json:"luksTpm2Pin" tier:"critical"`
-	RecoveryEnable            bool   `json:"recoveryEnable" tier:"critical"`
-	RecoveryPartitionEnable   bool   `json:"recoveryPartitionEnable" tier:"critical"`
-	JODSPrebootLockEnable     bool   `json:"jodsPrebootLockEnable" tier:"critical"`
-	SecureBootEnable          bool   `json:"secureBootEnable" tier:"critical"`
-	SecureBootPrompt          bool   `json:"secureBootPrompt" tier:"critical"`
-	FirmwarePasswordLock      bool   `json:"firmwarePasswordLock" tier:"critical"`
-	EndpointManagedDevice     bool   `json:"endpointManagedDevice" tier:"critical"`
-	JODSEndpoint              string `json:"jodsEndpoint" tier:"critical"`
-	JODSPolicySigningKey      string `json:"jodsPolicySigningPublicKey" tier:"critical"`
-	JODSRecoverySigningKey    string `json:"jodsRecoveryCommandSigningPublicKey" tier:"critical"`
-	JODSEnrollmentMode        string `json:"jodsEnrollmentMode" tier:"critical"`
-	JODSAllowInsecureTLS      bool   `json:"jodsAllowInsecureTls" tier:"critical"`
-	JODSDeviceClass           string `json:"jodsDeviceClass" tier:"critical"`
-	JODSDesktopProfile        string `json:"jodsDesktopProfile" tier:"critical"`
-	JODSFingerprintEnroll     bool   `json:"jodsFingerprintEnrollmentAllowed" tier:"critical"`
-	AllowUnvalidatedODDCModel bool   `json:"allowUnvalidatedODDCModel" tier:"critical"`
-	DeveloperMode             bool   `json:"developerMode" tier:"critical"`
+	LUKSTPM2Enable            bool   `json:"luksTpm2Enable" tier:"critical" scope:"device"`
+	LUKSTPM2PIN               bool   `json:"luksTpm2Pin" tier:"critical" scope:"device"`
+	RecoveryEnable            bool   `json:"recoveryEnable" tier:"critical" scope:"device"`
+	RecoveryPartitionEnable   bool   `json:"recoveryPartitionEnable" tier:"critical" scope:"device"`
+	JODSPrebootLockEnable     bool   `json:"jodsPrebootLockEnable" tier:"critical" scope:"device"`
+	SecureBootEnable          bool   `json:"secureBootEnable" tier:"critical" scope:"device"`
+	SecureBootPrompt          bool   `json:"secureBootPrompt" tier:"critical" scope:"device"`
+	FirmwarePasswordLock      bool   `json:"firmwarePasswordLock" tier:"critical" scope:"device"`
+	EndpointManagedDevice     bool   `json:"endpointManagedDevice" tier:"critical" scope:"device"`
+	JODSEndpoint              string `json:"jodsEndpoint" tier:"critical" scope:"device"`
+	JODSPolicySigningKey      string `json:"jodsPolicySigningPublicKey" tier:"critical" scope:"device"`
+	JODSRecoverySigningKey    string `json:"jodsRecoveryCommandSigningPublicKey" tier:"critical" scope:"device"`
+	JODSEnrollmentMode        string `json:"jodsEnrollmentMode" tier:"critical" scope:"device"`
+	JODSAllowInsecureTLS      bool   `json:"jodsAllowInsecureTls" tier:"critical" scope:"device"`
+	JODSDeviceClass           string `json:"jodsDeviceClass" tier:"critical" scope:"device"`
+	JODSDesktopProfile        string `json:"jodsDesktopProfile" tier:"critical" scope:"device"`
+	JODSFingerprintEnroll     bool   `json:"jodsFingerprintEnrollmentAllowed" tier:"critical" scope:"device"`
+	AllowUnvalidatedODDCModel bool   `json:"allowUnvalidatedODDCModel" tier:"critical" scope:"device"`
+	DeveloperMode             bool   `json:"developerMode" tier:"critical" scope:"device"`
+	// SettingsSigningKey is the main user's own OpenSSH public key for
+	// settings files (ROADMAP "Pairing and own keys"); empty means
+	// GjallarOS manages that user's signing key.
+	SettingsSigningKey string `json:"settingsSigningKey" tier:"critical" scope:"device"`
 	// ReleaseChannel is the branch of the official repository that
 	// rebuild --update follows (ROADMAP §11): dev, staging or stable.
-	ReleaseChannel    string `json:"releaseChannel" tier:"critical"`
+	ReleaseChannel    string `json:"releaseChannel" tier:"critical" scope:"device"`
 	UnattendedInstall bool   `json:"unattendedInstall" tier:"installer"`
 	AutoReboot        bool   `json:"autoReboot" tier:"installer"`
 	RunUpdateChecks   bool   `json:"runUpdateChecks" tier:"installer"`
@@ -140,6 +153,9 @@ func Defaults() (User, error) {
 		JODSDeviceClass:         "laptop",
 		JODSDesktopProfile:      "headless",
 		ReleaseChannel:          DefaultReleaseChannel,
+		SnapshotsEnable:         true,
+		SnapshotsKeepHours:      DefaultSnapshotsKeepHours,
+		SnapshotsKeepDays:       DefaultSnapshotsKeepDays,
 		WriteConfig:             true,
 		RunRebuild:              true,
 	}, nil
@@ -216,6 +232,15 @@ var usernamePattern = regexp.MustCompile(`^[a-z_][a-z0-9_-]*$`)
 var hostnamePattern = regexp.MustCompile(`^[A-Za-z0-9]([A-Za-z0-9_-]{0,61}[A-Za-z0-9])?$`)
 var usbTrustTPMHandlePattern = regexp.MustCompile(`^0x810[0-9a-fA-F]{5}$`)
 
+// timezonePattern is the shape of an IANA time zone name such as
+// Europe/Berlin or Etc/GMT+5: parts of letters, digits, _, + and -, joined
+// by /. No part can be . or .., so the name stays inside the zoneinfo tree.
+var timezonePattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_+-]*(/[A-Za-z0-9_+-]+)*$`)
+
+// localePattern is the shape of a glibc locale name such as en_US.UTF-8,
+// sr_RS@latin or C.UTF-8.
+var localePattern = regexp.MustCompile(`^(C|POSIX|[a-z]{2,3}(_[A-Z]{2})?)(\.[A-Za-z0-9-]+)?(@[a-z]+)?$`)
+
 // DefaultUSBTrustTPMHandle is where the USB trust broker creates its signing
 // key on first boot. It stays clear of the handles systemd and Windows use
 // (0x81000001, 0x81000002) and the endorsement range (0x8101xxxx).
@@ -224,6 +249,17 @@ const DefaultUSBTrustTPMHandle = "0x81000042"
 // MaxUSBTrustLapseDays bounds usbTrustLapseDays to what the Nix option
 // accepts. 0 means permanent USB trust never lapses.
 const MaxUSBTrustLapseDays = 36500
+
+// Snapshot retention: hourly snapshots of /home are kept this many hours,
+// daily ones of /home and the system settings this many days. Short by
+// default, because a file deleted from /home lives on in old snapshots
+// until they age out.
+const (
+	DefaultSnapshotsKeepHours = 24
+	MaxSnapshotsKeepHours     = 168
+	DefaultSnapshotsKeepDays  = 7
+	MaxSnapshotsKeepDays      = 365
+)
 
 // DefaultReleaseChannel is the channel of new installs and of configurations
 // written before channels existed.
@@ -277,6 +313,10 @@ func Parse(contents []byte) (User, error) {
 			return User{}, err
 		}
 	}
+	// Retired apps leave older configs here instead of failing Validate.
+	if user.Apps, _, err = apps.WithoutRetired(user.Apps); err != nil {
+		return User{}, err
+	}
 	// Missing collections get their defaults, missing add-ons are off.
 	user.FirefoxAddons = apps.CompleteFirefoxAddons(user.FirefoxAddons)
 	if user.FirefoxStoreAddons == nil {
@@ -284,6 +324,16 @@ func Parse(contents []byte) (User, error) {
 	}
 	if user.ReleaseChannel == "" {
 		user.ReleaseChannel = DefaultReleaseChannel
+	}
+	// Configurations written before snapshots existed get the defaults.
+	if _, ok := fields["snapshotsEnable"]; !ok {
+		user.SnapshotsEnable = true
+	}
+	if _, ok := fields["snapshotsKeepHours"]; !ok {
+		user.SnapshotsKeepHours = DefaultSnapshotsKeepHours
+	}
+	if _, ok := fields["snapshotsKeepDays"]; !ok {
+		user.SnapshotsKeepDays = DefaultSnapshotsKeepDays
 	}
 	if err := NormalizeProjectTools(&user); err != nil {
 		return User{}, err
@@ -304,17 +354,37 @@ func Validate(user User) error {
 	if !hostnamePattern.MatchString(user.Hostname) {
 		return fmt.Errorf("invalid hostname: %q; use letters, digits and - (at most 63), starting and ending with a letter or digit", user.Hostname)
 	}
+	if user.Timezone != "" && (len(user.Timezone) > 64 || !timezonePattern.MatchString(user.Timezone)) {
+		return fmt.Errorf("invalid timezone: %q; use an IANA name such as Europe/Berlin or Etc/UTC", user.Timezone)
+	}
+	if user.Locale != "" && (len(user.Locale) > 64 || !localePattern.MatchString(user.Locale)) {
+		return fmt.Errorf("invalid locale: %q; use a locale name such as en_US.UTF-8", user.Locale)
+	}
 	if len(user.Editors) == 0 || len(user.Browsers) == 0 {
 		return fmt.Errorf("at least one editor and browser are required")
 	}
 	if user.ReleaseChannel != "" && !slices.Contains(ReleaseChannels, user.ReleaseChannel) {
 		return fmt.Errorf("invalid releaseChannel: %q; use %s", user.ReleaseChannel, strings.Join(ReleaseChannels, ", "))
 	}
+	if user.SettingsSigningKey != "" {
+		if _, err := sshsig.ParseKey(user.SettingsSigningKey); err != nil {
+			return fmt.Errorf("invalid settingsSigningKey: %w", err)
+		}
+	}
 	if user.USBTrustTPMHandle != "" && !usbTrustTPMHandlePattern.MatchString(user.USBTrustTPMHandle) {
 		return fmt.Errorf("invalid usbTrustTpmHandle: %q", user.USBTrustTPMHandle)
 	}
 	if user.USBTrustLapseDays < 0 || user.USBTrustLapseDays > MaxUSBTrustLapseDays {
 		return fmt.Errorf("invalid usbTrustLapseDays: %d; use 0 (never) or 1 to %d", user.USBTrustLapseDays, MaxUSBTrustLapseDays)
+	}
+	// Retention only counts while snapshots are on.
+	if user.SnapshotsEnable {
+		if user.SnapshotsKeepHours < 0 || user.SnapshotsKeepHours > MaxSnapshotsKeepHours {
+			return fmt.Errorf("invalid snapshotsKeepHours: %d; use 0 to %d", user.SnapshotsKeepHours, MaxSnapshotsKeepHours)
+		}
+		if user.SnapshotsKeepDays < 1 || user.SnapshotsKeepDays > MaxSnapshotsKeepDays {
+			return fmt.Errorf("invalid snapshotsKeepDays: %d; use 1 to %d", user.SnapshotsKeepDays, MaxSnapshotsKeepDays)
+		}
 	}
 	if user.USBTrustEnforce {
 		if !user.USBGuardEnable {

@@ -77,4 +77,16 @@ func TestTPMProvisionAndSignedPersistenceSimulator(t *testing.T) {
 	if _, err := ReadVerified(ctx, dir, other); err == nil {
 		t.Fatal("wrong key accepted")
 	}
+	// Provisioning pinned the key: the foreign key fails the pin even
+	// before any signature is checked.
+	pinned, _ := NewTPMSigner(foreign)
+	pinned.PinFile = filepath.Join(dir, KeyPinFile)
+	if err := ValidateSigner(ctx, pinned); err == nil || !strings.Contains(err.Error(), "not the key this system set up") {
+		t.Fatalf("foreign key passed the pin: %v", err)
+	}
+	signer.PinFile = pinned.PinFile
+	signer.key = nil
+	if err := ValidateSigner(ctx, signer); err != nil {
+		t.Fatalf("provisioned key failed its own pin: %v", err)
+	}
 }

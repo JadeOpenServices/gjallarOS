@@ -28,3 +28,28 @@ func TestCatalogue(t *testing.T) {
 		t.Fatal("bad app list accepted")
 	}
 }
+
+func TestRetired(t *testing.T) {
+	retired, err := Retired()
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalogue, err := Catalogue()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range retired {
+		for _, app := range catalogue {
+			if app.ID == id {
+				t.Errorf("%s is retired but still in the catalogue", id)
+			}
+		}
+	}
+	kept, dropped, err := WithoutRetired([]string{"git", "drawio", "vlc"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(kept) != 2 || kept[0] != "git" || kept[1] != "vlc" || len(dropped) != 1 || dropped[0] != "drawio" {
+		t.Fatalf("kept %v dropped %v", kept, dropped)
+	}
+}

@@ -1,6 +1,7 @@
 {
   lib,
   buildGoModule,
+  openssh,
 }:
 
 buildGoModule {
@@ -14,15 +15,22 @@ buildGoModule {
       ../../go.sum
       (lib.fileset.fileFilter (f: f.hasExt "go" || f.name == "meta.json") ../../apps)
       ../../apps/firefox-addons.json
+      ../../apps/retired.json
       ../../cmd/gjallar-namecheck
       ../../cmd/gjallar-settingsd
+      ../../cmd/gjallar-snapshotd
+      ../../cmd/gjallar-system-disk
       ../../internal/installer/config
       ../../internal/installer/systemcheckout
+      ../../internal/installer/targetdisk
       ../../internal/localchanges
       ../../internal/namecheck
       ../../internal/nettrust
       ../../internal/noctalia
       ../../internal/settings
+      ../../internal/snapshots
+      ../../internal/sshsig
+      ../../internal/usbtrust
     ];
   };
 
@@ -32,6 +40,13 @@ buildGoModule {
   subPackages = [
     "cmd/gjallar-namecheck"
     "cmd/gjallar-settingsd"
+    "cmd/gjallar-snapshotd"
+    "cmd/gjallar-system-disk"
+  ];
+
+  # Own signing keys are checked by ssh-keygen -Y verify.
+  ldflags = [
+    "-X github.com/JadeOpenServices/gjallarOS/internal/sshsig.Keygen=${openssh}/bin/ssh-keygen"
   ];
 
   env.CGO_ENABLED = "0";

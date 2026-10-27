@@ -21,6 +21,7 @@ import (
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/systemcheckout"
 	"github.com/JadeOpenServices/gjallarOS/internal/installercheck"
 	"github.com/JadeOpenServices/gjallarOS/internal/settings"
+	"github.com/JadeOpenServices/gjallarOS/internal/sshsig"
 )
 
 // gjallarctl settings is the first front end of gjallar-settingsd (ROADMAP
@@ -35,9 +36,15 @@ const settingsUsage = `usage: gjallarctl settings list [--names]   every key wit
        gjallarctl settings apply [ID]          write a change and rebuild
        gjallarctl settings cancel [ID]
        gjallarctl settings export FILE         save the settings, signed with your key
-       gjallarctl settings import FILE         ask for the change a saved file makes
+       gjallarctl settings import FILE         ask for the change a saved file makes;
+                                               with an own key, FILE.sig is its signature
+       gjallarctl settings pair export FILE    save a pairing file for your other device
+       gjallarctl settings pair add FILE       pair with the device that made FILE
+       gjallarctl settings pair list [--ids]
+       gjallarctl settings pair remove ID
 ID may be the start of the id; without one, the only waiting change is used.
-A saved file imports only on the device and account that made it.`
+A saved file imports on the device and account that made it, and for the
+account that paired with that one; settings of the device stay behind.`
 
 var (
 	// settingsConnect opens the system bus; tests replace it.
@@ -59,8 +66,9 @@ var (
 			return ctx.Err()
 		}
 	}
-	settingsPoll = 2 * time.Second
-	settingsEUID = os.Geteuid
+	settingsPoll            = 2 * time.Second
+	settingsEUID            = os.Geteuid
+	settingsStdin io.Reader = os.Stdin
 )
 
 const (
@@ -81,8 +89,9 @@ type settingsBus interface {
 	// Call runs one method of the settings service and returns its JSON
 	// answer, or "" for methods without one.
 	Call(ctx context.Context, method string, args ...any) (string, error)
-	// Export returns a signed settings file of the current settings.
-	Export(ctx context.Context) ([]byte, error)
+	// Bytes runs a method of the settings service that returns a file:
+	// Export or PairExport.
+	Bytes(ctx context.Context, method string) ([]byte, error)
 	// Rebuild reports whether the rebuild unit is queued or running, and
 	// its last result.
 	Rebuild(ctx context.Context) (running bool, result string, err error)
@@ -99,7 +108,7 @@ func runSettings(args []string, stdout, stderr io.Writer) int {
 		return runSettingsNames(args, stdout, stderr)
 	}
 	switch command {
-	case "list", "get", "set", "pending", "apply", "cancel", "export", "import":
+	case "list", "get", "set", "pending", "apply", "cancel", "export", "import", "pair":
 	default:
 		fmt.Fprintf(stderr, "ERROR: unknown settings command %q\n%s\n", command, settingsUsage)
 		return 2
@@ -134,6 +143,8 @@ func runSettings(args []string, stdout, stderr io.Writer) int {
 		err = settingsExport(ctx, bus, args, stdout)
 	case "import":
 		return settingsImport(ctx, bus, args, stdout, stderr)
+	case "pair":
+		return settingsPair(ctx, bus, args, stdout, stderr)
 	}
 	if err != nil {
 		fmt.Fprintf(stderr, "ERROR: %v\n", err)
@@ -324,31 +335,47 @@ func settingsAsked(ctx context.Context, bus settingsBus, answer string, stdout, 
 
 // settingsExport saves a signed file of the settings. The service signs
 // what it reads itself; this command only writes the file, as the user, and
-// never over an existing one.
+// never over an existing one. For an account with its own key the file is
+// left unsigned, and the user signs it with ssh-keygen.
 func settingsExport(ctx context.Context, bus settingsBus, args []string, stdout io.Writer) error {
 	if len(args) != 1 || args[0] == "" {
 		return fmt.Errorf("usage: gjallarctl settings export FILE")
 	}
-	fmt.Fprintln(stdout, "The password dialog asks for your own password.")
-	data, err := bus.Export(ctx)
+	data, err := exportNewFile(ctx, bus, "Export", args[0], stdout)
 	if err != nil {
 		return err
 	}
-	out, err := os.OpenFile(args[0], os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-	if err != nil {
-		return err
-	}
-	if _, err := out.Write(data); err != nil {
-		out.Close()
-		os.Remove(args[0])
-		return err
-	}
-	if err := out.Close(); err != nil {
-		os.Remove(args[0])
-		return err
+	if settings.IsUnsigned(data) {
+		fmt.Fprintf(stdout, "Saved to %s. Sign it with your own key; KEY is its private key file (for a FIDO key, the id_ed25519_sk file):\n", args[0])
+		fmt.Fprintf(stdout, "  ssh-keygen -Y sign -n %s -f KEY %s\n", settings.SSHNamespace, shellQuote(args[0]))
+		fmt.Fprintf(stdout, "That writes %s.sig. Import both with: gjallarctl settings import %s\n", args[0], shellQuote(args[0]))
+		return nil
 	}
 	fmt.Fprintf(stdout, "Saved to %s. It imports on this device, for this account: gjallarctl settings import %s\n", args[0], args[0])
 	return nil
+}
+
+// exportNewFile saves what the service's method returns to path, a new file
+// only the user can read, and returns it. The file is made before the
+// service is asked, so an existing file fails before the password dialog.
+func exportNewFile(ctx context.Context, bus settingsBus, method, path string, stdout io.Writer) ([]byte, error) {
+	out, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return nil, err
+	}
+	fmt.Fprintln(stdout, "The password dialog asks for your own password.")
+	data, err := bus.Bytes(ctx, method)
+	if err == nil {
+		_, err = out.Write(data)
+	}
+	if closeErr := out.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		os.Remove(path)
+		return nil, err
+	}
+	return data, nil
 }
 
 func settingsImport(ctx context.Context, bus settingsBus, args []string, stdout, stderr io.Writer) int {
@@ -361,7 +388,12 @@ func settingsImport(ctx context.Context, bus settingsBus, args []string, stdout,
 		fmt.Fprintf(stderr, "ERROR: %v\n", err)
 		return 1
 	}
-	answer, err := bus.Call(ctx, "Import", data)
+	var answer string
+	if settings.IsUnsigned(data) {
+		answer, err = importSigned(ctx, bus, args[0], data)
+	} else {
+		answer, err = bus.Call(ctx, "Import", data)
+	}
 	if err != nil {
 		fmt.Fprintf(stderr, "ERROR: %v\n", err)
 		return 1
@@ -369,18 +401,34 @@ func settingsImport(ctx context.Context, bus settingsBus, args []string, stdout,
 	return settingsAsked(ctx, bus, answer, stdout, stderr)
 }
 
+// importSigned sends a file for an own key with its signature, path.sig.
+func importSigned(ctx context.Context, bus settingsBus, path string, data []byte) (string, error) {
+	sig, err := readLimited(path+".sig", "an OpenSSH signature", sshsig.MaxSignatureBytes)
+	if errors.Is(err, os.ErrNotExist) {
+		return "", fmt.Errorf("%s.sig is missing. This file is for your own key; sign it first: ssh-keygen -Y sign -n %s -f KEY %s", path, settings.SSHNamespace, shellQuote(path))
+	}
+	if err != nil {
+		return "", err
+	}
+	return bus.Call(ctx, "ImportSigned", data, sig)
+}
+
 func readSettingsFile(path string) ([]byte, error) {
+	return readLimited(path, "a settings file", settings.MaxFileBytes)
+}
+
+func readLimited(path, what string, limit int) ([]byte, error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
 	defer file.Close()
-	data, err := io.ReadAll(io.LimitReader(file, settings.MaxFileBytes+1))
+	data, err := io.ReadAll(io.LimitReader(file, int64(limit)+1))
 	if err != nil {
 		return nil, err
 	}
-	if len(data) > settings.MaxFileBytes {
-		return nil, fmt.Errorf("%s is larger than a settings file can be (%d bytes)", path, settings.MaxFileBytes)
+	if len(data) > limit {
+		return nil, fmt.Errorf("%s is larger than %s can be (%d bytes)", path, what, limit)
 	}
 	return data, nil
 }
@@ -688,9 +736,9 @@ func (b systemSettingsBus) Call(ctx context.Context, method string, args ...any)
 	return answer, nil
 }
 
-func (b systemSettingsBus) Export(ctx context.Context) ([]byte, error) {
+func (b systemSettingsBus) Bytes(ctx context.Context, method string) ([]byte, error) {
 	call := b.conn.Object(settings.BusName, dbus.ObjectPath(settings.ObjectPath)).
-		CallWithContext(ctx, settings.Interface+".Export", 0)
+		CallWithContext(ctx, settings.Interface+"."+method, 0)
 	if call.Err != nil {
 		var busErr dbus.Error
 		if errors.As(call.Err, &busErr) && busErr.Name == "org.freedesktop.DBus.Error.ServiceUnknown" {

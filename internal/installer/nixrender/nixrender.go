@@ -112,6 +112,8 @@ type Settings struct {
 	ConsoleLoginEnable, USBReviewTechnical, DolphinDriveUsage, FirmwareFlashReadEntry       bool
 	USBTrustTPMHandle                                                                       string
 	USBTrustLapseDays                                                                       int
+	SnapshotsEnable                                                                         bool
+	SnapshotsKeepHours, SnapshotsKeepDays                                                   int
 	Name, Email, GitHubUsername, DotfilesDir                                                string
 	RootPasswordFile, UserPasswordFile                                                      string
 	DebugFunctions, DeveloperMode                                                           bool
@@ -123,6 +125,7 @@ type Settings struct {
 	Apps                                                                                    []string
 	FirefoxAddons                                                                           map[string]string
 	FirefoxStoreAddons                                                                      []apps.FirefoxStoreAddon
+	ThunderbirdSmartCard                                                                    bool
 	NextcloudHost                                                                           string
 	NextcloudEnable                                                                         bool
 	ODDCModel                                                                               string
@@ -167,6 +170,9 @@ func FromUser(user config.User) Settings {
 		USBTrustEnforce:                     user.USBTrustEnforce,
 		USBTrustTPMHandle:                   user.USBTrustTPMHandle,
 		USBTrustLapseDays:                   user.USBTrustLapseDays,
+		SnapshotsEnable:                     user.SnapshotsEnable,
+		SnapshotsKeepHours:                  user.SnapshotsKeepHours,
+		SnapshotsKeepDays:                   user.SnapshotsKeepDays,
 		USBReviewTechnical:                  user.USBReviewTechnical,
 		PrintingEnable:                      user.PrintingEnable,
 		NetworkPrintingEnable:               user.NetworkPrintingEnable,
@@ -188,6 +194,7 @@ func FromUser(user config.User) Settings {
 		Apps:                                user.Apps,
 		FirefoxAddons:                       apps.ActiveFirefoxAddons(user.FirefoxAddons),
 		FirefoxStoreAddons:                  apps.ActiveStoreAddons(user.FirefoxStoreAddons),
+		ThunderbirdSmartCard:                user.ThunderbirdSmartCard,
 		NextcloudEnable:                     user.NextcloudEnable,
 		NextcloudHost:                       user.NextcloudHost,
 		AIAgentMode:                         user.AIAgentMode,
@@ -264,6 +271,9 @@ var userIntentKeys = []string{
 	"networkPrintingEnable",
 	"dolphinDriveUsage",
 	"firmwareFlashReadEntry",
+	"snapshotsEnable",
+	"snapshotsKeepHours",
+	"snapshotsKeepDays",
 	"name",
 	"email",
 	"githubUsername",
@@ -302,6 +312,7 @@ var userIntentKeys = []string{
 	"apps",
 	"firefoxAddons",
 	"firefoxStoreAddons",
+	"thunderbirdSmartCard",
 }
 
 // SyncUserIntent updates only direct user-owned assignments in an existing
@@ -546,6 +557,9 @@ func Render(s Settings) []byte {
 	boolean("networkPrintingEnable", s.NetworkPrintingEnable)
 	boolean("dolphinDriveUsage", s.DolphinDriveUsage)
 	boolean("firmwareFlashReadEntry", s.FirmwareFlashReadEntry)
+	boolean("snapshotsEnable", s.SnapshotsEnable)
+	integer("snapshotsKeepHours", s.SnapshotsKeepHours)
+	integer("snapshotsKeepDays", s.SnapshotsKeepDays)
 	str("name", s.Name)
 	str("email", s.Email)
 	str("githubUsername", s.GitHubUsername)
@@ -564,6 +578,7 @@ func Render(s Settings) []byte {
 	list("apps", s.Apps)
 	fmt.Fprintf(&b, "    firefoxAddons = %s;\n", StringAttrs(s.FirefoxAddons))
 	fmt.Fprintf(&b, "    firefoxStoreAddons = %s;\n", FirefoxStoreAddons(s.FirefoxStoreAddons))
+	boolean("thunderbirdSmartCard", s.ThunderbirdSmartCard)
 	boolean("nextcloudEnable", s.NextcloudEnable)
 	str("nextcloudHost", s.NextcloudHost)
 	str("oddcModel", s.ODDCModel)

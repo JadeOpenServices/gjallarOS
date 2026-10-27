@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"net/netip"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -37,7 +39,7 @@ func (f fakeProber) Reach(_ context.Context, target string) error {
 
 var policy = Policy{
 	HomeSubnets:       []string{"192.168.8.0/24"},
-	TrustedWifis:      []string{"bakasifu-5Ghz", "bakasifu-2.4Ghz", "fizzlipuzzli"},
+	TrustedWifis:      []string{"synthetic-5Ghz", "synthetic-2.4Ghz", "synthetic-guest"},
 	ExitNode:          "home-router",
 	SiteRouterTrust:   true,
 	SiteRouterTargets: []string{"192.168.8.1:53"},
@@ -61,14 +63,14 @@ func decide(t *testing.T, p Policy, n *Network, tn Tailnet, pr Prober) Verdict {
 }
 
 func TestTrustedHomeWifiKeepsHomeLocal(t *testing.T) {
-	v := decide(t, policy, wifi("bakasifu-5Ghz", "wpa-psk", "192.168.8.0/24"), Tailnet{Running: true}, fakeProber{})
+	v := decide(t, policy, wifi("synthetic-5Ghz", "wpa-psk", "192.168.8.0/24"), Tailnet{Running: true}, fakeProber{})
 	if v.Trust != TrustHome || v.ExitNode != "" || !slices.Equal(v.Bypass, []string{"192.168.8.0/24"}) {
 		t.Fatalf("verdict = %+v", v)
 	}
 }
 
 func TestClonedOpenHomeWifiIsUntrusted(t *testing.T) {
-	v := decide(t, policy, wifi("bakasifu-5Ghz", "", "192.168.8.0/24"), Tailnet{Running: true}, fakeProber{})
+	v := decide(t, policy, wifi("synthetic-5Ghz", "", "192.168.8.0/24"), Tailnet{Running: true}, fakeProber{})
 	if v.Trust != TrustUntrusted || v.ExitNode != "home-router" || len(v.Bypass) != 0 {
 		t.Fatalf("verdict = %+v", v)
 	}
@@ -83,6 +85,9 @@ func TestHomeRouterProofWorksOnEthernet(t *testing.T) {
 	v := decide(t, policy, n, tn, fakeProber{via: map[string]string{"home-router": "192.168.8.1"}})
 	if v.Trust != TrustHome || v.Router != "home-router via 192.168.8.1" {
 		t.Fatalf("verdict = %+v", v)
+	}
+	if v.RouterVia != "192.168.8.1" || !slices.Equal(v.RouterTailnet, []string{"100.64.0.9"}) {
+		t.Fatalf("router addresses = %q %q", v.RouterVia, v.RouterTailnet)
 	}
 }
 
@@ -128,7 +133,7 @@ func TestSiteRouterTrustOffFallsBackToWifi(t *testing.T) {
 	p.SiteRouterTrust = false
 	tn := Tailnet{Running: true, Peers: []Peer{router("sis-router", "192.168.1.0/24")}}
 	pr := fakeProber{via: map[string]string{"sis-router": "192.168.1.1"}, reach: map[string]bool{"192.168.8.1:53": true}}
-	v := decide(t, p, wifi("fizzlipuzzli", "sae", "192.168.1.0/24"), tn, pr)
+	v := decide(t, p, wifi("synthetic-guest", "sae", "192.168.1.0/24"), tn, pr)
 	if v.Trust != TrustTrustedWifi || v.ExitNode != "" {
 		t.Fatalf("verdict = %+v", v)
 	}
@@ -164,7 +169,8 @@ func TestOfflineExitNodeStaysSet(t *testing.T) {
 	exit := router("exit-1", "0.0.0.0/0")
 	exit.Online = false
 	v := decide(t, Policy{ExitNode: "exit-1", RouterHome: true}, wifi("cafe-net", "", "10.30.0.0/24"), Tailnet{Running: true, Peers: []Peer{exit}}, fakeProber{})
-	if v.ExitNode != "exit-1" || len(v.Warnings) != 1 || !strings.Contains(v.Warnings[0], "offline") {
+	if v.ExitNode != "exit-1" || len(v.Warnings) != 1 || !strings.Contains(v.Warnings[0], "offline") ||
+		v.Blocked != BlockExitNodeOffline {
 		t.Fatalf("verdict = %+v", v)
 	}
 }
@@ -176,9 +182,16 @@ func TestUnmanagedPolicyKeepsLegacyBypass(t *testing.T) {
 	}
 }
 
-func TestStoppedTailscaleLeavesExitNodeAlone(t *testing.T) {
+func TestStoppedTailscaleLeavesExitNodeAloneButBlocks(t *testing.T) {
 	v := decide(t, policy, wifi("cafe", "", "172.16.0.0/16"), Tailnet{}, fakeProber{})
-	if v.Trust != TrustUntrusted || v.ManageExitNode {
+	if v.Trust != TrustUntrusted || v.ManageExitNode || v.Blocked != BlockTailscaleDown {
+		t.Fatalf("verdict = %+v", v)
+	}
+}
+
+func TestTrustedHomeIsNeverBlocked(t *testing.T) {
+	v := decide(t, policy, wifi("synthetic-5Ghz", "wpa-psk", "192.168.8.0/24"), Tailnet{}, fakeProber{})
+	if v.Trust != TrustHome || v.Blocked != "" {
 		t.Fatalf("verdict = %+v", v)
 	}
 }
@@ -240,7 +253,7 @@ func TestApplyExitNodeOnlyChangesOnDifference(t *testing.T) {
 }
 
 func TestRouterProofViaGatewayWANAddress(t *testing.T) {
-	n := wifi("bakasifu-5ghz", "wpa-psk", "192.168.8.0/24")
+	n := wifi("synthetic-5ghz", "wpa-psk", "192.168.8.0/24")
 	n.Gateway = netip.MustParseAddr("192.168.8.1")
 	tn := Tailnet{Running: true, Peers: []Peer{router("OpenWrt", "192.168.8.0/24")}}
 	pr := fakeProber{via: map[string]string{"OpenWrt": "192.168.9.1"}, gateway: map[string]bool{"192.168.9.1": true}}
@@ -282,7 +295,10 @@ func TestTailnetWaitsForStartingTailscaled(t *testing.T) {
 	tailnetSettle = 5 * time.Second
 	defer func() { tailnetSettle = old }()
 	answers := []string{"", `{"BackendState":"Starting"}`, `{"BackendState":"Running"}`}
-	s := System{run: func(context.Context, string, ...string) ([]byte, error) {
+	s := System{run: func(_ context.Context, name string, _ ...string) ([]byte, error) {
+		if name == "systemctl" {
+			return []byte("activating\n"), errors.New("synthetic exit status 3")
+		}
 		a := answers[0]
 		answers = answers[1:]
 		if a == "" {
@@ -299,6 +315,22 @@ func TestTailnetWaitsForStartingTailscaled(t *testing.T) {
 	}}
 	if tn, _ := stopped.Tailnet(context.Background()); tn.Running {
 		t.Fatal("NeedsLogin reported running")
+	}
+	// A failed unit has no start coming: no wait at all.
+	var calls []string
+	failed := System{run: func(_ context.Context, name string, _ ...string) ([]byte, error) {
+		calls = append(calls, name)
+		if name == "systemctl" {
+			return []byte("failed\n"), errors.New("synthetic exit status 3")
+		}
+		return nil, errors.New("no tailscaled socket")
+	}}
+	begin := time.Now()
+	if tn, err := failed.Tailnet(context.Background()); err != nil || tn.Running || time.Since(begin) > time.Second {
+		t.Fatalf("failed unit: tailnet %+v, err %v after %v, calls %v", tn, err, time.Since(begin), calls)
+	}
+	if !slices.Equal(calls, []string{"tailscale", "systemctl"}) {
+		t.Fatalf("calls = %v", calls)
 	}
 }
 
@@ -325,5 +357,48 @@ func TestGatewayOwnsProbesOutsideTheTunnel(t *testing.T) {
 	n.Device = "eth0" // routed out of another device: not this gateway
 	if s.GatewayOwns(context.Background(), n, netip.MustParseAddr("192.168.9.1")) {
 		t.Fatal("route via another device accepted")
+	}
+}
+
+func TestWriteStatusSkipsUnchanged(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "status.json")
+	v := Verdict{Trust: TrustHome, Bypass: []string{}}
+	if err := WriteStatus(path, v); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-time.Hour)
+	if err := os.Chtimes(path, old, old); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteStatus(path, v); err != nil {
+		t.Fatal(err)
+	}
+	if info, err := os.Stat(path); err != nil || !info.ModTime().Equal(old) {
+		t.Fatalf("unchanged verdict rewritten: %v %v", info.ModTime(), err)
+	}
+	v.Trust = TrustUntrusted
+	if err := WriteStatus(path, v); err != nil {
+		t.Fatal(err)
+	}
+	if info, err := os.Stat(path); err != nil || info.ModTime().Equal(old) {
+		t.Fatalf("changed verdict not written: %v", err)
+	}
+}
+
+func TestMayBlockOnlyWhenAnExitNodeIsWanted(t *testing.T) {
+	for _, tc := range []struct {
+		p    Policy
+		want bool
+	}{
+		{Policy{}, false},
+		{Policy{ExitNode: ExitNodeOff, TrustedWifis: []string{"home"}, RouterHome: true}, false},
+		{Policy{ExitNode: ExitNodeAuto}, true},
+		{Policy{ExitNode: "exit"}, true},
+		{Policy{WifiExitNodes: map[string]string{"home": ""}}, false},
+		{Policy{ExitNode: ExitNodeOff, WifiExitNodes: map[string]string{"home": ExitNodeOff, "work": "exit"}}, true},
+	} {
+		if got := tc.p.MayBlock(); got != tc.want {
+			t.Errorf("%+v: MayBlock = %v", tc.p, got)
+		}
 	}
 }

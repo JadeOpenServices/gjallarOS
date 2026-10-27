@@ -37,6 +37,12 @@ type fakeSystem struct {
 	tailnetErr error
 	taken      map[string]netip.Addr
 	probed     []string
+	usbDisk    string
+	usbArmed   bool
+	usbErr     error
+
+	verdicts  []nettrust.Verdict
+	reapplied int
 }
 
 func (f *fakeSystem) Caller(_ context.Context, sender string) (caller, error) {
@@ -65,6 +71,24 @@ func (f *fakeSystem) NameTaken(_ context.Context, device, name string) (netip.Ad
 	return f.taken[name], nil
 }
 func (f *fakeSystem) Rebuilding(context.Context) (bool, error) { return f.rebuilding, nil }
+func (f *fakeSystem) SystemDiskOnUSB() string                  { return f.usbDisk }
+func (f *fakeSystem) USBArmed() (bool, error)                  { return f.usbArmed, f.usbErr }
+
+// Verdict hands out the queued verdicts in turn and repeats the last one.
+func (f *fakeSystem) Verdict() (nettrust.Verdict, bool) {
+	if len(f.verdicts) == 0 {
+		return nettrust.Verdict{}, false
+	}
+	v := f.verdicts[0]
+	if len(f.verdicts) > 1 {
+		f.verdicts = f.verdicts[1:]
+	}
+	return v, true
+}
+func (f *fakeSystem) ReapplyVPN(context.Context) error {
+	f.reapplied++
+	return nil
+}
 func (f *fakeSystem) StartRebuild(_ context.Context, colors string) error {
 	f.rebuilt = append(f.rebuilt, colors)
 	return nil
@@ -356,6 +380,22 @@ func TestHostnameNotes(t *testing.T) {
 	}
 }
 
+func TestSlowBuildNote(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	change, err := f.svc.Request(ctx, ":1.10", `{"dolphinDriveUsage":true}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(change.Notes) != 1 || !strings.Contains(change.Notes[0], "can take hours") {
+		t.Errorf("notes %q", change.Notes)
+	}
+	setValue(t, f, "dolphinDriveUsage", "true")
+	if change, err = f.svc.Request(ctx, ":1.12", `{"dolphinDriveUsage":false}`); err != nil || len(change.Notes) != 0 {
+		t.Errorf("turning it off: notes %q, %v", change.Notes, err)
+	}
+}
+
 func TestHostnameCheckFailsClosed(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()
@@ -370,5 +410,77 @@ func TestHostnameCheckFailsClosed(t *testing.T) {
 	}
 	if _, err := f.svc.Request(ctx, ":1.10", `{"hostname":"`+strings.ToUpper(old)+`"}`); err != nil {
 		t.Errorf("case change: %v", err)
+	}
+}
+
+func TestUSBBlockingRefusedOnUSBSystemDisk(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	f.sys.usbDisk = "the system disk (/dev/sda) is a USB drive, and blocking could cut off the disk the system runs from."
+	review := `"usbguardEnable":true,"usbTrustTpmHandle":"` + config.DefaultUSBTrustTPMHandle + `"`
+	if _, err := f.svc.Request(ctx, ":1.10", `{`+review+`,"usbTrustEnforce":true}`); !errors.Is(err, errRefused) || !strings.Contains(err.Error(), "/dev/sda") {
+		t.Fatalf("blocking on a USB system disk: %v", err)
+	}
+	if _, err := f.svc.Request(ctx, ":1.10", `{`+review+`}`); err != nil {
+		t.Fatalf("review without blocking: %v", err)
+	}
+	f.sys.usbDisk = ""
+	if _, err := f.svc.Request(ctx, ":1.11", `{`+review+`,"usbTrustEnforce":true}`); err != nil {
+		t.Fatalf("blocking on an internal system disk: %v", err)
+	}
+}
+
+func TestUSBBlockingStaysOnWhileArmed(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	data, err := os.ReadFile(f.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fields map[string]any
+	if err := json.Unmarshal(data, &fields); err != nil {
+		t.Fatal(err)
+	}
+	fields["usbguardEnable"], fields["usbTrustEnforce"], fields["usbTrustTpmHandle"] = true, true, config.DefaultUSBTrustTPMHandle
+	if data, err = json.Marshal(fields); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(f.path, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	f.sys.usbArmed = true
+	for _, request := range []string{`{"usbTrustEnforce":false}`, `{"usbguardEnable":false,"usbTrustEnforce":false}`} {
+		if _, err := f.svc.Request(ctx, ":1.10", request); !errors.Is(err, errRefused) || !strings.Contains(err.Error(), "gjallarctl usb disarm") {
+			t.Fatalf("%s while armed: %v", request, err)
+		}
+	}
+	f.sys.usbArmed, f.sys.usbErr = false, errors.New("decode USB trust state")
+	if _, err := f.svc.Request(ctx, ":1.10", `{"usbTrustEnforce":false}`); !errors.Is(err, errRefused) || !strings.Contains(err.Error(), "cannot be read") {
+		t.Fatalf("unreadable state: %v", err)
+	}
+	f.sys.usbErr = nil
+	if _, err := f.svc.Request(ctx, ":1.10", `{"usbTrustEnforce":false}`); err != nil {
+		t.Fatalf("after the disarm: %v", err)
+	}
+}
+
+func TestReadSystemDiskNeedsRootCheck(t *testing.T) {
+	dir := t.TempDir()
+	if readSystemDisk(filepath.Join(dir, "missing.json")) == "" {
+		t.Fatal("a missing boot check counts as an internal disk")
+	}
+	path := filepath.Join(dir, "system-disk.json")
+	if err := os.WriteFile(path, []byte(`{"usbReason":""}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := readSystemDisk(path); (os.Geteuid() == 0) != (got == "") {
+		t.Fatalf("reason %q from a file owned by uid %d", got, os.Geteuid())
+	}
+	if err := os.WriteFile(path, []byte(`{}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if readSystemDisk(path) == "" {
+		t.Fatal("a check without a reason field counts as an internal disk")
 	}
 }

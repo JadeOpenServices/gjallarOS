@@ -1,6 +1,7 @@
 package diskcrypto
 
 import (
+	"encoding/json"
 	"os"
 	"reflect"
 	"strings"
@@ -31,6 +32,44 @@ func TestParseKeyslots(t *testing.T) {
 		}
 		if !reflect.DeepEqual(got, tc.want) {
 			t.Errorf("%s: got %+v, want %+v", tc.file, got, tc.want)
+		}
+	}
+}
+
+// systemd before 255 wrote TPM2 tokens without tpm2_srk. The e2e-fw13
+// header with that one field taken out stands in for such a token.
+func TestParseKeyslotsOldTPM2Token(t *testing.T) {
+	raw, err := os.ReadFile("testdata/luks-tpm2pin-recovery.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var header map[string]any
+	if err := json.Unmarshal(raw, &header); err != nil {
+		t.Fatal(err)
+	}
+	for _, token := range header["tokens"].(map[string]any) {
+		delete(token.(map[string]any), "tpm2_srk")
+	}
+	old, err := json.Marshal(header)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := ParseKeyslots(old)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.TPM2NoSRK {
+		t.Fatal("token without tpm2_srk not flagged")
+	}
+	if cur, _ := ParseKeyslots(raw); cur.TPM2NoSRK {
+		t.Fatal("current token flagged as old")
+	}
+}
+
+func TestTPMKindPIN(t *testing.T) {
+	for kind, want := range map[TPMKind]bool{TPMFirmware: false, TPMSeparate: true, TPMUnknown: true} {
+		if got := kind.PINRecommended(); got != want {
+			t.Errorf("%q: PINRecommended %v, want %v", kind, got, want)
 		}
 	}
 }

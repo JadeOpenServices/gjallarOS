@@ -11,6 +11,9 @@
       # Details of the security notice (gjallarctl security notice): big enough
       # that ODDC's whole text shows without scrolling up.
       "match:title ^(Security notes for this device)$, float on, center on, size (monitor_w*0.6) (monitor_h*0.8)"
+      # The time details (bar clock click, gjallar-time-details). The window
+      # sizes itself in cells so no line wraps; a size here would override that.
+      "match:title ^(GjallarOS time)$, float on, center on, max_size (monitor_w*0.9) (monitor_h*0.8)"
     ];
 
     workspace = [

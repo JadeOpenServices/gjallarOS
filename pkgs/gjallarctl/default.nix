@@ -22,6 +22,7 @@ buildGoModule {
       ../../go.sum
       (lib.fileset.fileFilter (f: f.hasExt "go" || f.name == "meta.json") ../../apps)
       ../../apps/firefox-addons.json
+      ../../apps/retired.json
       ../../cmd
       ../../internal/ai
       ../../internal/binarycache
@@ -37,6 +38,8 @@ buildGoModule {
       ../../internal/oddccli
       ../../internal/preset
       ../../internal/settings
+      ../../internal/snapshots
+      ../../internal/sshsig
       ../../internal/usbtrust
     ];
   };

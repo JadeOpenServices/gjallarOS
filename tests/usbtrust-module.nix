@@ -1,6 +1,7 @@
-# oddc: the ODDC flake source, e.g. (builtins.getFlake "github:JadeOpenServices/oddc/staging").
+# nixpkgs and oddc: the source paths flake.lock pins (the flake's
+# inputs.nixpkgs and inputs.oddc), never a channel or a branch head.
 {
-  nixpkgs ? <nixpkgs>,
+  nixpkgs,
   oddc,
 }:
 let

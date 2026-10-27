@@ -7,6 +7,7 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -22,6 +23,19 @@ var officialOrigin = systemcheckout.Origins[0]
 // machineLocal are the checkout entries the installer writes for this
 // machine. git does not track them; they are copied into the clone.
 var machineLocal = []string{"generated", "user.config.json"}
+
+// checkReleasedRevision checks, as the live user, that revision is on a
+// release channel of the official origin. Tests replace it.
+var checkReleasedRevision = func(ctx context.Context, revision string) error {
+	run := func(ctx context.Context, args ...string) ([]byte, error) {
+		output, err := exec.CommandContext(ctx, args[0], args[1:]...).CombinedOutput()
+		if err != nil {
+			return output, fmt.Errorf("%s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(output)))
+		}
+		return output, nil
+	}
+	return systemcheckout.Released(ctx, run, officialOrigin, revision)
+}
 
 // cloneSystemCheckout makes the root-owned system checkout of the freshly
 // installed system (ROADMAP section 14, checkpoint 4). It clones the

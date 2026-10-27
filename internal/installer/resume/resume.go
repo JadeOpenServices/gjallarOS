@@ -24,6 +24,7 @@ const (
 	ControlPath   = StateDir + "/gjallarctl"
 	ModulePath    = StateDir + "/resume-module.nix"
 	WrapperPath   = StateDir + "/configuration.nix"
+	GCRootPath    = StateDir + "/gcroot"
 	ServiceName   = "installer-resume.service"
 
 	StateReleaseReboot     = "waiting-for-release-reboot"
@@ -141,10 +142,36 @@ func Finish(dir string, succeeded, interrupted bool) error {
 		if err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return fmt.Errorf("remove finished installer resume transaction: %w", err)
 		}
-		return nil
+		return releaseRoot(dir)
 	}
 
-	return retire(dir)
+	return errors.Join(retire(dir), releaseRoot(dir))
+}
+
+// releaseRoot drops the garbage collector root arm took, unless a run handed
+// over to a new continuation that still needs it.
+func releaseRoot(dir string) error {
+	if _, err := os.Stat(filepath.Join(dir, "pending.json")); err == nil {
+		return nil
+	}
+	err := os.Remove(filepath.Join(dir, "gcroot"))
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("remove installer resume store root: %w", err)
+	}
+	return nil
+}
+
+// storeRoot returns the /nix/store entry path lives in, or "" outside it.
+func storeRoot(path string) string {
+	rest, ok := strings.CutPrefix(filepath.Clean(path), "/nix/store/")
+	if !ok {
+		return ""
+	}
+	name, _, _ := strings.Cut(rest, "/")
+	if name == "" {
+		return ""
+	}
+	return "/nix/store/" + name
 }
 
 func retire(dir string) error {
@@ -346,6 +373,20 @@ func arm(ctx context.Context, executable string, tx Transaction) error {
 			ControlPath,
 		); err != nil {
 			return fmt.Errorf("install resumable gjallarctl: %w", err)
+		}
+	}
+
+	// The copied installer still names gjallarctl and the ODDC catalog by
+	// store path, and the weekly garbage collection can run right at boot.
+	// A root on the store entry the installer started from keeps its whole
+	// closure until Finish. A resumed copy is not in the store; the root its
+	// first run took stays in place.
+	if store := storeRoot(executable); store != "" {
+		cmd := exec.CommandContext(ctx, "sudo", "nix-store", "--add-root", GCRootPath, "--realise", store)
+		cmd.Stdin = os.Stdin
+		cmd.Stderr = os.Stderr
+		if err := cmd.Run(); err != nil {
+			return fmt.Errorf("keep installer store paths for the resume: %w", err)
 		}
 	}
 

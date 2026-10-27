@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/JadeOpenServices/gjallarOS/internal/localchanges"
 )
@@ -26,8 +27,20 @@ func useRootCopy(t *testing.T, tree localchanges.Tree) {
 	t.Cleanup(func() { readRootCopy = old })
 }
 
+// useClock makes chronyd report state at the SYNTHETIC time now.
+func useClock(t *testing.T, state clockState, now time.Time) {
+	t.Helper()
+	oldRead, oldNow, oldBoot, oldRouter := readClock, clockNow, readTimeBoot, readTimeRouter
+	readClock = func() clockState { return state }
+	clockNow = func() time.Time { return now }
+	readTimeBoot = func() timeBoot { return timeBoot{} }
+	readTimeRouter = func() *timeRouter { return nil }
+	t.Cleanup(func() { readClock, clockNow, readTimeBoot, readTimeRouter = oldRead, oldNow, oldBoot, oldRouter })
+}
+
 func useBuildSource(t *testing.T, data string) {
 	t.Helper()
+	useClock(t, clockState{}, time.Unix(0, 0))
 	old := buildSourcePath
 	buildSourcePath = filepath.Join(t.TempDir(), "build-source.json")
 	t.Cleanup(func() { buildSourcePath = old })
@@ -136,5 +149,40 @@ func TestDeveloperModeOnCreatesFolder(t *testing.T) {
 	}
 	if data, _ := os.ReadFile(filepath.Join(dir, "README.md")); string(data) != "SYNTHETIC mine\n" || strings.Contains(stdout.String(), "Created") {
 		t.Fatalf("existing folder touched: %q\n%s", data, stdout.String())
+	}
+}
+
+func TestSystemStatusTimeLine(t *testing.T) {
+	// SYNTHETIC times.
+	now := time.Date(2026, 10, 21, 12, 0, 0, 0, time.Local)
+	recent := now.Add(-20 * time.Minute)
+	old := now.Add(-3 * time.Hour)
+	for _, c := range []struct {
+		state clockState
+		want  string
+	}{
+		{clockState{}, "Time: not confirmed, chronyd is not running"},
+		{clockState{Running: true, Started: "Wed 2026-10-21 11:00:00 CEST"}, "Time: not confirmed since chronyd started at Wed 2026-10-21 11:00:00 CEST"},
+		{clockState{Running: true}, "Time: not confirmed since chronyd started"},
+		{clockState{Running: true, Ref: recent}, "Time: not confirmed since " + recent.Format("2006-01-02 15:04 MST")},
+		{clockState{Running: true, Synced: true, Ref: old}, "Time: not confirmed since " + old.Format("2006-01-02 15:04 MST")},
+		{clockState{Running: true, Synced: true, Ref: recent}, "Time: confirmed by NTS at " + recent.Format("2006-01-02 15:04 MST")},
+	} {
+		if got := timeLine(c.state, now); got != c.want {
+			t.Errorf("%+v: got %q, want %q", c.state, got, c.want)
+		}
+	}
+
+	bus := &fakeSettingsBus{}
+	useLocalFolder(t, bus, true, statusFolder)
+	useRootCopy(t, localchanges.Tree{})
+	useBuildSource(t, `{"revision":"b1a07ba98fe16fe03d6e08e57f7276aff13cb272"}`)
+	useClock(t, clockState{Running: true, Synced: true, Ref: recent}, now)
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"system", "status"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("code %d, stderr %s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "\nTime: confirmed by NTS at ") {
+		t.Errorf("stdout lacks the time line:\n%s", stdout.String())
 	}
 }

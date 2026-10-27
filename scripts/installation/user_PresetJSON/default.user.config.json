@@ -7,7 +7,6 @@
   "apps": [
     "btop",
     "dolphin",
-    "drawio",
     "fastfetch",
     "gimp",
     "git",
@@ -20,6 +19,7 @@
     "rust",
     "tailscale",
     "teams",
+    "thunderbird",
     "vlc",
     "wine"
   ],
@@ -31,6 +31,7 @@
   "consoleLoginEnable": false,
   "debugFunctions": false,
   "developerMode": false,
+  "settingsSigningKey": "",
   "dotfilesDir": "",
   "editors": [
     "vscodium"
@@ -112,7 +113,11 @@
   "secureBootEnable": false,
   "secureBootPrompt": true,
   "shell": "zsh",
+  "snapshotsEnable": true,
+  "snapshotsKeepDays": 7,
+  "snapshotsKeepHours": 24,
   "theme": "noctalia",
+  "thunderbirdSmartCard": false,
   "timezone": "Europe/Berlin",
   "touchpadWorkspaceSwipe": true,
   "unattendedInstall": false,
