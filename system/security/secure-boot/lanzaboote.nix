@@ -121,9 +121,16 @@ let
       echo "error: this is the firmware flash read entry. Restart into the normal entry to rebuild." >&2
       exit 1
     fi
+    # The same holds for the recovery partition, whose UKI is in PCR 4 when
+    # gjallar-recover rebuilds through nixos-enter, which mounts this /proc
+    # (e2e-fw13, 2026-10-28). make-policy failed there and so did the rebuild.
+    recovery=
+    if [[ " $(</proc/cmdline) " == *" gjallar.recovery=partition "* ]]; then
+      recovery=1
+    fi
     has_tpm2=
     ${lib.optionalString cfg.measuredBoot.enable ''
-      if ${config.systemd.package}/bin/systemd-analyze has-tpm2 >/dev/null 2>&1; then
+      if [ -z "$recovery" ] && ${config.systemd.package}/bin/systemd-analyze has-tpm2 >/dev/null 2>&1; then
         has_tpm2=1
       fi
     ''}
@@ -147,6 +154,9 @@ let
         ${lib.optionalString keepBooted restoreBooted}
         echo "Predicting the PCR state for future boots..."
         ${lib.last config.systemd.services.systemd-pcrlock-make-policy.serviceConfig.ExecStart}
+      elif [ -n "$recovery" ]; then
+        echo "warning: the recovery partition cannot update the TPM policy; the next boot asks for the recovery key or disk passphrase." >&2
+        echo "warning: after that boot, run: gjallarctl tpm2 reenroll" >&2
       else
         echo "warning: no usable TPM2 (see: systemd-analyze has-tpm2); the TPM policy was not updated." >&2
         echo "warning: once the TPM is back, boot with the recovery key or disk passphrase and run: gjallarctl tpm2 reenroll" >&2
