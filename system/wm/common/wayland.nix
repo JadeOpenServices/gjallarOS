@@ -17,44 +17,122 @@ let
     exec ${pkgs.wvkbd}/bin/wvkbd-mobintl -H 320 -L 240 --no-popup "$@"
   '';
 
+  # Key for the look in a greeter sync staging directory. Noctalia releases
+  # encode the same look differently (header comments, where the wallpaper is
+  # installed, rows the greeter never reads), so the key is built from what
+  # the greeter uses, not from the raw bytes.
+  greeterSyncKey = pkgs.writeText "gjallar-greeter-sync-key.py" ''
+    import hashlib
+    import json
+    import os
+    import re
+    import sys
+    import tomllib
+
+    staging = sys.argv[1]
+    colour = re.compile(r"#[0-9A-Fa-f]{6}([0-9A-Fa-f]{2})?")
+
+
+    def norm(value):
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            return float(value)
+        if isinstance(value, str) and colour.fullmatch(value):
+            return value.lower()
+        if isinstance(value, dict):
+            return {k: norm(v) for k, v in value.items()}
+        if isinstance(value, list):
+            return [norm(v) for v in value]
+        return value
+
+
+    def digest(path):
+        with open(path, "rb") as f:
+            return hashlib.sha256(f.read()).hexdigest()
+
+
+    def sync_toml(path):
+        try:
+            with open(path, "rb") as f:
+                doc = tomllib.load(f)
+        except (OSError, ValueError):
+            return digest(path)
+        appearance = doc.get("appearance", {})
+        # The wallpaper path only says where the helper installs the staged
+        # wallpaper file; its content is keyed below.
+        wallpapers = [appearance.get("wallpaper")]
+        wallpapers += list(appearance.get("wallpapers", {}).values())
+        for wallpaper in wallpapers:
+            if isinstance(wallpaper, dict):
+                wallpaper.pop("path", None)
+        # The greeter has no reboot_uefi action; Noctalia 5.4 stopped staging
+        # the row.
+        actions = doc.get("session", {}).get("actions")
+        if isinstance(actions, list):
+            doc["session"]["actions"] = [
+                a for a in actions
+                if not (isinstance(a, dict) and a.get("action") == "reboot_uefi")
+            ]
+        return norm(doc)
+
+
+    key = {}
+    for name in sorted(os.listdir(staging)):
+        path = os.path.join(staging, name)
+        if not os.path.isfile(path):
+            continue
+        if name == "sync.toml":
+            key[name] = sync_toml(path)
+        elif name.startswith("output_"):
+            with open(path, encoding="utf-8", errors="replace") as f:
+                key[name] = sorted(line.strip() for line in f if line.strip())
+        elif name.startswith("wallpaper"):
+            # wallpaper.jpg, wallpaper-DP-2.webp: the output, not the format.
+            rest = name[len("wallpaper"):]
+            rest = "" if rest.startswith(".") else os.path.splitext(rest)[0]
+            key["wallpaper" + rest] = digest(path)
+        else:
+            key[name] = digest(path)
+    print(hashlib.sha256(json.dumps(key, sort_keys=True).encode()).hexdigest())
+  '';
+
   # Noctalia re-stages the greeter look on every login and theme load, and
-  # each sync is a pkexec password prompt. Ask only when the staged files
-  # differ from the last answered sync. No passwordless polkit rule: the
-  # greeter look is shared by every account on the machine.
+  # each sync is a pkexec password prompt. Ask only when the look differs
+  # from the last answered sync. No passwordless polkit rule: the greeter
+  # look is shared by every account on the machine.
   greeterSyncPrivilege = pkgs.writeShellScriptBin "gjallar-greeter-sync-privilege" ''
     set -eu
-    PATH=${
-      lib.makeBinPath [
-        pkgs.coreutils
-        pkgs.findutils
-      ]
-    }:$PATH
+    PATH=${lib.makeBinPath [ pkgs.coreutils ]}:$PATH
     staging="$2"
-    state="''${XDG_STATE_HOME:-$HOME/.local/state}/gjallar/greeter-sync.sha256"
-    sum=$(cd "$staging" && find . -maxdepth 1 -type f -print0 | sort -z \
-      | xargs -0 sha256sum | sha256sum)
-    if [ -r "$state" ] && [ "$(cat "$state")" = "$sum" ]; then
+    dir="''${XDG_STATE_HOME:-$HOME/.local/state}/gjallar"
+    state="$dir/greeter-sync.key"
+    key=$(${pkgs.python3}/bin/python3 -I ${greeterSyncKey} "$staging")
+    if [ -r "$state" ] && [ "$(cat "$state")" = "$key" ]; then
       exit 0
     fi
-    mkdir -p "$(dirname "$state")"
+    mkdir -p "$dir"
     # First sync of a new account is the default look the greeter already
-    # shows: record it, do not ask during the welcome flow.
+    # shows: record it, do not ask during the welcome flow. An account with
+    # only the old raw-bytes record (greeter-sync.sha256) answered every look
+    # it staged, so its first sync after the update is recorded the same way.
     if [ ! -e "$state" ]; then
-      printf '%s\n' "$sum" > "$state"
+      printf '%s\n' "$key" > "$state"
+      rm -f "$dir/greeter-sync.sha256"
       exit 0
     fi
     # Run only the store path the org.gjallaros.greeter-sync action names;
     # the generic pkexec action is refused (local-hardening.nix).
     case "$1" in
-      */noctalia-greeter-apply-appearance) shift ;;
+      noctalia-greeter-apply-appearance | */noctalia-greeter-apply-appearance) shift ;;
       *) echo "greeter sync: unexpected helper $1" >&2; exit 1 ;;
     esac
     # A dismissed prompt counts as the answer for this look; the next change
-    # asks again instead of re-prompting for the same files.
+    # asks again instead of re-prompting for the same look.
     rc=0
     /run/wrappers/bin/pkexec ${greeterHelper} "$@" || rc=$?
     if [ "$rc" -eq 0 ] || [ "$rc" -eq 126 ]; then
-      printf '%s\n' "$sum" > "$state"
+      printf '%s\n' "$key" > "$state"
     fi
     exit "$rc"
   '';
