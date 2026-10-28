@@ -287,7 +287,8 @@ func runLUKSRemind(args []string, stderr io.Writer) int {
 		if state == diskProtectionPIN {
 			label = "Add PIN"
 		}
-		actions = append(actions, noticeAction{"open", label})
+		// A click on the card itself starts setup, like the button.
+		actions = append(actions, noticeAction{"default", label}, noticeAction{"open", label})
 	}
 	actions = append(actions, noticeAction{"later", "Later"})
 	if os.Getenv("GJALLAR_MANAGED_DEVICE") != "1" {
@@ -311,7 +312,7 @@ func runLUKSRemind(args []string, stderr io.Writer) int {
 		return 1
 	}
 	switch choice {
-	case "open":
+	case "open", "default":
 		return runDiskProtectionSetup(text.command, stderr)
 	case "never":
 		if os.Getenv("GJALLAR_MANAGED_DEVICE") == "1" {

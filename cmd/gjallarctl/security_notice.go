@@ -74,7 +74,8 @@ func runSecurityNotice(stderr io.Writer) int {
 			Icon:    "security-medium",
 			Summary: summary,
 			Body:    body,
-			Actions: []noticeAction{{"details", "Details"}, {"ok", "OK"}},
+			// A click on the card itself shows the details, like the button.
+			Actions: []noticeAction{{"default", "Details"}, {"details", "Details"}, {"ok", "OK"}},
 		})
 		if err != nil {
 			if ctx.Err() != nil {
@@ -92,7 +93,7 @@ func runSecurityNotice(stderr io.Writer) int {
 			fmt.Fprintf(stderr, "ERROR: %v\n", err)
 			return 1
 		}
-		if choice == "details" {
+		if choice == "details" || choice == "default" {
 			// Plain `oddc security` is ODDC's text for users. --details is
 			// for contributors and spells out how each weakness is used.
 			// GjallarOS's own notes come first, passed as arguments.
