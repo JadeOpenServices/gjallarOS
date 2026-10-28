@@ -61,7 +61,7 @@ let
   shellDetails = hyprlandShellDetails;
   sessionStart = pkgs.writeShellScript "gjallar-hyprland-session-start" ''
     selected_wallpaper=""
-    noctalia_state="''${XDG_STATE_HOME:-$HOME/.local/state}/noctalia/settings.toml"
+    noctalia_state="$(${noctalia} config settings-path 2>/dev/null)"
     if [ -r "$noctalia_state" ]; then
       noctalia_wallpaper="$(${pkgs.gawk}/bin/awk '
         /^\[wallpaper\.last\]$/ { in_last = 1; next }

@@ -60,6 +60,14 @@
 # the patch moves the slot to the application: the two cards open their tab,
 # every other click goes on to the calendar as before.
 #
+# The shell rewrites its state-dir settings.toml when it migrates the config
+# to a newer version, and an older build refuses a file from a newer one, so
+# a rollback to an older generation lost the bar settings (Q110/Q112).
+# settings-per-version.patch keeps one copy per config version
+# (settings.v<N>.toml); a build seeds its own copy from the newest older one
+# and migrates only that, so the older build still finds the file it wrote.
+# `noctalia config settings-path` prints the copy in use.
+#
 # libqalculate 5.10 frees its random state on exit even when nothing ever
 # created it, so the shell crashes every time it stops. Upstream fixed that in
 # 931c2aa9 (5.11); drop the patch once nixpkgs ships libqalculate 5.11 or newer.
@@ -86,5 +94,6 @@
       ./wpa-supplicant-access-denied.patch
       ./lock-osk.patch
       ./notification-internal-actions.patch
+      ./settings-per-version.patch
     ];
   })
