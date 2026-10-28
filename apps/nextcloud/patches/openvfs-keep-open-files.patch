@@ -1,0 +1,190 @@
+--- a/src/openvfs/openvfconstants.h
++++ b/src/openvfs/openvfconstants.h
+@@ -27,6 +27,17 @@ namespace Constants {
+          */
+         constexpr std::string_view RealSize = "user.openvfs.realsize";
+         constexpr std::string_view Registration = "user.openvfs.registration";
++        /**
++         * Xattribute OpenVFSFuse keeps on the file: when a program other than
++         * the client last opened it, in seconds since the epoch. Written at
++         * most once a day.
++         */
++        constexpr std::string_view LastOpen = "user.openvfs.lastopen";
++        /**
++         * Xattribute provided by OpenVFSFuse: "1" while a program other than
++         * the client has the file open, otherwise "0".
++         */
++        constexpr std::string_view InUse = "user.openvfs.inuse";
+     }
+ 
+     enum class RegistrationAttributes : uint8_t { Owner, Version };
+--- a/src/openvfsfuse/openvfsfuse.cpp
++++ b/src/openvfsfuse/openvfsfuse.cpp
+@@ -20,6 +20,7 @@
+ #include "socketthread.h"
+ 
+ #include <atomic>
++#include <charconv>
+ #include <chrono>
+ #include <cstdint>
+ #include <cstring>
+@@ -31,6 +32,7 @@
+ #include <fuse3/fuse_lowlevel.h>
+ #include <grp.h>
+ #include <iostream>
++#include <map>
+ #include <mutex>
+ #include <pwd.h>
+ #include <string_view>
+@@ -310,6 +312,81 @@ private:
+ 
+ static RefusalReport _refusalReport;
+ 
++// Programs other than the client that have a file open, counted per inode of
++// the file below the mount. The client asks before it frees up a file, and
++// its own truncating open fails while the count is not zero, so a program
++// never sees a file it has open go empty. A mapping holds the file open until
++// the last munmap; FUSE sends release only then.
++class OpenFiles
++{
++public:
++    static void opened(uint64_t fh)
++    {
++        struct stat st{};
++        if (fstat(static_cast<int>(fh), &st) == -1 || !S_ISREG(st.st_mode)) {
++            return;
++        }
++        const std::lock_guard lock(_mutex);
++        const Key key{st.st_dev, st.st_ino};
++        if (_byHandle.emplace(fh, key).second) {
++            ++_count[key];
++        }
++    }
++    // Before the handle is closed: a closed descriptor number can be reused
++    // by the next open at once.
++    static void released(uint64_t fh)
++    {
++        const std::lock_guard lock(_mutex);
++        const auto handle = _byHandle.find(fh);
++        if (handle == _byHandle.end()) {
++            return;
++        }
++        if (const auto count = _count.find(handle->second); count != _count.end() && --count->second == 0) {
++            _count.erase(count);
++        }
++        _byHandle.erase(handle);
++    }
++    static bool inUse(const std::filesystem::path &path)
++    {
++        struct stat st{};
++        if (lstat(path.c_str(), &st) == -1 || !S_ISREG(st.st_mode)) {
++            return false;
++        }
++        const std::lock_guard lock(_mutex);
++        return _count.contains(Key{st.st_dev, st.st_ino});
++    }
++
++private:
++    using Key = std::pair<dev_t, ino_t>;
++    static inline std::mutex _mutex;
++    static inline std::map<Key, unsigned> _count;
++    static inline std::unordered_map<uint64_t, Key> _byHandle;
++};
++
++// The client frees up a file kept after opening once no program has opened it
++// for a while. Opens by the client and by programs that must not hydrate
++// (thumbnailers, indexers) do not count. Written at most once a day, so
++// reading a file does not rewrite its attributes on every open. A stored time
++// in the future counts as stale and is replaced.
++static void noteOpened(const std::filesystem::path &path)
++{
++    const long long now = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
++    const auto name = OpenVFS::Constants::XAttributeNames::LastOpen.data();
++    char stored[24] = {};
++    const auto length = Xattr::getxattr(path, name, stored, sizeof(stored));
++    if (length > 0) {
++        long long last = 0;
++        const auto [end, error] = std::from_chars(stored, stored + length, last);
++        if (error == std::errc{} && end == stored + length && last <= now && now - last < 24 * 60 * 60) {
++            return;
++        }
++    }
++    const auto value = std::to_string(now);
++    if (Xattr::setxattr(path, name, value.data(), value.size(), 0) < 0) {
++        openvfsfuse_log(path, "open", -1, "could not note the open time");
++    }
++}
++
+ 
+ void openvfsfuse_log(const std::string &path, const char *action, int returncode, const char *format, ...)
+ {
+@@ -614,6 +691,10 @@ static int openVFSfuse_truncate(const char *orig_path, off_t size, fuse_file_inf
+     int res;
+ 
+     const auto path = getInternalPath(orig_path);
++    if (callerBelongsToProcess(fuse_get_context()->pid, _jobs.desktopClientPid()) && OpenFiles::inUse(path)) {
++        openvfsfuse_log(path, "truncate", -1, "a program has the file open");
++        return -EBUSY;
++    }
+     res = truncate(path.c_str(), size);
+     openvfsfuse_log(path, "truncate", res, "truncate to %d bytes", size);
+ 
+@@ -663,6 +744,10 @@ static int openVFSfuse_create(const char *orig_path, mode_t mode, struct fuse_fi
+     }
+     openvfsfuse_log(path, "create", 0, "create %o", static_cast<unsigned int>(mode));
+     fi->fh = res;
++    if (!callerBelongsToProcess(fuse_get_context()->pid, _jobs.desktopClientPid())) {
++        OpenFiles::opened(fi->fh);
++        noteOpened(path);
++    }
+ 
+     return 0;
+ }
+@@ -678,8 +763,15 @@ static int openVFSfuse_open(const char *orig_path, struct fuse_file_info *fi)
+ 
+     // The desktop client must not be blocked from accessing the file
+     // to be able to overwrite it.
+-    if (callerBelongsToProcess(fuse_get_context()->pid, _jobs.desktopClientPid())) {
++    const bool client = callerBelongsToProcess(fuse_get_context()->pid, _jobs.desktopClientPid());
++    if (client) {
+         openvfsfuse_log(path, "open", res, "Desktop client tries to access, bypassing!");
++        // The client empties a file to free it up. Not while a program has it
++        // open: the program would read zeros where its data was.
++        if ((fi->flags & O_TRUNC) && OpenFiles::inUse(path)) {
++            openvfsfuse_log(path, "open", -1, "a program has the file open");
++            return -EBUSY;
++        }
+     } else {
+         if (const auto attribs = OpenVFS::PlaceHolderAttributes::fromAttributes(path)) {
+             if (attribs->state == OpenVFS::Constants::States::DeHydrated
+@@ -809,6 +901,12 @@ static int openVFSfuse_open(const char *orig_path, struct fuse_file_info *fi)
+     }
+ 
+     fi->fh = res;
++    if (!client) {
++        OpenFiles::opened(fi->fh);
++        if (!VFSFuseContext::instance().blockedToOpen(opener, fuse_get_context()->pid)) {
++            noteOpened(path);
++        }
++    }
+     return 0;
+ }
+ 
+@@ -866,6 +964,7 @@ static int openVFSfuse_release(const char *orig_path, struct fuse_file_info *fi)
+ 
+     openvfsfuse_log(path, "close", 0, "");
+ 
++    OpenFiles::released(fi->fh);
+     close(fi->fh);
+     return 0;
+ }
+@@ -913,6 +1012,9 @@ static int openVFSfuse_getxattr(const char *orig_path, const char *name, char *v
+         }
+         return copyDataResult(std::to_string(statbuf.st_size));
+     }
++    if (name == OpenVFS::Constants::XAttributeNames::InUse) {
++        return copyDataResult(std::string_view(OpenFiles::inUse(path) ? "1" : "0"));
++    }
+     const auto ret = Xattr::getxattr(path, name, value, size);
+     if (ret == -ENODATA && name == OpenVFS::Constants::XAttributeNames::Data) {
+         errno = 0;

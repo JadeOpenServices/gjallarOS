@@ -70,5 +70,9 @@ in
     # A click on a client notification opens the tray window, like a click
     # on the tray icon (Plane 189).
     ./patches/nextcloud-notification-click.patch
+    # A file opened below an online-only folder stays on disk and goes back
+    # to online-only once no program has opened it for 14 days; a file a
+    # program has open is never emptied (Q79, Plane 254).
+    ./patches/nextcloud-openvfs-keep-open-files.patch
   ];
 }

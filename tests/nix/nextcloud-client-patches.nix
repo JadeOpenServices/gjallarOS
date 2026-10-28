@@ -111,6 +111,12 @@ pkgs.stdenvNoCC.mkDerivation {
     grep -Fq 'const QStringList actions = {u"default"_s, tr("Open")};' src/gui/systray.cpp
     grep -A4 'void Systray::slotNotificationActionInvoked' src/gui/systray.cpp \
       | grep -Fq '!_notificationIds.remove(id)'
+    # Freeing up emptied files a program still had open; it read zeros
+    # where its data was (Q79, Plane 254). Discovery asks openvfs first, and
+    # an opened file below an online-only folder stays on disk for 14 days.
+    grep -F -A3 'if (pin && *pin == PinState::OnlineOnly) {' "$f" | grep -Fq 'if (!inUse(path.toStdString())) {'
+    grep -Fq 'constexpr auto keptAfterOpen = std::chrono::days(14);' "$f"
+    grep -A4 'void OpenVFS::keepAfterOpen' "$f" | grep -Fq 'PinStates::Inherited && wantsOnlineOnly(folderPath)'
     touch $out
   '';
 }
