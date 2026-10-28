@@ -332,6 +332,30 @@ func mediaKind(lun LUN, emptySeen bool) string {
 	return kind
 }
 
+// DiskKind names the medium kind of a gated USB LUN for the storage icon
+// rule, from the same device facts as the media notices. Without the gate's
+// state it cannot know whether the slot was empty since the plug. A LUN that
+// is not gated, or not behind USB, has no kind.
+func DiskKind(sysfs, id string) (string, error) {
+	luns, err := (&Gate{Sysfs: sysfs}).scan()
+	if err != nil {
+		return "", err
+	}
+	slots := map[string]int{}
+	for _, lun := range luns {
+		if lun.Gated() {
+			slots[lun.Port]++
+		}
+	}
+	for _, lun := range luns {
+		if lun.ID == id && lun.Gated() {
+			lun.Slots = slots[lun.Port]
+			return mediaKind(lun, false), nil
+		}
+	}
+	return "", nil
+}
+
 // cardKind reads card words in a name like "SD/MMC", "MS Pro" or "CF Card
 // Reader". "Flash" alone means nothing: sticks call themselves "USB Flash
 // Disk".

@@ -152,7 +152,11 @@ let
   # the icon Solid would pick, so both show the same one (Plane 233). Discs
   # keep Solid's own icons, which also tell the disc type. The rules run
   # after 80-udisks2.rules, which sets ID_DRIVE_*, and never replace an icon
-  # a device rule already set.
+  # a device rule already set. A USB disk's card kind comes from
+  # gjallar-storage-icon, the classifier the media notices use: udisks only
+  # knows model strings like "*Reader*SD*", while reader slots often call
+  # themselves "SD/MMC" or "MS-Pro". The udisks per-device flags still refine
+  # a slot the classifier only knows as some memory card.
   storageIconRules = ''
     SUBSYSTEM!="block", GOTO="gjallar_storage_icon_end"
     ENV{UDISKS_ICON_NAME}!="", GOTO="gjallar_storage_icon_end"
@@ -160,11 +164,16 @@ let
     KERNEL=="mmcblk[0-9]*", SUBSYSTEMS=="mmc", ENV{UDISKS_ICON_NAME}="media-flash-sd-mmc", GOTO="gjallar_storage_icon_end"
     KERNEL=="msblk[0-9]*|mspblk[0-9]*", SUBSYSTEMS=="memstick", ENV{UDISKS_ICON_NAME}="media-flash-memory-stick", GOTO="gjallar_storage_icon_end"
     ENV{ID_BUS}!="usb", GOTO="gjallar_storage_icon_end"
+    ENV{DEVTYPE}=="disk", IMPORT{program}="${usbtrustd}/bin/gjallar-storage-icon $devpath"
+    ENV{DEVTYPE}=="partition", IMPORT{parent}="GJALLAR_STORAGE_KIND"
+    ENV{GJALLAR_STORAGE_KIND}=="sd-card", ENV{UDISKS_ICON_NAME}="media-flash-sd-mmc", GOTO="gjallar_storage_icon_end"
+    ENV{GJALLAR_STORAGE_KIND}=="memory-stick", ENV{UDISKS_ICON_NAME}="media-flash-memory-stick", GOTO="gjallar_storage_icon_end"
     ENV{ID_DRIVE_FLASH_SD}=="1", ENV{UDISKS_ICON_NAME}="media-flash-sd-mmc", GOTO="gjallar_storage_icon_end"
     ENV{ID_DRIVE_FLASH_SD_COMBO}=="1", ENV{UDISKS_ICON_NAME}="media-flash-sd-mmc", GOTO="gjallar_storage_icon_end"
     ENV{ID_DRIVE_FLASH_MS}=="1", ENV{UDISKS_ICON_NAME}="media-flash-memory-stick", GOTO="gjallar_storage_icon_end"
     ENV{ID_DRIVE_FLASH_SM}=="1", ENV{UDISKS_ICON_NAME}="media-flash-smart-media", GOTO="gjallar_storage_icon_end"
     ENV{ID_DRIVE_FLASH_CF}=="1", ENV{UDISKS_ICON_NAME}="media-flash", GOTO="gjallar_storage_icon_end"
+    ENV{GJALLAR_STORAGE_KIND}=="card", ENV{UDISKS_ICON_NAME}="media-flash", GOTO="gjallar_storage_icon_end"
     ATTRS{removable}=="1", ENV{UDISKS_ICON_NAME}="drive-removable-media-usb-pendrive", GOTO="gjallar_storage_icon_end"
     ATTRS{removable}=="0", ENV{UDISKS_ICON_NAME}="drive-harddisk"
     LABEL="gjallar_storage_icon_end"

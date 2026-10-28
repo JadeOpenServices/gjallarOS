@@ -445,6 +445,30 @@ func TestMediaKind(t *testing.T) {
 	}
 }
 
+func TestDiskKind(t *testing.T) {
+	_, k, _ := newGate(t)
+	for id, model := range map[string]string{"6:0:0:0": "SD/MMC", "6:0:0:1": "SYNTHETIC"} {
+		mustWrite(t, filepath.Join(k.add(id, true, true, 0, "5"), "model"), model)
+	}
+	k.add("7:0:0:0", false, false, 0, "")
+	for id, want := range map[string]string{"6:0:0:0": "sd-card", "6:0:0:1": "card", "7:0:0:0": "", "9:0:0:0": ""} {
+		got, err := DiskKind(k.root, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got != want {
+			t.Errorf("DiskKind(%s) = %q, want %q", id, got, want)
+		}
+	}
+
+	// A lone stick names nothing, the same as in its notice.
+	_, k, _ = newGate(t)
+	k.add("6:0:0:0", true, true, 0, "5")
+	if got, _ := DiskKind(k.root, "6:0:0:0"); got != "" {
+		t.Errorf("stick kind = %q", got)
+	}
+}
+
 func TestCardKind(t *testing.T) {
 	for name, want := range map[string]string{
 		"USB Flash Disk":      "",
