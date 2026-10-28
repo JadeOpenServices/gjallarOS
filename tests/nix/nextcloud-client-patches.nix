@@ -12,7 +12,7 @@ pkgs.stdenvNoCC.mkDerivation {
   # (2026-09-30); discovery must use the effective pin like xattr/suffix VFS.
   installPhase = ''
     f=src/libsync/vfs/openvfs/vfs_openvfs.cpp
-    grep -Fq 'if (pin && *pin == PinState::OnlineOnly) {' "$f"
+    grep -Fq 'if (pin && *pin == PinState::OnlineOnly && sinceLastOpen(' "$f"
     grep -Fq 'if (pin && *pin == PinState::AlwaysLocal) {' "$f"
     # New local files have no placeholder attributes (default "Hydrated");
     # they must never be classified for dehydration.
