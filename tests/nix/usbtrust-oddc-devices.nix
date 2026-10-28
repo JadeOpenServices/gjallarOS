@@ -4,7 +4,9 @@
 # (ODDC answer to 102), so it must not grow one by accident. The keyboard
 # gate tier follows from that: ZBook usb-keyboard, FW13 none. A devices file
 # that puts the keyboard on another port than the resolved view must fail
-# the build.
+# the build. With blocking on and systemd in stage 1, the ZBook closes USB
+# from the start of boot and lets its keyboard in by port; the FW13, and a
+# ZBook without systemd in stage 1, keep the note instead.
 {
   nixpkgs,
   system,
@@ -13,8 +15,9 @@
 let
   pkgs = nixpkgs.legacyPackages.${system};
 
-  machine =
-    model: extra:
+  machine = machineWith { };
+  machineWith =
+    settings: model: extra:
     (nixpkgs.lib.nixosSystem {
       inherit system;
       specialArgs.settings = {
@@ -22,7 +25,8 @@ let
         usbguardEnable = true;
         usbTrustEnforce = false;
         usbTrustTpmHandle = "0x81000042";
-      };
+      }
+      // settings;
       modules = [
         oddc.nixosModules.default
         ../../system/services/removable-media.nix
@@ -62,6 +66,22 @@ let
   zbookMoved = machine "model/hp/zbook-x2-g4" {
     services.gjallar-usbtrust.oddcDevices = movedKeyboard;
   };
+
+  enforced = machineWith { usbTrustEnforce = true; };
+  systemdInitrd = {
+    boot.initrd.systemd.enable = true;
+  };
+  zbookGated = enforced "model/hp/zbook-x2-g4" systemdInitrd;
+  zbookScripted = enforced "model/hp/zbook-x2-g4" {
+    boot.initrd.systemd.enable = false;
+  };
+  fw13Enforced = enforced "model/framework/laptop-13-amd-ryzen-7040" systemdInitrd;
+  gateRules =
+    config:
+    lib.findFirst (
+      p: lib.hasSuffix "gjallar-usb-keyboard-gate-rules" p.name
+    ) null config.boot.initrd.services.udev.packages;
+  hasGateParam = config: lib.elem "usbcore.authorized_default=0" config.boot.kernelParams;
   portCheck =
     config:
     lib.findFirst (
@@ -71,6 +91,10 @@ let
 
 in
 assert !zbook.services.usbguard.restoreControllerDeviceState;
+assert hasGateParam zbookGated && gateRules zbookGated != null;
+assert !hasGateParam zbook && gateRules zbook == null;
+assert !hasGateParam zbookScripted && gateRules zbookScripted == null;
+assert !hasGateParam fw13Enforced && gateRules fw13Enforced == null;
 pkgs.runCommand "usbtrust-oddc-devices"
   {
     nativeBuildInputs = [ pkgs.jq ];
@@ -83,6 +107,10 @@ pkgs.runCommand "usbtrust-oddc-devices"
     zbookCheck = portCheck zbook;
     fw13Check = portCheck fw13;
     movedCheck = pkgs.testers.testBuildFailure (portCheck zbookMoved);
+    zbookGatedGate = zbookGated.environment.etc."gjallar/usb-keyboard-gate.json".text;
+    zbookScriptedGate = zbookScripted.environment.etc."gjallar/usb-keyboard-gate.json".text;
+    fw13EnforcedGate = fw13Enforced.environment.etc."gjallar/usb-keyboard-gate.json".text;
+    zbookRules = gateRules zbookGated;
   }
   ''
     grep -qF -- "--oddc-devices $zbook " "$zbookStart"
@@ -100,5 +128,10 @@ pkgs.runCommand "usbtrust-oddc-devices"
     jq -e '. == {tier: "none", reason: "no-keyboard-facts", enforce: false, earlyGate: false, keyboard: null}' <<<"$fw13Gate"
     test -e "$zbookCheck" && test -e "$fw13Check"
     grep -qF "disagree on the USB keyboard" "$movedCheck/testBuildFailure.log"
+    jq -e '.tier == "usb-keyboard" and .enforce and .earlyGate' <<<"$zbookGatedGate"
+    jq -e '.tier == "usb-keyboard" and .enforce and (.earlyGate | not)' <<<"$zbookScriptedGate"
+    jq -e '.tier == "none" and .enforce and (.earlyGate | not)' <<<"$fw13EnforcedGate"
+    rule=$(< "$zbookRules/lib/udev/rules.d/90-gjallar-usb-keyboard-gate.rules")
+    [[ $rule == 'ACTION=="add", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="1fc9", ATTR{idProduct}=="0088", RUN+="'/nix/store/*-gjallar-usb-keyboard-gate' %k 1fc9:0088 8086:9d2f usb2 4"' ]]
     touch $out
   ''

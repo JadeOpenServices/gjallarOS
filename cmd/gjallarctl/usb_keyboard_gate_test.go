@@ -13,8 +13,9 @@ import (
 // The shapes removable-media.nix writes for the ZBook x2 G4 and the FW13
 // (tests/nix/usbtrust-oddc-devices.nix checks the Nix side).
 const (
-	zbookGateJSON = `{"earlyGate":false,"enforce":true,"keyboard":{"attachment":"detachable","deviceId":"1fc9:0088","name":"Keyboard"},"reason":"keyboard-on-usb","tier":"usb-keyboard"}`
-	fw13GateJSON  = `{"earlyGate":false,"enforce":false,"keyboard":null,"reason":"no-keyboard-facts","tier":"none"}`
+	zbookGateJSON  = `{"earlyGate":false,"enforce":true,"keyboard":{"attachment":"detachable","deviceId":"1fc9:0088","name":"Keyboard"},"reason":"keyboard-on-usb","tier":"usb-keyboard"}`
+	zbookGatedJSON = `{"earlyGate":true,"enforce":true,"keyboard":{"attachment":"detachable","deviceId":"1fc9:0088","name":"Keyboard"},"reason":"keyboard-on-usb","tier":"usb-keyboard"}`
+	fw13GateJSON   = `{"earlyGate":false,"enforce":false,"keyboard":null,"reason":"no-keyboard-facts","tier":"none"}`
 )
 
 func writeGate(t *testing.T, text string) {
@@ -56,7 +57,7 @@ func TestUSBKeyboardGateZBook(t *testing.T) {
 	if gate.Tier != "usb-keyboard" || gate.Keyboard == nil || gate.Keyboard.DeviceID != "1fc9:0088" {
 		t.Fatalf("got %+v", gate)
 	}
-	// Checkpoint 2: the tier is known but stage 1 does not gate yet.
+	// A build without a stage 1 gate (no systemd initrd) keeps the note.
 	findings := gjallarOSFindings(gate)
 	if len(findings) != 1 || findings[0].ID != "gjallaros/usb-early-boot" || findings[0].Summary != gate.Summary {
 		t.Fatalf("enforcing without an early gate must raise one note, got %+v", findings)
@@ -67,6 +68,20 @@ func TestUSBKeyboardGateZBook(t *testing.T) {
 	}
 	if strings.Contains(usbKeyboardGateSummary(gate), "every USB port") {
 		t.Fatal("the gated text must not say every port is open")
+	}
+}
+
+func TestUSBKeyboardGateZBookGated(t *testing.T) {
+	writeGate(t, zbookGatedJSON)
+	gate, err := readUSBKeyboardGate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gjallarOSFindings(gate) != nil {
+		t.Fatal("the stage 1 gate must not raise the note")
+	}
+	if !strings.Contains(gate.Summary, "only the built-in keyboard") {
+		t.Fatalf("got %q", gate.Summary)
 	}
 }
 

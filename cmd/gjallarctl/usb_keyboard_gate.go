@@ -56,7 +56,7 @@ func usbKeyboardGateSummary(gate *usbKeyboardGate) string {
 	case !gate.Enforce:
 		return "USB blocking is off."
 	case gate.EarlyGate:
-		return "During boot only the built-in keyboard's USB port takes devices. It takes any device that reports as that keyboard."
+		return "During boot and at the disk unlock screen, USB takes only the built-in keyboard on its own port, or a device that reports as that keyboard there. Every other device waits until the system is up."
 	default:
 		return "USB protection starts once the system is up. Until then, during boot and at the disk unlock screen, every USB port takes any device. Keep this device in sight while it starts."
 	}

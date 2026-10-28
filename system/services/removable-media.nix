@@ -30,7 +30,8 @@ let
   # 2). What can close that gap depends on the keyboard the owner needs for
   # the disk unlock, and only ODDC knows it: one keyboard on a USB root port
   # can be let in by that port alone. No keyboard fact, or a keyboard that
-  # is not on USB, has no early gate yet.
+  # is not on USB, has no early gate yet. The gate itself:
+  # usb-keyboard-gate.nix.
   keyboardSlots = lib.filterAttrs (_: lib.isAttrs) (
     config.oddc.resolved.hardware.input.keyboard or { }
   );
@@ -63,8 +64,11 @@ let
     tier
     // {
       inherit (cfg) enforce;
-      # Set once the gate runs in stage 1 (checkpoint 3).
-      earlyGate = false;
+      earlyGate =
+        cfg.enforce
+        && tier.tier == "usb-keyboard"
+        && config.boot.initrd.systemd.enable
+        && cfg.oddcDevices != null;
       keyboard =
         if tier.tier == "usb-keyboard" then
           {
@@ -216,7 +220,10 @@ in
   # A stick written with dd loses partitions and keeps its old label in
   # udev (Plane 185). What the fix does and when to drop it:
   # system/fixes/systemd-partition-reread.
-  imports = [ ../fixes/systemd-partition-reread ];
+  imports = [
+    ../fixes/systemd-partition-reread
+    ./usb-keyboard-gate.nix
+  ];
 
   options.services.gjallar-usbtrust = {
     enable = lib.mkOption {
@@ -336,6 +343,10 @@ in
       # Read by `gjallarctl usb status` and `gjallarctl security notice`.
       environment.etc."gjallar/usb-keyboard-gate.json".text = builtins.toJSON keyboardGate;
       system.checks = lib.optional (cfg.oddcDevices != null) keyboardPortCheck;
+      services.gjallar-usbtrust.earlyKeyboardGate = {
+        enable = keyboardGate.earlyGate;
+        devices = cfg.oddcDevices;
+      };
 
       # While USB protection enforces, the broker turns off automatic SCSI
       # driver binding so a medium in an allowed reader stays unread until

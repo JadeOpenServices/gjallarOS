@@ -286,6 +286,11 @@
           inherit (inputs) oddc;
         };
 
+        usb-keyboard-gate = import ./tests/nix/usb-keyboard-gate.nix {
+          inherit pkgs;
+          gateModule = ./system/services/usb-keyboard-gate.nix;
+        };
+
         recovery-maintenance = import ./tests/nix/recovery-maintenance.nix {
           inherit nixpkgs system;
           recoveryModule = ./system/recovery;
