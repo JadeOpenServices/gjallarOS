@@ -260,6 +260,16 @@ func TestUnpluggedConnectionIsInactive(t *testing.T) {
 	}
 }
 
+func TestAllowedConnectionIsNotBlocked(t *testing.T) {
+	policy := []usbtrust.Decision{{Connection: "a", Target: usbtrust.TargetBlock}, {Connection: "b", Target: usbtrust.TargetAllow}}
+	if !usbConnectionBlocked(policy, "a") {
+		t.Fatal("blocked connection reported decided")
+	}
+	if usbConnectionBlocked(policy, "b") || usbConnectionBlocked(policy, "c") {
+		t.Fatal("allowed or unplugged connection reported blocked")
+	}
+}
+
 func TestUSBMediaNotice(t *testing.T) {
 	body := usbMediaNotice(usbtrust.MediaDecision{ID: "6:0:0:0", Reader: "<b>Reader</b>", Bytes: 31_900_000_000}).Body
 	if !strings.Contains(body, "&lt;b&gt;Reader&lt;/b&gt;, 31.9 GB") {
