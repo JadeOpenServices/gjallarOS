@@ -25,8 +25,9 @@ let
     # Keep workers free for the client while hydrations wait.
     # Log file names only in debug mode.
     # Count opens refused for lack of a slot, without names, for error reports.
-    # Count programs that have a file open and note when one last opened it,
-    # so the client never frees up a file in use (Q79).
+    # Count programs that have a file open and note when one last read it,
+    # so the client never frees up a file in use; the last close after a
+    # free-up tells the client (Q79).
     patches = [
       ./patches/openvfs-hydration-liveness.patch
       ./patches/openvfs-shutdown.patch

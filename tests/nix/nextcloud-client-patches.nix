@@ -112,11 +112,15 @@ pkgs.stdenvNoCC.mkDerivation {
     grep -A4 'void Systray::slotNotificationActionInvoked' src/gui/systray.cpp \
       | grep -Fq '!_notificationIds.remove(id)'
     # Freeing up emptied files a program still had open; it read zeros
-    # where its data was (Q79, Plane 254). Discovery asks openvfs first, and
-    # an opened file below an online-only folder stays on disk for 14 days.
-    grep -F -A3 'if (pin && *pin == PinState::OnlineOnly) {' "$f" | grep -Fq 'if (!inUse(path.toStdString())) {'
+    # where its data was (Q79, Plane 254). An opened file stays on disk for
+    # 14 days, a free-up empties it at once, never while a program has it
+    # open; the last close after a free-up tells the client.
     grep -Fq 'constexpr auto keptAfterOpen = std::chrono::days(14);' "$f"
-    grep -A4 'void OpenVFS::keepAfterOpen' "$f" | grep -Fq 'PinStates::Inherited && wantsOnlineOnly(folderPath)'
+    grep -Fq 'sinceLastOpen(path.toStdString()) >= keptAfterOpen && !inUse(path.toStdString())' "$f"
+    grep -Fq 'virtual void freeUp([[maybe_unused]] const QString &folderPath) { }' src/common/vfs.h
+    grep -Fq 'data.folder->vfs().freeUp(data.folderRelativePath);' src/gui/socketapi/socketapi.cpp
+    grep -Fq 'void SocketApi::command_V2_FILE_CLOSED(' src/gui/socketapi/socketapi.cpp
+    grep -Fq 'folder->vfs().freeUp(path);' src/gui/accountsettings.cpp
     touch $out
   '';
 }
