@@ -84,6 +84,7 @@ in
 {
   imports = [
     ./gtk.nix
+    ./palettes.nix
     ./qt.nix
   ];
 
@@ -105,8 +106,11 @@ in
 
         theme = {
           mode = "dark";
-          source = "builtin";
+          # A theme with a palette starts on it (palettes.nix); the user can
+          # pick another one in Noctalia's settings.
+          source = if themeDetails ? palette then "custom" else "builtin";
           builtin = "Noctalia";
+          custom_palette = themeDetails.palette or "";
           templates.user.hyprland = {
             input_path = "$XDG_CONFIG_HOME/noctalia/templates/hyprland-colors.txt";
             output_path = "$XDG_STATE_HOME/noctalia/hyprland-colors.txt";
@@ -140,7 +144,7 @@ in
         shell = {
           clipboard_enabled = false;
           corner_radius_scale = 2.0;
-          font_family = themeDetails.font;
+          font_family = themeDetails.uiFont or themeDetails.font;
           polkit_agent = true;
           # No "Welcome to Noctalia" wizard: its choices are saved as overrides
           # that beat the theme above and the colors it feeds to Hyprland,
@@ -435,7 +439,11 @@ in
       };
   };
 
-  xdg.configFile."noctalia/palettes/stylix.json".text = builtins.toJSON palette;
+  # Themes without an openJade palette offer their own colours; with one, a
+  # "stylix" entry would only repeat it under a name nobody knows.
+  xdg.configFile."noctalia/palettes/stylix.json" = lib.mkIf (!themeDetails ? palette) {
+    text = builtins.toJSON palette;
+  };
 
   # Noctalia picks up plugins in its local source dir; enabled above.
   xdg.dataFile."noctalia/plugins/gjallar-quick-keys" = lib.mkIf hasQuickKeys {

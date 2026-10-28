@@ -201,7 +201,7 @@ in
         scheme = "Synced";
         theme_mode = "dark";
         corner_radius_scale = 2.0;
-        font_family = settings.themeDetails.font;
+        font_family = settings.themeDetails.uiFont or settings.themeDetails.font;
         password_style = "random";
         hide_logo = false;
       };

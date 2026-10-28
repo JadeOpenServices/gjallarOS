@@ -1,27 +1,32 @@
 { pkgs, ... }:
 {
   themeName = "rose-pine";
+  # Obsidian (themes/palettes/openjade.nix) in the shape the Noctalia
+  # stylix-override template writes, so the first build before Noctalia
+  # has run looks the same. base03/04 is the outline as Noctalia lifts it
+  # to 3:1 (read from its output on e2e-fw13).
   override = {
-    base00 = "11111b";
-    base01 = "181825";
-    base02 = "313244";
-    base03 = "45475a";
-    base04 = "585b70";
-    base05 = "cdd6f4";
-    base06 = "f5e0dc";
-    base07 = "b4befe";
-    base08 = "f38ba8";
-    base09 = "fab387";
-    base0A = "f9e2af";
-    base0B = "a6e3a1";
-    base0C = "94e2d5";
-    base0D = "89b4fa";
-    base0E = "cba6f7";
-    base0F = "f2cdcd";
+    base00 = "0F171D";
+    base01 = "16222A";
+    base02 = "10191F";
+    base03 = "546671";
+    base04 = "546671";
+    base05 = "DCE8EC";
+    base06 = "DCE8EC";
+    base07 = "DCE8EC";
+    base08 = "E5484D";
+    base09 = "85B9D8";
+    base0A = "E3B464";
+    base0B = "E3B464";
+    base0C = "85B9D8";
+    base0D = "4FA89D";
+    base0E = "85B9D8";
+    base0F = "E5484D";
   };
 
   btopTheme = null;
   shell = "noctalia";
+  palette = "Obsidian";
 
   opacity = 0.8;
   rounding = 25;
@@ -30,6 +35,8 @@
 
   font = "FiraCode Nerd Font";
   fontPkg = pkgs.nerd-fonts.fira-code;
+  uiFont = "Fira Sans";
+  uiFontPkg = pkgs.fira-sans;
   fontSize = 13;
 
   icons = "Papirus";

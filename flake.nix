@@ -197,6 +197,8 @@
 
         qt6ct-kde-style = import ./tests/nix/qt6ct-kde-style.nix { inherit pkgs; };
 
+        theme-palettes = import ./tests/nix/theme-palettes.nix { inherit pkgs; };
+
         security-baseline = import ./tests/nix/security-baseline.nix {
           inherit nixpkgs system;
           bootModule = ./system/hardware/boot.nix;
