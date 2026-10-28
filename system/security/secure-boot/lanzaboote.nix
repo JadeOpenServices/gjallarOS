@@ -155,8 +155,10 @@ let
         echo "Predicting the PCR state for future boots..."
         ${lib.last config.systemd.services.systemd-pcrlock-make-policy.serviceConfig.ExecStart}
       elif [ -n "$recovery" ]; then
-        echo "warning: the recovery partition cannot update the TPM policy; the next boot asks for the recovery key or disk passphrase." >&2
-        echo "warning: after that boot, run: gjallarctl tpm2 reenroll" >&2
+        # The old policy still covers the boot files it knew, so the same
+        # system unlocks as before (e2e-fw13, 2026-10-28).
+        echo "warning: the recovery partition cannot update the TPM policy; if the next boot starts a system the TPM policy does not know, it asks for the recovery key or disk passphrase." >&2
+        echo "warning: after such a boot, run: gjallarctl tpm2 reenroll" >&2
       else
         echo "warning: no usable TPM2 (see: systemd-analyze has-tpm2); the TPM policy was not updated." >&2
         echo "warning: once the TPM is back, boot with the recovery key or disk passphrase and run: gjallarctl tpm2 reenroll" >&2
