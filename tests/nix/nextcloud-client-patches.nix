@@ -106,6 +106,11 @@ pkgs.stdenvNoCC.mkDerivation {
       | grep -Fq 'if (ok && !encoded && _expectedContentLength != -1'
     grep -Fq 'restoreDehydrated(hydration->targetFileName(), hydration->record());' "$f"
     grep -A3 'States::Hydrating) {' "$f" | grep -Fq 'stat->type = ItemTypeVirtualFile;'
+    # A click on a client notification did nothing (Plane 189). It carries
+    # a "default" action, and only our own ids open the tray window.
+    grep -Fq 'const QStringList actions = {u"default"_s, tr("Open")};' src/gui/systray.cpp
+    grep -A4 'void Systray::slotNotificationActionInvoked' src/gui/systray.cpp \
+      | grep -Fq '!_notificationIds.remove(id)'
     touch $out
   '';
 }

@@ -67,5 +67,8 @@ in
     ./patches/nextcloud-hydration-encoded-size.patch
     # A failed or running hydration is never uploaded as a local edit.
     ./patches/nextcloud-openvfs-failed-hydration.patch
+    # A click on a client notification opens the tray window, like a click
+    # on the tray icon (Plane 189).
+    ./patches/nextcloud-notification-click.patch
   ];
 }
