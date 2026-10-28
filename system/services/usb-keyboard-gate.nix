@@ -10,6 +10,10 @@
 # allow rule lives in the initrd only: a keyboard plugged in again in stage
 # 2 before USBGuard runs stays closed until USBGuard decides.
 #
+# Of the keyboard only the input parts (HID interfaces) are let in, so a
+# keyboard that also offers storage or a network adapter gives stage 1 the
+# keys and nothing else.
+#
 # The keyboard is let in by its root port, its root hub's USB version and
 # its controller's PCI ID, read the way the broker reads them
 # (internal/usbtrust/roothub), and its vendor:product. Anything that does
@@ -65,8 +69,40 @@ let
       exit 0
     fi
 
+    # Only the keyboard's input parts (interface class 03, HID) get a
+    # driver; anything else the same device offers stays closed (Q88). New
+    # interfaces take the root hub's default, so it is 0 while the keyboard
+    # is set up and 1 again right after, the way USBGuard finds it in
+    # stage 2.
+    default=$hub/interface_authorized_default
+    echo 0 > "$default" || exit 1
+    trap 'echo 1 > "$default"' EXIT
     echo 1 > "$dev/authorized"
-    log "$1" "built-in keyboard let in"
+    echo 1 > "$default"
+    trap - EXIT
+    input=()
+    for intf in "$dev/$1":*; do
+      read -r class < "$intf/bInterfaceClass" || continue
+      if [[ $class == 03 ]]; then
+        input+=("''${intf##*/}")
+      else
+        log "''${intf##*/}" "class $class is not an input part, stays closed"
+      fi
+    done
+    if (( ''${#input[@]} == 0 )); then
+      echo 0 > "$dev/authorized"
+      log "$1" "no input part, stays closed"
+      exit 0
+    fi
+    # All parts first, then the probe, as the kernel's USB authorization
+    # docs ask for drivers that use more than one interface.
+    for name in "''${input[@]}"; do
+      echo 1 > "$dev/$name/authorized"
+    done
+    for name in "''${input[@]}"; do
+      echo "$name" > /sys/bus/usb/drivers_probe
+    done
+    log "$1" "built-in keyboard let in, input parts ''${input[*]}"
   '';
 
   # The one rule, from the devices file. Facts that do not look like IDs

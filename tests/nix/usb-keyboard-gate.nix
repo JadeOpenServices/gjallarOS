@@ -5,26 +5,31 @@
 # the smartcard reader, and the tablet on root port 1 of the default UHCI
 # controller stay closed until USBGuard decides in stage 2. With two xHCI
 # controllers the ID no longer names one controller, and nothing gets in.
+# Only the keyboard's input parts get a driver: a devices file that names
+# the smartcard reader (no HID interface) as the keyboard lets nothing in.
 { pkgs, gateModule }:
 let
   # EMULATED: the shape `oddc devices --json` gives, with QEMU's IDs.
-  devices = pkgs.writeText "emulated-oddc-devices.json" (
-    builtins.toJSON {
-      devices = [
-        {
-          path = "hardware.input.keyboard.internal";
-          name = "Keyboard";
-          deviceId = "0627:0001";
-          attachment = "detachable";
-          usbPort = {
-            controller = "1b36:000d";
-            hub = "usb2";
-            port = 1;
-          };
-        }
-      ];
-    }
-  );
+  devicesFor =
+    deviceId: port:
+    pkgs.writeText "emulated-oddc-devices.json" (
+      builtins.toJSON {
+        devices = [
+          {
+            path = "hardware.input.keyboard.internal";
+            name = "Keyboard";
+            inherit deviceId;
+            attachment = "detachable";
+            usbPort = {
+              controller = "1b36:000d";
+              hub = "usb2";
+              inherit port;
+            };
+          }
+        ];
+      }
+    );
+  devices = devicesFor "0627:0001" 1;
 
   gatedNode = {
     imports = [ gateModule ];
@@ -66,6 +71,12 @@ pkgs.testers.runNixOSTest {
     ]
     ++ ports;
   };
+  # QEMU's smartcard reader (08e6:4433) has one interface, class 0b.
+  nodes.nohid = {
+    imports = [ gatedNode ];
+    services.gjallar-usbtrust.earlyKeyboardGate.devices = pkgs.lib.mkForce (devicesFor "08e6:4433" 4);
+    virtualisation.qemu.options = [ "-device qemu-xhci,id=xhci" ] ++ ports;
+  };
 
   testScript = ''
     # The USB 2 root hub of the first QEMU xHCI controller, by bus number.
@@ -101,6 +112,9 @@ pkgs.testers.runNixOSTest {
         for port in (2, 3, 4):
             assert authorized(gated, f"{b}-{port}") == "0", port
         gated.succeed(f"test -e /sys/bus/usb/devices/{b}-1:1.0/driver")
+        gated.succeed(f"grep -qx 1 /sys/bus/usb/devices/{b}-1:1.0/authorized")
+        gated.succeed(f"grep -qx 1 /sys/bus/usb/devices/usb{b}/interface_authorized_default")
+        gated.succeed(f"dmesg | grep -F 'gjallar-usb-keyboard-gate: {b}-1: built-in keyboard let in, input parts {b}-1:1.0'")
         gated.succeed(f"dmesg | grep -F 'gjallar-usb-keyboard-gate: {b}-1: built-in keyboard let in'")
         gated.succeed(f"dmesg | grep -F 'gjallar-usb-keyboard-gate: {b}-3: not on root port 1, stays closed'")
         tablet = uhci_tablet(gated)
@@ -132,5 +146,14 @@ pkgs.testers.runNixOSTest {
         ).split()):
             shared.succeed(f"for d in /sys/bus/usb/devices/{b}-*; do [ -e \"$d\" ] || continue; case $d in *:*) continue;; esac; grep -qx 0 $d/authorized; done")
         shared.succeed("dmesg | grep -F '2 controllers with ID 1b36:000d, stays closed'")
+
+    with subtest("a device without an input part stays closed"):
+        nohid.wait_for_unit("multi-user.target")
+        b = bus(nohid)
+        for port in (1, 2, 3, 4):
+            assert authorized(nohid, f"{b}-{port}") == "0", port
+        nohid.succeed(f"dmesg | grep -F 'gjallar-usb-keyboard-gate: {b}-4:1.0: class 0b is not an input part, stays closed'")
+        nohid.succeed(f"dmesg | grep -F 'gjallar-usb-keyboard-gate: {b}-4: no input part, stays closed'")
+        nohid.succeed(f"grep -qx 1 /sys/bus/usb/devices/usb{b}/interface_authorized_default")
   '';
 }
