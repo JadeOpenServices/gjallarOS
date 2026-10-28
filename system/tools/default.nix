@@ -251,10 +251,6 @@ in
         pkgs.writeShellScript "handoff-plymouth-to-greetd" ''
           # No daemon: the splash is off or already gone, nothing to hand over.
           ${plymouth} --ping || exit 0
-          ${lib.optionalString (config.boot.plymouth.theme == "gjallar") ''
-            # The kept frame shows the mark upright, not frozen mid-turn.
-            ${plymouth} display-message --text=${config.gjallar.bootSplash.handoffMessage} || true
-          ''}
           # --wait returns once plymouthd has exited and let go of the display.
           if ! ${plymouth} quit --retain-splash --wait; then
             echo "handoff-plymouth-to-greetd: plymouth quit failed, starting the greeter anyway" >&2

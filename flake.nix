@@ -146,6 +146,7 @@
           _wine
           ghostty
           hyprland
+          plymouth
           udiskie
           usbguard
           wvkbd
@@ -171,6 +172,7 @@
             dolphin
             ghostty
             hyprland
+            plymouth
             udiskie
             usbguard
             wvkbd
@@ -244,6 +246,11 @@
         udiskie-new-media-only = import ./tests/nix/udiskie-new-media-only.nix {
           inherit pkgs;
           stockUdiskie = nixpkgs.legacyPackages.${system}.udiskie;
+        };
+
+        boot-splash-retain = import ./tests/nix/boot-splash-retain.nix {
+          inherit pkgs;
+          stockPlymouth = nixpkgs.legacyPackages.${system}.plymouth;
         };
 
         kio-fuse-slow = import ./tests/nix/kio-fuse-slow.nix {
