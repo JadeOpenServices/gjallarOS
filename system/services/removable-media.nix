@@ -26,6 +26,89 @@ let
         oddc devices --json --root ${config.oddc.catalog} --device ${lib.escapeShellArg config.oddc.device} > $out
       '';
 
+  # Until the broker starts, every USB port takes any device (Plane 194 part
+  # 2). What can close that gap depends on the keyboard the owner needs for
+  # the disk unlock, and only ODDC knows it: one keyboard on a USB root port
+  # can be let in by that port alone. No keyboard fact, or a keyboard that
+  # is not on USB, has no early gate yet.
+  keyboardSlots = lib.filterAttrs (_: lib.isAttrs) (
+    config.oddc.resolved.hardware.input.keyboard or { }
+  );
+  usbKeyboards = lib.filterAttrs (_: slot: slot ? usbPort) keyboardSlots;
+  keyboardGate =
+    let
+      tier =
+        if keyboardSlots == { } then
+          {
+            tier = "none";
+            reason = "no-keyboard-facts";
+          }
+        else if lib.length (lib.attrNames keyboardSlots) == 1 && usbKeyboards == keyboardSlots then
+          {
+            tier = "usb-keyboard";
+            reason = "keyboard-on-usb";
+          }
+        else if usbKeyboards == { } then
+          {
+            tier = "none";
+            reason = "keyboard-not-on-usb";
+          }
+        else
+          {
+            tier = "none";
+            reason = "several-keyboards";
+          };
+      keyboard = lib.head (lib.attrValues usbKeyboards);
+    in
+    tier
+    // {
+      inherit (cfg) enforce;
+      # Set once the gate runs in stage 1 (checkpoint 3).
+      earlyGate = false;
+      keyboard =
+        if tier.tier == "usb-keyboard" then
+          {
+            deviceId = keyboard.deviceId or null;
+            attachment = keyboard.attachment or null;
+            name = keyboard.name or null;
+          }
+        else
+          null;
+    };
+
+  # The resolved view names the keyboard's controller only by reference, so
+  # the port the gate opens comes from the devices file. Both come from the
+  # same pinned catalogue; a build where they disagree on which keyboard
+  # sits on which port fails here instead of gating the wrong port.
+  keyboardPortCheck =
+    let
+      expected = lib.mapAttrsToList (slot: kb: {
+        path = "hardware.input.keyboard.${slot}";
+        deviceId = kb.deviceId or null;
+        attachment = kb.attachment or null;
+        hub = kb.usbPort.hub or null;
+        port = kb.usbPort.port or null;
+      }) usbKeyboards;
+    in
+    pkgs.runCommand "gjallar-usbtrust-keyboard-port-check"
+      {
+        nativeBuildInputs = [ pkgs.jq ];
+        expected = builtins.toJSON expected;
+        devices = cfg.oddcDevices;
+      }
+      ''
+        jq -e --argjson expected "$expected" '
+          [.devices[] | select(.path | startswith("hardware.input.keyboard.")) | select(.usbPort)]
+          | (map({path, deviceId, attachment, hub: .usbPort.hub, port: .usbPort.port}) | sort_by(.path))
+              == ($expected | sort_by(.path))
+            and all(.usbPort.controller | type == "string" and test("^[0-9a-f]{4}:[0-9a-f]{4}$"))
+        ' "$devices" > /dev/null || {
+          echo "USB trust: oddc devices and the resolved ODDC view disagree on the USB keyboard" >&2
+          exit 1
+        }
+        touch $out
+      '';
+
   # The same settings the nixpkgs module writes, with the fallback target
   # passed in. See the usbguard unit below for why.
   usbguard = config.services.usbguard;
@@ -213,6 +296,10 @@ in
         "-/tmp"
         "-/sys"
       ];
+
+      # Read by `gjallarctl usb status` and `gjallarctl security notice`.
+      environment.etc."gjallar/usb-keyboard-gate.json".text = builtins.toJSON keyboardGate;
+      system.checks = lib.optional (cfg.oddcDevices != null) keyboardPortCheck;
 
       # While USB protection enforces, the broker turns off automatic SCSI
       # driver binding so a medium in an allowed reader stays unread until

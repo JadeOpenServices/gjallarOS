@@ -76,9 +76,22 @@ func runUSB(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "FAIL: %v\n", err)
 		return 1
 	}
+	var out any = response
+	if r.Action == broker.ActionStatus {
+		// The early-boot gate is a build-time fact, not broker state.
+		gate, err := readUSBKeyboardGate()
+		if err != nil {
+			fmt.Fprintf(stderr, "FAIL: %v\n", err)
+			return 1
+		}
+		out = struct {
+			broker.Response
+			KeyboardGate *usbKeyboardGate `json:"keyboardGate,omitempty"`
+		}{response, gate}
+	}
 	encoder := json.NewEncoder(stdout)
 	encoder.SetIndent("", "  ")
-	if err := encoder.Encode(response); err != nil {
+	if err := encoder.Encode(out); err != nil {
 		fmt.Fprintf(stderr, "FAIL: %v\n", err)
 		return 1
 	}
