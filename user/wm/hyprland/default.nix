@@ -145,8 +145,8 @@ in
 
   wayland.windowManager.hyprland = {
     enable = true;
-    # Lua config (wiki 752 Q29): window rules can then react to a title that
-    # changes after the window maps (Firefox picture-in-picture, Plane 188).
+    # Lua config (wiki 752 Q29): event handlers can react to a title that
+    # changes after the window maps (Firefox extension pop-ups, Plane 188).
     configType = "lua";
     # Calls render in this order, so variables, plugins and permissions exist
     # before anything uses them, and binds come last.
