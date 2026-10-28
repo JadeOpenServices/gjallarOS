@@ -1,3 +1,5 @@
+diff --git a/src/render/scene/input_area.cpp b/src/render/scene/input_area.cpp
+index bf8a0e1325..d7ec6d4f79 100644
 --- a/src/render/scene/input_area.cpp
 +++ b/src/render/scene/input_area.cpp
 @@ -206,9 +206,9 @@ void InputArea::dispatchLeave() {
@@ -30,9 +32,11 @@
         .axis = axis,
         .axisSource = axisSource,
         .pressed = false,
+diff --git a/src/render/scene/input_area.h b/src/render/scene/input_area.h
+index 208f1aff1a..95a5b21bae 100644
 --- a/src/render/scene/input_area.h
 +++ b/src/render/scene/input_area.h
-@@ -179,7 +179,8 @@ public:
+@@ -184,7 +184,8 @@ public:
    // Dispatch methods (called by InputDispatcher)
    void dispatchEnter(float localX, float localY);
    void dispatchLeave();
@@ -42,7 +46,7 @@
    void dispatchPress(
        float localX, float localY, std::uint32_t button, bool isPressed, float sceneX = 0.0F, float sceneY = 0.0F,
        std::uint32_t serial = 0, std::uint32_t time = 0
-@@ -187,7 +188,8 @@ public:
+@@ -192,7 +193,8 @@ public:
    void dispatchCancel();
    [[nodiscard]] bool dispatchAxis(
        float localX, float localY, std::uint32_t axis, std::uint32_t axisSource, double axisValue,
@@ -52,6 +56,8 @@
    );
    void dispatchKey(std::uint32_t sym, std::uint32_t utf32, std::uint32_t modifiers, bool pressed, bool preedit = false);
    void dispatchFocusGain();
+diff --git a/src/render/scene/input_dispatcher.cpp b/src/render/scene/input_dispatcher.cpp
+index 6621f502f6..633027fc47 100644
 --- a/src/render/scene/input_dispatcher.cpp
 +++ b/src/render/scene/input_dispatcher.cpp
 @@ -140,7 +140,7 @@ void InputDispatcher::pointerLeave() {
@@ -117,6 +123,8 @@
    }
  
    updateCursor(serial);
+diff --git a/src/render/scene/input_dispatcher.h b/src/render/scene/input_dispatcher.h
+index 1e9cac8781..5d03237302 100644
 --- a/src/render/scene/input_dispatcher.h
 +++ b/src/render/scene/input_dispatcher.h
 @@ -35,7 +35,8 @@ public:

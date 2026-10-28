@@ -5,14 +5,7 @@
 # side), let notification cards be swiped away with their timer bar draining
 # from the left, show Bluetooth devices by their advertised name with
 # nameless ones hidden by default, treat a touch long press as a right click,
-# trust Bluetooth devices after pairing (upstream 27f2e349, drop it once the
-# pin includes that commit), and let battery-guard own the laptop battery
-# warnings.
-#
-# A card shown while the shell is still starting finished its slide-in within one
-# stalled frame and kept the input region of its start position, so clicks went
-# through to the window below. Upstream fixed that in f5e744f0; drop
-# notification-input-region.patch once the pin includes it.
+# and let battery-guard own the laptop battery warnings.
 #
 # Motion and scroll events reach widgets with their Wayland timestamp
 # (pointer-event-time.patch), so a swipe's speed is measured on when the
@@ -25,7 +18,7 @@
 #
 # Keyboards that show a code to type (DisplayPasskey, DisplayPinCode) never
 # showed it: the pairing card only appeared for requests that wait for a reply.
-# Upstream fixed the passkey card in 2a80c854 (#4232). bluetooth-pairing.patch
+# Upstream fixed the passkey card (2a80c854, #4232). bluetooth-pairing.patch
 # also shows the PIN while BlueZ waits for the device, closes the card when the
 # device pairs or goes away, makes Cancel on a code card stop the pairing,
 # re-registers the agent when bluetoothd restarts, and posts a notification
@@ -36,25 +29,18 @@
 # temperature flickered (47 -> 63 -> 56 -> 47 within seconds on the ZBook x2).
 # cpu-temp-smoothing.patch shows an 8 s moving average of it instead.
 #
-# Wi-Fi password prompts died after the first rebuild switch: NM restarts and
-# forgets its agents, and the shell registered only once, so NM answered "No
-# agents were available". network-secret-agent.patch backports upstream
-# 22ab9a4d (#4402, in 5.2.1) to register again whenever NM comes back, only
-# takes GetSecrets and CancelGetSecrets from the current NM owner, keeps the
-# request when the control center closes, and posts a notification while the
-# Network tab is not open. Drop it once the pin is 5.2.1 or newer, except for
-# the sender check and the notification.
+# Upstream registers the Wi-Fi secret agent again whenever NM comes back
+# (22ab9a4d), but takes GetSecrets from any caller and drops the request when
+# the control center closes. network-secret-agent.patch only takes GetSecrets
+# and CancelGetSecrets from the current NM owner, keeps the request when the
+# control center closes, and posts a notification while the Network tab is not
+# open.
 #
-# The shell picked its Wi-Fi backend once at startup. When NM was not on the bus
-# yet (or restarting), it fell back to wpa_supplicant, which the user may not
-# talk to, and never looked at NM again, so the Wi-Fi list stayed empty ("no
-# networks in range") until the shell restarted. networkmanager-follow-bus.patch
-# backports upstream 24f85bae to attach to NM whenever it appears on the bus and
-# detach when it leaves. Drop it once the pin includes that commit.
-# That alone does not cover a shell that starts while NM is down: NM's own
-# wpa_supplicant is on the bus, closed to the user, and the fallback took it
-# anyway. wpa-supplicant-access-denied.patch (ours; upstream has the same gap)
-# refuses a wpa_supplicant that answers AccessDenied, so the NM backend waits.
+# Upstream attaches to NM whenever it appears on the bus (24f85bae). A shell
+# that starts while NM is down still took NM's own wpa_supplicant, which is on
+# the bus but closed to the user. wpa-supplicant-access-denied.patch (ours;
+# upstream has the same gap) refuses a wpa_supplicant that answers
+# AccessDenied, so the NM backend waits.
 #
 # Touch-only machines (a tablet with its keyboard cover off) had no way to
 # type the password at the lock screen. lock-osk.patch (ours) adds an
@@ -68,10 +54,11 @@
 # A click on a notification runs its "default" action, but the shell's own
 # cards could not carry one: the Wi-Fi password and Bluetooth pairing cards
 # said "open the control center" and a click did nothing (Plane 189).
-# notification-internal-actions.patch backports upstream's in-process
-# callback for actions on the shell's own cards (5.4.0, setInternalActionCallback)
-# and gives those two cards a click that opens their tab. When the pin moves
-# to 5.4.0, keep only the two cards and share the callback with the calendar.
+# notification-internal-actions.patch gives those two cards a "default"
+# action that opens their tab. Upstream has one slot for clicks on the
+# shell's own cards (setInternalActionCallback) and the calendar took it, so
+# the patch moves the slot to the application: the two cards open their tab,
+# every other click goes on to the calendar as before.
 #
 # libqalculate 5.10 frees its random state on exit even when nothing ever
 # created it, so the shell crashes every time it stops. Upstream fixed that in
@@ -90,15 +77,12 @@
       ./notification-swipe.patch
       ./bluetooth.patch
       ./touch-long-press.patch
-      ./bluetooth-trust.patch
       ./notification-progress-left.patch
       ./battery-notify.patch
-      ./notification-input-region.patch
       ./wallpaper-store-path.patch
       ./bluetooth-pairing.patch
       ./cpu-temp-smoothing.patch
       ./network-secret-agent.patch
-      ./networkmanager-follow-bus.patch
       ./wpa-supplicant-access-denied.patch
       ./lock-osk.patch
       ./notification-internal-actions.patch

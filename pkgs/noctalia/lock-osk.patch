@@ -1,8 +1,8 @@
 diff --git a/meson.build b/meson.build
-index 0313934..974cf52 100644
+index a96f242a2d..ade8a722a0 100644
 --- a/meson.build
 +++ b/meson.build
-@@ -78,6 +78,7 @@ pangoft2_dep        = dependency('pangoft2')
+@@ -79,6 +79,7 @@ pangoft2_dep        = dependency('pangoft2')
  harfbuzz_dep        = dependency('harfbuzz')
  librsvg_dep         = dependency('librsvg-2.0')
  xkbcommon_dep       = dependency('xkbcommon')
@@ -10,7 +10,7 @@ index 0313934..974cf52 100644
  glib_dep            = dependency('glib-2.0')
  gobject_dep         = dependency('gobject-2.0')
  gio_dep             = dependency('gio-2.0')
-@@ -1034,6 +1035,7 @@ _noctalia_system_dependencies = [
+@@ -1082,6 +1083,7 @@ _noctalia_system_dependencies = [
    harfbuzz_dep,
    librsvg_dep,
    xkbcommon_dep,
@@ -19,24 +19,26 @@ index 0313934..974cf52 100644
    gobject_dep,
    gio_dep,
 diff --git a/src/shell/lockscreen/lock_screen.cpp b/src/shell/lockscreen/lock_screen.cpp
-index 22d60ff..8bcd503 100644
+index ae398eb9fe..15e57b7c60 100644
 --- a/src/shell/lockscreen/lock_screen.cpp
 +++ b/src/shell/lockscreen/lock_screen.cpp
-@@ -20,8 +20,12 @@
- #include "wayland/wayland_seat.h"
- 
+@@ -26,10 +26,14 @@
  #include <algorithm>
+ #include <chrono>
+ #include <cmath>
 +#include <cstring>
+ #include <ctime>
 +#include <libudev.h>
 +#include <linux/input.h>
  #include <string>
  #include <thread>
+ #include <utility>
 +#include <xkbcommon/xkbcommon-keysyms.h>
  
  namespace {
  
-@@ -38,6 +42,50 @@ namespace {
-     return resolveColorSpec(*config.fillColor);
+@@ -86,6 +90,50 @@ namespace {
+     std::unreachable();
    }
  
 +  // True when a keyboard is attached that a person can type on: built in,
@@ -86,7 +88,7 @@ index 22d60ff..8bcd503 100644
    // An output can only carry a lock surface once it is complete and has real geometry.
    bool hasUsableOutput(const WaylandConnection& wayland) {
      return std::ranges::any_of(wayland.outputs(), [](const WaylandOutput& output) {
-@@ -159,6 +207,7 @@ bool LockScreen::lock() {
+@@ -246,6 +294,7 @@ bool LockScreen::lock() {
    clearSensitiveString(m_password);
    m_status = i18n::tr("lockscreen.waiting");
    m_statusIsError = false;
@@ -94,15 +96,15 @@ index 22d60ff..8bcd503 100644
    syncInstances();
    if (m_instances.empty()) {
      kLog.warn("no outputs available for lock screen");
-@@ -199,6 +248,7 @@ void LockScreen::unlock() {
+@@ -327,6 +376,7 @@ void LockScreen::finishUnlock() {
    clearSensitiveString(m_password);
    m_status.clear();
    m_statusIsError = false;
 +  m_oskVisible = false;
    m_wayland->stopKeyRepeat();
-   m_desktopCaptures.clear();
-   m_desktopCapturesPrimed = false;
-@@ -362,6 +412,14 @@ void LockScreen::onKeyboardEvent(const KeyboardEvent& event) {
+   invalidateDesktopCaptures();
+   m_activeTransition.reset();
+@@ -525,6 +575,14 @@ void LockScreen::onKeyboardEvent(const KeyboardEvent& event) {
      return;
    }
  
@@ -114,12 +116,12 @@ index 22d60ff..8bcd503 100644
 +    setOskVisibleOnSurfaces(false);
 +  }
 +
-   // The password field always owns plain printable keys; Space is a Validate
-   // chord but must type a space, not submit (passwords may contain spaces).
-   if (!isPlainPrintableKey(event.utf32, event.modifiers, event.preedit)
-@@ -402,6 +460,15 @@ void LockScreen::onKeyboardEvent(const KeyboardEvent& event) {
-   }
- }
+   LockSurface* targetSurface = nullptr;
+   if (m_pointerSurface != nullptr) {
+     for (auto& instance : m_instances) {
+@@ -602,6 +660,15 @@ bool LockScreen::tryActionShortcut(std::uint32_t sym, std::uint32_t modifiers) {
+ 
+ void LockScreen::markOutputsWoke() { m_wokeAtMillis = bootTimeMillis(); }
  
 +void LockScreen::setOskVisibleOnSurfaces(bool visible) {
 +  m_oskVisible = visible;
@@ -132,16 +134,16 @@ index 22d60ff..8bcd503 100644
 +
  bool LockScreen::isActive() const noexcept { return m_lockPending || m_locked; }
  
- bool LockScreen::isSessionLocked() const noexcept { return m_locked; }
-@@ -500,6 +567,7 @@ void LockScreen::handleFinished(void* data, ext_session_lock_v1* /*lock*/) {
-   clearSensitiveString(self->m_password);
-   self->m_status.clear();
-   self->m_statusIsError = false;
+ bool LockScreen::isInGracePeriod() const noexcept {
+@@ -929,6 +996,7 @@ void LockScreen::handleFinished(void* data, ext_session_lock_v1* /*lock*/) {
+   self->invalidateDesktopCaptures();
+   self->m_activeTransition.reset();
+   self->m_transitionSuppressed = false;
 +  self->m_oskVisible = false;
-   self->m_desktopCaptures.clear();
-   self->m_desktopCapturesPrimed = false;
    if (wasLockedInteractive && self->m_onSessionUnlocked) {
-@@ -726,6 +794,8 @@ void LockScreen::createInstance(const WaylandOutput& output) {
+     self->m_onSessionUnlocked();
+   } else if (!wasLockedInteractive && self->m_onLockAborted) {
+@@ -1318,6 +1386,8 @@ void LockScreen::createInstance(const WaylandOutput& output) {
    surface->setOnLogin([this]() { tryAuthenticate(); });
    surface->setOnCycleLayout([this]() { cycleKeyboardLayout(); });
    surface->setOnPasswordChanged([this](const std::string& value) { handlePasswordEdited(value); });
@@ -151,40 +153,40 @@ index 22d60ff..8bcd503 100644
    surface->setPromptState(m_user, m_password, m_status, m_statusIsError, m_authenticating);
    applyIndicatorsToSurface(*surface);
 diff --git a/src/shell/lockscreen/lock_screen.h b/src/shell/lockscreen/lock_screen.h
-index d1cae42..59ac7de 100644
+index c66a269a16..bc619264a0 100644
 --- a/src/shell/lockscreen/lock_screen.h
 +++ b/src/shell/lockscreen/lock_screen.h
-@@ -96,6 +96,7 @@ private:
-   };
- 
-   void syncInstances();
+@@ -119,6 +119,7 @@ private:
+   [[nodiscard]] bool captureDesktopSnapshots();
+   void invalidateDesktopCaptures();
+   [[nodiscard]] bool shouldCaptureDesktop() const;
 +  void setOskVisibleOnSurfaces(bool visible);
-   void captureDesktopSnapshots();
-   [[nodiscard]] bool shouldUseBlurredDesktop() const;
    [[nodiscard]] bool allSurfacesReady() const;
-@@ -143,6 +144,9 @@ private:
-   bool m_lockPending = false;
-   bool m_locked = false;
+   bool tryFlushPendingAfterLocked();
+   void dispatchPendingAfterLocked(bool timedOut = false);
+@@ -184,6 +185,9 @@ private:
+   bool m_lockStarting = false;
    bool m_desktopCapturesPrimed = false;
+   std::uint64_t m_desktopCaptureGeneration = 0;
 +  // On-screen keyboard shown on every lock surface; starts shown when no
 +  // physical keyboard is attached.
 +  bool m_oskVisible = false;
    bool m_lockDeferred = false;
-   std::function<void()> m_pendingAfterLocked;
-   std::function<void()> m_onSessionLocked;
+   bool m_transitionSuppressed = false;
+   bool m_unlocking = false;
 diff --git a/src/shell/lockscreen/lock_surface.cpp b/src/shell/lockscreen/lock_surface.cpp
-index 9b98e95..7517ed7 100644
+index 8cfab4149a..641705975e 100644
 --- a/src/shell/lockscreen/lock_surface.cpp
 +++ b/src/shell/lockscreen/lock_surface.cpp
-@@ -37,6 +37,7 @@
- #include <string_view>
+@@ -40,6 +40,7 @@
  #include <tuple>
+ #include <utility>
  #include <wayland-client-core.h>
 +#include <xkbcommon/xkbcommon.h>
  
  namespace {
  
-@@ -52,6 +53,59 @@ namespace {
+@@ -57,6 +58,59 @@ namespace {
    constexpr int kForecastDayCountAlone = 5;
    constexpr float kWeatherCurrentMinText = 56.0F;
  
@@ -244,16 +246,15 @@ index 9b98e95..7517ed7 100644
    [[nodiscard]] int fitForecastDays(
        Renderer& renderer, float weatherBudget, float weatherGlyphSize, float forecastGlyphSize, float captionSize,
        int maxDays
-@@ -532,6 +586,8 @@ LockSurface::LockSurface(WaylandConnection& connection, ConfigService* config) :
-       )
-   );
- 
+@@ -565,6 +619,7 @@ LockSurface::LockSurface(WaylandConnection& connection, ConfigService* config) :
+     transitionCover->setZIndex(1000);
+     m_transitionCover = static_cast<LockscreenTransitionCover*>(m_root.addChild(std::move(transitionCover)));
+   }
 +  buildOsk();
-+
+ 
    m_inputDispatcher.setSceneRoot(&m_root);
    m_inputDispatcher.setCursorShapeCallback([this](std::uint32_t serial, std::uint32_t shape) {
-     m_connection.setCursorShape(serial, shape);
-@@ -633,10 +689,272 @@ void LockSurface::setLockedState(bool locked) {
+@@ -680,10 +735,272 @@ void LockSurface::setLockedState(bool locked) {
      focusPasswordField();
    } else {
      m_inputDispatcher.setFocus(nullptr);
@@ -465,7 +466,7 @@ index 9b98e95..7517ed7 100644
 +  m_oskLayer->setSize(sw, sh);
 +
 +  m_oskPanel->setFill(style.panelFill);
-+  m_oskPanel->setBorder(colorForRole(ColorRole::Outline, style.panelOpacity), Style::borderWidth);
++  m_oskPanel->setBorder(colorForRole(ColorRole::OutlineVariant, style.panelOpacity), Style::borderWidth);
 +  m_oskPanel->setRadius(Style::scaledRadius(style.panelRadius));
 +  m_oskPanel->setSoftness(1.0F);
 +  m_oskPanel->setMinWidth(kbWidth);
@@ -526,7 +527,7 @@ index 9b98e95..7517ed7 100644
  bool LockSurface::passwordFieldContainsPoint(float sceneX, float sceneY) const {
    return m_passwordField != nullptr && m_passwordField->containsScenePoint(sceneX, sceneY);
  }
-@@ -811,6 +1129,10 @@ void LockSurface::onPointerEvent(const PointerEvent& event) {
+@@ -989,6 +1306,10 @@ void LockSurface::onPointerEvent(const PointerEvent& event) {
      if (m_locked && pressed && passwordFieldContainsPoint(x, y)) {
        focusPasswordField();
      }
@@ -537,17 +538,17 @@ index 9b98e95..7517ed7 100644
      m_inputDispatcher.pointerButton(x, y, event.button, pressed, event.serial, event.time, event.touch);
      if (m_locked && pressed && passwordFieldContainsPoint(x, y)) {
        focusPasswordField();
-@@ -939,6 +1261,9 @@ void LockSurface::layoutScene(std::uint32_t width, std::uint32_t height) {
-     if (m_authPanel != nullptr) {
-       m_authPanel->setVisible(false);
+@@ -1237,6 +1558,9 @@ void LockSurface::layoutScene(std::uint32_t width, std::uint32_t height) {
      }
+     layoutTransitionCover();
+     syncTransitionCover();
 +    if (m_oskLayer != nullptr) {
 +      m_oskLayer->setVisible(false);
 +    }
      return;
    }
  
-@@ -981,6 +1306,13 @@ void LockSurface::layoutScene(std::uint32_t width, std::uint32_t height) {
+@@ -1289,6 +1613,13 @@ void LockSurface::layoutScene(std::uint32_t width, std::uint32_t height) {
    panelX = util::clampOrdered(panelX, Style::spaceLg, sw - panelWidth - Style::spaceLg);
    panelY = util::clampOrdered(panelY, Style::spaceLg, sh - panelHeight - Style::spaceLg);
  
@@ -562,10 +563,10 @@ index 9b98e95..7517ed7 100644
  
    m_backgroundLayer->setPosition(0.0F, 0.0F);
 diff --git a/src/shell/lockscreen/lock_surface.h b/src/shell/lockscreen/lock_surface.h
-index 76a27cb..78871e3 100644
+index 5824692ddc..47f4528762 100644
 --- a/src/shell/lockscreen/lock_surface.h
 +++ b/src/shell/lockscreen/lock_surface.h
-@@ -66,6 +66,11 @@ public:
+@@ -78,6 +78,11 @@ public:
    void setOnLogin(std::function<void()> onLogin);
    void setOnCycleLayout(std::function<void()> onCycleLayout);
    void setOnPasswordChanged(std::function<void(const std::string&)> onPasswordChanged);
@@ -577,7 +578,7 @@ index 76a27cb..78871e3 100644
    void setLoginBoxServices(
        SessionActionRunner* sessionActions, MprisService* mpris, const WeatherService* weather, HttpClient* httpClient
    );
-@@ -119,6 +124,21 @@ private:
+@@ -154,6 +159,21 @@ private:
    [[nodiscard]] bool passwordFieldContainsPoint(float sceneX, float sceneY) const;
    void focusPasswordField();
  
@@ -599,7 +600,7 @@ index 76a27cb..78871e3 100644
    ext_session_lock_surface_v1* m_lockSurface = nullptr;
    wl_output* m_output = nullptr;
    bool m_receivedConfigure = false;
-@@ -155,6 +175,21 @@ private:
+@@ -192,6 +212,21 @@ private:
    Button* m_layoutChip = nullptr;
    Flex* m_sessionRow = nullptr;
    std::vector<Button*> m_sessionButtons;
@@ -619,5 +620,5 @@ index 76a27cb..78871e3 100644
 +  OskShift m_oskShift = OskShift::Off;
 +  std::function<void(bool)> m_onOskVisibilityRequest;
    SharedTextureCache* m_textureCache = nullptr;
-   TextureHandle m_wallpaperTexture{};
-   TextureHandle m_blurredWallpaperTexture{};
+   SharedTextureCache::Lease m_wallpaperLease;
+   SharedTextureCache::Lease m_pendingWallpaperLease;

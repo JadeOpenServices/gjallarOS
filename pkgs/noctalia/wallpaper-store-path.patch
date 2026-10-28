@@ -1,6 +1,8 @@
+diff --git a/src/config/config_overrides.cpp b/src/config/config_overrides.cpp
+index 1c8d2786f1..ce2fbad54d 100644
 --- a/src/config/config_overrides.cpp
 +++ b/src/config/config_overrides.cpp
-@@ -2265,6 +2265,35 @@
+@@ -2349,6 +2349,35 @@ void ConfigService::setWallpaperPath(const std::optional<std::string>& connector
  
  void ConfigService::extractWallpaperFromOverrides() { extractWallpaperFromTable(m_overridesTable); }
  
@@ -36,7 +38,7 @@
  void ConfigService::extractWallpaperFromTable(const toml::table& table) {
    m_defaultWallpaperPath.clear();
    m_lastWallpaperPath.clear();
-@@ -2273,19 +2302,19 @@
+@@ -2357,19 +2386,19 @@ void ConfigService::extractWallpaperFromTable(const toml::table& table) {
  
    if (auto* wpDefault = table["wallpaper"]["default"].as_table()) {
      if (auto v = (*wpDefault)["path"].value<std::string>()) {
@@ -59,7 +61,7 @@
          }
        }
      }
-@@ -2298,7 +2327,7 @@
+@@ -2382,7 +2411,7 @@ void ConfigService::extractWallpaperFromTable(const toml::table& table) {
        }
        WallpaperFavorite favorite;
        if (auto path = (*favTbl)["path"].value<std::string>()) {

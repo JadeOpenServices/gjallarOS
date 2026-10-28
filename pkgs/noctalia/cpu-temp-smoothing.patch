@@ -1,5 +1,5 @@
 diff --git a/src/system/system_monitor_service.cpp b/src/system/system_monitor_service.cpp
-index 97c2f48..f6861ad 100644
+index 04b726fbe8..52e28ce671 100644
 --- a/src/system/system_monitor_service.cpp
 +++ b/src/system/system_monitor_service.cpp
 @@ -11,6 +11,7 @@
@@ -10,7 +10,7 @@ index 97c2f48..f6861ad 100644
  #include <cstdlib>
  #include <cstring>
  #include <dlfcn.h>
-@@ -1257,6 +1258,12 @@ void SystemMonitorService::samplingLoop() {
+@@ -1253,6 +1254,12 @@ void SystemMonitorService::samplingLoop() {
    std::optional<std::vector<cpu_stat::Totals>> prevCpuCores;
    bool cpuCoresWasEnabled = false;
    auto nextCpu = Clock::now();
@@ -23,7 +23,7 @@ index 97c2f48..f6861ad 100644
    auto nextCpuCores = Clock::now();
    auto nextGpu = Clock::now();
    auto nextMemory = Clock::now();
-@@ -1333,9 +1340,19 @@ void SystemMonitorService::samplingLoop() {
+@@ -1329,9 +1336,19 @@ void SystemMonitorService::samplingLoop() {
  
        if (m_cpuTempRefs.load(std::memory_order_relaxed) > 0) {
          std::optional<double> cpuTemp = readCpuTempCelsius(pollCfg);
