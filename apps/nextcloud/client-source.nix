@@ -75,5 +75,8 @@ in
     # file a program has open is never emptied; openvfs tells the client
     # when the last program closes a file freed up meanwhile (Q79, Plane 254).
     ./patches/nextcloud-openvfs-keep-open-files.patch
+    # SIGTERM quits as from the tray: folders stop and openvfs unmounts
+    # before the client exits (Plane 184).
+    ./patches/nextcloud-quit-on-sigterm.patch
   ];
 }

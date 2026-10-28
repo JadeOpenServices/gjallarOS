@@ -121,6 +121,11 @@ pkgs.stdenvNoCC.mkDerivation {
     grep -Fq 'data.folder->vfs().freeUp(data.folderRelativePath);' src/gui/socketapi/socketapi.cpp
     grep -Fq 'void SocketApi::command_V2_FILE_CLOSED(' src/gui/socketapi/socketapi.cpp
     grep -Fq 'folder->vfs().freeUp(path);' src/gui/accountsettings.cpp
+    # systemctl stop killed the client at once; openvfs unmounted alone, and
+    # systemd killed it mid-unmount (Plane 184, 2026-10-28). SIGTERM quits
+    # through the event loop, as the tray does.
+    grep -Fq 'sigaction(SIGTERM, &quitAction, nullptr);' src/gui/main.cpp
+    grep -F -A4 'QSocketNotifier::activated, &app, [quitSignal]' src/gui/main.cpp | grep -Fq 'QCoreApplication::quit();'
     touch $out
   '';
 }

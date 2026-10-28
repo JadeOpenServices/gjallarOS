@@ -51,6 +51,12 @@ Client behaviour patches:
   "Classic sync" to set it apart from macOS File Provider. Linux has no File
   Provider, so the title sat above virtual-file folders and said the
   opposite of what they do. It now reads "Sync folders".
+- `nextcloud-quit-on-sigterm.patch`: `systemctl stop` and session logout
+  send SIGTERM. Upstream sets no handler, so the client died at once and
+  never stopped its folders; openvfs unmounted alone through the setuid
+  `fusermount3`, which user systemd cannot signal, and systemd killed
+  openvfs mid-unmount (Plane 184). SIGTERM now quits through the event loop
+  as the tray does, and the client exits once openvfs is gone.
 
 Hydration patches:
 
