@@ -2531,8 +2531,16 @@ security bs goes in" (Q48), kernel HMAC "Leave off for now" (Q49).
 status shows the chip type and no hint with a PIN set, the record carries
 `pin=1`, the old install got its USB key pinned after its signed state
 verified, and a wrong pin is refused. Item 1 waits on ODDC 103; until then
-every model is unknown and gets the PIN preselected. Still to test: the
-card on an install without a PIN, and fresh provisioning.
+every model is unknown and gets the PIN preselected.
+
+**Status (2026-10-28):** the rest passed on e2e-fw13: without a PIN the
+login card shows, Later brings it back on the next reminder, Don't ask
+holds; setting the PIN again brings back the PIN prompt at boot and ends
+the card. Fresh provisioning writes the pin with the key, and a wrong pin
+still keeps permanent USB trust off. ODDC answered item 103: no model has
+TPM facts yet, so all stay unknown, and ODDC also recommends the PIN on
+every model, firmware TPM included. Item 1 stays open until ODDC ships the
+field; the field names wait on Jade (questionnaire).
 
 **Tests:** unit tests for the token check and the status lines; installer
 text test per TPM type; e2e-fw13 for status and card. Wire attacks cannot
