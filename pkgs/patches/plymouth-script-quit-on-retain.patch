@@ -27,7 +27,7 @@
          script_lib_sprite_refresh (plugin->script_sprite_lib);
  
          if (plugin->loop != NULL)
-@@ -558,6 +561,23 @@
+@@ -558,6 +561,25 @@
  become_idle (ply_boot_splash_plugin_t *plugin,
               ply_trigger_t            *idle_trigger)
  {
@@ -38,6 +38,8 @@
 +         * not a moment of its animation. This is what two-step does with
 +         * its end animation.
 +         */
++        ply_trace ("going idle: animating %d, quit function run %d",
++                   plugin->is_animating, plugin->has_quit);
 +        if (plugin->is_animating && !plugin->has_quit) {
 +                plugin->has_quit = true;
 +                pause_displays (plugin);
