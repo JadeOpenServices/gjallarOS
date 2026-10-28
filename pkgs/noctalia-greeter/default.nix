@@ -21,6 +21,11 @@
 # (udev ID_INPUT_KEYBOARD, not virtual, not Bluetooth). It needs libudev.
 # display-ready.patch creates $NOCTALIA_GREETER_DISPLAY_READY once the
 # compositor has its first frame on a screen, so the boot splash can let go.
+# The upstream polkit action for the apply-appearance helper is dropped:
+# it names the same helper as org.gjallaros.greeter-sync (wayland.nix) but
+# lets inactive and remote sessions ask too, and pkexec picked it over ours.
+# rm without -f, so a renamed upstream file stops the build instead of
+# leaving two actions again.
 noctalia-greeter.overrideAttrs (old: {
   patches = (old.patches or [ ]) ++ [
     ./staging-snapshot.patch
@@ -33,4 +38,7 @@ noctalia-greeter.overrideAttrs (old: {
     ./display-ready.patch
   ];
   buildInputs = (old.buildInputs or [ ]) ++ [ systemdLibs ];
+  postInstall = (old.postInstall or "") + ''
+    rm "$out/share/polkit-1/actions/org.noctalia.greeter.apply-appearance.policy"
+  '';
 })
