@@ -11,6 +11,21 @@ let
   usbtrustd = pkgs.callPackage ../../pkgs/gjallar-usbtrustd { };
   resolved = pkgs.writeText "gjallar-usbtrust-oddc.json" (builtins.toJSON config.oddc.resolved);
 
+  # Built-in USB parts with their root port come only from the ODDC CLI at
+  # the pinned release (ODDC contract, answer to 102). The ODDC module puts
+  # the CLI in systemPackages; there is no option that names it.
+  oddcPackages = builtins.filter (p: (p.pname or "") == "oddc") config.environment.systemPackages;
+  oddcPackage =
+    if builtins.length oddcPackages == 1 then
+      builtins.head oddcPackages
+    else
+      throw "USB trust: expected one oddc package in environment.systemPackages, found ${toString (builtins.length oddcPackages)}";
+  oddcDevicesFile =
+    pkgs.runCommand "gjallar-usbtrust-oddc-devices.json" { nativeBuildInputs = [ oddcPackage ]; }
+      ''
+        oddc devices --json --root ${config.oddc.catalog} --device ${lib.escapeShellArg config.oddc.device} > $out
+      '';
+
   # The same settings the nixpkgs module writes, with the fallback target
   # passed in. See the usbguard unit below for why.
   usbguard = config.services.usbguard;
@@ -100,7 +115,9 @@ in
     };
     oddcDevices = lib.mkOption {
       type = lib.types.nullOr lib.types.path;
-      default = null;
+      default =
+        if config.oddc.device != null && config.oddc.catalog != null then oddcDevicesFile else null;
+      defaultText = lib.literalMD "`oddc devices --json` for `oddc.device` from `oddc.catalog`";
       description = "Output of `oddc devices --json` for the selected model. Built-in parts it lists with a usbPort are then judged by their root port.";
     };
     lapseDays = lib.mkOption {
@@ -148,7 +165,13 @@ in
         presentDevicePolicy = "apply-policy";
         insertedDevicePolicy = "apply-policy";
         presentControllerPolicy = "keep";
-        restoreControllerDeviceState = true;
+        # USBGuard sets new devices to start out deauthorized (AuthorizedDefault,
+        # upstream default none). Restoring the kernel's value on stop let any
+        # device plugged in while USBGuard was down, or after protection was
+        # turned off, in without a decision (loophole 35). Upstream warns
+        # about this and defaults to false. With false, turning protection
+        # off needs a reboot before new USB devices work.
+        restoreControllerDeviceState = false;
         deviceRulesWithPort = false;
       };
 

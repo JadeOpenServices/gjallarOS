@@ -281,6 +281,11 @@
           gjallarctlSource = ./cmd/gjallarctl;
         };
 
+        usbtrust-oddc-devices = import ./tests/nix/usbtrust-oddc-devices.nix {
+          inherit nixpkgs system;
+          inherit (inputs) oddc;
+        };
+
         recovery-maintenance = import ./tests/nix/recovery-maintenance.nix {
           inherit nixpkgs system;
           recoveryModule = ./system/recovery;

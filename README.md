@@ -732,6 +732,11 @@ is temporary: the broker re-arms from the config on its next restart. The other
 order is refused by `gjallarctl settings`; done by hand, USBGuard keeps
 blocking unknown devices at boot while the stored state still says armed.
 
+Turning USB trust off altogether (`"usbguardEnable": false`) takes effect for
+new USB devices at the next reboot. Until then a newly plugged device stays
+off: USBGuard does not hand the ports back to the kernel's default when it
+stops, because anything that stops it would then let every device in.
+
 On a machine with TPM2 the installer also asks "Let approved USB devices expire
 when unused?" (default no). With it on, an approved external device that was
 not connected for `usbTrustLapseDays` days (30 by default, any number from 1)
