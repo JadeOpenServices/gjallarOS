@@ -65,6 +65,14 @@
 # modifiers, clipboard, emoji, settings or launch keys, no prediction and no
 # key previews above the keyboard.
 #
+# A click on a notification runs its "default" action, but the shell's own
+# cards could not carry one: the Wi-Fi password and Bluetooth pairing cards
+# said "open the control center" and a click did nothing (Plane 189).
+# notification-internal-actions.patch backports upstream's in-process
+# callback for actions on the shell's own cards (5.4.0, setInternalActionCallback)
+# and gives those two cards a click that opens their tab. When the pin moves
+# to 5.4.0, keep only the two cards and share the callback with the calendar.
+#
 # libqalculate 5.10 frees its random state on exit even when nothing ever
 # created it, so the shell crashes every time it stops. Upstream fixed that in
 # 931c2aa9 (5.11); drop the patch once nixpkgs ships libqalculate 5.11 or newer.
@@ -93,5 +101,6 @@
       ./networkmanager-follow-bus.patch
       ./wpa-supplicant-access-denied.patch
       ./lock-osk.patch
+      ./notification-internal-actions.patch
     ];
   })

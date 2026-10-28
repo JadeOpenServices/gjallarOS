@@ -1,0 +1,148 @@
+diff --git a/src/app/application_services.cpp b/src/app/application_services.cpp
+index 817b6cb..0cbe3b5 100644
+--- a/src/app/application_services.cpp
++++ b/src/app/application_services.cpp
+@@ -1236,6 +1236,9 @@ void Application::initSystemBusServices() {
+     }
+     m_configService.addReloadCallback([this]() { m_externalIpService.onConfigReload(); });
+ 
++    // The Wi-Fi password and Bluetooth pairing cards: notification id and the request it is for.
++    auto networkCard = std::make_shared<std::pair<std::uint32_t, std::uint64_t>>();
++    auto bluetoothCard = std::make_shared<std::pair<std::uint32_t, std::string>>();
+     if (m_networkService != nullptr && m_networkService->supportsSecretAgent()) {
+       try {
+         m_networkSecretAgent = std::make_unique<NetworkSecretAgent>(*m_systemBus);
+@@ -1244,8 +1247,7 @@ void Application::initSystemBusServices() {
+         // ends. The panel is not opened by itself, so the keyboard stays with
+         // the window being typed in.
+         m_networkSecretAgent->setRequestCallback([this, shouldRefreshControlCenter,
+-                                                  shownRequest =
+-                                                      std::make_shared<std::pair<std::uint32_t, std::uint64_t>>()](
++                                                  shownRequest = networkCard](
+                                                      const NetworkSecretAgent::SecretRequest& request
+                                                  ) {
+           if (shouldRefreshControlCenter()) {
+@@ -1270,9 +1272,17 @@ void Application::initSystemBusServices() {
+           }
+           const std::string ssid =
+               request.ssid.empty() ? i18n::tr("control-center.network.password-notify-unknown") : request.ssid;
+-          shownRequest->first = notifications->addInternal(
+-              "Network", i18n::tr("control-center.network.password-notify-title"),
+-              i18n::tr("control-center.network.password-notify-body", "ssid", ssid), Urgency::Normal, 0
++          // "default" is what a click on the card runs; it opens the Network tab.
++          shownRequest->first = notifications->addOrReplace(
++              NotificationRequest{
++                  .appName = "Network",
++                  .summary = i18n::tr("control-center.network.password-notify-title"),
++                  .body = i18n::tr("control-center.network.password-notify-body", "ssid", ssid),
++                  .urgency = Urgency::Normal,
++                  .timeout = 0,
++                  .origin = NotificationOrigin::Internal,
++                  .actions = {"default", i18n::tr("control-center.network.password-notify-title")},
++              }
+           );
+         });
+       } catch (const std::exception& e) {
+@@ -1327,7 +1337,7 @@ void Application::initSystemBusServices() {
+         // device in range can ask to pair, and that must not take the
+         // keyboard from the window being typed in.
+         m_bluetoothAgent->setRequestCallback([this, shouldRefreshControlCenter,
+-                                              shownRequest = std::make_shared<std::pair<std::uint32_t, std::string>>()](
++                                              shownRequest = bluetoothCard](
+                                                  const BluetoothPairingRequest& request
+                                              ) {
+           if (shouldRefreshControlCenter()) {
+@@ -1362,9 +1372,17 @@ void Application::initSystemBusServices() {
+               }
+             }
+           }
+-          shownRequest->first = notifications->addInternal(
+-              "Bluetooth", i18n::tr("control-center.bluetooth.pairing-notify-title"),
+-              i18n::tr("control-center.bluetooth.pairing-notify-body", "device", device), Urgency::Normal, 0
++          // "default" is what a click on the card runs; it opens the Bluetooth tab.
++          shownRequest->first = notifications->addOrReplace(
++              NotificationRequest{
++                  .appName = "Bluetooth",
++                  .summary = i18n::tr("control-center.bluetooth.pairing-notify-title"),
++                  .body = i18n::tr("control-center.bluetooth.pairing-notify-body", "device", device),
++                  .urgency = Urgency::Normal,
++                  .timeout = 0,
++                  .origin = NotificationOrigin::Internal,
++                  .actions = {"default", i18n::tr("control-center.bluetooth.pairing-notify-title")},
++              }
+           );
+         });
+       } catch (const std::exception& e) {
+@@ -1373,6 +1391,21 @@ void Application::initSystemBusServices() {
+       }
+     }
+ 
++    // Only a click opens the tab: the card itself never takes the keyboard.
++    m_notificationManager.setInternalActionCallback([this, networkCard, bluetoothCard](
++                                                        std::uint32_t id, const std::string& actionKey,
++                                                        const std::string& /*activationToken*/
++                                                    ) {
++      if (actionKey != "default" || id == 0) {
++        return;
++      }
++      if (id == networkCard->first) {
++        m_panelManager.openPanel("control-center", PanelOpenRequest{.context = "network"});
++      } else if (id == bluetoothCard->first) {
++        m_panelManager.openPanel("control-center", PanelOpenRequest{.context = "bluetooth"});
++      }
++    });
++
+     m_configService.addReloadCallback([this]() { syncPolkitAgent(); });
+   }
+ }
+diff --git a/src/notification/notification_manager.cpp b/src/notification/notification_manager.cpp
+index ba14567..899be1c 100644
+--- a/src/notification/notification_manager.cpp
++++ b/src/notification/notification_manager.cpp
+@@ -454,6 +454,10 @@ void NotificationManager::setActionInvokeCallback(ActionInvokeCallback callback)
+   m_actionInvokeCallback = std::move(callback);
+ }
+ 
++void NotificationManager::setInternalActionCallback(ActionInvokeCallback callback) {
++  m_internalActionCallback = std::move(callback);
++}
++
+ void NotificationManager::setCloseCallback(CloseCallback callback) { m_closeCallback = std::move(callback); }
+ 
+ bool NotificationManager::hasPendingDBusClose(uint32_t id) const noexcept { return m_pendingDBusClose.contains(id); }
+@@ -494,7 +498,12 @@ bool NotificationManager::invokeAction(
+     return false;
+   }
+ 
+-  if (m_actionInvokeCallback) {
++  // Internal notifications have no D-Bus owner, so their actions are dispatched in-process instead.
++  if (notification->origin == NotificationOrigin::Internal) {
++    if (m_internalActionCallback) {
++      m_internalActionCallback(id, actionKey, activationToken);
++    }
++  } else if (m_actionInvokeCallback) {
+     m_actionInvokeCallback(id, actionKey, activationToken);
+   }
+ 
+diff --git a/src/notification/notification_manager.h b/src/notification/notification_manager.h
+index 419586a..ff32a0d 100644
+--- a/src/notification/notification_manager.h
++++ b/src/notification/notification_manager.h
+@@ -92,6 +92,9 @@ public:
+   );
+ 
+   void setActionInvokeCallback(ActionInvokeCallback callback);
++  // Actions on internally generated notifications are handled in-process: there is no D-Bus client
++  // to receive ActionInvoked, so routing them to the external callback would signal into the void.
++  void setInternalActionCallback(ActionInvokeCallback callback);
+   void setCloseCallback(CloseCallback callback);
+   [[nodiscard]] bool hasPendingDBusClose(uint32_t id) const noexcept;
+   [[nodiscard]] bool invokeAction(uint32_t id, const std::string& actionKey, bool closeAfterInvoke = true);
+@@ -187,6 +190,7 @@ private:
+   std::unordered_map<uint32_t, size_t> m_historyIndex;
+   std::vector<std::pair<int, EventCallback>> m_eventCallbacks;
+   ActionInvokeCallback m_actionInvokeCallback;
++  ActionInvokeCallback m_internalActionCallback;
+   CloseCallback m_closeCallback;
+   StateCallback m_stateCallback;
+   int m_nextCallbackToken{0};
