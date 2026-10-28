@@ -294,33 +294,8 @@ in
             interactive = false;
           };
 
-          disk_protection = {
-            type = "gjallar/disk-protection:status";
-            scale = 0.98;
-          };
-
-          vpn = {
-            type = "gjallar/vpn:status";
-            scale = 0.98;
-          };
-
-          developer_mode = {
-            type = "gjallar/developer-mode:status";
-            scale = 0.98;
-          };
-
           time_status = {
             type = "gjallar/time:status";
-            scale = 0.98;
-          };
-
-          quick_keys = {
-            type = "gjallar/quick-keys:preset";
-            scale = 0.98;
-          };
-
-          touch_keyboard = {
-            type = "gjallar/osk:button";
             scale = 0.98;
           };
 
@@ -332,7 +307,40 @@ in
             anchor = true;
           };
 
+        }
+        # A plugin's widgets exist only while the plugin is enabled; Noctalia
+        # warns about a widget whose type it does not know.
+        // lib.optionalAttrs hasEncryptedDisk {
+          disk_protection = {
+            type = "gjallar/disk-protection:status";
+            scale = 0.98;
+          };
+        }
+        // lib.optionalAttrs hasVPN {
+          vpn = {
+            type = "gjallar/vpn:status";
+            scale = 0.98;
+          };
+        }
+        // lib.optionalAttrs hasDeveloperMode {
+          developer_mode = {
+            type = "gjallar/developer-mode:status";
+            scale = 0.98;
+          };
+        }
+        // lib.optionalAttrs hasQuickKeys {
+          quick_keys = {
+            type = "gjallar/quick-keys:preset";
+            scale = 0.98;
+          };
+        }
+        // lib.optionalAttrs hasTouchKeyboard {
+          touch_keyboard = {
+            type = "gjallar/osk:button";
+            scale = 0.98;
+          };
         };
+
         location = {
           auto_locate = false;
           address = "${settings.weatherCity}, ${settings.weatherCountry}";
