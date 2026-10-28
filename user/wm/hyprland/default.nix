@@ -98,11 +98,50 @@ in
     PY
           fi
 
+          ${pkgs.coreutils}/bin/rm -f "$hypr_dir/workspaces.lua"
+  '';
+
+  # A session started before the move to Lua runs the hyprlang config and
+  # watches hyprland.conf and the files it sources. When they vanish it
+  # reloads into Hyprland's example config, without any of our binds. So
+  # while such a session runs, hyprland.conf stays as a plain copy and its
+  # sources stay too. Hyprland picks hyprland.lua at the next start, and the
+  # first activation without a hyprlang session removes the old files.
+  home.activation.gjallarHyprlandLuaHandover =
+    lib.hm.dag.entryBetween [ "linkGeneration" ] [ "writeBoundary" ]
+      ''
+        hypr_dir="''${XDG_CONFIG_HOME:-$HOME/.config}/hypr"
+        conf="$hypr_dir/hyprland.conf"
+        marker="# GjallarOS: kept for a session started before the move to Lua."
+        runtime_dir="''${XDG_RUNTIME_DIR:-/run/user/$(${pkgs.coreutils}/bin/id -u)}"
+        hyprctl=${config.wayland.windowManager.hyprland.finalPackage}/bin/hyprctl
+
+        hyprlang_session=
+        if [ -d "$runtime_dir/hypr" ]; then
+          for instance in $(XDG_RUNTIME_DIR="$runtime_dir" "$hyprctl" instances -j | ${pkgs.jq}/bin/jq -r '.[].instance'); do
+            # Only a Lua config answers eval with "ok".
+            if [ "$(XDG_RUNTIME_DIR="$runtime_dir" "$hyprctl" -i "$instance" eval 'do end')" != ok ]; then
+              hyprlang_session=1
+            fi
+          done
+        fi
+
+        if [ -n "$hyprlang_session" ]; then
+          if [ -L "$conf" ]; then
+            { echo "$marker"; ${pkgs.coreutils}/bin/cat "$conf"; } > "$conf.gjallar-new"
+            ${pkgs.coreutils}/bin/mv -f "$conf.gjallar-new" "$conf"
+          fi
+        else
+          if [ -f "$conf" ] && [ ! -L "$conf" ] \
+            && [ "$(${pkgs.coreutils}/bin/head -n 1 "$conf")" = "$marker" ]; then
+            ${pkgs.coreutils}/bin/rm -f "$conf"
+          fi
           ${pkgs.coreutils}/bin/rm -f \
             "$hypr_dir/monitors.conf" \
             "$hypr_dir/workspaces.conf" \
-            "$hypr_dir/workspaces.lua"
-  '';
+            "''${XDG_STATE_HOME:-$HOME/.local/state}/noctalia/hyprland-colors.conf"
+        fi
+      '';
 
   wayland.windowManager.hyprland = {
     enable = true;
