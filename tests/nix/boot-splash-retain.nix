@@ -1,7 +1,7 @@
 # pkgs/overlays/plymouth.nix next to a stock plymouth. Both show a small
 # script theme that paints the screen red and turns it green in its quit
 # function. The patch runs the quit function when the splash goes idle, which
-# quit --retain-splash (greetd, unl0kr) and deactivate share; the test reads
+# quit --retain-splash (unl0kr) and deactivate (greetd) share; the test reads
 # the frame after deactivate, while plymouthd still holds the screen. The
 # patched one shows green; the stock one never runs the quit function and
 # stays red. When the stock one shows green too, the test says to drop the
@@ -95,8 +95,9 @@ pkgs.testers.runNixOSTest {
             retry(lambda last: shows(m, f"{m.name}-shown", (255, 0, 0)), timeout_seconds=60)
 
     # Deactivate goes idle the same way quit does, but plymouthd stays up and
-    # its frame stays on screen. Once plymouthd exits, the kernel puts the
-    # text console back here, which a real boot covers with the greeter.
+    # its frame stays on screen. greetd deactivates first for this reason:
+    # once plymouthd exits while no other program has the card open, the
+    # kernel puts the console back (system/wm/common/wayland.nix).
     for m in both:
         m.succeed("plymouth deactivate")
 

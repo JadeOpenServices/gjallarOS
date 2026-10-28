@@ -19,6 +19,8 @@
 # osk-auto-show.patch starts that keyboard shown when no built-in or wired
 # keyboard is attached, and shows it again when the last one is unplugged
 # (udev ID_INPUT_KEYBOARD, not virtual, not Bluetooth). It needs libudev.
+# display-ready.patch creates $NOCTALIA_GREETER_DISPLAY_READY once the
+# compositor has its first frame on a screen, so the boot splash can let go.
 noctalia-greeter.overrideAttrs (old: {
   patches = (old.patches or [ ]) ++ [
     ./staging-snapshot.patch
@@ -28,6 +30,7 @@ noctalia-greeter.overrideAttrs (old: {
     ./runtime-dir.patch
     ./internal-panel-first.patch
     ./osk-auto-show.patch
+    ./display-ready.patch
   ];
   buildInputs = (old.buildInputs or [ ]) ++ [ systemdLibs ];
 })

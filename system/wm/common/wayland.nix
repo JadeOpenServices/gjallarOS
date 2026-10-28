@@ -9,6 +9,19 @@
 let
   greeterHelper = "${config.programs.noctalia-greeter.package}/bin/noctalia-greeter-apply-appearance";
 
+  greeterUser = config.services.greetd.settings.default_session.user;
+  greeterGroup = config.users.users.${greeterUser}.group;
+  greeterReadyDir = "/run/noctalia-greeter";
+  greeterReady = "${greeterReadyDir}/display-ready";
+
+  plymouth = "${config.boot.plymouth.package}/bin/plymouth";
+  # Returns once plymouthd has exited; the greeter keeps the card open, so the
+  # screen stays on its frame.
+  quitPlymouth = pkgs.writeShellScript "plymouth-quit-greeter" ''
+    ${plymouth} --ping || exit 0
+    exec ${plymouth} quit --retain-splash --wait
+  '';
+
   # On-screen keyboard at the login screen of touchscreen machines. The
   # greeter compositor starts it with --hidden and shows it on touch.
   # --no-popup: no enlarged preview of the pressed key, which would show the
@@ -209,11 +222,54 @@ in
     };
   };
 
+  # Plymouth hands the screen to the greeter in two steps, the way GDM does
+  # it. greetd deactivates it first: the quit function sets the last frame
+  # (themes/lib/boot-splash.script), and plymouthd gives up DRM master but
+  # keeps that frame on screen. Once the greeter has drawn a frame of its own
+  # (display-ready.patch), plymouthd quits. A plymouthd that exits while no
+  # other program has the card open hands the screen back to the kernel
+  # console, which then showed the frame from the middle of a spin (Q77).
   services.greetd.greeterManagesPlymouth = true;
+  systemd.services.plymouth-quit.enable = false;
+  systemd.services.plymouth-quit-wait.enable = false;
 
-  services.greetd.settings.default_session.command = lib.mkIf (settings.touchscreenEnable or false) (
-    "${pkgs.coreutils}/bin/env NOCTALIA_GREETER_OSK=${greeterOsk} "
-    + "${config.programs.noctalia-greeter.package}/bin/noctalia-greeter-session --"
+  # The greeter can only create this file; root starts a fixed unit when it
+  # shows up and never reads it.
+  systemd.tmpfiles.rules = [ "d ${greeterReadyDir} 0700 ${greeterUser} ${greeterGroup} -" ];
+
+  systemd.services.greetd.serviceConfig = {
+    ExecStartPre = pkgs.writeShellScript "greetd-deactivate-plymouth" ''
+      ${pkgs.coreutils}/bin/rm -f ${greeterReady}
+      # No daemon: the splash is off or already gone, nothing to hand over.
+      ${plymouth} --ping || exit 0
+      if ! ${plymouth} deactivate; then
+        echo "greetd-deactivate-plymouth: plymouth deactivate failed, starting the greeter anyway" >&2
+      fi
+    '';
+    # A greeter that never drew leaves plymouthd waiting; the shutdown splash
+    # starts its own.
+    ExecStopPost = quitPlymouth;
+  };
+
+  systemd.paths.plymouth-quit-greeter = {
+    description = "Wait for the greeter to drive a screen";
+    wantedBy = [ "greetd.service" ];
+    pathConfig.PathExists = greeterReady;
+  };
+
+  systemd.services.plymouth-quit-greeter = {
+    description = "Hand the screen from Plymouth to the greeter";
+    serviceConfig = {
+      Type = "oneshot";
+      RemainAfterExit = true;
+      ExecStart = quitPlymouth;
+    };
+  };
+
+  services.greetd.settings.default_session.command = lib.mkForce (
+    "${pkgs.coreutils}/bin/env NOCTALIA_GREETER_DISPLAY_READY=${greeterReady} "
+    + lib.optionalString (settings.touchscreenEnable or false) "NOCTALIA_GREETER_OSK=${greeterOsk} "
+    + "${config.programs.noctalia-greeter.package}/bin/noctalia-greeter-session -- ${config.programs.noctalia-greeter.greeter-args}"
   );
 
   security.polkit.enable = true;

@@ -238,24 +238,7 @@ in
         ];
       };
 
-      # The stock quit units end Plymouth before greetd and drop the splash,
-      # so the console shows through until the greeter draws. greetd quits it
-      # itself, keeping the last frame up until the greeter takes the display.
-      systemd.services.plymouth-quit.enable = false;
-      systemd.services.plymouth-quit-wait.enable = false;
-
-      systemd.services.greetd.serviceConfig.ExecStartPre =
-        let
-          plymouth = "${config.boot.plymouth.package}/bin/plymouth";
-        in
-        pkgs.writeShellScript "handoff-plymouth-to-greetd" ''
-          # No daemon: the splash is off or already gone, nothing to hand over.
-          ${plymouth} --ping || exit 0
-          # --wait returns once plymouthd has exited and let go of the display.
-          if ! ${plymouth} quit --retain-splash --wait; then
-            echo "handoff-plymouth-to-greetd: plymouth quit failed, starting the greeter anyway" >&2
-          fi
-        '';
+      # The hand-over to the greeter: system/wm/common/wayland.nix.
 
       systemd.services.plymouth-poweroff = {
         after = [
