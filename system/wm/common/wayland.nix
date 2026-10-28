@@ -11,8 +11,10 @@ let
 
   # On-screen keyboard at the login screen of touchscreen machines. The
   # greeter compositor starts it with --hidden and shows it on touch.
+  # --no-popup: no enlarged preview of the pressed key, which would show the
+  # password to anyone watching.
   greeterOsk = pkgs.writeShellScript "gjallar-greeter-osk" ''
-    exec ${pkgs.wvkbd}/bin/wvkbd-mobintl -H 320 -L 240 "$@"
+    exec ${pkgs.wvkbd}/bin/wvkbd-mobintl -H 320 -L 240 --no-popup "$@"
   '';
 
   # Noctalia re-stages the greeter look on every login and theme load, and

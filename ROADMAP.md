@@ -2747,3 +2747,99 @@ threads on pull versus push.
 - draw.io was a test web application and is removed (2026-10-27, Jade).
   It can come back as a regular catalogue app. Taking `drawio` out of
   `apps/retired.json` is part of that job, so older configs keep it again.
+
+## 23. Touch keyboard at the lock, greeter and LUKS prompt
+
+Written 2026-10-28 for Plane GJALLAROS-164 (ODDC items 101, 103 and 104).
+A tablet or a convertible folded flat has no usable keyboard at the three
+password prompts. ODDC's rules (item 104): fail closed, the keyboard is part
+of the lock surface, no clipboard, emoji, URL, settings or app launch keys,
+no prediction or learning, rotation never drops the lock, and the same rules
+at the LUKS prompt.
+
+### Today
+
+- **Session lock** (Noctalia, ext-session-lock-v1): no on-screen keyboard.
+  The session's wvkbd sits below the lock and gets no input there.
+- **Greeter** (our small wlroots compositor, `pkgs/noctalia-greeter`):
+  wvkbd-mobintl, started by the compositor itself over a socket pair, so
+  only that client sees the layer-shell and virtual-keyboard globals. It
+  shows on a touch and hides on a physical key press. It does not show by
+  itself when no keyboard is attached, and the greeter does not rotate.
+- **LUKS prompt** (unl0kr from buffybox 3.5.1, only with a touchscreen):
+  its own keyboard, hidden when a hardware keyboard is found at start, with a
+  button to show it. Key popovers are on: every pressed key is shown large
+  above the keyboard. No rotation option.
+
+### How others handle it
+
+- **Linux Mint, 2021** (CVE-2021-3567 family, Arch bug 69338, oss-security
+  2021-01-15): two children found that hammering the on-screen keyboard
+  (caribou, a separate X11 process) crashed the screensaver and left the
+  desktop open. The lesson: the keyboard must not be able to take the lock
+  down with it.
+- **ext-session-lock-v1** (waylock, quickshell docs): if the lock client
+  dies, the compositor keeps the session locked and paints a solid colour.
+  Hyprland does the same. A keyboard inside the lock process inherits that:
+  a crash leaves a locked, blank screen, never an open desktop.
+- **GNOME** (gnome-shell issue 5966): the OSK learned a typed password and
+  offered it as a word suggestion. No prediction or learning at a password.
+- **KDE Plasma** (KDE bugs 306596 and related forum threads): Maliit at
+  kscreenlocker is unreliable on Wayland. **Plasma Mobile** draws its own
+  keypad inside the lock screen instead of using Maliit.
+
+### Security pass
+
+**Threat model.** (1) Someone holding the locked device, touching the
+screen. (2) Someone looking over the user's shoulder. (3) A process in the
+user's session (a compromised app) trying to read the password or get into
+the lock. (4) A crash or rotation while locked.
+
+- (1) and (4): the lock keyboard is drawn by the lock client itself, in the
+  same process and on the same lock surface. There is no second client
+  that can crash, and a crash of the lock client keeps the session locked
+  (ext-session-lock). Rotation is a new configure on the same lock
+  surface; the lock object is not touched, so it cannot drop the lock.
+- (3): keys go straight into the password field in memory. Nothing goes
+  over Wayland: no virtual-keyboard or input-method protocol, so no other
+  client sees the keys. The lock never enables text-input-v3, so no input
+  method can feed or read the field. The keyboard sends no modifiers, so the
+  field's Ctrl shortcuts (paste, undo) cannot fire from it.
+- (2): no key popups, no preview of the pressed character. Keys show the
+  usual pressed shade only. The field stays masked.
+- No clipboard, emoji, URL, settings, layout or launch keys. No word list,
+  no suggestions, nothing is stored. The only state is Shift and the page
+  (letters, symbols, accents), reset on every lock.
+- Showing it is never a security decision: it shows when no physical
+  keyboard is attached at lock time, on any touch of the lock, and goes
+  away on a physical key press or its own hide key. A wrong guess only
+  means one extra touch. The lock checks for a keyboard once, when it
+  locks; a keyboard cover taken off while locked needs one touch.
+- "Physical keyboard" means a udev keyboard (`ID_INPUT_KEYBOARD=1`) that is
+  not Bluetooth (bus 0x05) and not virtual (`/devices/virtual`, which also
+  covers uhid and uinput). Bluetooth keyboards do not count (ODDC 101): they
+  may not be connected yet, and they are not there at the greeter or LUKS
+  prompt. A USB keyboard blocked by USB trust has no input device, so it does
+  not count either.
+- **Greeter:** stays wvkbd, started and fenced by the compositor as today.
+  The greeter is not a lock (nothing is unlocked behind it), and wvkbd's
+  globals are only offered to the one client the compositor started.
+  Added: show it when the compositor has no physical keyboard, counted from
+  the same rule on its own libinput devices, so a keyboard taken off shows
+  the keyboard at once. wvkbd key popups go off (`--no-popup`), the same as
+  the lock and unl0kr.
+- **LUKS prompt:** unl0kr is one process with its keyboard built in, so the
+  same rules hold. Key popovers go off. unl0kr keeps its show/hide button.
+
+**What stays open.** The greeter does not rotate, and unl0kr has no rotation
+setting; both stay in the panel's normal orientation. Rotating them needs
+the accelerometer and its mount matrix in the greeter and in stage 1. Logged
+as a follow-up.
+
+**Sources:** bugs.archlinux.org/task/69338,
+openwall.com/lists/oss-security/2021/01/15/1,
+securityaffairs.com/113518/hacking/screensaver-bypass-linux-mint.html,
+bugs.mageia.org/show_bug.cgi?id=28072, isaacfreund.com/software/waylock,
+gitlab.gnome.org/GNOME/gnome-shell/-/issues/5966,
+bugs.kde.org/show_bug.cgi?id=306596,
+liliputing.com/plasma-mobile-ui-for-linux-phones-gets-new-lockscreen-keyboard-and-apps.

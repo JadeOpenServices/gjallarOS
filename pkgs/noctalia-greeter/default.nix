@@ -1,4 +1,4 @@
-{ noctalia-greeter }:
+{ noctalia-greeter, systemdLibs }:
 
 # Keep the pinned upstream package; the root apply-appearance helper reads a
 # root-owned snapshot of the staging folder so staged symlinks cannot leak
@@ -15,6 +15,9 @@
 # internal-panel-cursor.patch starts the cursor on the laptop panel (eDP,
 # LVDS, DSI) while the lid is open, not on a TV the layout puts first, so
 # the touchpad moves a pointer the user can see.
+# osk-auto-show.patch starts that keyboard shown when no built-in or wired
+# keyboard is attached, and shows it again when the last one is unplugged
+# (udev ID_INPUT_KEYBOARD, not virtual, not Bluetooth). It needs libudev.
 noctalia-greeter.overrideAttrs (old: {
   patches = (old.patches or [ ]) ++ [
     ./staging-snapshot.patch
@@ -23,5 +26,7 @@ noctalia-greeter.overrideAttrs (old: {
     ./osk.patch
     ./runtime-dir.patch
     ./internal-panel-cursor.patch
+    ./osk-auto-show.patch
   ];
+  buildInputs = (old.buildInputs or [ ]) ++ [ systemdLibs ];
 })

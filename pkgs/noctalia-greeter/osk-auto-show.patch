@@ -1,0 +1,142 @@
+diff --git a/meson.build b/meson.build
+index 9fcf8e4..e3e3433 100644
+--- a/meson.build
++++ b/meson.build
+@@ -43,6 +43,7 @@ tomlplusplus_dep   = dependency('tomlplusplus')
+ nlohmann_dep       = dependency('nlohmann_json')
+ wlroots_dep = dependency('wlroots-0.20')
+ libinput_dep = dependency('libinput')
++libudev_dep = dependency('libudev')
+ 
+ egl_dep = dependency('egl', required: false)
+ gles2_dep = dependency('glesv2', required: false)
+@@ -288,6 +289,7 @@ executable('noctalia-greeter-compositor',
+   dependencies: [
+     wlroots_dep,
+     libinput_dep,
++    libudev_dep,
+     wayland_server_dep,
+     xkbcommon_dep,
+     tomlplusplus_dep,
+diff --git a/src/compositor/noctalia_compositor.c b/src/compositor/noctalia_compositor.c
+index 2f94de5..ed21365 100644
+--- a/src/compositor/noctalia_compositor.c
++++ b/src/compositor/noctalia_compositor.c
+@@ -6,7 +6,9 @@
+ #include <fcntl.h>
+ #include <glob.h>
+ #include <libinput.h>
++#include <libudev.h>
+ #include <limits.h>
++#include <linux/input.h>
+ #include <signal.h>
+ #include <stdarg.h>
+ #include <stdbool.h>
+@@ -144,6 +146,8 @@ struct greeter_keyboard {
+   struct greeter_server* server;
+   struct wlr_keyboard* wlr_keyboard;
+   bool is_virtual;
++  // A keyboard a person can type on (see keyboard_device_is_physical).
++  bool is_physical;
+   struct wl_listener modifiers;
+   struct wl_listener key;
+   struct wl_listener destroy;
+@@ -1836,12 +1840,50 @@ static void handle_keyboard_key(struct wl_listener* listener, void* data) {
+   wlr_seat_keyboard_notify_key(server->seat, event->time_msec, event->keycode, event->state);
+ }
+ 
++static bool has_physical_keyboard(struct greeter_server* server) {
++  struct greeter_keyboard* keyboard;
++  wl_list_for_each(keyboard, &server->keyboards, link) {
++    if (keyboard->is_physical) {
++      return true;
++    }
++  }
++  return false;
++}
++
++// True for a built-in, USB or similar keyboard. Virtual devices (uinput tools,
++// the on-screen keyboard itself) and Bluetooth keyboards do not count: a
++// Bluetooth keyboard is not paired or reachable before login. Switches and
++// button devices that only carry a few keys (power button, tablet buttons)
++// are not keyboards to udev and do not count either.
++static bool keyboard_device_is_physical(struct wlr_input_device* device) {
++  if (!wlr_input_device_is_libinput(device)) {
++    // Nested backends (wayland, x11) are driven from a real keyboard.
++    return true;
++  }
++  struct libinput_device* libinput_dev = wlr_libinput_get_device_handle(device);
++  struct udev_device* udev_dev = libinput_dev != NULL ? libinput_device_get_udev_device(libinput_dev) : NULL;
++  if (udev_dev == NULL) {
++    return false;
++  }
++  bool physical = false;
++  const char* syspath = udev_device_get_syspath(udev_dev);
++  const char* keyboard = udev_device_get_property_value(udev_dev, "ID_INPUT_KEYBOARD");
++  if (syspath != NULL && strstr(syspath, "/devices/virtual/") == NULL && keyboard != NULL &&
++      strcmp(keyboard, "1") == 0) {
++    const unsigned int bus = libinput_device_get_id_bustype(libinput_dev);
++    physical = bus != BUS_BLUETOOTH && bus != BUS_VIRTUAL;
++  }
++  udev_device_unref(udev_dev);
++  return physical;
++}
++
+ static void handle_keyboard_destroy(struct wl_listener* listener, void* data) {
+   (void)data;
+   struct greeter_keyboard* keyboard = wl_container_of(listener, keyboard, destroy);
+   struct greeter_server* server = keyboard->server;
+   const bool was_seat_keyboard =
+       !server->shutting_down && server->seat != NULL && wlr_seat_get_keyboard(server->seat) == keyboard->wlr_keyboard;
++  const bool was_physical = keyboard->is_physical;
+ 
+   wl_list_remove(&keyboard->modifiers.link);
+   wl_list_remove(&keyboard->key.link);
+@@ -1860,6 +1902,10 @@ static void handle_keyboard_destroy(struct wl_listener* listener, void* data) {
+   }
+   recompute_keyboard_capability(server);
+   focus_mapped_views(server);
++  // The last keyboard was unplugged (a tablet's keyboard cover came off).
++  if (was_physical && !has_physical_keyboard(server)) {
++    osk_set_visible(server, true);
++  }
+ }
+ 
+ static void configure_libinput_touchpad(struct wlr_input_device* device) {
+@@ -1943,6 +1989,7 @@ static void add_keyboard(struct greeter_server* server, struct wlr_input_device*
+     }
+   }
+   wlr_keyboard_set_repeat_info(keyboard->wlr_keyboard, 25, 600);
++  keyboard->is_physical = keyboard_device_is_physical(device);
+ 
+   keyboard->modifiers.notify = handle_keyboard_modifiers;
+   wl_signal_add(&keyboard->wlr_keyboard->events.modifiers, &keyboard->modifiers);
+@@ -2293,6 +2340,7 @@ static void start_osk(struct greeter_server* server) {
+   }
+   envp[env_out++] = socket_env;
+   envp[env_out] = NULL;
++  const bool start_shown = !has_physical_keyboard(server);
+ 
+   pid_t pid = fork();
+   if (pid < 0) {
+@@ -2307,14 +2355,17 @@ static void start_osk(struct greeter_server* server) {
+     if (flags < 0 || fcntl(fds[1], F_SETFD, flags & ~FD_CLOEXEC) != 0) {
+       _exit(127);
+     }
+-    char* const argv[] = {(char*)osk_bin, (char*)"--hidden", NULL};
+-    execve(osk_bin, argv, envp);
++    // With no keyboard attached the on-screen one is the only way to type,
++    // so it starts shown.
++    char* const shown_argv[] = {(char*)osk_bin, NULL};
++    char* const hidden_argv[] = {(char*)osk_bin, (char*)"--hidden", NULL};
++    execve(osk_bin, start_shown ? shown_argv : hidden_argv, envp);
+     _exit(127);
+   }
+   free(envp);
+   close(fds[1]);
+   server->osk_pid = pid;
+-  server->osk_visible = false;
++  server->osk_visible = start_shown;
+   wlr_log(WLR_INFO, "started on-screen keyboard: %s", osk_bin);
+ }
+ 

@@ -56,6 +56,15 @@
 # anyway. wpa-supplicant-access-denied.patch (ours; upstream has the same gap)
 # refuses a wpa_supplicant that answers AccessDenied, so the NM backend waits.
 #
+# Touch-only machines (a tablet with its keyboard cover off) had no way to
+# type the password at the lock screen. lock-osk.patch (ours) adds an
+# on-screen keyboard to the lock surface itself, so it is drawn and read by
+# the locked shell and nothing else sees the keys. It shows when no wired or
+# built-in keyboard is attached, or on a touch, and goes away on a hardware
+# key press or its hide key. It only types into the password field: no
+# modifiers, clipboard, emoji, settings or launch keys, no prediction and no
+# key previews above the keyboard.
+#
 # libqalculate 5.10 frees its random state on exit even when nothing ever
 # created it, so the shell crashes every time it stops. Upstream fixed that in
 # 931c2aa9 (5.11); drop the patch once nixpkgs ships libqalculate 5.11 or newer.
@@ -83,5 +92,6 @@
       ./network-secret-agent.patch
       ./networkmanager-follow-bus.patch
       ./wpa-supplicant-access-denied.patch
+      ./lock-osk.patch
     ];
   })

@@ -167,7 +167,13 @@ needs a `desc`, which is what the list shows.
 | <kbd>Super</kbd> + <kbd>Ctrl</kbd> + <kbd>K</kbd> | On-screen keyboard (touch devices) |
 
 On touch devices the on-screen keyboard also opens when the device folds
-into tablet mode and on the keyboard key some convertibles have. The HP ZBook
+into tablet mode and on the keyboard key some convertibles have. With no
+keyboard attached, the login screen and the lock screen show their own
+touch keyboard; with one attached, touch the password field to open it, and
+a key on the keyboard closes it again. The disk unlock prompt shows its touch
+keyboard on every touch device. These keyboards
+have letters, numbers and symbols only: no clipboard, emoji or word
+suggestions. The HP ZBook
 x2 bezel Quick Keys have three presets, switched with the third key from the
 top. GjallarOS maps none of them: every key sends a macro key
 (`XF86Macro1`–`15`) that no other key sends, so you can bind it in Hyprland,
