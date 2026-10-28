@@ -139,7 +139,7 @@ func (w *renderGPUWatch) check(ctx context.Context, stderr io.Writer) {
 	go func() {
 		defer close(done)
 		if w.ask(cardCtx) {
-			if err := exec.Command("hyprctl", "dispatch", "exit").Run(); err != nil {
+			if err := exec.Command("hyprctl", "dispatch", "hl.dsp.exit()").Run(); err != nil {
 				fmt.Fprintf(stderr, "ERROR: log out: %v\n", err)
 			}
 		}

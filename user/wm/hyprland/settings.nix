@@ -23,7 +23,13 @@ let
   });
   gjallarPasteOnce = pkgs.writeShellScript "gjallar-paste-once" ''
     set -eu
-    PATH=${lib.makeBinPath [ wlClipboardPasteOnce pkgs.gnugrep pkgs.coreutils ]}
+    PATH=${
+      lib.makeBinPath [
+        wlClipboardPasteOnce
+        pkgs.gnugrep
+        pkgs.coreutils
+      ]
+    }
 
     hand_over() {
       types="$(wl-paste --list-types 2>/dev/null)" || return 0
@@ -47,8 +53,10 @@ let
     # nothing reads the primary selection and it is dropped.
     wl-copy --primary --clear >/dev/null 2>&1 || true
 
-    ${pkgs.hyprland}/bin/hyprctl dispatch sendshortcut "$keys,$key,activewindow" >/dev/null
+    ${pkgs.hyprland}/bin/hyprctl dispatch "hl.dsp.send_shortcut({ mods = \"$keys\", key = \"$key\" })" >/dev/null
   '';
+  hl = import ./lua.nix { inherit lib; };
+  noctalia = lib.getExe config.programs.noctalia.package;
   themeDetails = settings.themeDetails;
   shellDetails = hyprlandShellDetails;
   sessionStart = pkgs.writeShellScript "gjallar-hyprland-session-start" ''
@@ -104,135 +112,266 @@ in
   ];
 
   wayland.windowManager.hyprland.settings = {
-    bindd =
+    bind =
       lib.optionals config.programs.noctalia.enable [
-        "SUPER, C, Open control center, exec, ${lib.getExe config.programs.noctalia.package} msg status >/dev/null 2>&1 && ${lib.getExe config.programs.noctalia.package} msg panel-toggle control-center >/dev/null 2>&1 || true"
+        (hl.bind {
+          mods = "SUPER";
+          key = "C";
+          dispatcher = hl.exec "${noctalia} msg status >/dev/null 2>&1 && ${noctalia} msg panel-toggle control-center >/dev/null 2>&1 || true";
+          description = "Open control center";
+        })
       ]
       ++ lib.optionals (settings.touchscreenEnable or false) [
-        "CTRL, V, Paste, exec, ${gjallarPasteOnce} ctrl-v"
-        "CTRL SHIFT, V, Paste, exec, ${gjallarPasteOnce} ctrl-shift-v"
-        "SHIFT, INSERT, Paste, exec, ${gjallarPasteOnce} shift-insert"
+        (hl.bind {
+          mods = "CTRL";
+          key = "V";
+          dispatcher = hl.exec "${gjallarPasteOnce} ctrl-v";
+          description = "Paste";
+        })
+        (hl.bind {
+          mods = "CTRL SHIFT";
+          key = "V";
+          dispatcher = hl.exec "${gjallarPasteOnce} ctrl-shift-v";
+          description = "Paste";
+        })
+        (hl.bind {
+          mods = "SHIFT";
+          key = "INSERT";
+          dispatcher = hl.exec "${gjallarPasteOnce} shift-insert";
+          description = "Paste";
+        })
       ];
 
     monitor = [
-      ",preferred,auto,1"
+      {
+        output = "";
+        mode = "preferred";
+        position = "auto";
+        scale = 1;
+      }
     ];
 
-    exec-once = lib.optionals config.programs.noctalia.enable [
-      "${sessionStart}"
+    on = lib.optionals config.programs.noctalia.enable [
+      {
+        _args = [
+          "hyprland.start"
+          (hl.inline "function() hl.exec_cmd(${hl.toLua "${sessionStart}"}) end")
+        ];
+      }
     ];
 
-    general = {
-      gaps_in = 8;
-      gaps_out = 16;
-      border_size = 2;
-      allow_tearing = true;
-      # Drag the gap between tiled windows (or a floating window's edge) to
-      # resize it, e.g. narrow a chat column beside a stream.
-      resize_on_border = true;
-    };
-
-    # A drag starts only after the mouse moved 10 px, so a plain click near a
-    # border does not resize, and Super + click does not re-insert a tiled
-    # window (which would reset its split). Applies to border drags too.
-    binds.drag_threshold = 10;
-
-    cursor = {
-      inactive_timeout = 5;
-    };
-
-    decoration = {
-      dim_special = 0.5;
-      rounding = themeDetails.rounding;
-
-      blur = {
-        enabled = true;
-        special = false;
-        brightness = 1.0;
-        contrast = 1.0;
-        noise = 0.02;
-        passes = 3;
-        size = 10;
+    # Hyprland 0.55 Lua takes all plain options in one hl.config table.
+    config = {
+      general = {
+        gaps_in = 8;
+        gaps_out = 16;
+        border_size = 2;
+        allow_tearing = true;
+        # Drag the gap between tiled windows (or a floating window's edge) to
+        # resize it, e.g. narrow a chat column beside a stream.
+        resize_on_border = true;
       };
 
-      shadow = {
-        enabled = themeDetails.shadow;
-        offset = "2 2";
-        range = 20;
+      # A drag starts only after the mouse moved 10 px, so a plain click near a
+      # border does not resize, and Super + click does not re-insert a tiled
+      # window (which would reset its split). Applies to border drags too.
+      binds.drag_threshold = 10;
+
+      cursor = {
+        inactive_timeout = 5;
+      };
+
+      decoration = {
+        dim_special = 0.5;
+        rounding = themeDetails.rounding;
+
+        blur = {
+          enabled = true;
+          special = false;
+          brightness = 1.0;
+          contrast = 1.0;
+          noise = 0.02;
+          passes = 3;
+          size = 10;
+        };
+
+        shadow = {
+          enabled = themeDetails.shadow;
+          offset = [
+            2
+            2
+          ];
+          range = 20;
+        };
+      };
+
+      animations.enabled = true;
+
+      debug = {
+        disable_logs = false;
+      };
+
+      input = {
+        kb_layout = settings.keyboardLayout;
+        kb_variant = settings.keyboardVariant;
+        kb_options = "grp:alt_shift_toggle";
+        follow_mouse = true;
+
+        touchpad = {
+          natural_scroll = true;
+        };
+
+        tablet = lib.mkIf (settings.penTabletEnable or false) {
+          relative_input = false;
+        };
+      };
+
+      gestures = {
+        workspace_swipe_cancel_ratio = 0.15;
+        workspace_swipe_forever = true;
+        workspace_swipe_distance = 200;
+      };
+
+      dwindle = {
+        preserve_split = true;
+        force_split = 2;
+        split_width_multiplier = 1.5;
+      };
+
+      misc = {
+        force_default_wallpaper = -1;
+        disable_hyprland_logo = true;
+        disable_splash_rendering = true;
+        exit_window_retains_fullscreen = true;
+      };
+
+      # Hyprland updates arrive through GjallarOS rebuilds; its release-notes
+      # and donation windows only interrupt the first login after one.
+      ecosystem = {
+        no_update_news = true;
+        no_donation_nag = true;
       };
     };
 
-    animations = {
-      enabled = true;
+    curve =
+      lib.mapAttrsToList
+        (name: points: {
+          _args = [
+            name
+            {
+              type = "bezier";
+              inherit points;
+            }
+          ];
+        })
+        {
+          wind = [
+            [
+              0.05
+              0.9
+            ]
+            [
+              0.1
+              1.05
+            ]
+          ];
+          winIn = [
+            [
+              0.1
+              1.1
+            ]
+            [
+              0.1
+              1.1
+            ]
+          ];
+          winOut = [
+            [
+              0.3
+              (-0.3)
+            ]
+            [
+              0
+              1
+            ]
+          ];
+          liner = [
+            [
+              1
+              1
+            ]
+            [
+              1
+              1
+            ]
+          ];
+          workIn = [
+            [
+              0.72
+              (-0.07)
+            ]
+            [
+              0.41
+              0.98
+            ]
+          ];
+        };
 
-      bezier = [
-        "wind, 0.05, 0.9, 0.1, 1.05"
-        "winIn, 0.1, 1.1, 0.1, 1.1"
-        "winOut, 0.3, -0.3, 0, 1"
-        "liner, 1, 1, 1, 1"
-        "workIn, 0.72, -0.07, 0.41, 0.98"
-      ];
+    animation = map (a: a // { enabled = true; }) [
+      {
+        leaf = "windows";
+        speed = 6;
+        bezier = "wind";
+        style = "slide";
+      }
+      {
+        leaf = "windowsIn";
+        speed = 6;
+        bezier = "winIn";
+        style = "slide";
+      }
+      {
+        leaf = "windowsOut";
+        speed = 5;
+        bezier = "winOut";
+        style = "slide";
+      }
+      {
+        leaf = "windowsMove";
+        speed = 5;
+        bezier = "wind";
+        style = "slide";
+      }
+      {
+        leaf = "border";
+        speed = 1;
+        bezier = "liner";
+      }
+      {
+        leaf = "fade";
+        speed = 10;
+        bezier = "default";
+      }
+      {
+        leaf = "workspaces";
+        speed = 5;
+        bezier = "wind";
+      }
+      {
+        leaf = "specialWorkspace";
+        speed = 5;
+        bezier = "workIn";
+        style = "slidevert";
+      }
+    ];
 
-      animation = [
-        "windows, 1, 6, wind, slide"
-        "windowsIn, 1, 6, winIn, slide"
-        "windowsOut, 1, 5, winOut, slide"
-        "windowsMove, 1, 5, wind, slide"
-        "border, 1, 1, liner"
-        "fade, 1, 10, default"
-        "workspaces, 1, 5, wind"
-        "specialWorkspace, 1, 5, workIn, slidevert"
-      ];
-    };
-
-    debug = {
-      disable_logs = false;
-    };
-
-    input = {
-      kb_layout = settings.keyboardLayout;
-      kb_variant = settings.keyboardVariant;
-      kb_options = "grp:alt_shift_toggle";
-      follow_mouse = true;
-
-      touchpad = {
-        natural_scroll = true;
-      };
-
-      tablet = lib.mkIf (settings.penTabletEnable or false) {
-        relative_input = false;
-      };
-    };
-
-    # Also listed in the shortcut list, see gjallar.keybindHelp below.
+    # Also listed in the shortcut list, see gjallar.keybindHelp above.
     gesture = lib.optionals settings.touchpadWorkspaceSwipe [
-      "3, horizontal, workspace"
+      {
+        fingers = 3;
+        direction = "horizontal";
+        action = "workspace";
+      }
     ];
-
-    gestures = {
-      workspace_swipe_cancel_ratio = 0.15;
-      workspace_swipe_forever = true;
-      workspace_swipe_distance = 200;
-    };
-
-    dwindle = {
-      preserve_split = true;
-      force_split = 2;
-      split_width_multiplier = 1.5;
-    };
-
-    misc = {
-      force_default_wallpaper = -1;
-      disable_hyprland_logo = true;
-      disable_splash_rendering = true;
-      exit_window_retains_fullscreen = true;
-    };
-
-    # Hyprland updates arrive through GjallarOS rebuilds; its release-notes
-    # and donation windows only interrupt the first login after one.
-    ecosystem = {
-      no_update_news = true;
-      no_donation_nag = true;
-    };
   };
 }

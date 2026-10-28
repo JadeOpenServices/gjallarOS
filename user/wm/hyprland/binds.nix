@@ -9,6 +9,7 @@
 }:
 let
   shell = hyprlandShellDetails.binds;
+  hl = import ./lua.nix { inherit lib; };
   profile = builtins.fromJSON (builtins.readFile ./keybinds.json);
 
   # Shortcut list (Super+F1). Reads the live binds from Hyprland; gestures
@@ -19,6 +20,10 @@ let
       helpConfig = pkgs.writeText "gjallar-keybinds.json" (
         builtins.toJSON {
           inherit (config.gjallar.keybindHelp) gestures;
+          drags = map (b: {
+            modmask = modmask (b.mods or "");
+            inherit (b) key;
+          }) profile.bindm;
           menu =
             if noctalia.enable then
               [
@@ -79,24 +84,44 @@ let
     keybinds = lib.getExe keybindsHelp;
   };
 
+  # Hyprland modmask bits, as `hyprctl binds -j` reports them.
+  modBits = {
+    SHIFT = 1;
+    CTRL = 4;
+    ALT = 8;
+    SUPER = 64;
+  };
+  modmask =
+    mods:
+    lib.foldl' builtins.add 0 (
+      map (m: modBits.${m}) (
+        builtins.filter (m: m != "") (
+          lib.splitString " " (lib.toUpper (builtins.replaceStrings [ "$mod" ] [ "SUPER" ] mods))
+        )
+      )
+    );
+
   render =
-    binding:
+    opts: binding:
     let
-      mods = binding.mods or "";
       isExec = binding.action == "exec";
 
       command =
-        if isExec && builtins.hasAttr binding.command commands then
-          commands.${binding.command}
-        else
-          binding.command or binding.action;
+        if builtins.hasAttr binding.command commands then commands.${binding.command} else binding.command;
 
       args = binding.args or "";
     in
-    if isExec then
-      "${mods}, ${binding.key}, ${binding.desc}, exec, ${command}${if args == "" then "" else " ${args}"}"
-    else
-      "${mods}, ${binding.key}, ${binding.desc}, ${command}${if args == "" then "," else ", ${args}"}";
+    hl.bind {
+      inherit (binding) key;
+      inherit opts;
+      mods = binding.mods or "";
+      description = binding.desc;
+      dispatcher =
+        if isExec then
+          hl.exec "${command}${if args == "" then "" else " ${args}"}"
+        else
+          hl.dispatcher binding.action args;
+    };
 
   # Commands that exist only when their app is selected.
   appOf = {
@@ -111,7 +136,15 @@ let
     !(binding.action == "exec" && appOf ? ${binding.command or ""})
     || config.gjallar.apps.${appOf.${binding.command}}.enable;
 
-  renderBindm = binding: "${binding.mods or ""}, ${binding.key}, ${binding.desc}, ${binding.action}";
+  renderBindm =
+    binding:
+    hl.bind {
+      inherit (binding) key;
+      mods = binding.mods or "";
+      description = binding.desc;
+      dispatcher = hl.mouseDispatcher binding.action;
+      opts.mouse = true;
+    };
 
   # The shortcut list shows the description; a comma would end it early.
   allBinds = profile.bindm ++ profile.binde ++ profile.bind;
@@ -157,13 +190,12 @@ in
   ];
 
   config.wayland.windowManager.hyprland.settings = {
-    "$mod" = "SUPER";
-
-    # The d flag carries a description, which `hyprctl binds` reports and the
-    # shortcut list shows.
-    bindmd = map renderBindm profile.bindm;
-    bindde = map render (builtins.filter available profile.binde);
-    bindd = map render (builtins.filter available profile.bind);
+    # The description is what `hyprctl binds` reports and the shortcut list
+    # shows. "$mod" in keybinds.json is Super.
+    bind =
+      map renderBindm profile.bindm
+      ++ map (render { repeating = true; }) (builtins.filter available profile.binde)
+      ++ map (render { }) (builtins.filter available profile.bind);
   };
 
   config.home.packages = [

@@ -3645,39 +3645,60 @@ func applyHyprlandRotation(sysRoot, orientation string) error {
 		return fmt.Errorf("internal connector %q not present in Hyprland", connector)
 	}
 
+	return hyprctlEval(rotationLua(*monitor, transform))
+}
+
+// rotationLua turns the running monitor and the touch screen and pen on it.
+// hl.monitor keeps the fields of an existing rule that are not given.
+func rotationLua(monitor hyprMonitor, transform int) string {
 	mode := fmt.Sprintf("%dx%d@%.3f", monitor.Width, monitor.Height, monitor.RefreshRate)
 	position := fmt.Sprintf("%dx%d", monitor.X, monitor.Y)
 	scale := strconv.FormatFloat(runningScale(monitor.Width, monitor.Height, monitor.Scale), 'f', -1, 64)
-	spec := fmt.Sprintf(
-		"%s,%s,%s,%s,transform,%d",
-		monitor.Name,
-		mode,
-		position,
-		scale,
+	name := luaString(monitor.Name)
+	return fmt.Sprintf(
+		"hl.monitor({ output = %s, mode = %s, position = %s, scale = %s, transform = %d }) "+
+			// Touch screen and pen belong to the built-in panel. Hyprland's
+			// automatic binding finds no monitor for them.
+			"hl.config({ input = { touchdevice = { output = %[1]s, transform = %[5]d }, tablet = { output = %[1]s, transform = %[5]d } } })",
+		name,
+		luaString(mode),
+		luaString(position),
+		luaString(scale),
 		transform,
 	)
+}
 
-	for _, args := range [][]string{
-		{"keyword", "monitor", spec},
-		// Touch screen and pen belong to the built-in panel. Hyprland's
-		// automatic binding finds no monitor for them.
-		{"keyword", "input:touchdevice:output", monitor.Name},
-		{"keyword", "input:tablet:output", monitor.Name},
-		{"keyword", "input:touchdevice:transform", strconv.Itoa(transform)},
-		{"keyword", "input:tablet:transform", strconv.Itoa(transform)},
-	} {
-		cmd := exec.Command("hyprctl", args...)
-		if out, err := cmd.CombinedOutput(); err != nil {
-			return fmt.Errorf(
-				"hyprctl %s: %w: %s",
-				strings.Join(args, " "),
-				err,
-				strings.TrimSpace(string(out)),
-			)
+// hyprctlEval runs Lua in the running Hyprland. hyprctl exits 0 whatever the
+// code did; the reply is "ok" only when it ran without errors.
+func hyprctlEval(code string) error {
+	out, err := exec.Command("hyprctl", "eval", code).CombinedOutput()
+	reply := strings.TrimSpace(string(out))
+	if err != nil {
+		return fmt.Errorf("hyprctl eval: %w: %s", err, reply)
+	}
+	if reply != "ok" {
+		return fmt.Errorf("hyprctl eval: %s", reply)
+	}
+	return nil
+}
+
+// luaString quotes s as a Lua string literal.
+func luaString(s string) string {
+	var b strings.Builder
+	b.WriteByte('"')
+	for i := 0; i < len(s); i++ {
+		switch c := s[i]; {
+		case c == '"' || c == '\\':
+			b.WriteByte('\\')
+			b.WriteByte(c)
+		case c < 0x20 || c == 0x7f:
+			fmt.Fprintf(&b, "\\%03d", c)
+		default:
+			b.WriteByte(c)
 		}
 	}
-
-	return nil
+	b.WriteByte('"')
+	return b.String()
 }
 
 // sensorOrientation reads the orientation from a monitor-sensor line.

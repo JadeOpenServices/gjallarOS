@@ -108,8 +108,8 @@ in
           source = "builtin";
           builtin = "Noctalia";
           templates.user.hyprland = {
-            input_path = "$XDG_CONFIG_HOME/noctalia/templates/hyprland.conf";
-            output_path = "$XDG_STATE_HOME/noctalia/hyprland-colors.conf";
+            input_path = "$XDG_CONFIG_HOME/noctalia/templates/hyprland-colors.txt";
+            output_path = "$XDG_STATE_HOME/noctalia/hyprland-colors.txt";
             post_hook = "${pkgs.hyprland}/bin/hyprctl reload; if ${lib.getExe config.programs.noctalia.package} msg status >/dev/null 2>&1; then ${lib.getExe config.programs.noctalia.package} msg greeter-sync >/dev/null 2>&1 || true; fi";
           };
           templates.user.ghostty = {
@@ -521,23 +521,12 @@ in
     };
   };
 
-  xdg.configFile."noctalia/templates/hyprland.conf".text = ''
-    $primary = rgb({{colors.primary.default.hex_stripped}})
-    $surface = rgb({{colors.surface.default.hex_stripped}})
-    $secondary = rgb({{colors.secondary.default.hex_stripped}})
-    $error = rgb({{colors.error.default.hex_stripped}})
-
-    general {
-      col.active_border = $primary
-      col.inactive_border = $surface
-    }
-
-    group {
-      col.border_active = $secondary
-      col.border_inactive = $surface
-      col.border_locked_active = $error
-      col.border_locked_inactive = $surface
-    }
+  # Plain data: hyprland.lua reads these lines and never runs the file.
+  xdg.configFile."noctalia/templates/hyprland-colors.txt".text = ''
+    primary={{colors.primary.default.hex_stripped}}
+    surface={{colors.surface.default.hex_stripped}}
+    secondary={{colors.secondary.default.hex_stripped}}
+    error={{colors.error.default.hex_stripped}}
   '';
 
   xdg.configFile."noctalia/templates/ghostty.conf".text = ''
@@ -606,29 +595,4 @@ in
     # Weather and plugins fetch at start; give the network a moment first.
     "-${pkgs.networkmanager}/bin/nm-online -q -t 10"
   ];
-
-  home.activation.gjallarNoctaliaHyprlandFallback = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
-        theme_file="$HOME/.local/state/noctalia/hyprland-colors.conf"
-        if [ ! -e "$theme_file" ]; then
-          mkdir -p "$(dirname "$theme_file")"
-          cat >"$theme_file" <<'EOF'
-    $primary = rgb(7aa2f7)
-    $surface = rgb(1a1b26)
-    $secondary = rgb(7dcfff)
-    $error = rgb(f7768e)
-
-    general {
-      col.active_border = $primary
-      col.inactive_border = $surface
-    }
-
-    group {
-      col.border_active = $secondary
-      col.border_inactive = $surface
-      col.border_locked_active = $error
-      col.border_locked_inactive = $surface
-    }
-    EOF
-        fi
-  '';
 }
