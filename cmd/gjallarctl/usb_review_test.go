@@ -265,6 +265,18 @@ func TestUSBMediaNotice(t *testing.T) {
 	if !strings.Contains(body, "&lt;b&gt;Reader&lt;/b&gt;, 31.9 GB") {
 		t.Fatalf("body = %q", body)
 	}
+	for kind, want := range map[string]string{
+		"":                        "USB storage connected",
+		"SYNTHETIC-unknown":       "USB storage connected",
+		usbtrust.MediaDisc:        "Disc inserted",
+		usbtrust.MediaSDCard:      "SD card inserted",
+		usbtrust.MediaMemoryStick: "Memory Stick inserted",
+		usbtrust.MediaCard:        "Memory card inserted",
+	} {
+		if got := usbMediaNotice(usbtrust.MediaDecision{Kind: kind}).Summary; got != want {
+			t.Errorf("kind %q: summary %q, want %q", kind, got, want)
+		}
+	}
 	if usbMediaActive([]usbtrust.MediaDecision{{Connection: "a", Allowed: true}}, "a") {
 		t.Fatal("an opened medium keeps its notice")
 	}

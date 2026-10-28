@@ -146,6 +146,30 @@ let
     ACTION=="add", SUBSYSTEM=="scsi", ENV{DEVTYPE}=="scsi_device", ENV{GJALLAR_USB_SCSI}=="1", RUN+="${scsiBindUngated} %k"
   '';
 
+  # udisks hands UDISKS_ICON_NAME to its clients as the drive's icon. Without
+  # it udiskie shows one generic icon for every drive, while Dolphin (KDE
+  # Solid) picks its own from the same udisks facts. These lines give udisks
+  # the icon Solid would pick, so both show the same one (Plane 233). Discs
+  # keep Solid's own icons, which also tell the disc type. The rules run
+  # after 80-udisks2.rules, which sets ID_DRIVE_*, and never replace an icon
+  # a device rule already set.
+  storageIconRules = ''
+    SUBSYSTEM!="block", GOTO="gjallar_storage_icon_end"
+    ENV{UDISKS_ICON_NAME}!="", GOTO="gjallar_storage_icon_end"
+    ENV{ID_CDROM}=="1", GOTO="gjallar_storage_icon_end"
+    KERNEL=="mmcblk[0-9]*", SUBSYSTEMS=="mmc", ENV{UDISKS_ICON_NAME}="media-flash-sd-mmc", GOTO="gjallar_storage_icon_end"
+    KERNEL=="msblk[0-9]*|mspblk[0-9]*", SUBSYSTEMS=="memstick", ENV{UDISKS_ICON_NAME}="media-flash-memory-stick", GOTO="gjallar_storage_icon_end"
+    ENV{ID_BUS}!="usb", GOTO="gjallar_storage_icon_end"
+    ENV{ID_DRIVE_FLASH_SD}=="1", ENV{UDISKS_ICON_NAME}="media-flash-sd-mmc", GOTO="gjallar_storage_icon_end"
+    ENV{ID_DRIVE_FLASH_SD_COMBO}=="1", ENV{UDISKS_ICON_NAME}="media-flash-sd-mmc", GOTO="gjallar_storage_icon_end"
+    ENV{ID_DRIVE_FLASH_MS}=="1", ENV{UDISKS_ICON_NAME}="media-flash-memory-stick", GOTO="gjallar_storage_icon_end"
+    ENV{ID_DRIVE_FLASH_SM}=="1", ENV{UDISKS_ICON_NAME}="media-flash-smart-media", GOTO="gjallar_storage_icon_end"
+    ENV{ID_DRIVE_FLASH_CF}=="1", ENV{UDISKS_ICON_NAME}="media-flash", GOTO="gjallar_storage_icon_end"
+    ATTRS{removable}=="1", ENV{UDISKS_ICON_NAME}="drive-removable-media-usb-pendrive", GOTO="gjallar_storage_icon_end"
+    ATTRS{removable}=="0", ENV{UDISKS_ICON_NAME}="drive-harddisk"
+    LABEL="gjallar_storage_icon_end"
+  '';
+
   # zenity --password has no --text option and silently drops it, so the
   # reason line needs --entry --hide-text. Output is the same: text + newline.
   usbTrustAskpass = pkgs.writeShellScript "gjallar-usbtrust-askpass" ''
@@ -222,7 +246,10 @@ in
   };
 
   config = lib.mkMerge [
-    { services.udisks2.enable = true; }
+    {
+      services.udisks2.enable = true;
+      services.udev.extraRules = storageIconRules;
+    }
     (lib.mkIf cfg.enable {
       assertions = [
         {

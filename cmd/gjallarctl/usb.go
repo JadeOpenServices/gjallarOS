@@ -570,6 +570,22 @@ func usbMediaReader(m usbtrust.MediaDecision) string {
 	return m.Reader
 }
 
+// usbMediaLook gives the notice icon and title for a medium kind. A kind
+// it does not know (or none, from an older broker) reads as USB storage.
+func usbMediaLook(kind string) (icon, summary string) {
+	switch kind {
+	case usbtrust.MediaDisc:
+		return "media-optical", "Disc inserted"
+	case usbtrust.MediaSDCard:
+		return "media-flash-sd-mmc", "SD card inserted"
+	case usbtrust.MediaMemoryStick:
+		return "media-flash-memory-stick", "Memory Stick inserted"
+	case usbtrust.MediaCard:
+		return "media-flash", "Memory card inserted"
+	}
+	return "drive-removable-media-usb", "USB storage connected"
+}
+
 // usbMediaNotice builds the notice for a closed medium.
 func usbMediaNotice(m usbtrust.MediaDecision) desktopNotice {
 	body := usbMediaReader(m)
@@ -577,10 +593,11 @@ func usbMediaNotice(m usbtrust.MediaDecision) desktopNotice {
 		body += fmt.Sprintf(", %.1f GB", float64(m.Bytes)/1e9)
 	}
 	body += "\nNothing on it is read until you open it."
+	icon, summary := usbMediaLook(m.Kind)
 	return desktopNotice{
 		App:     "USB Guard",
-		Icon:    "media-flash",
-		Summary: "Card or USB storage inserted",
+		Icon:    icon,
+		Summary: summary,
 		Body:    html.EscapeString(body),
 		Actions: []noticeAction{{"default", "Open"}, {"open", "Open it"}, {"keep", "Keep closed"}},
 	}

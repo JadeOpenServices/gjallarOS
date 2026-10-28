@@ -49,6 +49,7 @@ type LUN struct {
 	DevNum    string // changes on every replug
 	VIDPID    string
 	Product   string
+	Model     string // SCSI model string, e.g. "SD/MMC" on a card reader
 	Type      int
 	Removable bool
 	Driver    string // bound upper driver, empty when unbound
@@ -57,6 +58,9 @@ type LUN struct {
 	// sees a media change, so a swap is caught even when sd, not the gate,
 	// received the unit attention.
 	DiskSeq string
+	// Slots counts the gated LUNs of the same USB device. A multi-slot
+	// reader has one per slot.
+	Slots int
 }
 
 // Gated reports whether the LUN's medium needs the owner's approval: a
@@ -72,6 +76,9 @@ type state struct {
 	allowed bool
 	bytes   uint64
 	diskSeq string
+	// emptySeen is set once the slot reported no medium since the plug. A
+	// stick never does, so the slot belongs to a card reader.
+	emptySeen bool
 }
 
 type Gate struct {
@@ -134,10 +141,17 @@ func (g *Gate) Sync(enforcing bool) error {
 		}
 		return errors.Join(errs...)
 	}
+	slots := map[string]int{}
+	for _, lun := range luns {
+		if lun.Gated() {
+			slots[lun.Port]++
+		}
+	}
 	seen := map[string]bool{}
 	var errs []error
 	for _, lun := range luns {
 		seen[lun.ID] = true
+		lun.Slots = slots[lun.Port]
 		if !lun.Gated() {
 			if lun.Driver == "" {
 				errs = append(errs, g.bind(lun.ID))
@@ -186,7 +200,7 @@ func (g *Gate) step(st *state, keepOpen bool) error {
 		if st.present {
 			g.event("removed", st)
 		}
-		*st = state{lun: lun}
+		*st = state{lun: lun, emptySeen: true}
 		if lun.Driver != "" {
 			return g.unbind(lun)
 		}
@@ -194,7 +208,7 @@ func (g *Gate) step(st *state, keepOpen bool) error {
 		if st.allowed {
 			g.event("revoked", st)
 		}
-		*st = state{lun: lun}
+		*st = state{lun: lun, emptySeen: st.emptySeen}
 		if lun.Driver != "" {
 			return g.unbind(lun)
 		}
@@ -294,8 +308,63 @@ func decision(st *state) usbtrust.MediaDecision {
 		VIDPID:     st.lun.VIDPID,
 		Port:       st.lun.Port,
 		Bytes:      st.bytes,
+		Kind:       mediaKind(st.lun, st.emptySeen),
 		Allowed:    st.allowed,
 	}
+}
+
+// mediaKind guesses what the medium is from what the reader reports about
+// itself. It only picks the notice's words and icon, never a decision: a
+// device can claim any name.
+func mediaKind(lun LUN, emptySeen bool) string {
+	if lun.Type == 5 {
+		return usbtrust.MediaDisc
+	}
+	kind := cardKind(lun.Model)
+	// The USB product name covers every slot of a multi-slot reader, so it
+	// only names the card on a single-slot one.
+	if kind == "" && lun.Slots < 2 {
+		kind = cardKind(lun.Product)
+	}
+	if kind == "" && (emptySeen || lun.Slots > 1) {
+		kind = usbtrust.MediaCard
+	}
+	return kind
+}
+
+// cardKind reads card words in a name like "SD/MMC", "MS Pro" or "CF Card
+// Reader". "Flash" alone means nothing: sticks call themselves "USB Flash
+// Disk".
+func cardKind(name string) string {
+	words := strings.FieldsFunc(strings.ToUpper(name), func(r rune) bool {
+		return (r < 'A' || r > 'Z') && (r < '0' || r > '9')
+	})
+	var sd, ms, other, card bool
+	for i, w := range words {
+		switch w {
+		case "SD", "SDHC", "SDXC", "MICROSD", "MMC", "TF":
+			sd = true
+		case "MS", "MSPRO", "MEMORYSTICK":
+			ms = true
+		case "MEMORY":
+			if i+1 < len(words) && words[i+1] == "STICK" {
+				ms = true
+			}
+		case "CF", "XD", "SM", "COMPACTFLASH", "SMARTMEDIA":
+			other = true
+		case "CARD", "READER":
+			card = true
+		}
+	}
+	switch {
+	case sd && !ms && !other:
+		return usbtrust.MediaSDCard
+	case ms && !sd && !other:
+		return usbtrust.MediaMemoryStick
+	case sd || ms || other || card:
+		return usbtrust.MediaCard
+	}
+	return ""
 }
 
 func (g *Gate) event(name string, st *state) {
@@ -303,7 +372,7 @@ func (g *Gate) event(name string, st *state) {
 		return
 	}
 	d := decision(st)
-	g.Event(map[string]any{"event": "usb-media", "change": name, "id": d.ID, "reader": d.Reader, "vidPid": d.VIDPID, "port": d.Port, "bytes": d.Bytes})
+	g.Event(map[string]any{"event": "usb-media", "change": name, "id": d.ID, "reader": d.Reader, "vidPid": d.VIDPID, "port": d.Port, "bytes": d.Bytes, "kind": d.Kind})
 }
 
 func (g *Gate) devicePath(id string) string {
@@ -376,6 +445,7 @@ func (g *Gate) scan() ([]LUN, error) {
 			DevNum:  readTrim(filepath.Join(usbDev, "devnum")),
 			VIDPID:  readTrim(filepath.Join(usbDev, "idVendor")) + ":" + readTrim(filepath.Join(usbDev, "idProduct")),
 			Product: readTrim(filepath.Join(usbDev, "product")),
+			Model:   readTrim(filepath.Join(real, "model")),
 			Type:    -1,
 		}
 		fmt.Sscanf(readTrim(filepath.Join(real, "type")), "%d", &lun.Type)
