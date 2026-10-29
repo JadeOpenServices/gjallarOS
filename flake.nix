@@ -144,6 +144,7 @@
         inherit (pkgs)
           _nemu
           _wine
+          btrbk
           chrony
           ghostty
           hyprland
@@ -170,6 +171,7 @@
             _nemu
             _wine
             # pkgs/overlays patches these, so cache.nixos.org has other builds.
+            btrbk
             chrony
             dolphin
             ghostty
@@ -260,6 +262,11 @@
         noctalia-notification-app-name = import ./tests/nix/noctalia-notification-app-name.nix {
           inherit pkgs;
           noctalia = self.packages.${system}.noctalia;
+        };
+
+        btrbk-onchange = import ./tests/nix/btrbk-onchange.nix {
+          inherit pkgs;
+          stockBtrbk = nixpkgs.legacyPackages.${system}.btrbk;
         };
 
         chrony-rtc-no-interrupts = import ./tests/nix/chrony-rtc-no-interrupts.nix {

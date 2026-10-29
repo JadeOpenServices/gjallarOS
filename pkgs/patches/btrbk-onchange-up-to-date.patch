@@ -1,0 +1,95 @@
+--- a/btrbk
++++ b/btrbk
+@@ -1050,6 +1050,18 @@
+ }
+ 
+ 
++sub btrfs_filesystem_sync($)
++{
++  my $vol = shift || die;
++  my $path = $vol->{PATH} // die;
++  return run_cmd( cmd => vinfo_cmd($vol, "btrfs filesystem sync", { unsafe => $path }),
++                  rsh => vinfo_rsh($vol),
++                  non_destructive => 1,
++                  filter_stderr => \&_btrfs_filter_stderr,
++                 );
++}
++
++
+ sub btrfs_filesystem_usage($)
+ {
+   my $vol = shift || die;
+@@ -3746,6 +3758,31 @@
+ }
+ 
+ 
++# A snapshot holds the subvolume as of the transaction it was created in,
++# which is later than the last transaction that changed the subvolume: its
++# cgen is equal to the subvolume gen only if both happened in the same
++# transaction. Changes that are not committed yet do not show in the gen,
++# so commit them first and read the gen again.
++sub snapshot_up_to_date($$)
++{
++  my $svol = shift // die;
++  my $snapshot = shift // die;
++  # only a snapshot taken from this very subvolume holds its contents
++  return 0 unless(defined($svol->{node}{uuid}) && ($snapshot->{node}{parent_uuid} eq $svol->{node}{uuid}));
++  unless(defined(btrfs_filesystem_sync($svol))) {
++    WARN "Failed to sync filesystem, not skipping snapshot creation: $svol->{PRINT}", @stderr;
++    return 0;
++  }
++  my $detail = btrfs_subvolume_show($svol);
++  unless($detail && defined($detail->{uuid}) && ($detail->{uuid} eq $svol->{node}{uuid})) {
++    WARN "Failed to read subvolume generation, not skipping snapshot creation: $svol->{PRINT}";
++    return 0;
++  }
++  $svol->{node}{gen} = $detail->{gen};
++  return ($svol->{node}{gen} <= $snapshot->{node}{cgen});
++}
++
++
+ sub check_file($$;@)
+ {
+   my $file = shift // die;
+@@ -6660,7 +6697,7 @@
+         my @sdata = map +{
+           %svol_data,
+           type => "snapshot",
+-          status => ($_->{node}{cgen} == $svol->{node}{gen}) ? "up-to-date" : "",
++          status => (defined($svol->{node}{uuid}) && ($_->{node}{parent_uuid} eq $svol->{node}{uuid}) && ($svol->{node}{gen} <= $_->{node}{cgen})) ? "up-to-date" : "",
+           vinfo_prefixed_keys("snapshot", $_),
+           _vinfo => $_,
+           _btrbk_date => $_->{node}{BTRBK_DATE},
+@@ -6887,12 +6924,12 @@
+             # check if latest (btrbk only!) snapshot is up-to-date with source subvolume (by generation)
+             my $latest = get_latest_related_snapshot($snaproot, $svol, $snapshot_basename);
+             if($latest) {
+-              if($latest->{node}{cgen} == $svol->{node}{gen}) {
++              if(snapshot_up_to_date($svol, $latest)) {
+                 INFO "Snapshot creation skipped: snapshot_create=onchange, snapshot is up-to-date: $latest->{PRINT}";
+                 $svol->{SNAPSHOT_UP_TO_DATE} = $latest;
+                 next;
+               }
+-              DEBUG "Snapshot creation enabled: snapshot_create=onchange, gen=$svol->{node}{gen} > snapshot_cgen=$latest->{node}{cgen}";
++              DEBUG "Snapshot creation enabled: snapshot_create=onchange, latest snapshot is not up-to-date (gen=$svol->{node}{gen}, snapshot_cgen=$latest->{node}{cgen}): $latest->{PRINT}";
+             }
+             else {
+               DEBUG "Snapshot creation enabled: snapshot_create=onchange, no snapshots found";
+--- a/ssh_filter_btrbk.sh
++++ b/ssh_filter_btrbk.sh
+@@ -146,6 +146,7 @@
+ 
+       -s|--source)
+           allow_cmd "${sudo_prefix}btrfs subvolume snapshot"
++          allow_cmd "${sudo_prefix}btrfs filesystem sync"
+           allow_cmd "${sudo_prefix}btrfs send"
+           ;;
+ 
+@@ -169,6 +170,7 @@
+ 
+       --snapshot)
+           allow_cmd "${sudo_prefix}btrfs subvolume snapshot"
++          allow_cmd "${sudo_prefix}btrfs filesystem sync"
+           ;;
+ 
+       --send)
