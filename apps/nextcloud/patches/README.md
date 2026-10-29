@@ -71,27 +71,28 @@ Hydration patches:
 - OpenVFS identifies the sync client from Unix socket peer credentials because
   Nextcloud does not include a PID in its VERSION response. Client threads must
   be able to write downloaded content without requesting hydration themselves.
-- OpenVFS registers requests before sending them, uses atomic request IDs,
-  waits for files already being hydrated, and releases waiters on errors,
-  cancellation, or a five-minute deadline. A failed download fails the open
-  with EIO. Upstream returned ENOENT, so a program saw the file as gone and
+- OpenVFS registers requests before sending them, uses atomic request IDs
+  and ends a wait after `hydrationTimeoutSeconds` from its config file
+  (default 300); upstream does this since c20c0fe. Our patch also waits for
+  files already being hydrated and releases waiters on cancellation. A failed
+  download fails the open with EIO. Upstream returned ENOENT, so a program saw the file as gone and
   could save a new file over the placeholder.
-- The five-minute deadline counts from the last write into the file, not from
-  the request. The sync client writes the download through the mount, so a
-  large file on a slow link keeps its reader waiting while data arrives.
-  Upstream failed every open that took longer than five minutes, even with
-  the download still running.
+- The deadline counts from the last write into the file, not from the
+  request. The sync client writes the download through the mount, so a large
+  file on a slow link keeps its reader waiting while data arrives. Upstream
+  fails every open that takes longer than the timeout, even with the download
+  still running.
 - OpenVFS ends a hydration wait when the FUSE session exits. libfuse joins
   every worker before it unmounts and a worker cannot be cancelled during a
-  request, so upstream ignored SIGTERM for up to five minutes. systemd then
+  request, so upstream ignored SIGTERM until the hydration timed out. systemd then
   killed openvfs together with its unmount helper and left a dead mount.
 - OpenVFS notices when the sync client closes its socket. Pending hydrations
   fail at once and new ones fail without waiting for the deadline. Upstream
   read EOF as "no data" and kept the closed socket's fd number for later
   writes.
 - OpenVFS unmounts when the sync client closes its socket, which it only does
-  when it exits, and does not mount when it cannot reach the client. Upstream
-  kept serving a mount after the client was killed; the restarted client's
+  when it exits. Upstream (like us) does not mount when it cannot reach the
+  client, but kept serving a mount after the client was killed; the restarted client's
   openvfs could not mount over it and the client aborted.
 - OpenVFS keeps FUSE workers free for the sync client. libfuse serves the
   mount from one pool of 10 workers by default, and a hydration wait holds
@@ -141,8 +142,13 @@ The integration fixture uses a fake sync socket and a fresh temporary FUSE
 mount, never the user's Nextcloud directory:
 
 ```sh
-python3 tests/openvfs-hydration.py /path/to/openvfs --timeout
+python3 tests/openvfs-hydration.py /path/to/openvfs/bin/openvfs --timeout
 ```
+
+Upstream's own tests (strtools_test, socketthreadtest) run in every openvfs
+build. Our patch changes socketthreadtest: upstream expects a VERSION message
+to set the client PID, but we take it from the socket peer, so the test checks
+that VERSION cannot replace it.
 
 It checks concurrent opens, in-progress hydration, wrapped preview exclusion,
 server errors, cancellation with zero blocked requests, SIGTERM and sync

@@ -2,12 +2,12 @@
 """Integration regression test for the pinned OpenVFS hydration patch.
 
 Run as the desktop user with access to /dev/fuse, cat and fusermount3:
-    python3 tests/openvfs-hydration.py /path/to/openvfs [--timeout]
+    python3 tests/openvfs-hydration.py /path/to/openvfs/bin/openvfs [--timeout]
 
 Uses only a fresh temporary mount and a fake local sync socket. The optional
-five-minute timeout check and the slow download next to it (about six minutes
-together) require no server or Nextcloud account. Logs remain
-in the printed temporary directory. Never mounts the real Nextcloud directory.
+five-minute timeout check (the default hydrationTimeoutSeconds) and the slow
+download next to it (about six minutes together) require no server or
+Nextcloud account. Logs remain in the printed temporary directory. Never mounts the real Nextcloud directory.
 """
 import json
 import os
