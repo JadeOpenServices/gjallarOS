@@ -156,6 +156,32 @@ func TestPlanDeveloperModeWaitsOnlyWhenTurnedOn(t *testing.T) {
 	}
 }
 
+func TestPlanReadsDefaultsOfKeysAnOlderFileLacks(t *testing.T) {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(configText(t, defaults(t)), &fields); err != nil {
+		t.Fatal(err)
+	}
+	delete(fields, "firewallEnable")
+	data, err := json.Marshal(fields)
+	if err != nil {
+		t.Fatal(err)
+	}
+	effective, err := Effective(data)
+	if err != nil || string(effective["firewallEnable"]) != "true" {
+		t.Fatalf("firewallEnable = %s, %v; want the default true", effective["firewallEnable"], err)
+	}
+	if _, err := Plan(data, raw(map[string]string{"firewallEnable": `true`})); err == nil {
+		t.Fatal("turning on a firewall that is on by default should change nothing")
+	}
+	change, err := Plan(data, raw(map[string]string{"firewallEnable": `false`}))
+	if err != nil || string(change.Keys[0].Old) != "true" || change.Tier != config.TierSecurity {
+		t.Fatalf("firewall off: %+v %v", change, err)
+	}
+	if _, err := change.Apply(data); err != nil {
+		t.Fatalf("apply against the default: %v", err)
+	}
+}
+
 func TestPlanProtectionWaitsOnlyWhenTurnedOff(t *testing.T) {
 	user := defaults(t)
 	user.USBGuardEnable, user.USBTrustEnforce, user.FirewallEnable = true, true, true

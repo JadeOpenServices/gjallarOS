@@ -134,9 +134,18 @@ func (s *service) readConfig() ([]byte, map[string]json.RawMessage, error) {
 	return data, fields, nil
 }
 
+// effective reads the configuration with defaults for keys it lacks.
+func (s *service) effective() (map[string]json.RawMessage, error) {
+	data, _, err := s.readConfig()
+	if err != nil {
+		return nil, err
+	}
+	return settings.Effective(data)
+}
+
 // List returns every key with its tier and current value, sorted by key.
 func (s *service) List() ([]settings.KeyValue, error) {
-	_, fields, err := s.readConfig()
+	fields, err := s.effective()
 	if err != nil {
 		return nil, err
 	}
@@ -158,7 +167,7 @@ func (s *service) Get(key string) (settings.KeyValue, error) {
 	if err != nil {
 		return settings.KeyValue{}, fmt.Errorf("%w: %v", errRefused, err)
 	}
-	_, fields, err := s.readConfig()
+	fields, err := s.effective()
 	if err != nil {
 		return settings.KeyValue{}, err
 	}

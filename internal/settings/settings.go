@@ -116,9 +116,9 @@ func Plan(data []byte, values map[string]json.RawMessage) (Change, error) {
 	if err != nil {
 		return Change{}, fmt.Errorf("the current configuration does not load: %w", err)
 	}
-	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(data, &fields); err != nil {
-		return Change{}, fmt.Errorf("parse user configuration: %w", err)
+	fields, err := Effective(data)
+	if err != nil {
+		return Change{}, err
 	}
 
 	change := Change{Tier: config.TierEveryday}
@@ -258,9 +258,9 @@ func (c Change) Apply(data []byte) ([]byte, error) {
 	if c.Local != nil {
 		return nil, fmt.Errorf("a local change writes the developer-mode folder, not the configuration")
 	}
-	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(data, &fields); err != nil {
-		return nil, fmt.Errorf("parse user configuration: %w", err)
+	fields, err := Effective(data)
+	if err != nil {
+		return nil, err
 	}
 	values := make(map[string]json.RawMessage, len(c.Keys))
 	for _, key := range c.Keys {
@@ -425,6 +425,34 @@ func Shown(value json.RawMessage, limit int) string {
 		b.WriteString(strings.Trim(strconv.QuoteRuneToASCII(r), "'"))
 	}
 	return b.String()
+}
+
+// Effective returns every key with the value the system uses: the file's
+// own value, or the default config.Parse gives a key an older file does not
+// hold yet. Without the defaults, a protection that is on would look unset.
+func Effective(data []byte) (map[string]json.RawMessage, error) {
+	user, err := config.Parse(data)
+	if err != nil {
+		return nil, fmt.Errorf("the current configuration does not load: %w", err)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return nil, fmt.Errorf("parse user configuration: %w", err)
+	}
+	parsed, err := json.Marshal(user)
+	if err != nil {
+		return nil, err
+	}
+	var defaults map[string]json.RawMessage
+	if err := json.Unmarshal(parsed, &defaults); err != nil {
+		return nil, err
+	}
+	for key, value := range defaults {
+		if _, ok := fields[key]; !ok {
+			fields[key] = value
+		}
+	}
+	return fields, nil
 }
 
 func compact(value json.RawMessage) (json.RawMessage, error) {
