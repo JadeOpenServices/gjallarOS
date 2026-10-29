@@ -114,7 +114,12 @@ in
           templates.user.hyprland = {
             input_path = "$XDG_CONFIG_HOME/noctalia/templates/hyprland-colors.txt";
             output_path = "$XDG_STATE_HOME/noctalia/hyprland-colors.txt";
-            post_hook = "${pkgs.hyprland}/bin/hyprctl reload; if ${lib.getExe config.programs.noctalia.package} msg status >/dev/null 2>&1; then ${lib.getExe config.programs.noctalia.package} msg greeter-sync >/dev/null 2>&1 || true; fi";
+            # No greeter sync here: greeter_sync.auto_sync below already runs
+            # one on every theme and wallpaper change, and only after the
+            # shell's polkit agent is up (greeter-sync-polkit-ready.patch).
+            # A sync from this hook ran at shell start before the agent, so
+            # pkexec had no agent to ask.
+            post_hook = "${pkgs.hyprland}/bin/hyprctl reload";
           };
           templates.user.ghostty = {
             input_path = "$XDG_CONFIG_HOME/noctalia/templates/ghostty.conf";
