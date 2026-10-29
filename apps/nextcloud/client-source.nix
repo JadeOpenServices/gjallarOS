@@ -8,8 +8,8 @@ in
   src = fetchFromGitHub {
     owner = "nextcloud";
     repo = "desktop";
-    rev = "fc07fe7474afb938dd5253aded6da0ea1f664704";
-    sha256 = "0q387p0g3n13d8rw5rp6l6y48i4vmadr843a9b8s1xzhdp9wvxqw";
+    rev = "d1f9f6469a038ca223e1e86ad1dcc5c199735957";
+    sha256 = "14mzqq4133m6sj9sm9ari0x53n1dsyjdsidmpyz3yyzl231vn7jm";
   };
 
   # The nixpkgs patch targets the old 4.0.8 source. GjallarOS already
@@ -35,7 +35,8 @@ in
     # A folder's keep or free-up choice covers the folders below it, also
     # those that had their own choice.
     ./patches/nextcloud-openvfs-folder-pin-below.patch
-    # New accounts start as virtual-files folders on Linux too.
+    # New accounts start as virtual-files folders on Linux too, unless the
+    # server's managed settings turn virtual files off.
     ./patches/nextcloud-vfs-default.patch
     # Windows, menus and popups follow the Qt palette (Noctalia via qt6ct,
     # else the system palette) instead of hardcoded light/dark colors.
@@ -43,7 +44,7 @@ in
     # A rebuilt client never adds itself to autostart; GjallarOS starts it.
     ./patches/nextcloud-no-autostart.patch
     # A folder added in the settings follows the VFS default too, not only
-    # the wizard checkbox.
+    # the wizard checkbox. A server that enforces VFS off still wins.
     ./patches/nextcloud-vfs-folder-wizard.patch
     # NEXTCLOUD_BROWSER_OPENER gets web links (login flow included) and
     # NEXTCLOUD_BROWSER_CLOSER runs after login. Mail links stay with the

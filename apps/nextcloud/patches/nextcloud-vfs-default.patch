@@ -1,15 +1,19 @@
+diff --git a/src/gui/wizard/accountwizardcontroller.cpp b/src/gui/wizard/accountwizardcontroller.cpp
+index 6f705e1..3ef27e4 100644
 --- a/src/gui/wizard/accountwizardcontroller.cpp
 +++ b/src/gui/wizard/accountwizardcontroller.cpp
-@@ -103,11 +103,13 @@
-     _largeFolderThresholdMb = static_cast<int>(largeFolderLimit.second);
-     _askBeforeExternalStorage = cfg.confirmExternalStorage();
+@@ -118,12 +118,15 @@ AccountWizardController::AccountWizardController(QObject *parent)
+ 
+     seedProxySettingsFromManagedDefault();
  
 -#ifndef Q_OS_LINUX
 +    // Upstream keeps Linux on classic sync here. With the server URL and
 +    // local folder preset, the wizard finishes without showing the sync
 +    // options, so every new account downloaded the whole server before
-+    // anything switched it to virtual files (2026-10-09).
-     if (canUseVirtualFiles()) {
++    // anything switched it to virtual files (2026-10-09). An admin who turns
++    // virtual files off still wins.
+     const auto managedVfs = accountManagedVirtualFilesMode();
+     if (canUseVirtualFiles() && !(managedVfs.isManaged && !managedVfs.enabled)) {
          _syncMode = VirtualFiles;
      }
 -#endif

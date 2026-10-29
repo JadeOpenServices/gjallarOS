@@ -1,15 +1,17 @@
+diff --git a/src/gui/folder.cpp b/src/gui/folder.cpp
+index bbf44d4..9f008f6 100644
 --- a/src/gui/folder.cpp
 +++ b/src/gui/folder.cpp
-@@ -357,7 +357,7 @@ bool Folder::syncPaused() const
- 
- bool Folder::canSync() const
- {
+@@ -367,7 +367,7 @@ bool Folder::canSync() const
+         return false;
+     }
+ #endif
 -    return !syncPaused() && accountState()->isConnected() && _syncResult.status() != SyncResult::SetupError;
 +    return !syncPaused() && accountState()->isConnected() && _syncResult.status() != SyncResult::SetupError && _vfsReady;
  }
  
  void Folder::setSyncPaused(bool paused)
-@@ -603,6 +603,28 @@ void Folder::startVfs()
+@@ -613,6 +613,28 @@ void Folder::startVfs()
      connect(&_engine->syncFileStatusTracker(), &SyncFileStatusTracker::fileStatusChanged,
              _vfs.data(), &Vfs::fileStatusChanged);
  
@@ -38,9 +40,11 @@
      connect(_vfs.get(), &Vfs::needSync, this, [this] {
          if (canSync()) {
              // the vfs plugin detected that its metadata is out of sync and requests a new sync
+diff --git a/src/gui/folder.h b/src/gui/folder.h
+index a7ffa20..a0de1a9 100644
 --- a/src/gui/folder.h
 +++ b/src/gui/folder.h
-@@ -627,6 +627,9 @@ private:
+@@ -632,6 +632,9 @@ private:
       */
      bool _hasSwitchedToVfs = false;
  
@@ -50,6 +54,8 @@
      bool _silenceErrorsUntilNextSync = false;
  
  #ifdef Q_OS_MACOS
+diff --git a/src/libsync/vfs/openvfs/vfs_openvfs.cpp b/src/libsync/vfs/openvfs/vfs_openvfs.cpp
+index 8ecfe58..9339d61 100644
 --- a/src/libsync/vfs/openvfs/vfs_openvfs.cpp
 +++ b/src/libsync/vfs/openvfs/vfs_openvfs.cpp
 @@ -22,10 +22,12 @@

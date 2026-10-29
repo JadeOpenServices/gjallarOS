@@ -62,7 +62,7 @@ let
   clientSource = import ./client-source.nix { inherit (pkgs) fetchFromGitHub replaceVars; };
 
   client = pkgs.nextcloud-client.overrideAttrs (old: {
-    version = "34.0.50-openvfs";
+    version = "35.0.50-openvfs";
 
     inherit (clientSource) src patches;
 
