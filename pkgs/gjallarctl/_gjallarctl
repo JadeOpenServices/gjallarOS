@@ -134,9 +134,9 @@ _gjallarctl_security() {
     fix)
       _arguments '1:check:((disk\:"disk encryption" secure-boot\:"Secure Boot" usb\:"USB device approval" updates\:"update the system" developer\:"turn developer mode off"))' ;;
     switch)
-      _arguments '1:protection:((usb\:"USB device approval"))' '2:state:(on off)' ;;
+      _arguments '1:protection:((usb\:"USB device approval" firewall\:"firewall"))' '2:state:(on off)' ;;
     apply|cancel)
-      _arguments '1:protection:((usb\:"USB device approval"))' ;;
+      _arguments '1:protection:((usb\:"USB device approval" firewall\:"firewall"))' ;;
   esac
 }
 
