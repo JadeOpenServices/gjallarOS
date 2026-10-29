@@ -131,6 +131,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runVPN(args[1:], stdout, stderr)
 	case "addons":
 		return runAddons(args[1:], stdout, stderr)
+	case "apps":
+		return runApps(args[1:], stdout, stderr)
 	case "settings":
 		return runSettings(args[1:], stdout, stderr)
 	case "snapshots":
@@ -1805,6 +1807,7 @@ func printUsage(out io.Writer) {
 	fmt.Fprintln(out, "       gjallarctl luks {status|recovery-key|pin [--remove]|setup|remind [--open|--refresh]}")
 	fmt.Fprintln(out, "       gjallarctl vpn status")
 	fmt.Fprintln(out, "       gjallarctl addons {list|set|pin|update} [--repo PATH]")
+	fmt.Fprintln(out, "       gjallarctl apps {list [--json]|add ID|remove ID}")
 	fmt.Fprintln(out, "       gjallarctl settings {list|get|set|pending|apply|cancel|export|import|pair}")
 	fmt.Fprintln(out, "       gjallarctl snapshots {list|restore PATH}")
 	fmt.Fprintln(out, "       gjallarctl secure-boot {status|setup|update-dbx} [--repo PATH]")

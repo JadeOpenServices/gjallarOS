@@ -90,6 +90,27 @@ _gjallarctl_thunderbolt() {
   _arguments '--uid[device UID from thunderbolt status]:uid:'
 }
 
+_gjallarctl_apps() {
+  local -a cmds=(
+    'list:show the app catalogue and what is installed'
+    'add:install an app from the catalogue'
+    'remove:remove an app'
+  )
+  if (( CURRENT == 2 )); then
+    _describe -t commands 'apps command' cmds
+    return
+  fi
+  shift words
+  (( CURRENT-- ))
+  case $words[1] in
+    list)
+      _arguments '--json[print the catalogue as JSON]' ;;
+    add|remove)
+      local -a ids=(${(f)"$(gjallarctl apps list 2>/dev/null | cut -c3- | awk '{print $1}')"})
+      _describe -t apps 'app' ids ;;
+  esac
+}
+
 _gjallarctl_security() {
   local -a cmds=(
     'notice:show new security notes once, as at login'
@@ -340,12 +361,13 @@ _gjallarctl() {
     'thunderbolt:Thunderbolt and USB4 device authorization'
     'vpn:VPN and trusted Wi-Fi'
     'addons:Firefox add-ons'
+    'apps:install or remove catalogue apps'
     'settings:change GjallarOS settings'
     'snapshots:restore your files from the /home snapshots'
     'tpm2:TPM2 disk unlock'
     'luks:system disk unlock methods and recovery key'
     'secure-boot:Secure Boot with GjallarOS keys'
-    'security:security notes for this device from ODDC'
+    'security:security checks and notes for this device'
     'oddc:ODDC hardware catalogue'
     'fan:fan control'
     'thermal-status:show temperatures and fan state'
@@ -371,6 +393,7 @@ _gjallarctl() {
         thunderbolt) _gjallarctl_thunderbolt ;;
         vpn) _gjallarctl_vpn ;;
         addons) _gjallarctl_addons ;;
+        apps) _gjallarctl_apps ;;
         settings) _gjallarctl_settings ;;
         snapshots) _gjallarctl_snapshots ;;
         oddc) _gjallarctl_oddc ;;
