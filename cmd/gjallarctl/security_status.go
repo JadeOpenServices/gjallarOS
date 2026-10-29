@@ -392,11 +392,62 @@ func runSecuritySwitch(args []string, stdout, stderr io.Writer) int {
 	if !here {
 		return runInTerminal("GjallarOS security", []string{"security", "switch", args[0], args[1], "--here"}, stderr)
 	}
+	if args[0] == "usb" && args[1] == "off" {
+		if code := usbDisarmForSwitch(stderr); code != 0 {
+			return code
+		}
+	}
 	values := map[string]any{}
 	for _, key := range keys {
 		values[key] = args[1] == "on"
 	}
 	return askSystemSettings(values, stdout, stderr)
+}
+
+// usbArmed and usbDisarmAsRoot are replaced in tests.
+var (
+	usbArmed = func() (bool, error) {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		response, err := broker.Call(ctx, broker.DefaultSocket, broker.Request{Action: broker.ActionStatus})
+		if err != nil {
+			return false, err
+		}
+		if response.Status == nil {
+			return false, errors.New("the USB check service sent no status")
+		}
+		return response.Status.Armed, nil
+	}
+	usbDisarmAsRoot = func() error {
+		self, err := os.Executable()
+		if err != nil {
+			return err
+		}
+		// -k: ask now and leave no timestamp behind.
+		cmd := exec.Command("sudo", "-k", self, "usb", "disarm")
+		cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
+		return cmd.Run()
+	}
+)
+
+// usbDisarmForSwitch disarms USB blocking before the off switch, which the
+// settings service refuses while blocking is armed (loophole 23). Disarming
+// still takes the disk recovery key, so the switch is no shortcut around it.
+func usbDisarmForSwitch(stderr io.Writer) int {
+	armed, err := usbArmed()
+	if err != nil {
+		fmt.Fprintf(stderr, "ERROR: cannot read the USB blocking state: %v\n", err)
+		return 1
+	}
+	if !armed {
+		return 0
+	}
+	fmt.Fprintln(stderr, "USB blocking is armed. To turn it off, enter your password and then the disk recovery key.")
+	if err := usbDisarmAsRoot(); err != nil {
+		fmt.Fprintf(stderr, "ERROR: USB blocking stays on: %v\n", err)
+		return 1
+	}
+	return 0
 }
 
 func securityFixHere(id string, stdout, stderr io.Writer) int {

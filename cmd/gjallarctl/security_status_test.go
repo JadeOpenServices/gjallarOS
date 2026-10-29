@@ -192,3 +192,28 @@ func TestSecurityChecksSwitch(t *testing.T) {
 		t.Errorf("bad state exit = %d, want 2", code)
 	}
 }
+
+func TestUSBDisarmForSwitch(t *testing.T) {
+	armed, armedErr, disarmErr, disarmed := false, error(nil), error(nil), 0
+	oldArmed, oldDisarm := usbArmed, usbDisarmAsRoot
+	t.Cleanup(func() { usbArmed, usbDisarmAsRoot = oldArmed, oldDisarm })
+	usbArmed = func() (bool, error) { return armed, armedErr }
+	usbDisarmAsRoot = func() error { disarmed++; return disarmErr }
+
+	var errOut bytes.Buffer
+	if code := usbDisarmForSwitch(&errOut); code != 0 || disarmed != 0 {
+		t.Errorf("not armed: exit %d, disarm runs %d, want 0 and 0", code, disarmed)
+	}
+	armed = true
+	if code := usbDisarmForSwitch(&errOut); code != 0 || disarmed != 1 {
+		t.Errorf("armed: exit %d, disarm runs %d, want 0 and 1", code, disarmed)
+	}
+	disarmErr = errors.New("wrong key")
+	if code := usbDisarmForSwitch(&errOut); code != 1 {
+		t.Errorf("failed disarm exit = %d, want 1", code)
+	}
+	armedErr = errors.New("no socket")
+	if code := usbDisarmForSwitch(&errOut); code != 1 || disarmed != 2 {
+		t.Errorf("unknown state: exit %d, disarm runs %d, want 1 and 2", code, disarmed)
+	}
+}
