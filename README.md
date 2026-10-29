@@ -290,6 +290,32 @@ and the Home Manager side (`user/apps/default.nix`). The old `aiEnable`,
 `containersEnable` and `nemuEnable` keys are rejected; list `ai`,
 `containers` or `nemu` in `apps` instead.
 
+`gjallarctl apps list` shows the catalogue and what is installed;
+`gjallarctl apps add <id>` and `gjallarctl apps remove <id>` change the list
+and rebuild. The Apps page of the settings window does the same.
+
+### Settings window and gjallarHorn
+
+GjallarOS Settings (`gjallar-settings`) has two pages, also in the launcher on
+their own: Apps and gjallarHorn. gjallarHorn shows the security checks of this
+device (disk encryption, Secure Boot, USB devices, firewall, updates,
+developer mode) and a fix button where one helps. `gjallarctl security status`
+prints the same checks. The window has no rights of its own; every change goes
+through `gjallarctl settings` and asks for the password.
+
+Some protections have an off switch, for people who run their own:
+
+| Key | Default | Switch |
+| --- | --- | --- |
+| `usbguardEnable`, `usbTrustEnforce` | `true` | USB devices |
+| `firewallEnable` | `true` | Firewall |
+
+The switches change security-tier keys, so turning one off waits an hour away
+from home, as above. Until then the card says when the change is ready and
+offers Apply now and Keep it on. A protection that is off shows "Off (your
+choice)" and does not ask again. The recovery system always has the firewall
+on.
+
 ### Firefox add-ons
 
 Add-ons come in collections, listed in `apps/firefox-addons.json`: Privacy,

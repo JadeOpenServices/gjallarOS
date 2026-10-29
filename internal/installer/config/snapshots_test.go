@@ -80,3 +80,26 @@ func TestValidateSnapshotRetention(t *testing.T) {
 		t.Fatalf("retention checked while snapshots are off: %v", err)
 	}
 }
+
+func TestParseOldConfigKeepsFirewallOn(t *testing.T) {
+	fields := presetFields(t)
+	delete(fields, "firewallEnable")
+	contents, err := json.Marshal(fields)
+	if err != nil {
+		t.Fatal(err)
+	}
+	user, err := Parse(contents)
+	if err != nil {
+		t.Fatalf("Parse() rejected a config without firewallEnable: %v", err)
+	}
+	if !user.FirewallEnable {
+		t.Fatal("a config from before the firewall switch turned the firewall off")
+	}
+	fields["firewallEnable"] = false
+	if contents, err = json.Marshal(fields); err != nil {
+		t.Fatal(err)
+	}
+	if user, err = Parse(contents); err != nil || user.FirewallEnable {
+		t.Fatalf("firewallEnable false = %v, %v", user.FirewallEnable, err)
+	}
+}

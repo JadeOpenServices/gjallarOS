@@ -20,7 +20,7 @@ func goodSecurityFacts() securityFacts {
 		firewall:   "active",
 		built:      flakesource.BuildSource{Revision: "abc", ODDC: "x", ODDCPinned: "x"},
 		systemAge:  time.Hour,
-		settings:   map[string]string{"usbguardEnable": "true", "usbTrustEnforce": "true", "secureBootEnable": "true", "developerMode": "false"},
+		settings:   map[string]string{"usbguardEnable": "true", "usbTrustEnforce": "true", "firewallEnable": "true", "secureBootEnable": "true", "developerMode": "false"},
 	}
 }
 
@@ -63,6 +63,16 @@ func TestSecurityChecksTurnedOffAreOff(t *testing.T) {
 	f.settings["secureBootEnable"] = "false"
 	if c := checkByID(t, securityChecks(f), "secure-boot"); c.State != checkOff {
 		t.Errorf("secure boot turned off = %s, want off", c.State)
+	}
+	f.firewall = "inactive"
+	f.settings["firewallEnable"] = "false"
+	if c := checkByID(t, securityChecks(f), "firewall"); c.State != checkOff || c.Switch != "off" {
+		t.Errorf("firewall turned off = %s switch %q, want off", c.State, c.Switch)
+	}
+	// Still running until the rebuild: the check says what runs now.
+	f.firewall = "active"
+	if c := checkByID(t, securityChecks(f), "firewall"); c.State != checkOK {
+		t.Errorf("firewall off but still running = %s, want ok", c.State)
 	}
 }
 
@@ -182,8 +192,8 @@ func TestSecurityChecksSwitch(t *testing.T) {
 	if c := checkByID(t, securityChecks(f), "usb"); c.Switch != "" {
 		t.Errorf("usb switch without settings = %q, want none", c.Switch)
 	}
-	if c := checkByID(t, securityChecks(f), "firewall"); c.Switch != "" {
-		t.Errorf("firewall has no switch yet, got %q", c.Switch)
+	if c := checkByID(t, securityChecks(f), "firewall"); c.Switch != "on" {
+		t.Errorf("firewall switch = %q, want on", c.Switch)
 	}
 	var out, errOut bytes.Buffer
 	if code := runSecuritySwitch([]string{"disk", "off"}, &out, &errOut); code != 2 {
