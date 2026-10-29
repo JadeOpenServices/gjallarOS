@@ -207,8 +207,11 @@ in
 
       animations.enabled = true;
 
+      # Hyprland's file log grows in /run/user, a small tmpfs that every
+      # user service needs. Only debug machines read it (the failed-session
+      # report in system/wm/hyprland).
       debug = {
-        disable_logs = false;
+        disable_logs = !(settings.debugFunctions or false);
       };
 
       input = {

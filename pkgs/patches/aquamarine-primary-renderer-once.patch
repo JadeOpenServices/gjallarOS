@@ -1,0 +1,35 @@
+diff -ru a/include/aquamarine/backend/DRM.hpp b/include/aquamarine/backend/DRM.hpp
+--- a/include/aquamarine/backend/DRM.hpp
++++ b/include/aquamarine/backend/DRM.hpp
+@@ -429,6 +429,7 @@
+         struct {
+             Hyprutils::Memory::CSharedPointer<IAllocator>   allocator;
+             Hyprutils::Memory::CSharedPointer<CDRMRenderer> renderer; // may be null if creation fails
++            bool                                            failed = false; // primary GPU had no renderer, do not retry
+         } rendererState;
+ 
+         Hyprutils::Memory::CWeakPointer<CBackend>                     backend;
+diff -ru a/src/backend/drm/DRM.cpp b/src/backend/drm/DRM.cpp
+--- a/src/backend/drm/DRM.cpp
++++ b/src/backend/drm/DRM.cpp
+@@ -641,7 +641,19 @@
+         if (rendererState.renderer && rendererState.allocator)
+             return true;
+ 
+-        return initMgpu();
++        // A primary GPU only needs its own renderer as the blit source for
++        // other GPUs. When it cannot make one (no EGL on the node), retrying
++        // on every commit rebuilds the allocator and logs each frame.
++        if (rendererState.failed)
++            return true;
++
++        if (!initMgpu()) {
++            rendererState.failed = true;
++            rendererState.allocator.reset();
++            backend->log(AQ_LOG_ERROR, std::format("drm: {} has no renderer, continuing without one", gpu->path));
++        }
++
++        return true;
+     }
+ 
+     const bool hasEnabledOutputs =
