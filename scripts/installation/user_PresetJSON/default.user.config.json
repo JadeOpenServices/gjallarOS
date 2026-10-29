@@ -96,6 +96,7 @@
   "luksTpm2Pin": false,
   "name": "Your Name",
   "networkPrintingEnable": false,
+  "firewallEnable": true,
   "dolphinDriveUsage": false,
   "firmwareFlashReadEntry": false,
   "nextcloudEnable": false,

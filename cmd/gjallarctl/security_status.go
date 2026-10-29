@@ -57,7 +57,8 @@ type securityWaiting struct {
 // securitySwitches are the protections a user may turn off, for example
 // to run their own instead, with the settings each one sets.
 var securitySwitches = map[string][]string{
-	"usb": {"usbguardEnable", "usbTrustEnforce"},
+	"usb":      {"usbguardEnable", "usbTrustEnforce"},
+	"firewall": {"firewallEnable"},
 }
 
 func switchState(f securityFacts, id string) string {
@@ -175,7 +176,7 @@ type securityFacts struct {
 
 // securitySettingKeys are the settings the checks read to tell a
 // protection the user turned off from one that failed.
-var securitySettingKeys = []string{"usbguardEnable", "usbTrustEnforce", "secureBootEnable", "developerMode"}
+var securitySettingKeys = []string{"usbguardEnable", "usbTrustEnforce", "firewallEnable", "secureBootEnable", "developerMode"}
 
 func securityChecks(f securityFacts) []securityCheck {
 	checks := []securityCheck{
@@ -273,6 +274,10 @@ func usbCheck(f securityFacts) securityCheck {
 
 func firewallCheck(f securityFacts) securityCheck {
 	c := securityCheck{ID: "firewall", Title: "Firewall"}
+	if f.settings["firewallEnable"] == "false" && f.firewall != "active" {
+		c.State, c.Detail = checkOff, "Off. GjallarOS does not filter connections from the network."
+		return c
+	}
 	if f.firewall == "active" {
 		c.State, c.Detail = checkOK, "On. Connections from the network are blocked unless allowed."
 		return c
