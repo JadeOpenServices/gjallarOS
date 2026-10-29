@@ -114,10 +114,10 @@ in
           templates.user.hyprland = {
             input_path = "$XDG_CONFIG_HOME/noctalia/templates/hyprland-colors.txt";
             output_path = "$XDG_STATE_HOME/noctalia/hyprland-colors.txt";
-            # No greeter sync here: greeter_sync.auto_sync below already runs
-            # one on every theme and wallpaper change, and only after the
-            # shell's polkit agent is up (greeter-sync-polkit-ready.patch).
-            # A sync from this hook ran at shell start before the agent, so
+            # No greeter sync here: greeter_sync.auto_sync below runs one
+            # after every start and on every theme and wallpaper change, and
+            # only once the shell's polkit agent is up (pkgs/noctalia). A
+            # sync from this hook ran at shell start before the agent, so
             # pkexec had no agent to ask.
             post_hook = "${pkgs.hyprland}/bin/hyprctl reload";
           };

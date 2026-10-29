@@ -76,13 +76,17 @@
 # only; running windows keep the guess.
 #
 # The shell syncs the look to the greeter on its own after a theme or
-# wallpaper change, and also right after it starts. The helper asks for the
-# password through the shell's own polkit agent, but the agent and the
-# startup sync were both started on a one-second timer, so pkexec often ran
-# before the agent was registered, found no agent and failed. The look was
-# not applied and the prompt came up later at an unrelated moment.
-# greeter-sync-polkit-ready.patch (ours) holds an automatic sync until the
-# agent is registered or known to be off.
+# wallpaper change. The helper asks for the password through the shell's
+# own polkit agent, but the agent and the sync were both started on a
+# one-second timer, so pkexec often ran before the agent was registered,
+# found no agent and failed. The look was not applied and the prompt came
+# up later at an unrelated moment. greeter-sync-polkit-ready.patch (ours)
+# holds an automatic sync until the agent is registered or known to be off.
+# The shell applies its theme before it listens for changes, so a look
+# changed while it was off never reached the greeter;
+# greeter-sync-on-start.patch (ours) asks for one sync after every start,
+# behind the same wait. The privilege helper (system/wm/common/wayland.nix)
+# only asks for a password when the look differs from the last answer.
 #
 # libqalculate 5.10 frees its random state on exit even when nothing ever
 # created it, so the shell crashes every time it stops. Upstream fixed that in
@@ -113,5 +117,6 @@
       ./settings-per-version.patch
       ./notification-app-name.patch
       ./greeter-sync-polkit-ready.patch
+      ./greeter-sync-on-start.patch
     ];
   })
