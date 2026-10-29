@@ -257,6 +257,11 @@
           stockPlymouth = nixpkgs.legacyPackages.${system}.plymouth;
         };
 
+        noctalia-notification-app-name = import ./tests/nix/noctalia-notification-app-name.nix {
+          inherit pkgs;
+          noctalia = self.packages.${system}.noctalia;
+        };
+
         chrony-rtc-no-interrupts = import ./tests/nix/chrony-rtc-no-interrupts.nix {
           inherit pkgs;
           stockChrony = nixpkgs.legacyPackages.${system}.chrony;

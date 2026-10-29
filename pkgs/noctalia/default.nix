@@ -68,6 +68,13 @@
 # and migrates only that, so the older build still finds the file it wrote.
 # `noctalia config settings-path` prints the copy in use.
 #
+# A notification shows its sender's app name, looked up in the desktop
+# entries. When nothing matched, upstream took any entry that shared one
+# word with it, so every GjallarOS card read "gjallarOS AI" once the AI app
+# was installed (gjallarOS-ai.desktop). notification-app-name.patch looks
+# notification names up by id, StartupWMClass, name or reverse-DNS tail
+# only; running windows keep the guess.
+#
 # libqalculate 5.10 frees its random state on exit even when nothing ever
 # created it, so the shell crashes every time it stops. Upstream fixed that in
 # 931c2aa9 (5.11); drop the patch once nixpkgs ships libqalculate 5.11 or newer.
@@ -95,5 +102,6 @@
       ./lock-osk.patch
       ./notification-internal-actions.patch
       ./settings-per-version.patch
+      ./notification-app-name.patch
     ];
   })
