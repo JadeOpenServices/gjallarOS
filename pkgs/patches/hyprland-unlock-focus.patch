@@ -1,0 +1,25 @@
+--- a/src/managers/SessionLockManager.cpp
++++ b/src/managers/SessionLockManager.cpp
+@@ -77,9 +77,22 @@
+     });
+ 
+     m_sessionLock->listeners.unlock = pLock->m_events.unlockAndDestroy.listen([this] {
++        // The lock surface still exists here and still has the keyboard.
++        // refocus() only moves the keys to what is under the pointer, so with
++        // the pointer on a layer that takes no keys (a notification) or on
++        // the bare desktop the keys stay on the lock surface and are gone
++        // once the client destroys it. Hand them back to the last window.
++        const auto LOCKKEYS = g_pSeatManager->m_state.keyboardFocus;
++        const bool LOCKHADKEYS = isSurfaceSessionLock(LOCKKEYS.lock());
++
+         m_sessionLock.reset();
+         g_pInputManager->refocus();
+ 
++        const auto PLASTWINDOW = Desktop::focusState()->window();
++        if (LOCKHADKEYS && g_pSeatManager->m_state.keyboardFocus == LOCKKEYS && PLASTWINDOW && PLASTWINDOW->m_isMapped && PLASTWINDOW->m_workspace &&
++            PLASTWINDOW->m_workspace->isVisibleNotCovered())
++            Desktop::focusState()->rawWindowFocus(PLASTWINDOW, Desktop::FOCUS_REASON_FFM);
++
+         for (auto const& m : g_pCompositor->m_monitors)
+             g_pHyprRenderer->damageMonitor(m);
+     });
