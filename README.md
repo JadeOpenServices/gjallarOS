@@ -298,8 +298,8 @@ and rebuild. The Apps page of the settings window does the same.
 
 GjallarOS Settings (`gjallar-settings`) has two pages, also in the launcher on
 their own: Apps and gjallarHorn. gjallarHorn shows the security checks of this
-device (disk encryption, Secure Boot, USB devices, firewall, updates,
-developer mode) and a fix button where one helps. `gjallarctl security status`
+device (disk encryption, Secure Boot, USB devices, firewall, virus scan,
+updates, developer mode) and a fix button where one helps. `gjallarctl security status`
 prints the same checks. The window has no rights of its own; every change goes
 through `gjallarctl settings` and asks for the password.
 
@@ -309,6 +309,7 @@ Some protections have an off switch, for people who run their own:
 | --- | --- | --- |
 | `usbguardEnable`, `usbTrustEnforce` | `true` | USB devices |
 | `firewallEnable` | `true` | Firewall |
+| `virusScanEnable` | `true` | Virus scan |
 
 The switches change security-tier keys, so turning one off waits an hour away
 from home, as above. Until then the card says when the change is ready and
@@ -316,6 +317,12 @@ offers Apply now and Keep it on. Turning a protection back on is stricter, so
 it applies at once after the password. A protection that is off shows "Off
 (your choice)" and does not ask again. The recovery system always has the firewall
 on.
+
+The virus scan is ClamAV, on demand only: no scanner daemon and no scanning of
+files as they open. freshclam fetches the signatures about once an hour (the
+first download is roughly 230 MB). Scan Downloads or Choose folder on the
+gjallarHorn page, or `gjallarctl security scan PATH`, runs `clamscan` as you
+in a sandbox without network that sees the system and your home read-only.
 
 ### Firefox add-ons
 
