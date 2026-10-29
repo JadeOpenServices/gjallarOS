@@ -553,7 +553,9 @@ var (
 		}
 		// -k: ask now and leave no timestamp behind.
 		cmd := exec.Command("sudo", "-k", self, "usb", "disarm")
-		cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
+		// The broker's JSON reply stays out of the terminal; failures
+		// still reach stderr.
+		cmd.Stdin, cmd.Stderr = os.Stdin, os.Stderr
 		return cmd.Run()
 	}
 	usbArmAsRoot = func() error {
@@ -562,7 +564,7 @@ var (
 			return err
 		}
 		cmd := exec.Command("sudo", "-k", self, "usb", "arm")
-		cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
+		cmd.Stdin, cmd.Stderr = os.Stdin, os.Stderr
 		return cmd.Run()
 	}
 )
