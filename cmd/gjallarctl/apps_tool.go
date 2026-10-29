@@ -11,7 +11,7 @@ import (
 	"github.com/JadeOpenServices/gjallarOS/apps"
 )
 
-const appsUsage = "Usage: gjallarctl apps list [--json] | add ID | remove ID"
+const appsUsage = "Usage: gjallarctl apps list [--json] | add ID [--window] | remove ID [--window]"
 
 // catalogueEntry is one app as the app window shows it (Plane 220).
 // Installed is null when the settings service does not answer.
@@ -24,6 +24,11 @@ type catalogueEntry struct {
 }
 
 func runApps(args []string, stdout, stderr io.Writer) int {
+	// --window runs the change in a terminal, so the app window's button
+	// shows the password prompt and the build output.
+	if len(args) == 3 && args[2] == "--window" && (args[0] == "add" || args[0] == "remove") {
+		return runInTerminal("GjallarOS apps", args[:2], stderr)
+	}
 	switch {
 	case len(args) >= 1 && args[0] == "list" && len(args) <= 2:
 		asJSON := len(args) == 2 && args[1] == "--json"

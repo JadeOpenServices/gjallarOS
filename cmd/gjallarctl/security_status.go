@@ -37,6 +37,32 @@ type securityCheck struct {
 	State  string `json:"state"`
 	Detail string `json:"detail"`
 	Fix    string `json:"fix,omitempty"`
+	// Switch is "on" or "off" for a protection the user may turn off in
+	// settings; empty when it cannot be turned off or is not known.
+	Switch string `json:"switch,omitempty"`
+}
+
+// securitySwitches are the protections a user may turn off, for example
+// to run their own instead, with the settings each one sets.
+var securitySwitches = map[string][]string{
+	"usb": {"usbguardEnable", "usbTrustEnforce"},
+}
+
+func switchState(f securityFacts, id string) string {
+	on := true
+	for _, key := range securitySwitches[id] {
+		switch f.settings[key] {
+		case "false":
+			on = false
+		case "true":
+		default:
+			return ""
+		}
+	}
+	if on {
+		return "on"
+	}
+	return "off"
 }
 
 // systemProfile changes with every switch to a new system.
@@ -88,6 +114,11 @@ func securityChecks(f securityFacts) []securityCheck {
 		firewallCheck(f),
 		updatesCheck(f),
 		developerCheck(f),
+	}
+	for i := range checks {
+		if _, ok := securitySwitches[checks[i].ID]; ok {
+			checks[i].Switch = switchState(f, checks[i].ID)
+		}
 	}
 	return append(checks, hardwareChecks(f)...)
 }
@@ -345,6 +376,29 @@ func runSecurityFix(args []string, stdout, stderr io.Writer) int {
 	return 2
 }
 
+// runSecuritySwitch turns one protection on or off in settings. Both ways
+// go through the settings service, which asks for the password.
+func runSecuritySwitch(args []string, stdout, stderr io.Writer) int {
+	here := len(args) == 3 && args[2] == "--here"
+	if len(args) != 2 && !here || args[1] != "on" && args[1] != "off" {
+		fmt.Fprintln(stderr, securityUsage)
+		return 2
+	}
+	keys, ok := securitySwitches[args[0]]
+	if !ok {
+		fmt.Fprintf(stderr, "ERROR: %q cannot be switched\n", args[0])
+		return 2
+	}
+	if !here {
+		return runInTerminal("GjallarOS security", []string{"security", "switch", args[0], args[1], "--here"}, stderr)
+	}
+	values := map[string]any{}
+	for _, key := range keys {
+		values[key] = args[1] == "on"
+	}
+	return askSystemSettings(values, stdout, stderr)
+}
+
 func securityFixHere(id string, stdout, stderr io.Writer) int {
 	switch id {
 	case "usb":
@@ -358,4 +412,4 @@ func securityFixHere(id string, stdout, stderr io.Writer) int {
 	return 2
 }
 
-const securityUsage = "Usage: gjallarctl security notice|oddc-notice|status [--json]|fix ID"
+const securityUsage = "Usage: gjallarctl security notice|oddc-notice|status [--json]|fix ID|switch ID on|off"

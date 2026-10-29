@@ -167,3 +167,28 @@ func TestSecurityFixUnknownID(t *testing.T) {
 		t.Errorf("firewall has no fix, exit = %d, want 2", code)
 	}
 }
+
+func TestSecurityChecksSwitch(t *testing.T) {
+	f := goodSecurityFacts()
+	if c := checkByID(t, securityChecks(f), "usb"); c.Switch != "on" {
+		t.Errorf("usb switch = %q, want on", c.Switch)
+	}
+	f.settings["usbTrustEnforce"] = "false"
+	if c := checkByID(t, securityChecks(f), "usb"); c.Switch != "off" {
+		t.Errorf("usb switch = %q, want off", c.Switch)
+	}
+	delete(f.settings, "usbguardEnable")
+	if c := checkByID(t, securityChecks(f), "usb"); c.Switch != "" {
+		t.Errorf("usb switch without settings = %q, want none", c.Switch)
+	}
+	if c := checkByID(t, securityChecks(f), "firewall"); c.Switch != "" {
+		t.Errorf("firewall has no switch yet, got %q", c.Switch)
+	}
+	var out, errOut bytes.Buffer
+	if code := runSecuritySwitch([]string{"disk", "off"}, &out, &errOut); code != 2 {
+		t.Errorf("disk switch exit = %d, want 2", code)
+	}
+	if code := runSecuritySwitch([]string{"usb", "maybe"}, &out, &errOut); code != 2 {
+		t.Errorf("bad state exit = %d, want 2", code)
+	}
+}
