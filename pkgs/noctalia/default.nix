@@ -75,6 +75,15 @@
 # notification names up by id, StartupWMClass, name or reverse-DNS tail
 # only; running windows keep the guess.
 #
+# The shell syncs the look to the greeter on its own after a theme or
+# wallpaper change, and also right after it starts. The helper asks for the
+# password through the shell's own polkit agent, but the agent and the
+# startup sync were both started on a one-second timer, so pkexec often ran
+# before the agent was registered, found no agent and failed. The look was
+# not applied and the prompt came up later at an unrelated moment.
+# greeter-sync-polkit-ready.patch (ours) holds an automatic sync until the
+# agent is registered or known to be off.
+#
 # libqalculate 5.10 frees its random state on exit even when nothing ever
 # created it, so the shell crashes every time it stops. Upstream fixed that in
 # 931c2aa9 (5.11); drop the patch once nixpkgs ships libqalculate 5.11 or newer.
@@ -103,5 +112,6 @@
       ./notification-internal-actions.patch
       ./settings-per-version.patch
       ./notification-app-name.patch
+      ./greeter-sync-polkit-ready.patch
     ];
   })
