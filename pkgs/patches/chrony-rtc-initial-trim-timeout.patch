@@ -1,0 +1,83 @@
+--- a/rtc_linux.c
++++ b/rtc_linux.c
+@@ -75,6 +75,11 @@
+ 
+ static SCH_TimeoutID timeout_id = 0;
+ 
++/* How long the initial trim waits for update interrupts from the RTC */
++#define INITIAL_TRIM_TIMEOUT 20
++
++static SCH_TimeoutID initial_timeout_id = 0;
++
+ static int skip_interrupts;
+ 
+ /* ================================================== */
+@@ -575,6 +580,8 @@
+ {
+   SCH_RemoveTimeout(timeout_id);
+   timeout_id = 0;
++  SCH_RemoveTimeout(initial_timeout_id);
++  initial_timeout_id = 0;
+ 
+   /* Remove input file handler */
+   if (fd >= 0) {
+@@ -662,6 +669,9 @@
+   
+   coefs_valid = 0;
+   
++  SCH_RemoveTimeout(initial_timeout_id);
++  initial_timeout_id = 0;
++
+   (after_init_hook)(after_init_hook_arg);
+   
+   operating_mode = OM_NORMAL;
+@@ -855,6 +865,8 @@
+       if (error) {
+         DEBUG_LOG("Could not complete initial step due to errors");
+         operating_mode = OM_NORMAL;
++        SCH_RemoveTimeout(initial_timeout_id);
++        initial_timeout_id = 0;
+         (after_init_hook)(after_init_hook_arg);
+ 
+         RTC_Linux_SwitchInterrupt(fd, 0);
+@@ -891,6 +903,32 @@
+ 
+ /* ================================================== */
+ 
++/* The RTC accepted the update interrupt request but never interrupted
++   (e.g. its IRQ is routed elsewhere), or reading it failed.  Give up the
++   initial trim instead of holding back the rest of the start, which waits
++   for it. */
++
++static void
++initial_trim_timeout(void *any)
++{
++  initial_timeout_id = 0;
++
++  if (operating_mode != OM_INITIAL)
++    return;
++
++  LOG(LOGS_WARN, "No interrupts from RTC, initial trim skipped");
++
++  operating_mode = OM_NORMAL;
++  n_samples = 0;
++  n_samples_since_regression = 0;
++  if (fd >= 0)
++    RTC_Linux_SwitchInterrupt(fd, 0);
++
++  (after_init_hook)(after_init_hook_arg);
++}
++
++/* ================================================== */
++
+ void
+ RTC_Linux_TimeInit(void (*after_hook)(void *), void *anything)
+ {
+@@ -900,6 +938,7 @@
+   operating_mode = OM_INITIAL;
+   timeout_id = 0;
+   RTC_Linux_SwitchInterrupt(fd, 1);
++  initial_timeout_id = SCH_AddTimeoutByDelay(INITIAL_TRIM_TIMEOUT, initial_trim_timeout, NULL);
+ }
+ 
+ /* ================================================== */

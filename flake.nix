@@ -144,6 +144,7 @@
         inherit (pkgs)
           _nemu
           _wine
+          chrony
           ghostty
           hyprland
           plymouth
@@ -169,6 +170,7 @@
             _nemu
             _wine
             # pkgs/overlays patches these, so cache.nixos.org has other builds.
+            chrony
             dolphin
             ghostty
             hyprland
@@ -253,6 +255,11 @@
         boot-splash-retain = import ./tests/nix/boot-splash-retain.nix {
           inherit pkgs;
           stockPlymouth = nixpkgs.legacyPackages.${system}.plymouth;
+        };
+
+        chrony-rtc-no-interrupts = import ./tests/nix/chrony-rtc-no-interrupts.nix {
+          inherit pkgs;
+          stockChrony = nixpkgs.legacyPackages.${system}.chrony;
         };
 
         kio-fuse-slow = import ./tests/nix/kio-fuse-slow.nix {
