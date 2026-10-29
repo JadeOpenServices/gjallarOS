@@ -1,17 +1,3 @@
---- a/src/openvfsfuse/openvfsfuse.cpp
-+++ b/src/openvfsfuse/openvfsfuse.cpp
-@@ -874,7 +874,10 @@ int initializeOpenVFSFuse(openVFSfuse_Args &openVFSArgs)
-     openVFSfuse_oper.removexattr = openVFSfuse_removexattr;
- 
-     assert(!openVFSArgs.socketPath.empty());
--    _socketThread.CreateThread(openVFSArgs.socketPath);
-+    if (!_socketThread.CreateThread(openVFSArgs.socketPath)) {
-+        std::cerr << "Cannot reach the sync client at " << openVFSArgs.socketPath << ", not mounting" << std::endl;
-+        return 1;
-+    }
- 
- 
-     std::cout << "openVFSfuse starting: PID:" << getpid();
 --- a/src/openvfsfuse/socketthread.cpp
 +++ b/src/openvfsfuse/socketthread.cpp
 @@ -25,6 +25,7 @@
@@ -22,37 +8,7 @@
  #include <cstring>
  #include <fcntl.h>
  #include <iostream>
-@@ -100,7 +101,9 @@ bool SocketThread::CreateThread(const std::string& socketPath)
-         // Wait for the thread to enter the Process method
-         m_threadStartFuture.get();
- 
--        initSocket(socketPath);
-+        // Without the sync client nothing can answer a hydration, and a mount
-+        // nobody serves only blocks the next client's mount.
-+        return initSocket(socketPath) > 0;
-     }
- 
-     return true;
-@@ -125,6 +128,9 @@ int SocketThread::initSocket(const std::string& socketPath)
-     std::strncpy(addr.sun_path, socketPath.c_str(), sizeof(addr.sun_path) - 1);
- 
-     if (connect(_socket, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
-+        perror("connect");
-+        close(_socket);
-+        _socket = -1;
-         return -1;
-     }
- 
-@@ -135,6 +141,8 @@ int SocketThread::initSocket(const std::string& socketPath)
-     socklen_t peerSize = sizeof(peer);
-     if (getsockopt(_socket, SOL_SOCKET, SO_PEERCRED, &peer, &peerSize) != 0 || peer.pid <= 0) {
-         std::cerr << "Cannot identify the desktop client's socket peer" << std::endl;
-+        close(_socket);
-+        _socket = -1;
-         return -1;
-     }
-     _sharedMap.setDesktopClientPid(peer.pid);
-@@ -256,6 +264,11 @@ void SocketThread::processSocketInput()
+@@ -276,6 +277,11 @@ void SocketThread::processSocketInput()
          close(_socket);
          _socket = -1;
          _sharedMap.failPending();

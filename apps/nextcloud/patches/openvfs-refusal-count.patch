@@ -1,6 +1,6 @@
 --- a/src/openvfsfuse/openvfsfuse.cpp
 +++ b/src/openvfsfuse/openvfsfuse.cpp
-@@ -269,6 +269,47 @@
+@@ -275,6 +275,47 @@ private:
      bool _acquired = false;
  };
  
@@ -48,11 +48,11 @@
  
  void openvfsfuse_log(const std::string &path, const char *action, int returncode, const char *format, ...)
  {
-@@ -655,6 +696,7 @@
-                 const HydrationSlot slot(fuse_get_context()->pid);
-                 if (!slot) {
-                     openvfsfuse_log(path, "open", -1, "no hydration slot free for %s", opener.c_str());
-+                    RefusalReport::count();
-                     return -EAGAIN;
-                 }
+@@ -666,6 +707,7 @@ static int openVFSfuse_open(const char *orig_path, struct fuse_file_info *fi)
+             const HydrationSlot slot(fuse_get_context()->pid);
+             if (!slot) {
+                 openvfsfuse_log(path, "open", -1, "no hydration slot free for %s", opener.c_str());
++                RefusalReport::count();
+                 return -EAGAIN;
+             }
  

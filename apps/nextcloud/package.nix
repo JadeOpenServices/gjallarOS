@@ -14,14 +14,18 @@ let
     src = pkgs.fetchFromGitHub {
       owner = "opencloud-eu";
       repo = "openvfs";
-      rev = "4c2317b2cf73a28503d4c5f190bd3f1dd8355cf5";
-      sha256 = "071kc5w2d52835np2k2xan0pk6vc3kbf98w4klxlrvp8wja54ksv";
+      rev = "c20c0fe4925607cb835a2d98f29632e954c558dd";
+      sha256 = "1lzrpjvnd9zcixgg6lpf2v5s4841xzb7ynz5as9ghmylb0pzwskv";
     };
 
-    # Bound hydration waits, deliver cancellation, and recognize Nix-wrapped KIO.
+    # Upstream bounds a hydration wait by hydrationTimeoutSeconds (#72) and
+    # does not mount without a client. On top of that:
+    # Deliver cancellation, wait on files already hydrating, recognize
+    # Nix-wrapped KIO, and take the client's PID from the socket peer.
     # Release waiters on shutdown or when the sync client goes away.
-    # Time a hydration out only when its download stops making progress.
-    # Unmount when the sync client exits, and never mount without one.
+    # Count hydrationTimeoutSeconds from the last download progress, so a
+    # large file on a slow link is not cut off while it still arrives.
+    # Unmount when the sync client exits.
     # Keep workers free for the client while hydrations wait.
     # Log file names only in debug mode.
     # Count opens refused for lack of a slot, without names, for error reports.
@@ -38,6 +42,9 @@ let
       ./patches/openvfs-refusal-count.patch
       ./patches/openvfs-keep-open-files.patch
     ];
+
+    # Upstream's socket and job tests run against the patched sources.
+    doCheck = true;
 
     nativeBuildInputs = [
       pkgs.cmake

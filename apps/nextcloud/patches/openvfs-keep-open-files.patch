@@ -1,5 +1,3 @@
-diff --git a/src/openvfs/openvfconstants.h b/src/openvfs/openvfconstants.h
-index 83d3f44..884c224 100644
 --- a/src/openvfs/openvfconstants.h
 +++ b/src/openvfs/openvfconstants.h
 @@ -27,6 +27,17 @@ namespace Constants {
@@ -20,19 +18,17 @@ index 83d3f44..884c224 100644
      }
  
      enum class RegistrationAttributes : uint8_t { Owner, Version };
-diff --git a/src/openvfsfuse/openvfsfuse.cpp b/src/openvfsfuse/openvfsfuse.cpp
-index 304480a..4656c19 100644
 --- a/src/openvfsfuse/openvfsfuse.cpp
 +++ b/src/openvfsfuse/openvfsfuse.cpp
-@@ -20,6 +20,7 @@
- #include "socketthread.h"
+@@ -21,6 +21,7 @@
  
+ #include <algorithm>
  #include <atomic>
 +#include <charconv>
  #include <chrono>
  #include <cstdint>
  #include <cstring>
-@@ -31,7 +32,9 @@
+@@ -32,7 +33,9 @@
  #include <fuse3/fuse_lowlevel.h>
  #include <grp.h>
  #include <iostream>
@@ -42,7 +38,7 @@ index 304480a..4656c19 100644
  #include <pwd.h>
  #include <string_view>
  #include <stdarg.h>
-@@ -310,6 +313,102 @@ private:
+@@ -316,6 +319,102 @@ private:
  
  static RefusalReport _refusalReport;
  
@@ -145,7 +141,7 @@ index 304480a..4656c19 100644
  
  void openvfsfuse_log(const std::string &path, const char *action, int returncode, const char *format, ...)
  {
-@@ -614,6 +713,10 @@ static int openVFSfuse_truncate(const char *orig_path, off_t size, fuse_file_inf
+@@ -620,6 +719,10 @@ static int openVFSfuse_truncate(const char *orig_path, off_t size, fuse_file_inf
      int res;
  
      const auto path = getInternalPath(orig_path);
@@ -153,10 +149,10 @@ index 304480a..4656c19 100644
 +        openvfsfuse_log(path, "truncate", -1, "a program has the file open");
 +        return -EBUSY;
 +    }
-     res = truncate(path.c_str(), size);
-     openvfsfuse_log(path, "truncate", res, "truncate to %d bytes", size);
- 
-@@ -663,6 +766,10 @@ static int openVFSfuse_create(const char *orig_path, mode_t mode, struct fuse_fi
+     // fi is set when the truncation goes through an open descriptor and null
+     // for a path-based truncate(). Truncating through a descriptor must not be
+     // re-checked against the file's mode, so use it when it is there.
+@@ -673,6 +776,10 @@ static int openVFSfuse_create(const char *orig_path, mode_t mode, struct fuse_fi
      }
      openvfsfuse_log(path, "create", 0, "create %o", static_cast<unsigned int>(mode));
      fi->fh = res;
@@ -167,7 +163,7 @@ index 304480a..4656c19 100644
  
      return 0;
  }
-@@ -678,8 +785,15 @@ static int openVFSfuse_open(const char *orig_path, struct fuse_file_info *fi)
+@@ -688,8 +795,15 @@ static int openVFSfuse_open(const char *orig_path, struct fuse_file_info *fi)
  
      // The desktop client must not be blocked from accessing the file
      // to be able to overwrite it.
@@ -182,19 +178,19 @@ index 304480a..4656c19 100644
 +            return -EBUSY;
 +        }
      } else {
-         if (const auto attribs = OpenVFS::PlaceHolderAttributes::fromAttributes(path)) {
-             if (attribs->state == OpenVFS::Constants::States::DeHydrated
-@@ -699,6 +813,9 @@ static int openVFSfuse_open(const char *orig_path, struct fuse_file_info *fi)
-                     RefusalReport::count();
-                     return -EAGAIN;
-                 }
-+                // Before the client hydrates it: it must not see the file as
-+                // unread and free it up again before this open counts it.
-+                noteOpened(path);
+         const auto attribs = OpenVFS::PlaceHolderAttributes::fromAttributes(path);
+         if (attribs
+@@ -710,6 +824,9 @@ static int openVFSfuse_open(const char *orig_path, struct fuse_file_info *fi)
+                 RefusalReport::count();
+                 return -EAGAIN;
+             }
++            // Before the client hydrates it: it must not see the file as
++            // unread and free it up again before this open counts it.
++            noteOpened(path);
  
-                 // Create message to send to worker thread 1
-                 std::shared_ptr<MsgData> msgData(new MsgData());
-@@ -809,6 +926,13 @@ static int openVFSfuse_open(const char *orig_path, struct fuse_file_info *fi)
+             // Create message to send to worker thread 1
+             std::shared_ptr<MsgData> msgData(new MsgData());
+@@ -803,6 +920,13 @@ static int openVFSfuse_open(const char *orig_path, struct fuse_file_info *fi)
      }
  
      fi->fh = res;
@@ -208,7 +204,7 @@ index 304480a..4656c19 100644
      return 0;
  }
  
-@@ -866,7 +990,24 @@ static int openVFSfuse_release(const char *orig_path, struct fuse_file_info *fi)
+@@ -860,7 +984,24 @@ static int openVFSfuse_release(const char *orig_path, struct fuse_file_info *fi)
  
      openvfsfuse_log(path, "close", 0, "");
  
@@ -233,7 +229,7 @@ index 304480a..4656c19 100644
      return 0;
  }
  
-@@ -913,6 +1054,9 @@ static int openVFSfuse_getxattr(const char *orig_path, const char *name, char *v
+@@ -907,6 +1048,9 @@ static int openVFSfuse_getxattr(const char *orig_path, const char *name, char *v
          }
          return copyDataResult(std::to_string(statbuf.st_size));
      }

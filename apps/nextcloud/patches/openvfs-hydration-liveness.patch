@@ -1,13 +1,14 @@
 --- a/src/openvfsfuse/openvfsfuse.cpp
 +++ b/src/openvfsfuse/openvfsfuse.cpp
-@@ -19,16 +19,19 @@
+@@ -19,6 +19,7 @@
  #include "sharedmap.h"
  #include "socketthread.h"
  
-+#include <atomic>
++#include <algorithm>
+ #include <atomic>
  #include <chrono>
  #include <cstdint>
- #include <cstring>
+@@ -26,10 +27,12 @@
  #include <dirent.h>
  #include <errno.h>
  #include <format>
@@ -20,7 +21,7 @@
  #include <stdarg.h>
  #include <stdio.h>
  #include <unistd.h>
-@@ -95,10 +98,30 @@ public:
+@@ -96,10 +99,30 @@ public:
  
      static auto &instance() { return *_instance; }
  
@@ -54,16 +55,7 @@
      }
  
      bool debugEnabled() const { return _debugEnabled; }
-@@ -179,7 +202,7 @@ std::string getcallername(fuse_context *context)
- static SharedMap _jobs;
- static SocketThread _socketThread("SocketThread", _jobs);
- 
--static int _transfer_id{12};
-+static std::atomic<int> _transfer_id{12};
- 
- 
- void openvfsfuse_log(const std::string &path, const char *action, int returncode, const char *format, ...)
-@@ -218,6 +241,8 @@ static void *openVFSfuse_init(struct fuse_conn_info *, fuse_config *cfg)
+@@ -224,6 +247,8 @@ static void *openVFSfuse_init(struct fuse_conn_info *, fuse_config *cfg)
      cfg->attr_timeout = 0;
      cfg->entry_timeout = 0;
      cfg->negative_timeout = 0;
@@ -72,94 +64,53 @@
  
      return nullptr;
  }
-@@ -551,12 +576,13 @@ static int openVFSfuse_open(const char *orig_path, struct fuse_file_info *fi)
+@@ -561,12 +586,14 @@ static int openVFSfuse_open(const char *orig_path, struct fuse_file_info *fi)
          openvfsfuse_log(path, "open", res, "Desktop client tries to access, bypassing!");
      } else {
-         if (const auto attribs = OpenVFS::PlaceHolderAttributes::fromAttributes(path)) {
--            if (attribs->state == OpenVFS::Constants::States::DeHydrated) {
-+            if (attribs->state == OpenVFS::Constants::States::DeHydrated
-+                || attribs->state == OpenVFS::Constants::States::Hydrating) {
-                 // the file is virtual. It will be hydrated if the calling instance
-                 // is not on the ignore list
+         const auto attribs = OpenVFS::PlaceHolderAttributes::fromAttributes(path);
+-        if (attribs && attribs->state == OpenVFS::Constants::States::DeHydrated) {
++        if (attribs
++            && (attribs->state == OpenVFS::Constants::States::DeHydrated
++                || attribs->state == OpenVFS::Constants::States::Hydrating)) {
+             // the file is virtual. It will be hydrated if the calling instance
+             // is not on the ignore list
  
-                 // ignore list of apps that must not cause a hydration
--                if (VFSFuseContext::instance().blockedToOpen(opener)) {
-+                if (VFSFuseContext::instance().blockedToOpen(opener, fuse_get_context()->pid)) {
-                     openvfsfuse_log(path, "open", 0, "blocked hydration for not permitted app %s", opener.c_str());
-                     return -EPERM;
-                 }
-@@ -572,28 +598,29 @@ static int openVFSfuse_open(const char *orig_path, struct fuse_file_info *fi)
-                 openvfsfuse_log(path, "open", 0, "Requesting hydration %s: %d", path.c_str(), msgData->id);
- 
-                 // push hydration request to the thread that handles the communication to the client
-+                // Publish before enqueueing: the FUSE waiter can run before
-+                // the socket thread has sent the request.
-+                _jobs.insert(msgData->id, HydJob{.state = 1});
-                 _socketThread.PostMsg(msgData);
- 
-                 // the socketThread now talks to the client, which downloads the file for us.
-                 // Here in this thread we enter a loop and wait for results
--                int cnt{0};
-                 int state{1};
--                const auto MaxCnt{20};
--                std::chrono::duration waitTime{10ms};
--                std::chrono::duration dur{30ms};
--
-+                const auto deadline = std::chrono::steady_clock::now() + 5min;
-                 HydJob hj;
- 
--                while (state == 1 && cnt++ < MaxCnt) {
--                    std::this_thread::sleep_for(waitTime); // sleep for some time
--                    waitTime += dur;
--                    dur += waitTime;
--                    // first: waittime: 10ms, dur: 30ms
--                    // second:waittime: 40ms, dur: 70ms
--                    // third: waittime: 110ms, dur: 180ms
--                    // forth: waittime: 290ms, dur: 470ms
--                    // fifth: waittime: 760ms, dur: 1230ms
--                    // ...
-+                while (state == 1) {
-+                    if (fuse_interrupted()) {
-+                        _jobs.remove(msgData->id);
-+                        return -EINTR;
-+                    }
-+                    if (std::chrono::steady_clock::now() >= deadline) {
-+                        state = 2;
-+                        break;
-+                    }
-+                    // A fixed short poll keeps cancellation and replies
-+                    // responsive; exponential sleeps previously grew to days.
-+                    std::this_thread::sleep_for(100ms);
- 
-                     // check shared map and see if the id has changed to 0, which means success
-                     // the value is changed in the other thread and fetched here
-@@ -625,17 +652,15 @@ static int openVFSfuse_open(const char *orig_path, struct fuse_file_info *fi)
-                 // remove the job regardless of the result
-                 _jobs.remove(msgData->id);
- 
--                if (state == -1 || state == 2) {
-+                if (state == 2) {
-+                    return -ETIMEDOUT;
-+                }
-+                if (state != 0) {
-                     // Fail, job with ID was errornous
-                     openvfsfuse_log(path, "open", 1, "ERROR while retrieving: %d", state);
--                    return -ENOENT;
-+                    return -EIO;
-                 }
- 
--                if (cnt >= MaxCnt) {
--                    openvfsfuse_log(path, "open", MaxCnt, "TIMEOUT - no answer from client");
--                    return -ENOENT;
--                }
--
-                 openvfsfuse_log(path, "open", 0, "-- open finished");
+             // ignore list of apps that must not cause a hydration
+-            if (VFSFuseContext::instance().blockedToOpen(opener)) {
++            if (VFSFuseContext::instance().blockedToOpen(opener, fuse_get_context()->pid)) {
+                 openvfsfuse_log(path, "open", 0, "blocked hydration for not permitted app %s", opener.c_str());
+                 return -EPERM;
              }
-         } else {
+@@ -596,7 +623,24 @@ static int openVFSfuse_open(const char *orig_path, struct fuse_file_info *fi)
+ 
+             // The socketThread now talks to the client, which downloads the file
+             // for us. Block here until the client answers or the timeout expires.
+-            const auto result = _jobs.waitForJob(msgData->id, VFSFuseContext::instance().hydrationTimeout());
++            // Wait in short slices: libfuse reports a cancelled open only
++            // through fuse_interrupted(), which cannot be waited on.
++            const auto deadline = std::chrono::steady_clock::now() + VFSFuseContext::instance().hydrationTimeout();
++            auto result = HydJobResult::TimedOut;
++            while (true) {
++                if (fuse_interrupted()) {
++                    _jobs.remove(msgData->id);
++                    return -EINTR;
++                }
++                const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(deadline - std::chrono::steady_clock::now());
++                if (left <= std::chrono::milliseconds::zero()) {
++                    break;
++                }
++                result = _jobs.waitForJob(msgData->id, std::min(left, std::chrono::milliseconds(100)));
++                if (result != HydJobResult::TimedOut) {
++                    break;
++                }
++            }
+ 
+             // remove the job regardless of the result
+             _jobs.remove(msgData->id);
 --- a/src/openvfsfuse/socketthread.cpp
 +++ b/src/openvfsfuse/socketthread.cpp
-@@ -128,6 +128,18 @@ int SocketThread::initSocket(const std::string& socketPath)
-         return -1;
+@@ -139,6 +139,20 @@ bool SocketThread::initSocket()
+         return false;
      }
  
 +#ifndef __APPLE__
@@ -169,7 +120,9 @@
 +    socklen_t peerSize = sizeof(peer);
 +    if (getsockopt(_socket, SOL_SOCKET, SO_PEERCRED, &peer, &peerSize) != 0 || peer.pid <= 0) {
 +        std::cerr << "Cannot identify the desktop client's socket peer" << std::endl;
-+        return -1;
++        close(_socket);
++        _socket = -1;
++        return false;
 +    }
 +    _sharedMap.setDesktopClientPid(peer.pid);
 +#endif
@@ -177,7 +130,7 @@
      /* send  a welcome message to the SocketAPI */
      std::shared_ptr<MsgData> msgData(new MsgData());
      msgData->msg = "VERSION";
-@@ -284,7 +296,7 @@ void SocketThread::handleReceivedMsg(const std::string &msg)
+@@ -308,7 +322,7 @@ void SocketThread::handleReceivedMsg(const std::string &msg)
          }
      } else if (msgType == "VERSION") {
          vector<string> attribs = StrTools::split(msgAttr, ':');
@@ -186,17 +139,31 @@
              cout << "Got PID of the Desktop Client: " << attribs.at(2) << endl;
              _sharedMap.setDesktopClientPid(std::stol(attribs.at(2)));
          }
-@@ -439,12 +451,7 @@ void SocketThread::Process()
+--- a/src/openvfsfuse/tests/socketthreadtest.cpp
++++ b/src/openvfsfuse/tests/socketthreadtest.cpp
+@@ -105,13 +105,19 @@ int main()
+         socketThread.PostMsg(data);
+     };
  
-             if (!socketSendMsg(msgData)) {
-                 cout << "Failed to send msg " << msgData->id << ": " << msgData->msg.c_str() << endl;
--            } else {
--                if (msgData->id > 0) {
--                    const HydJob hj{.state = 1};
--                    _sharedMap.insert(msgData->id, hj);
--                    cout << "Storing sent message ID" << msgData->id << endl;
--                }
-+                _sharedMap.set(msgData->id, HydJob{.state = -1});
-             }
-             break;
-         }
+-    // A message split across two writes must not be acted on until it is complete.
+-    writeAll(client, "VERSION:1.2.3:2");
+-    std::this_thread::sleep_for(750ms);
+-    check(jobs.desktopClientPid() == 0, "an incomplete message is not dispatched");
+-    writeAll(client, ":4242\n");
++    // The client's PID comes from the socket peer. A PID named in VERSION
++    // must not replace it: that process would bypass hydration.
++    writeAll(client, "VERSION:1.2.3:2:4242\n");
+     std::this_thread::sleep_for(750ms);
+-    check(jobs.desktopClientPid() == 4242, "a message split across two writes is reassembled");
++    check(jobs.desktopClientPid() == getpid(), "VERSION does not replace the socket peer's PID");
++
++    // A message split across two writes must not be acted on until it is complete.
++    post(100);
++    const auto split = hydrateResult(100, "\"status\":\"OK\"");
++    writeAll(client, split.substr(0, split.size() / 2));
++    check(jobs.waitForJob(100, 750ms) == HydJobResult::TimedOut, "an incomplete message is not dispatched");
++    writeAll(client, split.substr(split.size() / 2));
++    check(jobs.waitForJob(100, 10s) == HydJobResult::Succeeded, "a message split across two writes is reassembled");
+ 
+     // A reply well past any single read buffer must arrive as one message. An
+     // error string carrying a path and a description clears 1 KB easily.
