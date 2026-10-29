@@ -123,10 +123,13 @@ Page {
                             }
                             // The virus scan runs on demand only (no daemon,
                             // no scanning on access): the user picks what.
-                            RowLayout {
+                            // A Flow, so a narrow window wraps the buttons and
+                            // the busy indicator instead of widening the card.
+                            Flow {
                                 visible: row.modelData.id === "scan" && row.modelData.state !== "off"
                                 Layout.fillWidth: true
                                 Layout.topMargin: page.gap / 2
+                                spacing: page.gap / 2
                                 Button {
                                     text: "Scan Downloads"
                                     enabled: page.backend.scanning === "" && page.backend.downloads !== ""
