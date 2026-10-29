@@ -1,4 +1,4 @@
-#compdef gjallarctl rebuild helpme cleanup cleanup-old-generations thermal-status thermal-test check-installer gjallar-preflight
+#compdef gjallarctl rebuild helpme cleanup cleanup-old-generations thermal-status thermal-test check-installer gjallar-preflight gjallar-system-rebuild
 
 # Hand-written: gjallarctl parses its own arguments, so nothing can be
 # generated. Keep in step with printUsage in cmd/gjallarctl/main.go. The
@@ -17,6 +17,18 @@ _gjallarctl_rebuild() {
     '--channel[ODDC channel]:channel:(stable staging)' \
     '--switch[switch after the hardware update]:switch:(0 1)' \
     '*::nixos-rebuild argument:'
+}
+
+# The root side of rebuild: the options systemRebuildArgs passes on.
+_gjallarctl_system_rebuild() {
+  _arguments -S \
+    '--update[update the system checkout first]' \
+    '--hardware-update[move the ODDC hardware catalogue pin first]' \
+    '--channel[ODDC channel]:channel:(stable staging)' \
+    '--switch[switch after the hardware update]:switch:(0 1)' \
+    '--debug[show the full build output]' \
+    '--no-cleanup[keep old generations]' \
+    '--oddc-commit[build with this checked oddc commit]:commit:'
 }
 
 _gjallarctl_system() {
@@ -38,8 +50,10 @@ _gjallarctl_system() {
   shift words
   (( CURRENT-- ))
   case $words[1] in
+    rebuild) _gjallarctl_system_rebuild ;;
     clone)
       _arguments '--from[the checkout the system builds now]:directory:_files -/' ;;
+    *) _message 'no arguments' ;;
   esac
 }
 
@@ -354,6 +368,7 @@ _gjallarctl_oddc() {
 _gjallarctl() {
   case $service in
     rebuild) _gjallarctl_rebuild; return ;;
+    gjallar-system-rebuild) _gjallarctl_system_rebuild; return ;;
     helpme) _arguments '--text[print instead of opening a window]'; return ;;
     cleanup) _arguments '(-k --keep)'{-k,--keep}'[generations to keep]:count:'; return ;;
     cleanup-old-generations|thermal-status|gjallar-preflight) _message 'no arguments'; return ;;

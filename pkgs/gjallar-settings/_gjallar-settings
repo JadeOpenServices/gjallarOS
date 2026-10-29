@@ -1,0 +1,4 @@
+#compdef gjallar-settings
+
+# Keep in step with the start pages in gjallar_settings.py.
+_arguments '1:page:((security\:"security checks" apps\:"app catalogue"))'

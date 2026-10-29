@@ -24,6 +24,7 @@ stdenv.mkDerivation {
   src = lib.fileset.toSource {
     root = ./.;
     fileset = lib.fileset.unions [
+      ./_gjallar-settings
       ./check_icon.py
       ./gjallar_settings.py
       ./qml
@@ -67,6 +68,7 @@ stdenv.mkDerivation {
     makeWrapper ${python.interpreter} "$out/bin/gjallar-settings" \
       --add-flags "-I $out/${share}/gjallar_settings.py" \
       "''${qtWrapperArgs[@]}"
+    install -Dm444 _gjallar-settings "$out/share/zsh/site-functions/_gjallar-settings"
     runHook postInstall
   '';
 
