@@ -84,6 +84,7 @@ in
 {
   imports = [
     ./gtk.nix
+    ./palettes.nix
     ./qt.nix
   ];
 
@@ -105,12 +106,20 @@ in
 
         theme = {
           mode = "dark";
-          source = "builtin";
+          # A theme with a palette starts on it (palettes.nix); the user can
+          # pick another one in Noctalia's settings.
+          source = if themeDetails ? palette then "custom" else "builtin";
           builtin = "Noctalia";
+          custom_palette = themeDetails.palette or "";
           templates.user.hyprland = {
-            input_path = "$XDG_CONFIG_HOME/noctalia/templates/hyprland.conf";
-            output_path = "$XDG_STATE_HOME/noctalia/hyprland-colors.conf";
-            post_hook = "${pkgs.hyprland}/bin/hyprctl reload; if ${lib.getExe config.programs.noctalia.package} msg status >/dev/null 2>&1; then ${lib.getExe config.programs.noctalia.package} msg greeter-sync >/dev/null 2>&1 || true; fi";
+            input_path = "$XDG_CONFIG_HOME/noctalia/templates/hyprland-colors.txt";
+            output_path = "$XDG_STATE_HOME/noctalia/hyprland-colors.txt";
+            # No greeter sync here: greeter_sync.auto_sync below runs one
+            # after every start and on every theme and wallpaper change, and
+            # only once the shell's polkit agent is up (pkgs/noctalia). A
+            # sync from this hook ran at shell start before the agent, so
+            # pkexec had no agent to ask.
+            post_hook = "${pkgs.hyprland}/bin/hyprctl reload";
           };
           templates.user.ghostty = {
             input_path = "$XDG_CONFIG_HOME/noctalia/templates/ghostty.conf";
@@ -140,7 +149,7 @@ in
         shell = {
           clipboard_enabled = false;
           corner_radius_scale = 2.0;
-          font_family = themeDetails.font;
+          font_family = themeDetails.uiFont or themeDetails.font;
           polkit_agent = true;
           # No "Welcome to Noctalia" wizard: its choices are saved as overrides
           # that beat the theme above and the colors it feeds to Hyprland,
@@ -294,33 +303,8 @@ in
             interactive = false;
           };
 
-          disk_protection = {
-            type = "gjallar/disk-protection:status";
-            scale = 0.98;
-          };
-
-          vpn = {
-            type = "gjallar/vpn:status";
-            scale = 0.98;
-          };
-
-          developer_mode = {
-            type = "gjallar/developer-mode:status";
-            scale = 0.98;
-          };
-
           time_status = {
             type = "gjallar/time:status";
-            scale = 0.98;
-          };
-
-          quick_keys = {
-            type = "gjallar/quick-keys:preset";
-            scale = 0.98;
-          };
-
-          touch_keyboard = {
-            type = "gjallar/osk:button";
             scale = 0.98;
           };
 
@@ -332,7 +316,40 @@ in
             anchor = true;
           };
 
+        }
+        # A plugin's widgets exist only while the plugin is enabled; Noctalia
+        # warns about a widget whose type it does not know.
+        // lib.optionalAttrs hasEncryptedDisk {
+          disk_protection = {
+            type = "gjallar/disk-protection:status";
+            scale = 0.98;
+          };
+        }
+        // lib.optionalAttrs hasVPN {
+          vpn = {
+            type = "gjallar/vpn:status";
+            scale = 0.98;
+          };
+        }
+        // lib.optionalAttrs hasDeveloperMode {
+          developer_mode = {
+            type = "gjallar/developer-mode:status";
+            scale = 0.98;
+          };
+        }
+        // lib.optionalAttrs hasQuickKeys {
+          quick_keys = {
+            type = "gjallar/quick-keys:preset";
+            scale = 0.98;
+          };
+        }
+        // lib.optionalAttrs hasTouchKeyboard {
+          touch_keyboard = {
+            type = "gjallar/osk:button";
+            scale = 0.98;
+          };
         };
+
         location = {
           auto_locate = false;
           address = "${settings.weatherCity}, ${settings.weatherCountry}";
@@ -427,7 +444,11 @@ in
       };
   };
 
-  xdg.configFile."noctalia/palettes/stylix.json".text = builtins.toJSON palette;
+  # Themes without an openJade palette offer their own colours; with one, a
+  # "stylix" entry would only repeat it under a name nobody knows.
+  xdg.configFile."noctalia/palettes/stylix.json" = lib.mkIf (!themeDetails ? palette) {
+    text = builtins.toJSON palette;
+  };
 
   # Noctalia picks up plugins in its local source dir; enabled above.
   xdg.dataFile."noctalia/plugins/gjallar-quick-keys" = lib.mkIf hasQuickKeys {
@@ -513,23 +534,12 @@ in
     };
   };
 
-  xdg.configFile."noctalia/templates/hyprland.conf".text = ''
-    $primary = rgb({{colors.primary.default.hex_stripped}})
-    $surface = rgb({{colors.surface.default.hex_stripped}})
-    $secondary = rgb({{colors.secondary.default.hex_stripped}})
-    $error = rgb({{colors.error.default.hex_stripped}})
-
-    general {
-      col.active_border = $primary
-      col.inactive_border = $surface
-    }
-
-    group {
-      col.border_active = $secondary
-      col.border_inactive = $surface
-      col.border_locked_active = $error
-      col.border_locked_inactive = $surface
-    }
+  # Plain data: hyprland.lua reads these lines and never runs the file.
+  xdg.configFile."noctalia/templates/hyprland-colors.txt".text = ''
+    primary={{colors.primary.default.hex_stripped}}
+    surface={{colors.surface.default.hex_stripped}}
+    secondary={{colors.secondary.default.hex_stripped}}
+    error={{colors.error.default.hex_stripped}}
   '';
 
   xdg.configFile."noctalia/templates/ghostty.conf".text = ''
@@ -598,29 +608,4 @@ in
     # Weather and plugins fetch at start; give the network a moment first.
     "-${pkgs.networkmanager}/bin/nm-online -q -t 10"
   ];
-
-  home.activation.gjallarNoctaliaHyprlandFallback = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
-        theme_file="$HOME/.local/state/noctalia/hyprland-colors.conf"
-        if [ ! -e "$theme_file" ]; then
-          mkdir -p "$(dirname "$theme_file")"
-          cat >"$theme_file" <<'EOF'
-    $primary = rgb(7aa2f7)
-    $surface = rgb(1a1b26)
-    $secondary = rgb(7dcfff)
-    $error = rgb(f7768e)
-
-    general {
-      col.active_border = $primary
-      col.inactive_border = $surface
-    }
-
-    group {
-      col.border_active = $secondary
-      col.border_inactive = $surface
-      col.border_locked_active = $error
-      col.border_locked_inactive = $surface
-    }
-    EOF
-        fi
-  '';
 }

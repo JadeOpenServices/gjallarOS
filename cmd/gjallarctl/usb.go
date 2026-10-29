@@ -76,9 +76,22 @@ func runUSB(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "FAIL: %v\n", err)
 		return 1
 	}
+	var out any = response
+	if r.Action == broker.ActionStatus {
+		// The early-boot gate is a build-time fact, not broker state.
+		gate, err := readUSBKeyboardGate()
+		if err != nil {
+			fmt.Fprintf(stderr, "FAIL: %v\n", err)
+			return 1
+		}
+		out = struct {
+			broker.Response
+			KeyboardGate *usbKeyboardGate `json:"keyboardGate,omitempty"`
+		}{response, gate}
+	}
 	encoder := json.NewEncoder(stdout)
 	encoder.SetIndent("", "  ")
-	if err := encoder.Encode(response); err != nil {
+	if err := encoder.Encode(out); err != nil {
 		fmt.Fprintf(stderr, "FAIL: %v\n", err)
 		return 1
 	}
@@ -424,13 +437,13 @@ func usbReviewDecision(ctx context.Context, executable string, d usbtrust.Decisi
 	if len(rows) == 0 {
 		return usbReviewAnswered
 	}
-	ctx, cancel := usbWhilePresent(ctx, d.Connection)
+	ctx, asking, cancel := usbWhilePresent(ctx, d.Connection)
 	defer cancel()
 
 	// Announce the block quietly; the review dialog opens only on request.
 	// Dismissing the notice keeps the device blocked.
-	picked, err := showNotice(ctx, usbReviewNotice(d, enforcing, technical))
-	if ctx.Err() != nil {
+	picked, err := showNotice(asking, usbReviewNotice(d, enforcing, technical))
+	if asking.Err() != nil {
 		return usbReviewInterrupted
 	}
 	if err != nil {
@@ -439,8 +452,8 @@ func usbReviewDecision(ctx context.Context, executable string, d usbtrust.Decisi
 	if !usbReviewRequested(picked) {
 		return usbReviewAnswered
 	}
-	action, ok := usbReviewDialog(ctx, d, enforcing, technical)
-	if ctx.Err() != nil {
+	action, ok := usbReviewDialog(asking, d, enforcing, technical)
+	if asking.Err() != nil {
 		return usbReviewInterrupted
 	}
 	if !ok || !available[action] {
@@ -459,8 +472,8 @@ func usbReviewDecision(ctx context.Context, executable string, d usbtrust.Decisi
 	case "enroll-internal":
 		request = append(request, "--role", d.Role)
 	case "trust-permanent":
-		portability, err := exec.CommandContext(ctx, "zenity", "--list", "--radiolist", "--title=Permanent USB trust", "--text=Choose whether this device may move between ports and docks on this machine.", "--column=Choose", "--column=Portable", "--column=Meaning", "--hide-column=2", "--print-column=2", "TRUE", "false", "Only on this port", "FALSE", "true", "On any port or dock").Output()
-		if ctx.Err() != nil {
+		portability, err := exec.CommandContext(asking, "zenity", "--list", "--radiolist", "--title=Permanent USB trust", "--text=Choose whether this device may move between ports and docks on this machine.", "--column=Choose", "--column=Portable", "--column=Meaning", "--hide-column=2", "--print-column=2", "TRUE", "false", "Only on this port", "FALSE", "true", "On any port or dock").Output()
+		if asking.Err() != nil {
 			return usbReviewInterrupted
 		}
 		value := strings.TrimSpace(string(portability))
@@ -557,6 +570,22 @@ func usbMediaReader(m usbtrust.MediaDecision) string {
 	return m.Reader
 }
 
+// usbMediaLook gives the notice icon and title for a medium kind. A kind
+// it does not know (or none, from an older broker) reads as USB storage.
+func usbMediaLook(kind string) (icon, summary string) {
+	switch kind {
+	case usbtrust.MediaDisc:
+		return "media-optical", "Disc inserted"
+	case usbtrust.MediaSDCard:
+		return "media-flash-sd-mmc", "SD card inserted"
+	case usbtrust.MediaMemoryStick:
+		return "media-flash-memory-stick", "Memory Stick inserted"
+	case usbtrust.MediaCard:
+		return "media-flash", "Memory card inserted"
+	}
+	return "drive-removable-media-usb", "USB storage connected"
+}
+
 // usbMediaNotice builds the notice for a closed medium.
 func usbMediaNotice(m usbtrust.MediaDecision) desktopNotice {
 	body := usbMediaReader(m)
@@ -564,10 +593,11 @@ func usbMediaNotice(m usbtrust.MediaDecision) desktopNotice {
 		body += fmt.Sprintf(", %.1f GB", float64(m.Bytes)/1e9)
 	}
 	body += "\nNothing on it is read until you open it."
+	icon, summary := usbMediaLook(m.Kind)
 	return desktopNotice{
 		App:     "USB Guard",
-		Icon:    "media-flash",
-		Summary: "Card or USB storage inserted",
+		Icon:    icon,
+		Summary: summary,
 		Body:    html.EscapeString(body),
 		Actions: []noticeAction{{"default", "Open"}, {"open", "Open it"}, {"keep", "Keep closed"}},
 	}
@@ -606,30 +636,52 @@ func usbMediaActive(media []usbtrust.MediaDecision, connection string) bool {
 	return false
 }
 
-// usbWhilePresent returns a context that ends once the review connection
-// leaves the policy, so prompts for an unplugged device close within a second.
-func usbWhilePresent(ctx context.Context, connection string) (context.Context, context.CancelFunc) {
-	ctx, cancel := context.WithCancel(ctx)
+// usbWhilePresent returns two contexts for the review of one connection.
+// present ends once the connection leaves the policy, so prompts for an
+// unplugged device close within a second. asking also ends once the device
+// is no longer blocked: a notice for a device allowed elsewhere must not
+// stay up and hold back the review of the next device.
+func usbWhilePresent(ctx context.Context, connection string) (present, asking context.Context, cancel context.CancelFunc) {
+	present, cancelPresent := context.WithCancel(ctx)
+	asking, cancelAsking := context.WithCancel(present)
 	go func() {
 		ticker := time.NewTicker(time.Second)
 		defer ticker.Stop()
 		for {
 			select {
-			case <-ctx.Done():
+			case <-present.Done():
 				return
 			case <-ticker.C:
 			}
-			callCtx, done := context.WithTimeout(ctx, 2*time.Second)
+			callCtx, done := context.WithTimeout(present, 2*time.Second)
 			response, err := broker.Call(callCtx, broker.DefaultSocket, broker.Request{Action: broker.ActionPolicy})
 			done()
 			// An unreachable broker is not proof of removal.
-			if err == nil && !usbConnectionActive(response.Policy, connection) {
-				cancel()
+			if err != nil {
+				continue
+			}
+			if !usbConnectionActive(response.Policy, connection) {
+				cancelPresent()
 				return
+			}
+			if !usbConnectionBlocked(response.Policy, connection) {
+				cancelAsking()
 			}
 		}
 	}()
-	return ctx, cancel
+	return present, asking, func() {
+		cancelAsking()
+		cancelPresent()
+	}
+}
+
+func usbConnectionBlocked(policy []usbtrust.Decision, connection string) bool {
+	for _, d := range policy {
+		if d.Connection == connection {
+			return d.Target == usbtrust.TargetBlock
+		}
+	}
+	return false
 }
 
 func usbConnectionActive(policy []usbtrust.Decision, connection string) bool {

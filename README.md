@@ -167,7 +167,13 @@ needs a `desc`, which is what the list shows.
 | <kbd>Super</kbd> + <kbd>Ctrl</kbd> + <kbd>K</kbd> | On-screen keyboard (touch devices) |
 
 On touch devices the on-screen keyboard also opens when the device folds
-into tablet mode and on the keyboard key some convertibles have. The HP ZBook
+into tablet mode and on the keyboard key some convertibles have. With no
+keyboard attached, the login screen and the lock screen show their own
+touch keyboard; with one attached, touch the password field to open it, and
+a key on the keyboard closes it again. The disk unlock prompt shows its touch
+keyboard on every touch device. These keyboards
+have letters, numbers and symbols only: no clipboard, emoji or word
+suggestions. The HP ZBook
 x2 bezel Quick Keys have three presets, switched with the third key from the
 top. GjallarOS maps none of them: every key sends a macro key
 (`XF86Macro1`–`15`) that no other key sends, so you can bind it in Hyprland,
@@ -535,8 +541,9 @@ whole directory into the Nix store, untracked files and VM disks included.
 ### Release cache
 
 GjallarOS patches a few packages (Noctalia, its greeter, the Nextcloud client
-with OpenVFS, OpenCode, Hyprland, Ghostty, Dolphin and others), so cache.nixos.org does not have
-them and every machine compiled them itself. For each `v*` release tag,
+with OpenVFS, OpenCode, Hyprland, Ghostty, Dolphin and the KDE apps that
+come with it, and others), so cache.nixos.org does not have them and every
+machine compiled them itself. For each `v*` release tag,
 `.github/workflows/cache.yml` builds them (flake package `prebuilt`), signs
 them and uploads them as files of the `nix-cache` release. Those files are a
 plain Nix binary cache. Each tag adds to it, so a machine on `main` downloads a
@@ -725,6 +732,11 @@ is temporary: the broker re-arms from the config on its next restart. The other
 order is refused by `gjallarctl settings`; done by hand, USBGuard keeps
 blocking unknown devices at boot while the stored state still says armed.
 
+Turning USB trust off altogether (`"usbguardEnable": false`) takes effect for
+new USB devices at the next reboot. Until then a newly plugged device stays
+off: USBGuard does not hand the ports back to the kernel's default when it
+stops, because anything that stops it would then let every device in.
+
 On a machine with TPM2 the installer also asks "Let approved USB devices expire
 when unused?" (default no). With it on, an approved external device that was
 not connected for `usbTrustLapseDays` days (30 by default, any number from 1)
@@ -865,5 +877,7 @@ later; see [LICENSE](LICENSE). Bundled parts keep their own licenses:
 - [`pkgs/monique`](https://github.com/vardstein/monique): GPL-3.0.
 - [`apps/nemu/module.nix`](apps/nemu/module.nix): nemu's upstream NixOS
   module, BSD-2-Clause, license text in the file header.
+- [`themes/brand/openjade`](themes/brand/openjade/README.md): the openJade
+  logo is a trademark and not covered by the AGPL.
 
 <div align="right"><a href="#gjallaros">↑ back to top</a></div>

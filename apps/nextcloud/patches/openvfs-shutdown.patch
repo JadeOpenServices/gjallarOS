@@ -1,6 +1,6 @@
 --- a/src/openvfsfuse/openvfsfuse.cpp
 +++ b/src/openvfsfuse/openvfsfuse.cpp
-@@ -28,6 +28,7 @@
+@@ -29,6 +29,7 @@
  #include <format>
  #include <fstream>
  #include <fuse3/fuse.h>
@@ -8,78 +8,55 @@
  #include <grp.h>
  #include <iostream>
  #include <pwd.h>
-@@ -614,6 +615,13 @@ static int openVFSfuse_open(const char *orig_path, struct fuse_file_info *fi)
-                         _jobs.remove(msgData->id);
-                         return -EINTR;
-                     }
-+                    // On SIGTERM libfuse joins every worker before it
-+                    // unmounts, and a worker cannot be cancelled here.
-+                    if (fuse_session_exited(fuse_get_session(fuse_get_context()->fuse))) {
-+                        _jobs.remove(msgData->id);
-+                        openvfsfuse_log(path, "open", 0, "Shutting down, dropping job %d", msgData->id);
-+                        return -EIO;
-+                    }
-                     if (std::chrono::steady_clock::now() >= deadline) {
-                         state = 2;
-                         break;
+@@ -632,6 +633,13 @@ static int openVFSfuse_open(const char *orig_path, struct fuse_file_info *fi)
+                     _jobs.remove(msgData->id);
+                     return -EINTR;
+                 }
++                // On SIGTERM libfuse joins every worker before it
++                // unmounts, and a worker cannot be cancelled here.
++                if (fuse_session_exited(fuse_get_session(fuse_get_context()->fuse))) {
++                    _jobs.remove(msgData->id);
++                    openvfsfuse_log(path, "open", 0, "Shutting down, dropping job %d", msgData->id);
++                    return -EIO;
++                }
+                 const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(deadline - std::chrono::steady_clock::now());
+                 if (left <= std::chrono::milliseconds::zero()) {
+                     break;
 --- a/src/openvfsfuse/sharedmap.cpp
 +++ b/src/openvfsfuse/sharedmap.cpp
-@@ -52,6 +52,16 @@ bool SharedMap::set(int key, const HydJob &value)
-     return false;
+@@ -85,6 +85,19 @@ HydJobResult SharedMap::waitForJob(int key, std::chrono::milliseconds timeout)
+     return it->second._state == HydJobState::Success ? HydJobResult::Succeeded : HydJobResult::Failed;
  }
  
 +void SharedMap::failPending()
 +{
-+    std::lock_guard<std::mutex> lock(_mutex);
-+    for (auto &[k, v] : _data) {
-+        if (v.state == 1) {
-+            v.state = -1;
++    {
++        std::lock_guard<std::mutex> lock(_mutex);
++        for (auto &[k, v] : _data) {
++            if (v._state == HydJobState::Running) {
++                v._state = HydJobState::Failed;
++            }
 +        }
 +    }
++    _cv.notify_all();
 +}
 +
  bool SharedMap::remove(int id)
  {
-     std::lock_guard<std::mutex> lock(_mutex);
+     bool found{false};
 --- a/src/openvfsfuse/sharedmap.h
 +++ b/src/openvfsfuse/sharedmap.h
-@@ -43,6 +43,7 @@ public:
+@@ -78,6 +78,7 @@ public:
      bool get(int key, HydJob &outValue);
      bool remove(int id);
      bool set(int key, const HydJob &value);
 +    void failPending();
  
-     void printAll();
-     void setDesktopClientPid(long pid);
+     /**
+      * Block until the job identified by @p key leaves the Running state, or
 --- a/src/openvfsfuse/socketthread.cpp
 +++ b/src/openvfsfuse/socketthread.cpp
-@@ -168,10 +168,14 @@ bool SocketThread::socketSendMsg(std::shared_ptr<MsgData> msgData)
-     // send message
-     ssize_t value;
- 
-+    if (_socket < 0) {
-+        return false;
-+    }
-     value = write(_socket, msg.c_str(), msg.size());
-     if (value < 0) {
-         perror("write");
-         close(_socket);
-+        _socket = -1;
-         return false;
-     }
- 
-@@ -182,7 +186,9 @@ bool SocketThread::socketSendMsg(std::shared_ptr<MsgData> msgData)
- 
- void SocketThread::processSocketInput()
- {
--    assert(_socket >= 0);
-+    if (_socket < 0) {
-+        return;
-+    }
- 
-     // The socket is a SOCK_STREAM and carries no message boundaries: a single
-     // read may return a fragment of a message, several messages at once, or
-@@ -190,6 +196,7 @@ void SocketThread::processSocketInput()
+@@ -216,6 +216,7 @@ void SocketThread::processSocketInput()
      char buf[SingleReadBufferSize];
  
      bool contRead{true};
@@ -87,7 +64,7 @@
      ssize_t n;
      while (contRead) {
          n = read(_socket, buf, sizeof(buf));
-@@ -202,6 +209,7 @@ void SocketThread::processSocketInput()
+@@ -228,6 +229,7 @@ void SocketThread::processSocketInput()
              // be interpreted - and remaining incompleted reads will be erased.
              std::cerr << "Socket closed by peer" << std::endl;
              contRead = false;
@@ -95,7 +72,7 @@
          } else if (n < 0) {
              // error condition
              if (errno == EINTR) {
-@@ -219,6 +227,7 @@ void SocketThread::processSocketInput()
+@@ -245,6 +247,7 @@ void SocketThread::processSocketInput()
                  ) {
                      // a serious errno was set
                      perror("socket read");
@@ -103,7 +80,7 @@
                  }
              }
          }
-@@ -239,6 +248,15 @@ void SocketThread::processSocketInput()
+@@ -265,6 +268,15 @@ void SocketThread::processSocketInput()
          std::cerr << "Discarding " << _rxBuffer.size() << " bytes from the socket API" << std::endl;
          _rxBuffer.clear();
      }

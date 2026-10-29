@@ -1,4 +1,4 @@
-{ noctalia-greeter }:
+{ noctalia-greeter, systemdLibs }:
 
 # Keep the pinned upstream package; the root apply-appearance helper reads a
 # root-owned snapshot of the staging folder so staged symlinks cannot leak
@@ -12,9 +12,20 @@
 # runtime-dir.patch keeps the session's own /run/user dir instead of a fixed
 # /tmp path that any local user could create first and so block the login
 # screen.
-# internal-panel-cursor.patch starts the cursor on the laptop panel (eDP,
-# LVDS, DSI) while the lid is open, not on a TV the layout puts first, so
-# the touchpad moves a pointer the user can see.
+# internal-panel-first.patch puts the laptop panel (eDP, LVDS, DSI) first
+# while the lid is open: it sits at (0,0) with the greeter and the cursor,
+# and the other screens go to its right. Before, a TV sorting first by name
+# took both, so the touchpad moved a pointer the user could not see.
+# osk-auto-show.patch starts that keyboard shown when no built-in or wired
+# keyboard is attached, and shows it again when the last one is unplugged
+# (udev ID_INPUT_KEYBOARD, not virtual, not Bluetooth). It needs libudev.
+# display-ready.patch creates $NOCTALIA_GREETER_DISPLAY_READY once the
+# compositor has its first frame on a screen, so the boot splash can let go.
+# The upstream polkit action for the apply-appearance helper is dropped:
+# it names the same helper as org.gjallaros.greeter-sync (wayland.nix) but
+# lets inactive and remote sessions ask too, and pkexec picked it over ours.
+# rm without -f, so a renamed upstream file stops the build instead of
+# leaving two actions again.
 noctalia-greeter.overrideAttrs (old: {
   patches = (old.patches or [ ]) ++ [
     ./staging-snapshot.patch
@@ -22,6 +33,12 @@ noctalia-greeter.overrideAttrs (old: {
     ./wlr-log-level.patch
     ./osk.patch
     ./runtime-dir.patch
-    ./internal-panel-cursor.patch
+    ./internal-panel-first.patch
+    ./osk-auto-show.patch
+    ./display-ready.patch
   ];
+  buildInputs = (old.buildInputs or [ ]) ++ [ systemdLibs ];
+  postInstall = (old.postInstall or "") + ''
+    rm "$out/share/polkit-1/actions/org.noctalia.greeter.apply-appearance.policy"
+  '';
 })

@@ -11,6 +11,104 @@ let
   usbtrustd = pkgs.callPackage ../../pkgs/gjallar-usbtrustd { };
   resolved = pkgs.writeText "gjallar-usbtrust-oddc.json" (builtins.toJSON config.oddc.resolved);
 
+  # Built-in USB parts with their root port come only from the ODDC CLI at
+  # the pinned release (ODDC contract, answer to 102). The ODDC module puts
+  # the CLI in systemPackages; there is no option that names it.
+  oddcPackages = builtins.filter (p: (p.pname or "") == "oddc") config.environment.systemPackages;
+  oddcPackage =
+    if builtins.length oddcPackages == 1 then
+      builtins.head oddcPackages
+    else
+      throw "USB trust: expected one oddc package in environment.systemPackages, found ${toString (builtins.length oddcPackages)}";
+  oddcDevicesFile =
+    pkgs.runCommand "gjallar-usbtrust-oddc-devices.json" { nativeBuildInputs = [ oddcPackage ]; }
+      ''
+        oddc devices --json --root ${config.oddc.catalog} --device ${lib.escapeShellArg config.oddc.device} > $out
+      '';
+
+  # Until the broker starts, every USB port takes any device (Plane 194 part
+  # 2). What can close that gap depends on the keyboard the owner needs for
+  # the disk unlock, and only ODDC knows it: one keyboard on a USB root port
+  # can be let in by that port alone. No keyboard fact, or a keyboard that
+  # is not on USB, has no early gate yet.
+  keyboardSlots = lib.filterAttrs (_: lib.isAttrs) (
+    config.oddc.resolved.hardware.input.keyboard or { }
+  );
+  usbKeyboards = lib.filterAttrs (_: slot: slot ? usbPort) keyboardSlots;
+  keyboardGate =
+    let
+      tier =
+        if keyboardSlots == { } then
+          {
+            tier = "none";
+            reason = "no-keyboard-facts";
+          }
+        else if lib.length (lib.attrNames keyboardSlots) == 1 && usbKeyboards == keyboardSlots then
+          {
+            tier = "usb-keyboard";
+            reason = "keyboard-on-usb";
+          }
+        else if usbKeyboards == { } then
+          {
+            tier = "none";
+            reason = "keyboard-not-on-usb";
+          }
+        else
+          {
+            tier = "none";
+            reason = "several-keyboards";
+          };
+      keyboard = lib.head (lib.attrValues usbKeyboards);
+    in
+    tier
+    // {
+      inherit (cfg) enforce;
+      # Set once the gate runs in stage 1 (checkpoint 3).
+      earlyGate = false;
+      keyboard =
+        if tier.tier == "usb-keyboard" then
+          {
+            deviceId = keyboard.deviceId or null;
+            attachment = keyboard.attachment or null;
+            name = keyboard.name or null;
+          }
+        else
+          null;
+    };
+
+  # The resolved view names the keyboard's controller only by reference, so
+  # the port the gate opens comes from the devices file. Both come from the
+  # same pinned catalogue; a build where they disagree on which keyboard
+  # sits on which port fails here instead of gating the wrong port.
+  keyboardPortCheck =
+    let
+      expected = lib.mapAttrsToList (slot: kb: {
+        path = "hardware.input.keyboard.${slot}";
+        deviceId = kb.deviceId or null;
+        attachment = kb.attachment or null;
+        hub = kb.usbPort.hub or null;
+        port = kb.usbPort.port or null;
+      }) usbKeyboards;
+    in
+    pkgs.runCommand "gjallar-usbtrust-keyboard-port-check"
+      {
+        nativeBuildInputs = [ pkgs.jq ];
+        expected = builtins.toJSON expected;
+        devices = cfg.oddcDevices;
+      }
+      ''
+        jq -e --argjson expected "$expected" '
+          [.devices[] | select(.path | startswith("hardware.input.keyboard.")) | select(.usbPort)]
+          | (map({path, deviceId, attachment, hub: .usbPort.hub, port: .usbPort.port}) | sort_by(.path))
+              == ($expected | sort_by(.path))
+            and all(.usbPort.controller | type == "string" and test("^[0-9a-f]{4}:[0-9a-f]{4}$"))
+        ' "$devices" > /dev/null || {
+          echo "USB trust: oddc devices and the resolved ODDC view disagree on the USB keyboard" >&2
+          exit 1
+        }
+        touch $out
+      '';
+
   # The same settings the nixpkgs module writes, with the fallback target
   # passed in. See the usbguard unit below for why.
   usbguard = config.services.usbguard;
@@ -46,6 +144,39 @@ let
     ACTION=="add", SUBSYSTEM=="scsi", ENV{DEVTYPE}=="scsi_device", SUBSYSTEMS=="usb", ENV{GJALLAR_USB_SCSI}="1"
     ACTION=="add", SUBSYSTEM=="scsi", ENV{DEVTYPE}=="scsi_device", ENV{GJALLAR_USB_SCSI}!="1", RUN+="${pkgs.runtimeShell} -c 'echo %k > /sys/bus/scsi/drivers_probe'"
     ACTION=="add", SUBSYSTEM=="scsi", ENV{DEVTYPE}=="scsi_device", ENV{GJALLAR_USB_SCSI}=="1", RUN+="${scsiBindUngated} %k"
+  '';
+
+  # udisks hands UDISKS_ICON_NAME to its clients as the drive's icon. Without
+  # it udiskie shows one generic icon for every drive, while Dolphin (KDE
+  # Solid) picks its own from the same udisks facts. These lines give udisks
+  # the icon Solid would pick, so both show the same one (Plane 233). Discs
+  # keep Solid's own icons, which also tell the disc type. The rules run
+  # after 80-udisks2.rules, which sets ID_DRIVE_*, and never replace an icon
+  # a device rule already set. A USB disk's card kind comes from
+  # gjallar-storage-icon, the classifier the media notices use: udisks only
+  # knows model strings like "*Reader*SD*", while reader slots often call
+  # themselves "SD/MMC" or "MS-Pro". The udisks per-device flags still refine
+  # a slot the classifier only knows as some memory card.
+  storageIconRules = ''
+    SUBSYSTEM!="block", GOTO="gjallar_storage_icon_end"
+    ENV{UDISKS_ICON_NAME}!="", GOTO="gjallar_storage_icon_end"
+    ENV{ID_CDROM}=="1", GOTO="gjallar_storage_icon_end"
+    KERNEL=="mmcblk[0-9]*", SUBSYSTEMS=="mmc", ENV{UDISKS_ICON_NAME}="media-flash-sd-mmc", GOTO="gjallar_storage_icon_end"
+    KERNEL=="msblk[0-9]*|mspblk[0-9]*", SUBSYSTEMS=="memstick", ENV{UDISKS_ICON_NAME}="media-flash-memory-stick", GOTO="gjallar_storage_icon_end"
+    ENV{ID_BUS}!="usb", GOTO="gjallar_storage_icon_end"
+    ENV{DEVTYPE}=="disk", IMPORT{program}="${usbtrustd}/bin/gjallar-storage-icon $devpath"
+    ENV{DEVTYPE}=="partition", IMPORT{parent}="GJALLAR_STORAGE_KIND"
+    ENV{GJALLAR_STORAGE_KIND}=="sd-card", ENV{UDISKS_ICON_NAME}="media-flash-sd-mmc", GOTO="gjallar_storage_icon_end"
+    ENV{GJALLAR_STORAGE_KIND}=="memory-stick", ENV{UDISKS_ICON_NAME}="media-flash-memory-stick", GOTO="gjallar_storage_icon_end"
+    ENV{ID_DRIVE_FLASH_SD}=="1", ENV{UDISKS_ICON_NAME}="media-flash-sd-mmc", GOTO="gjallar_storage_icon_end"
+    ENV{ID_DRIVE_FLASH_SD_COMBO}=="1", ENV{UDISKS_ICON_NAME}="media-flash-sd-mmc", GOTO="gjallar_storage_icon_end"
+    ENV{ID_DRIVE_FLASH_MS}=="1", ENV{UDISKS_ICON_NAME}="media-flash-memory-stick", GOTO="gjallar_storage_icon_end"
+    ENV{ID_DRIVE_FLASH_SM}=="1", ENV{UDISKS_ICON_NAME}="media-flash-smart-media", GOTO="gjallar_storage_icon_end"
+    ENV{ID_DRIVE_FLASH_CF}=="1", ENV{UDISKS_ICON_NAME}="media-flash", GOTO="gjallar_storage_icon_end"
+    ENV{GJALLAR_STORAGE_KIND}=="card", ENV{UDISKS_ICON_NAME}="media-flash", GOTO="gjallar_storage_icon_end"
+    ATTRS{removable}=="1", ENV{UDISKS_ICON_NAME}="drive-removable-media-usb-pendrive", GOTO="gjallar_storage_icon_end"
+    ATTRS{removable}=="0", ENV{UDISKS_ICON_NAME}="drive-harddisk"
+    LABEL="gjallar_storage_icon_end"
   '';
 
   # zenity --password has no --text option and silently drops it, so the
@@ -100,7 +231,9 @@ in
     };
     oddcDevices = lib.mkOption {
       type = lib.types.nullOr lib.types.path;
-      default = null;
+      default =
+        if config.oddc.device != null && config.oddc.catalog != null then oddcDevicesFile else null;
+      defaultText = lib.literalMD "`oddc devices --json` for `oddc.device` from `oddc.catalog`";
       description = "Output of `oddc devices --json` for the selected model. Built-in parts it lists with a usbPort are then judged by their root port.";
     };
     lapseDays = lib.mkOption {
@@ -122,7 +255,10 @@ in
   };
 
   config = lib.mkMerge [
-    { services.udisks2.enable = true; }
+    {
+      services.udisks2.enable = true;
+      services.udev.extraRules = storageIconRules;
+    }
     (lib.mkIf cfg.enable {
       assertions = [
         {
@@ -148,7 +284,13 @@ in
         presentDevicePolicy = "apply-policy";
         insertedDevicePolicy = "apply-policy";
         presentControllerPolicy = "keep";
-        restoreControllerDeviceState = true;
+        # USBGuard sets new devices to start out deauthorized (AuthorizedDefault,
+        # upstream default none). Restoring the kernel's value on stop let any
+        # device plugged in while USBGuard was down, or after protection was
+        # turned off, in without a decision (loophole 35). Upstream warns
+        # about this and defaults to false. With false, turning protection
+        # off needs a reboot before new USB devices work.
+        restoreControllerDeviceState = false;
         deviceRulesWithPort = false;
       };
 
@@ -190,6 +332,10 @@ in
         "-/tmp"
         "-/sys"
       ];
+
+      # Read by `gjallarctl usb status` and `gjallarctl security notice`.
+      environment.etc."gjallar/usb-keyboard-gate.json".text = builtins.toJSON keyboardGate;
+      system.checks = lib.optional (cfg.oddcDevices != null) keyboardPortCheck;
 
       # While USB protection enforces, the broker turns off automatic SCSI
       # driver binding so a medium in an allowed reader stays unread until

@@ -369,3 +369,124 @@ func TestParseSense(t *testing.T) {
 		t.Fatal("becoming ready must wait")
 	}
 }
+
+func kindOf(t *testing.T, g *Gate, id string) string {
+	t.Helper()
+	media, _ := g.MediaPolicy()
+	for _, m := range media {
+		if m.ID == id {
+			return m.Kind
+		}
+	}
+	t.Fatalf("no medium in %s: %+v", id, media)
+	return ""
+}
+
+func TestMediaKind(t *testing.T) {
+	g, k, probe := newGate(t)
+	real := k.add("6:0:0:0", true, true, 0, "5")
+	mustWrite(t, filepath.Join(real, "model"), "SYNTHETIC SD/MMC")
+	probe["6:0:0:0"] = MediumPresent
+	if err := g.Sync(true); err != nil {
+		t.Fatal(err)
+	}
+	if got := kindOf(t, g, "6:0:0:0"); got != "sd-card" {
+		t.Fatalf("SD/MMC slot kind = %q", got)
+	}
+
+	// A stick names nothing and never reports an empty slot.
+	g, k, probe = newGate(t)
+	k.add("6:0:0:0", true, true, 0, "5")
+	probe["6:0:0:0"] = MediumPresent
+	if err := g.Sync(true); err != nil {
+		t.Fatal(err)
+	}
+	if got := kindOf(t, g, "6:0:0:0"); got != "" {
+		t.Fatalf("stick kind = %q, want plain USB storage", got)
+	}
+
+	// A slot that was empty since the plug is a card reader.
+	probe["6:0:0:0"] = MediumAbsent
+	if err := g.Sync(true); err != nil {
+		t.Fatal(err)
+	}
+	probe["6:0:0:0"] = MediumPresent
+	if err := g.Sync(true); err != nil {
+		t.Fatal(err)
+	}
+	if got := kindOf(t, g, "6:0:0:0"); got != "card" {
+		t.Fatalf("slot seen empty: kind = %q, want card", got)
+	}
+
+	// Each slot of a multi-slot reader goes by its own model; the shared
+	// product name says nothing about one slot.
+	g, k, probe = newGate(t)
+	for id, model := range map[string]string{"6:0:0:0": "SD", "6:0:0:1": "MS", "6:0:0:2": "SYNTHETIC"} {
+		mustWrite(t, filepath.Join(k.add(id, true, true, 0, "5"), "model"), model)
+		probe[id] = MediumPresent
+	}
+	if err := g.Sync(true); err != nil {
+		t.Fatal(err)
+	}
+	for id, want := range map[string]string{"6:0:0:0": "sd-card", "6:0:0:1": "memory-stick", "6:0:0:2": "card"} {
+		if got := kindOf(t, g, id); got != want {
+			t.Errorf("%s kind = %q, want %q", id, got, want)
+		}
+	}
+
+	g, k, probe = newGate(t)
+	k.add("6:0:0:0", true, true, 5, "5")
+	probe["6:0:0:0"] = MediumPresent
+	if err := g.Sync(true); err != nil {
+		t.Fatal(err)
+	}
+	if got := kindOf(t, g, "6:0:0:0"); got != "disc" {
+		t.Fatalf("optical kind = %q", got)
+	}
+}
+
+func TestDiskKind(t *testing.T) {
+	_, k, _ := newGate(t)
+	for id, model := range map[string]string{"6:0:0:0": "SD/MMC", "6:0:0:1": "SYNTHETIC"} {
+		mustWrite(t, filepath.Join(k.add(id, true, true, 0, "5"), "model"), model)
+	}
+	k.add("7:0:0:0", false, false, 0, "")
+	for id, want := range map[string]string{"6:0:0:0": "sd-card", "6:0:0:1": "card", "7:0:0:0": "", "9:0:0:0": ""} {
+		got, err := DiskKind(k.root, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got != want {
+			t.Errorf("DiskKind(%s) = %q, want %q", id, got, want)
+		}
+	}
+
+	// A lone stick names nothing, the same as in its notice.
+	_, k, _ = newGate(t)
+	k.add("6:0:0:0", true, true, 0, "5")
+	if got, _ := DiskKind(k.root, "6:0:0:0"); got != "" {
+		t.Errorf("stick kind = %q", got)
+	}
+}
+
+func TestCardKind(t *testing.T) {
+	for name, want := range map[string]string{
+		"USB Flash Disk":      "",
+		"USB DISK 3.0":        "",
+		"Mass Storage":        "",
+		"SD/MMC":              "sd-card",
+		"microSD Card Reader": "sd-card",
+		"SDXC":                "sd-card",
+		"MS/MS-Pro":           "memory-stick",
+		"Memory Stick Reader": "memory-stick",
+		"CF Card":             "card",
+		"SD/MS Combo":         "card",
+		"xD-Picture":          "card",
+		"Multi-Card Reader":   "card",
+		"Flash Reader":        "card",
+	} {
+		if got := cardKind(name); got != want {
+			t.Errorf("cardKind(%q) = %q, want %q", name, got, want)
+		}
+	}
+}

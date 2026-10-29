@@ -11,5 +11,18 @@ type MediaDecision struct {
 	VIDPID     string `json:"vidPid,omitempty"`
 	Port       string `json:"port,omitempty"`
 	Bytes      uint64 `json:"bytes,omitempty"`
-	Allowed    bool   `json:"allowed"`
+	// Kind is what the medium looks like (MediaDisc, MediaSDCard, ...),
+	// for the notice only. It comes from what the device reports about
+	// itself, so it never decides anything.
+	Kind    string `json:"kind,omitempty"`
+	Allowed bool   `json:"allowed"`
 }
+
+// Media kinds. An empty Kind means plain USB storage: a stick, a disk or a
+// reader that gave no hint.
+const (
+	MediaDisc        = "disc"
+	MediaSDCard      = "sd-card"
+	MediaMemoryStick = "memory-stick"
+	MediaCard        = "card"
+)

@@ -144,37 +144,50 @@
         inherit (pkgs)
           _nemu
           _wine
+          btrbk
+          chrony
           ghostty
           hyprland
+          plymouth
           udiskie
           usbguard
           wvkbd
           xdg-desktop-portal-hyprland
           ;
 
-        prebuilt = pkgs.linkFarmFromDrvs "gjallar-prebuilt" [
-          gjallarctl
-          gjallar-usbtrustd
-          gjallar-settingsd
-          noctalia
-          noctalia-greeter
-          monique
-          nextcloud-client-openvfs
-          openvfs
-          gjallar-opencode
-          systemd-partition-reread
-          qt6ct
-          _nemu
-          _wine
-          # pkgs/overlays patches these, so cache.nixos.org has other builds.
-          dolphin
-          ghostty
-          hyprland
-          udiskie
-          usbguard
-          wvkbd
-          xdg-desktop-portal-hyprland
-        ];
+        prebuilt = pkgs.linkFarmFromDrvs "gjallar-prebuilt" (
+          [
+            gjallarctl
+            gjallar-usbtrustd
+            gjallar-settingsd
+            noctalia
+            noctalia-greeter
+            monique
+            nextcloud-client-openvfs
+            openvfs
+            gjallar-opencode
+            systemd-partition-reread
+            qt6ct
+            _nemu
+            _wine
+            # pkgs/overlays patches these, so cache.nixos.org has other builds.
+            btrbk
+            chrony
+            dolphin
+            ghostty
+            hyprland
+            plymouth
+            udiskie
+            usbguard
+            wvkbd
+            xdg-desktop-portal-hyprland
+            # Built against the patched KDE libraries.
+            (import ./themes/apps/dolphin/darkly.nix { inherit pkgs; }).package
+          ]
+          # Cached, they spare every machine the build and the -dev outputs of
+          # the patched KDE libraries it needs.
+          ++ import ./apps/dolphin/kde-apps.nix pkgs
+        );
       };
 
       checks.${system} = {
@@ -187,6 +200,8 @@
         nextcloud-client-patches = import ./tests/nix/nextcloud-client-patches.nix { inherit pkgs; };
 
         qt6ct-kde-style = import ./tests/nix/qt6ct-kde-style.nix { inherit pkgs; };
+
+        theme-palettes = import ./tests/nix/theme-palettes.nix { inherit pkgs; };
 
         security-baseline = import ./tests/nix/security-baseline.nix {
           inherit nixpkgs system;
@@ -239,6 +254,26 @@
           stockUdiskie = nixpkgs.legacyPackages.${system}.udiskie;
         };
 
+        boot-splash-retain = import ./tests/nix/boot-splash-retain.nix {
+          inherit pkgs;
+          stockPlymouth = nixpkgs.legacyPackages.${system}.plymouth;
+        };
+
+        noctalia-notification-app-name = import ./tests/nix/noctalia-notification-app-name.nix {
+          inherit pkgs;
+          noctalia = self.packages.${system}.noctalia;
+        };
+
+        btrbk-onchange = import ./tests/nix/btrbk-onchange.nix {
+          inherit pkgs;
+          stockBtrbk = nixpkgs.legacyPackages.${system}.btrbk;
+        };
+
+        chrony-rtc-no-interrupts = import ./tests/nix/chrony-rtc-no-interrupts.nix {
+          inherit pkgs;
+          stockChrony = nixpkgs.legacyPackages.${system}.chrony;
+        };
+
         kio-fuse-slow = import ./tests/nix/kio-fuse-slow.nix {
           inherit pkgs;
           stockKio = nixpkgs.legacyPackages.${system}.kdePackages.kio;
@@ -272,6 +307,11 @@
           inherit nixpkgs system;
           inherit (inputs) oddc;
           gjallarctlSource = ./cmd/gjallarctl;
+        };
+
+        usbtrust-oddc-devices = import ./tests/nix/usbtrust-oddc-devices.nix {
+          inherit nixpkgs system;
+          inherit (inputs) oddc;
         };
 
         recovery-maintenance = import ./tests/nix/recovery-maintenance.nix {

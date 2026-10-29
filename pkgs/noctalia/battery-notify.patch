@@ -1,7 +1,8 @@
 diff --git a/src/config/config_types.h b/src/config/config_types.h
+index abd840f28c..11be4aba71 100644
 --- a/src/config/config_types.h
 +++ b/src/config/config_types.h
-@@ -1301,6 +1301,9 @@ struct BatteryDeviceWarningThreshold {
+@@ -1607,6 +1607,9 @@ struct BatteryDeviceWarningThreshold {
  struct BatteryConfig {
    // 0 disables the low-battery warning notification and widget warning state by default.
    std::int32_t warningThreshold = 10;
@@ -12,9 +13,10 @@ diff --git a/src/config/config_types.h b/src/config/config_types.h
  
    bool operator==(const BatteryConfig&) const = default;
 diff --git a/src/config/schema/config_schema.cpp b/src/config/schema/config_schema.cpp
+index d6023bdf36..7bad83d1aa 100644
 --- a/src/config/schema/config_schema.cpp
 +++ b/src/config/schema/config_schema.cpp
-@@ -454,6 +454,7 @@ namespace noctalia::config::schema {
+@@ -502,6 +502,7 @@ namespace noctalia::config::schema {
    const Schema<BatteryConfig>& batterySchema() {
      static const Schema<BatteryConfig> s = {
          field(&BatteryConfig::warningThreshold, "warning_threshold", kBatteryWarningThresholdRange),
@@ -23,14 +25,15 @@ diff --git a/src/config/schema/config_schema.cpp b/src/config/schema/config_sche
          namedMap<BatteryConfig, BatteryDeviceWarningThreshold>(
              &BatteryConfig::deviceThresholds, "device", batteryDeviceSchema(),
 diff --git a/src/system/battery_warning_monitor.cpp b/src/system/battery_warning_monitor.cpp
+index ac40910702..35ee715688 100644
 --- a/src/system/battery_warning_monitor.cpp
 +++ b/src/system/battery_warning_monitor.cpp
-@@ -176,7 +176,8 @@ void BatteryWarningMonitor::evaluate(
+@@ -179,7 +179,8 @@ void BatteryWarningMonitor::evaluate(
  
      // Re-arm when charging, absent, or warnings disabled. firedLevel is percentage-based, so a
      // threshold change across config reloads needs no special handling — the next level decides.
--    if (!device.state.isPresent || isPluggedIn(device.state.state) || threshold <= 0) {
-+    if (!device.state.isPresent || isPluggedIn(device.state.state) || threshold <= 0 ||
+-    if (!warningState.isPresent || batteryStatePlugged(warningState.state).value_or(false) || threshold <= 0) {
++    if (!warningState.isPresent || batteryStatePlugged(warningState.state).value_or(false) || threshold <= 0 ||
 +        (isSystem && !config.notifySystemBattery)) {
        state.firedLevel = kNoLevel;
        continue;

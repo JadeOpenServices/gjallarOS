@@ -11,11 +11,14 @@ let
   enable = settings.nextcloudEnable or false;
   host = settings.nextcloudHost or "";
   preferredBrowser = settings.preferredBrowser or "firefox";
+  diagnosticsEnabled = settings.debugFunctions or false;
   loginRecipe =
     config.gjallar.loginBrowsers.${preferredBrowser}
       or (throw "Nextcloud login needs gjallar.loginBrowsers.${preferredBrowser}; add it in user/browsers/${preferredBrowser}.nix");
   # Hyprland floats and centres windows of this class (see below).
   loginClass = "gjallar-nextcloud-login";
+  # The desktop client's own windows; older builds use the short class.
+  clientClass = "^([Nn]extcloud|com\\.nextcloud\\.desktopclient\\.nextcloud)$";
 
   inherit (import ./package.nix { inherit pkgs; }) openvfs client;
 
@@ -101,12 +104,15 @@ let
 
     workspace="''${NEXTCLOUD_WORKSPACE:-}"
     if [ -n "''${HYPRLAND_INSTANCE_SIGNATURE:-}" ]; then
+      # The dispatch is a Lua expression. The session id passed the check in
+      # loginSession and the workspace is digits only, so neither can leave
+      # the Lua string.
       rule=""
       if printf '%s\n' "$workspace" | ${pkgs.gnugrep}/bin/grep -Eqx '[1-9][0-9]*'; then
-        rule="[workspace $workspace] "
+        rule=", { workspace = \"$workspace\" }"
       fi
-      exec ${lib.getExe' pkgs.hyprland "hyprctl"} dispatch exec \
-        "$rule${nextcloudLoginRun} $session" >/dev/null
+      exec ${lib.getExe' pkgs.hyprland "hyprctl"} dispatch \
+        "hl.dsp.exec_cmd(\"${nextcloudLoginRun} $session\"$rule)" >/dev/null
     fi
     exec ${nextcloudLoginRun} "$session"
   '';
@@ -520,6 +526,47 @@ if isinstance(wid, int) and wid > 0:
 
     exec ${managedClient}/bin/nextcloud --background
   '';
+
+  # Debug mode only (Plane 258): failures of the client and its mount, for
+  # error reports. Lines are fixed words and numbers; the journal lines they
+  # come from can name the mount, so they are never copied as they are.
+  syncDiagnostics = pkgs.writeShellScript "nextcloud-sync-diagnostics" ''
+    set -u
+    state_dir="''${XDG_STATE_HOME:-$HOME/.local/state}/gjallar-diagnostics"
+    ${pkgs.coreutils}/bin/mkdir -p -m 0700 "$state_dir"
+    log_file="$state_dir/nextcloud-$(${pkgs.coreutils}/bin/cat /proc/sys/kernel/random/boot_id).log"
+    cursor="$state_dir/nextcloud-sync.cursor"
+
+    # Service events of this boot since the last run; the cursor file keeps
+    # the place.
+    ${pkgs.systemd}/bin/journalctl --user -b -u nextcloud-sync.service --cursor-file="$cursor" -o short-iso --no-pager -q \
+      | ${pkgs.gnused}/bin/sed -nE \
+        -e 's/^([^ ]+) .*Main process exited, code=([a-z]+), status=([^ ,]+).*/\1 client-exit code=\2 status=\3/p' \
+        -e "s/^([^ ]+) .*Failed with result '([a-z-]+)'.*/\1 failed result=\2/p" \
+        -e 's/^([^ ]+) .*Scheduled restart job, restart counter is at ([0-9]+).*/\1 restart count=\2/p' \
+        -e 's/^([^ ]+) .*Start request repeated too quickly.*/\1 start-limit-hit/p' \
+        -e 's/^([^ ]+) .*\] " finished (-?[0-9]+)$/\1 openvfs-exit code=\2/p' \
+        -e 's/^([^ ]+) .*openVFSfuse: ([0-9]+) opens refused, no hydration slot free$/\1 openvfs-refused count=\2/p' \
+      >>"$log_file"
+
+    # The mount must answer a stat within five seconds. Only changes are
+    # written, so a mount that stops answering gives one line, and one more
+    # when it answers again.
+    ${pkgs.systemd}/bin/systemctl --user -q is-active nextcloud-sync.service || exit 0
+    type="$(${pkgs.coreutils}/bin/timeout -s KILL 5 ${pkgs.coreutils}/bin/stat -f -c %T "$HOME/Nextcloud" 2>/dev/null)"
+    rc=$?
+    case "$rc:$type" in
+      0:fuse*) mount=answering ;;
+      0:*) mount=not-mounted ;;
+      137:*) mount=no-answer-in-5s ;;
+      *) mount="stat-failed-$rc" ;;
+    esac
+    last="$(${pkgs.coreutils}/bin/cat "$state_dir/nextcloud-mount.state" 2>/dev/null || echo answering)"
+    if [ "$mount" != "$last" ]; then
+      echo "$(${pkgs.coreutils}/bin/date --iso-8601=seconds) mount=$mount" >>"$log_file"
+      echo "$mount" >"$state_dir/nextcloud-mount.state"
+    fi
+  '';
 in
 lib.mkMerge [
 {
@@ -544,13 +591,32 @@ lib.mkMerge [
     enrollmentLauncher
   ];
 
-  wayland.windowManager.hyprland.settings.windowrule = lib.optionals enable [
-    "match:class ^(${loginClass})$, float on, center on, size (monitor_w*0.5) (monitor_h*0.75)"
-    "match:class ^([Nn]extcloud|com\\.nextcloud\\.desktopclient\\.nextcloud)$, focus_on_activate on"
+  wayland.windowManager.hyprland.settings.window_rule = lib.optionals enable [
+    {
+      match.class = "^(${loginClass})$";
+      float = true;
+      center = true;
+      size = [
+        "monitor_w*0.5"
+        "monitor_h*0.75"
+      ];
+    }
+    {
+      match.class = clientClass;
+      focus_on_activate = true;
+    }
     # The client's windows are dialogs with a minimum size (settings 950x500).
     # Tiled, they got a smaller slot and were cut off (wiki 752 Q44). The
     # title is localized, so the rule matches the class.
-    "match:class ^([Nn]extcloud|com\\.nextcloud\\.desktopclient\\.nextcloud)$, float on, center on, max_size (monitor_w*0.95) (monitor_h*0.9)"
+    {
+      match.class = clientClass;
+      float = true;
+      center = true;
+      max_size = [
+        "monitor_w*0.95"
+        "monitor_h*0.9"
+      ];
+    }
   ];
 
 
@@ -607,6 +673,30 @@ lib.mkMerge [
 
     };
 
+    Install.WantedBy = [
+      "graphical-session.target"
+    ];
+  };
+
+  # Records only; it never restarts or stops anything (wiki 752 Q71).
+  systemd.user.services.nextcloud-sync-diagnostics = lib.mkIf (enable && diagnosticsEnabled) {
+    Unit.Description = "Nextcloud failure diagnostics (debug mode)";
+    Service = {
+      Type = "oneshot";
+      ExecStart = syncDiagnostics;
+    };
+  };
+
+  systemd.user.timers.nextcloud-sync-diagnostics = lib.mkIf (enable && diagnosticsEnabled) {
+    Unit = {
+      Description = "Nextcloud failure diagnostics every minute (debug mode)";
+      After = [ "graphical-session.target" ];
+      PartOf = [ "graphical-session.target" ];
+    };
+    Timer = {
+      OnActiveSec = "1min";
+      OnUnitActiveSec = "1min";
+    };
     Install.WantedBy = [
       "graphical-session.target"
     ];

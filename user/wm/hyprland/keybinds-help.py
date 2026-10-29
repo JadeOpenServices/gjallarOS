@@ -70,7 +70,10 @@ def what_text(bind):
     if bind.get("has_description") and bind.get("description"):
         return bind["description"]
     # A bind the user added without a description: show what it runs, with
-    # store paths cut down to the program name.
+    # store paths cut down to the program name. A Lua bind reports only a
+    # reference number, which tells nobody anything.
+    if bind.get("dispatcher") == "__lua":
+        return "No description"
     arg = re.sub(r"/nix/store/[^ ]*/bin/", "", bind.get("arg", ""))
     return f"{bind['dispatcher']} {arg}".strip()
 
@@ -114,7 +117,7 @@ def merge_same(rows):
     return [("  or  ".join(keys[what]), what) for what in order]
 
 
-def shortcut_rows():
+def shortcut_rows(drags):
     raw = subprocess.run(["hyprctl", "binds", "-j"], check=True,
                          capture_output=True, text=True).stdout
     rows = []
@@ -122,6 +125,9 @@ def shortcut_rows():
         # Switch binds (laptop lid, tablet hinge) are not shortcuts.
         if bind["key"].startswith("switch:") or bind.get("submap"):
             continue
+        # Lua binds do not report whether they drag, so the config lists them.
+        if (bind["modmask"], bind["key"]) in drags:
+            bind["mouse"] = True
         rows.append((keys_text(bind), what_text(bind)))
     return merge_same(merge_numbered(rows))
 
@@ -140,7 +146,8 @@ def main():
         print(f"gjallar-keybinds: unknown option {args[0]}", file=sys.stderr)
         return 2
 
-    rows = shortcut_rows()
+    drags = {(d["modmask"], d["key"]) for d in config["drags"]}
+    rows = shortcut_rows(drags)
     rows += [(g["keys"], g["description"]) for g in config["gestures"]]
 
     if args:

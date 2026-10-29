@@ -54,10 +54,9 @@ let
 in
 {
   config = lib.mkIf (config.gjallar.apps.teams.enable && teamsEnable) {
-    home.packages = [
-      pkgs.microsoft-edge
-      teamsApp
-    ];
+    # Edge runs from its store path only. In home.packages its desktop
+    # entries claimed web pages and links like a normal browser (257).
+    home.packages = [ teamsApp ];
 
     gjallar.urlHandler.routes = [
       {
@@ -102,13 +101,5 @@ in
             update-desktop-database "$HOME/.local/share/applications" >/dev/null 2>&1 || true
         fi
       '';
-
-    xdg.dataFile."applications/microsoft-edge.desktop".text = ''
-      [Desktop Entry]
-      Type=Application
-      Name=Backend Browser
-      NoDisplay=true
-      Hidden=true
-    '';
   };
 }

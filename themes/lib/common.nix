@@ -53,14 +53,19 @@ in
       package = pkgs.phinger-cursors;
     };
 
+    # uiFont: a theme's text face for the UI; code, terminals and glyphs
+    # keep font (a Nerd Font).
     fonts = {
       sansSerif = {
+        package = details.uiFontPkg or details.fontPkg;
+        name = details.uiFont or details.font;
+      };
+      serif = config.stylix.fonts.sansSerif;
+      monospace = {
         package = details.fontPkg;
         name = details.font;
       };
-      serif = config.stylix.fonts.sansSerif;
-      monospace = config.stylix.fonts.sansSerif;
-      emoji = config.stylix.fonts.sansSerif;
+      emoji = config.stylix.fonts.monospace;
     };
   };
 }

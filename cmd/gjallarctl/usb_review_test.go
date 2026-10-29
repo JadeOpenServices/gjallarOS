@@ -260,10 +260,32 @@ func TestUnpluggedConnectionIsInactive(t *testing.T) {
 	}
 }
 
+func TestAllowedConnectionIsNotBlocked(t *testing.T) {
+	policy := []usbtrust.Decision{{Connection: "a", Target: usbtrust.TargetBlock}, {Connection: "b", Target: usbtrust.TargetAllow}}
+	if !usbConnectionBlocked(policy, "a") {
+		t.Fatal("blocked connection reported decided")
+	}
+	if usbConnectionBlocked(policy, "b") || usbConnectionBlocked(policy, "c") {
+		t.Fatal("allowed or unplugged connection reported blocked")
+	}
+}
+
 func TestUSBMediaNotice(t *testing.T) {
 	body := usbMediaNotice(usbtrust.MediaDecision{ID: "6:0:0:0", Reader: "<b>Reader</b>", Bytes: 31_900_000_000}).Body
 	if !strings.Contains(body, "&lt;b&gt;Reader&lt;/b&gt;, 31.9 GB") {
 		t.Fatalf("body = %q", body)
+	}
+	for kind, want := range map[string]string{
+		"":                        "USB storage connected",
+		"SYNTHETIC-unknown":       "USB storage connected",
+		usbtrust.MediaDisc:        "Disc inserted",
+		usbtrust.MediaSDCard:      "SD card inserted",
+		usbtrust.MediaMemoryStick: "Memory Stick inserted",
+		usbtrust.MediaCard:        "Memory card inserted",
+	} {
+		if got := usbMediaNotice(usbtrust.MediaDecision{Kind: kind}).Summary; got != want {
+			t.Errorf("kind %q: summary %q, want %q", kind, got, want)
+		}
 	}
 	if usbMediaActive([]usbtrust.MediaDecision{{Connection: "a", Allowed: true}}, "a") {
 		t.Fatal("an opened medium keeps its notice")

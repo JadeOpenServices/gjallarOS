@@ -1,0 +1,49 @@
+diff --git a/src/compositor/noctalia_compositor.c b/src/compositor/noctalia_compositor.c
+index 4f0542b..155a44e 100644
+--- a/src/compositor/noctalia_compositor.c
++++ b/src/compositor/noctalia_compositor.c
+@@ -3,6 +3,7 @@
+ #include "greeter/greeter_config_io.h"
+ 
+ #include <ctype.h>
++#include <errno.h>
+ #include <fcntl.h>
+ #include <glob.h>
+ #include <libinput.h>
+@@ -1268,6 +1269,28 @@ static struct wlr_output_mode* select_output_mode(struct wlr_output* wlr_output,
+   return best;
+ }
+ 
++// The boot splash stays up, without the display, until the greeter shows
++// something. Creating $NOCTALIA_GREETER_DISPLAY_READY tells the system that
++// this compositor now drives a screen and the splash can go.
++static void note_display_ready(void) {
++  static bool noted = false;
++  if (noted) {
++    return;
++  }
++  noted = true;
++
++  const char* path = getenv("NOCTALIA_GREETER_DISPLAY_READY");
++  if (path == NULL || path[0] == '\0') {
++    return;
++  }
++  const int fd = open(path, O_WRONLY | O_CREAT | O_CLOEXEC | O_NOFOLLOW, 0600);
++  if (fd < 0) {
++    wlr_log(WLR_ERROR, "failed to create %s: %s", path, strerror(errno));
++    return;
++  }
++  close(fd);
++}
++
+ static bool commit_output_enabled(struct greeter_output* output) {
+   struct greeter_server* server = output->server;
+   if (!initialize_output_render(output)) {
+@@ -1299,6 +1322,7 @@ static bool commit_output_enabled(struct greeter_output* output) {
+ 
+   output->cleared_once = true;
+   wlr_log(WLR_INFO, "cleared output %s on enable", output->wlr_output->name);
++  note_display_ready();
+   wlr_log(WLR_INFO, "output %s scale=%.2f transform=%d", output->wlr_output->name, scale, (int)transform);
+   return true;
+ }

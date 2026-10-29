@@ -1805,7 +1805,7 @@ func printUsage(out io.Writer) {
 	fmt.Fprintln(out, "       gjallarctl luks {status|recovery-key|pin [--remove]|setup|remind [--open|--refresh]}")
 	fmt.Fprintln(out, "       gjallarctl vpn status")
 	fmt.Fprintln(out, "       gjallarctl addons {list|set|pin|update} [--repo PATH]")
-	fmt.Fprintln(out, "       gjallarctl settings {list|get|set|pending|apply|cancel}")
+	fmt.Fprintln(out, "       gjallarctl settings {list|get|set|pending|apply|cancel|export|import|pair}")
 	fmt.Fprintln(out, "       gjallarctl snapshots {list|restore PATH}")
 	fmt.Fprintln(out, "       gjallarctl secure-boot {status|setup|update-dbx} [--repo PATH]")
 	fmt.Fprintln(out, "       gjallarctl security notice|oddc-notice")
@@ -2441,7 +2441,8 @@ func pullCheckout(repo string, stdout, stderr io.Writer) int {
 	// channel, so after a switch HEAD and the channel often diverge. A HEAD
 	// that a newer channel holds waits until the channel promotes it; a
 	// HEAD that only older channels hold moves to the channel, which holds
-	// everything HEAD has (e2e-fw13, 2026-10-27).
+	// everything HEAD has, also when HEAD is the older channel's merge of the
+	// channel's own commit (e2e-fw13, 2026-10-27).
 	at := slices.Index(config.ReleaseChannels, channel)
 	heldBy := func(channels []string) bool {
 		for _, name := range channels {
@@ -2454,21 +2455,37 @@ func pullCheckout(repo string, stdout, stderr io.Writer) int {
 	ahead := func() {
 		fmt.Fprintf(stdout, "[GjallarOS] %s is ahead of the %s channel; it stays at %s until %s reaches it\n", repo, channel, gitHead(repo), channel)
 	}
+	// --keep stops on local edits to files the move would change.
+	moveToChannel := func() int {
+		if git("reset", "--quiet", "--keep", upstream) != 0 {
+			return failed("git reset --keep origin/" + channel)
+		}
+		return 0
+	}
+	newer, older := config.ReleaseChannels[:at], config.ReleaseChannels[at+1:]
 	switch {
 	case isAncestor(upstream, "HEAD"):
-		if !isAncestor("HEAD", upstream) {
+		switch {
+		case isAncestor("HEAD", upstream):
+		// An older channel's promotion merge holds the channel's commit but
+		// is not on the channel: the next promotion would not fast-forward
+		// (stable -> staging, e2e-fw13, 2026-10-27).
+		case heldBy(older) && !heldBy(newer):
+			if code := moveToChannel(); code != 0 {
+				return code
+			}
+		default:
 			ahead()
 		}
 	case isAncestor("HEAD", upstream):
 		if git("merge", "--quiet", "--ff-only", upstream) != 0 {
 			return failed("git merge --ff-only origin/" + channel)
 		}
-	case heldBy(config.ReleaseChannels[:at]):
+	case heldBy(newer):
 		ahead()
-	case heldBy(config.ReleaseChannels[at+1:]):
-		// --keep stops on local edits to files the move would change.
-		if git("reset", "--quiet", "--keep", upstream) != 0 {
-			return failed("git reset --keep origin/" + channel)
+	case heldBy(older):
+		if code := moveToChannel(); code != 0 {
+			return code
 		}
 	default:
 		fmt.Fprintf(stderr, "[GjallarOS] Error: %s has commits that the %s channel does not hold; nothing rebuilt\n", repo, channel)
@@ -3628,39 +3645,60 @@ func applyHyprlandRotation(sysRoot, orientation string) error {
 		return fmt.Errorf("internal connector %q not present in Hyprland", connector)
 	}
 
+	return hyprctlEval(rotationLua(*monitor, transform))
+}
+
+// rotationLua turns the running monitor and the touch screen and pen on it.
+// hl.monitor keeps the fields of an existing rule that are not given.
+func rotationLua(monitor hyprMonitor, transform int) string {
 	mode := fmt.Sprintf("%dx%d@%.3f", monitor.Width, monitor.Height, monitor.RefreshRate)
 	position := fmt.Sprintf("%dx%d", monitor.X, monitor.Y)
 	scale := strconv.FormatFloat(runningScale(monitor.Width, monitor.Height, monitor.Scale), 'f', -1, 64)
-	spec := fmt.Sprintf(
-		"%s,%s,%s,%s,transform,%d",
-		monitor.Name,
-		mode,
-		position,
-		scale,
+	name := luaString(monitor.Name)
+	return fmt.Sprintf(
+		"hl.monitor({ output = %s, mode = %s, position = %s, scale = %s, transform = %d }) "+
+			// Touch screen and pen belong to the built-in panel. Hyprland's
+			// automatic binding finds no monitor for them.
+			"hl.config({ input = { touchdevice = { output = %[1]s, transform = %[5]d }, tablet = { output = %[1]s, transform = %[5]d } } })",
+		name,
+		luaString(mode),
+		luaString(position),
+		luaString(scale),
 		transform,
 	)
+}
 
-	for _, args := range [][]string{
-		{"keyword", "monitor", spec},
-		// Touch screen and pen belong to the built-in panel. Hyprland's
-		// automatic binding finds no monitor for them.
-		{"keyword", "input:touchdevice:output", monitor.Name},
-		{"keyword", "input:tablet:output", monitor.Name},
-		{"keyword", "input:touchdevice:transform", strconv.Itoa(transform)},
-		{"keyword", "input:tablet:transform", strconv.Itoa(transform)},
-	} {
-		cmd := exec.Command("hyprctl", args...)
-		if out, err := cmd.CombinedOutput(); err != nil {
-			return fmt.Errorf(
-				"hyprctl %s: %w: %s",
-				strings.Join(args, " "),
-				err,
-				strings.TrimSpace(string(out)),
-			)
+// hyprctlEval runs Lua in the running Hyprland. hyprctl exits 0 whatever the
+// code did; the reply is "ok" only when it ran without errors.
+func hyprctlEval(code string) error {
+	out, err := exec.Command("hyprctl", "eval", code).CombinedOutput()
+	reply := strings.TrimSpace(string(out))
+	if err != nil {
+		return fmt.Errorf("hyprctl eval: %w: %s", err, reply)
+	}
+	if reply != "ok" {
+		return fmt.Errorf("hyprctl eval: %s", reply)
+	}
+	return nil
+}
+
+// luaString quotes s as a Lua string literal.
+func luaString(s string) string {
+	var b strings.Builder
+	b.WriteByte('"')
+	for i := 0; i < len(s); i++ {
+		switch c := s[i]; {
+		case c == '"' || c == '\\':
+			b.WriteByte('\\')
+			b.WriteByte(c)
+		case c < 0x20 || c == 0x7f:
+			fmt.Fprintf(&b, "\\%03d", c)
+		default:
+			b.WriteByte(c)
 		}
 	}
-
-	return nil
+	b.WriteByte('"')
+	return b.String()
 }
 
 // sensorOrientation reads the orientation from a monitor-sensor line.

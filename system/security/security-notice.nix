@@ -16,9 +16,10 @@ in
     printf '%s\n' "$systemConfig" > /run/gjallar/system-generation
   '';
 
-  # One calm notice when ODDC knows a security finding for this model that
+  # One calm notice when there is a security finding for this model that
   # the user has not seen yet: at login, and after a rebuild brings a new or
-  # changed one. ODDC owns the findings and their wording.
+  # changed one. ODDC owns its findings and their wording; GjallarOS adds its
+  # own notes with IDs that start with "gjallaros/" (Plane 194).
   home-manager.users.${settings.username} = {
     systemd.user.services.security-notice = {
       Unit = {

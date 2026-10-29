@@ -38,25 +38,33 @@ func runSecurity(args []string, stderr io.Writer) int {
 	return 2
 }
 
-// runSecurityNotice shows one calm notice when ODDC knows of a finding for
-// this model that is new or changed since the user last saw one. It runs at
-// login and after every rebuild, and stays quiet otherwise.
+// runSecurityNotice shows one calm notice when ODDC or GjallarOS knows of a
+// finding for this model that is new or changed since the user last saw one.
+// It runs at login and after every rebuild, and stays quiet otherwise.
 func runSecurityNotice(stderr io.Writer) int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	for {
-		findings, err := oddcFindings(ctx)
+		gate, err := readUSBKeyboardGate()
 		if err != nil {
+			fmt.Fprintf(stderr, "usb keyboard gate: %v\n", err)
+		}
+		own := gjallarOSFindings(gate)
+		findings, oddcErr := oddcFindings(ctx)
+		if oddcErr != nil {
 			// ODDC releases before 2 have no `oddc security`.
-			fmt.Fprintf(stderr, "oddc security: %v\n", err)
-			return 0
+			fmt.Fprintf(stderr, "oddc security: %v\n", oddcErr)
+			if len(own) == 0 {
+				return 0
+			}
 		}
 		seen, err := readSeenFindings()
 		if err != nil {
 			fmt.Fprintf(stderr, "ERROR: %v\n", err)
 			return 1
 		}
-		fresh := unseenFindings(findings, seen)
+		current := append(own, findings...)
+		fresh := unseenFindings(current, seen)
 		if len(fresh) == 0 {
 			return 0
 		}
@@ -66,7 +74,8 @@ func runSecurityNotice(stderr io.Writer) int {
 			Icon:    "security-medium",
 			Summary: summary,
 			Body:    body,
-			Actions: []noticeAction{{"details", "Details"}, {"ok", "OK"}},
+			// A click on the card itself shows the details, like the button.
+			Actions: []noticeAction{{"default", "Details"}, {"details", "Details"}, {"ok", "OK"}},
 		})
 		if err != nil {
 			if ctx.Err() != nil {
@@ -75,16 +84,26 @@ func runSecurityNotice(stderr io.Writer) int {
 			fmt.Fprintf(stderr, "ERROR: %v\n", err)
 			return 1
 		}
-		if err := writeSeenFindings(findings); err != nil {
+		keep := current
+		if oddcErr != nil {
+			// ODDC did not answer: what was seen of it stays seen.
+			keep = append(keep, seenODDCFindings(seen)...)
+		}
+		if err := writeSeenFindings(keep); err != nil {
 			fmt.Fprintf(stderr, "ERROR: %v\n", err)
 			return 1
 		}
-		if choice == "details" {
+		if choice == "details" || choice == "default" {
 			// Plain `oddc security` is ODDC's text for users. --details is
 			// for contributors and spells out how each weakness is used.
-			script := `oddc security; printf '\nPress Enter to close. '; read -r _`
+			// GjallarOS's own notes come first, passed as arguments.
+			script := `for note; do printf '%s\n\n' "$note"; done; oddc security; printf '\nPress Enter to close. '; read -r _`
+			args := []string{"--title=Security notes for this device", "-e", "sh", "-c", script, "sh"}
+			for _, f := range own {
+				args = append(args, f.Name+"\n"+f.Summary)
+			}
 			// The title gives it a floating window, see user/wm/hyprland/rules.nix.
-			if err := exec.Command("ghostty", "--title=Security notes for this device", "-e", "sh", "-c", script).Run(); err != nil {
+			if err := exec.Command("ghostty", args...).Run(); err != nil {
 				fmt.Fprintf(stderr, "ERROR: terminal: %v\n", err)
 			}
 		}
@@ -187,6 +206,18 @@ func readSeenFindings() (map[string]string, error) {
 		return map[string]string{}, nil
 	}
 	return seen, nil
+}
+
+// seenODDCFindings turns the seen ODDC entries back into findings, so they
+// can be written again unchanged.
+func seenODDCFindings(seen map[string]string) []securityFinding {
+	var kept []securityFinding
+	for id, modified := range seen {
+		if !strings.HasPrefix(id, "gjallaros/") {
+			kept = append(kept, securityFinding{ID: id, Modified: modified})
+		}
+	}
+	return kept
 }
 
 // writeSeenFindings keeps only the current findings, so a withdrawn one that

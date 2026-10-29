@@ -1,0 +1,227 @@
+diff --git a/src/common/vfs.h b/src/common/vfs.h
+index 4860322..e4b01d2 100644
+--- a/src/common/vfs.h
++++ b/src/common/vfs.h
+@@ -274,6 +274,15 @@ public:
+      */
+     [[nodiscard]] virtual bool setPinState(const QString &folderPath, PinState state) = 0;
+ 
++    /** The user freed up the item at a path, after setting its pin to OnlineOnly.
++     *
++     * Files a program opened stay on disk with an OnlineOnly pin for a while;
++     * a free-up empties them too. Moving a pin to a new name is no free-up.
++     *
++     * folderPath is relative to the sync folder. Can be "" for root folder.
++     */
++    virtual void freeUp([[maybe_unused]] const QString &folderPath) { }
++
+     /** Returns the pin state of an item at a path.
+      *
+      * Usually backed by the db's effectivePinState() function but some vfs
+diff --git a/src/gui/accountsettings.cpp b/src/gui/accountsettings.cpp
+index ff09047..53cf451 100644
+--- a/src/gui/accountsettings.cpp
++++ b/src/gui/accountsettings.cpp
+@@ -1247,6 +1247,9 @@ void AccountSettings::slotSetCurrentFolderAvailability(PinState state)
+ 
+     // similar to socket api: sets pin state recursively and sync
+     folder->setRootPinState(state);
++    if (state == PinState::OnlineOnly) {
++        folder->vfs().freeUp(QString());
++    }
+     folder->scheduleThisFolderSoon();
+ }
+ 
+@@ -1259,6 +1262,9 @@ void AccountSettings::slotSetSubFolderAvailability(Folder *folder, const QString
+     if (!folder->vfs().setPinState(path, state)) {
+         qCWarning(lcAccountSettings) << "Could not set pin state of" << path << "to" << state;
+     }
++    if (state == PinState::OnlineOnly) {
++        folder->vfs().freeUp(path);
++    }
+ 
+     // Trigger sync
+     folder->schedulePathForLocalDiscovery(path);
+diff --git a/src/gui/socketapi/socketapi.cpp b/src/gui/socketapi/socketapi.cpp
+index e5f111d..bd22d5f 100644
+--- a/src/gui/socketapi/socketapi.cpp
++++ b/src/gui/socketapi/socketapi.cpp
+@@ -1114,6 +1114,7 @@ void SocketApi::command_MAKE_ONLINE_ONLY(const QString &filesArg, SocketListener
+         if (!data.folder->vfs().setPinState(data.folderRelativePath, PinState::OnlineOnly)) {
+             qCWarning(lcSocketApi) << "Could not set pin state of" << data.folderRelativePath << "to online only";
+         }
++        data.folder->vfs().freeUp(data.folderRelativePath);
+ 
+         // Trigger sync
+         data.folder->schedulePathForLocalDiscovery(data.folderRelativePath);
+@@ -1121,6 +1122,20 @@ void SocketApi::command_MAKE_ONLINE_ONLY(const QString &filesArg, SocketListener
+     }
+ }
+ 
++// openvfs sends this when the last program closes a file freed up while it
++// was open: the file is emptied now instead of at the next sync.
++void SocketApi::command_V2_FILE_CLOSED(const QSharedPointer<SocketApiJobV2> &job) const
++{
++    const auto fileData = FileData::get(job->arguments()[QStringLiteral("file")].toString());
++    if (!fileData.folder) {
++        job->failure(QStringLiteral("unknown file"));
++        return;
++    }
++    fileData.folder->schedulePathForLocalDiscovery(fileData.folderRelativePath);
++    fileData.folder->scheduleThisFolderSoon();
++    job->success({{QStringLiteral("status"), QStringLiteral("OK")}});
++}
++
+ void SocketApi::copyUrlToClipboard(const QString &link)
+ {
+     setClipboardText(link);
+diff --git a/src/gui/socketapi/socketapi.h b/src/gui/socketapi/socketapi.h
+index c0e606c..86820d3 100644
+--- a/src/gui/socketapi/socketapi.h
++++ b/src/gui/socketapi/socketapi.h
+@@ -153,6 +153,7 @@ private:
+     Q_INVOKABLE void command_FILE_ACTIONS(const QString &localFile, OCC::SocketListener *listener);
+     Q_INVOKABLE void command_FILES_GOVERNANCE_LABELS(const QString &localFile, OCC::SocketListener *listener);
+     Q_INVOKABLE void command_V2_HYDRATE_FILE(const QSharedPointer<SocketApiJobV2> &job) const;
++    Q_INVOKABLE void command_V2_FILE_CLOSED(const QSharedPointer<SocketApiJobV2> &job) const;
+ 
+     void setFileLock(const QString &localFile, const SyncFileItem::LockStatus lockState) const;
+ 
+diff --git a/src/libsync/vfs/openvfs/vfs_openvfs.cpp b/src/libsync/vfs/openvfs/vfs_openvfs.cpp
+index 5ef9d24..d12469b 100644
+--- a/src/libsync/vfs/openvfs/vfs_openvfs.cpp
++++ b/src/libsync/vfs/openvfs/vfs_openvfs.cpp
+@@ -126,6 +126,62 @@ void restoreDehydrated(const QString &filePath, const OCC::SyncJournalFileRecord
+     }
+ }
+ 
++// A file a program opened stays on disk. It goes back to online-only once no
++// program has opened it for this long.
++constexpr auto keptAfterOpen = std::chrono::days(14);
++
++// openvfs answers this for every file it serves. Without an answer the file
++// counts as open: freeing it up later loses nothing, emptying it while a
++// program reads it would.
++bool inUse(const std::filesystem::path &path)
++{
++    const auto value = OCC::FileSystem::Xattr::getxattr(path, QString::fromUtf8(OpenVFS::Constants::XAttributeNames::InUse));
++    if (!value) {
++        qCWarning(lcOpenVFS) << u"openvfs did not say whether the file is open" << path.native();
++        return true;
++    }
++    return *value != "0";
++}
++
++// Time since a program other than the client last opened the file, noted by
++// openvfs. A free-up sets it to 0. A file without a readable time starts its
++// time now; a time in the future counts as now.
++std::chrono::seconds sinceLastOpen(const std::filesystem::path &path)
++{
++    const auto name = QString::fromUtf8(OpenVFS::Constants::XAttributeNames::LastOpen);
++    const auto now = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
++    if (const auto stored = OCC::FileSystem::Xattr::getxattr(path, name); stored && stored->size() <= 20) {
++        bool ok = false;
++        const auto last = stored->toLongLong(&ok);
++        if (ok) {
++            return std::chrono::seconds(std::max<qint64>(0, now - last));
++        }
++    }
++    if (const auto result = OCC::FileSystem::Xattr::setxattr(path, name, QByteArray::number(now)); !result) {
++        qCWarning(lcOpenVFS) << u"Failed to note the open time of" << path.native() << result.error();
++    }
++    return 0s;
++}
++
++// The user freed up the file: its open time goes to 0, so it is emptied as
++// soon as no program has it open, also when a program opened it lately.
++// openvfs tells the client when the last program closes it.
++void forgetOpen(const std::filesystem::path &path)
++{
++    const auto attributes = placeHolderAttributes(path);
++    if (!attributes || attributes.state != OpenVFS::Constants::States::Hydrated
++        || attributes.pinState == OpenVFS::Constants::PinStates::Excluded) {
++        return;
++    }
++    const auto name = QString::fromUtf8(OpenVFS::Constants::XAttributeNames::LastOpen);
++    if (const auto stored = OCC::FileSystem::Xattr::getxattr(path, name); stored && *stored == "0") {
++        return;
++    }
++    if (const auto result = OCC::FileSystem::Xattr::setxattr(path, name, QByteArrayLiteral("0")); !result) {
++        qCWarning(lcOpenVFS) << u"Failed to free up" << path.native() << result.error();
++    }
++}
++
+ OpenVFS::Constants::PinStates convertPinState(OCC::PinState pState)
+ {
+     switch (pState) {
+@@ -699,7 +755,12 @@ bool OpenVFS::statTypeVirtualFile(csync_file_stat_t *stat, void *statData)
+             // the server's file arriving, never a local edit to upload.
+             stat->type = ItemTypeVirtualFile;
+         } else if (attribs && attribs.state == ::OpenVFS::Constants::States::Hydrated) {
+-            if (pin && *pin == PinState::OnlineOnly) {
++            // A file a program opened stays on disk until no program has
++            // opened it for keptAfterOpen; a free-up empties it at once. Never
++            // while a program has it open: the program would read zeros where
++            // its data was. openvfs refuses the emptying then too; asking
++            // first keeps it from turning into a sync error.
++            if (pin && *pin == PinState::OnlineOnly && sinceLastOpen(path.toStdString()) >= keptAfterOpen && !inUse(path.toStdString())) {
+                 stat->type = ItemTypeVirtualFileDehydration;
+             }
+         }
+@@ -762,6 +823,32 @@ void OpenVFS::resetPinsBelow(const QString &folderPath)
+     }
+ }
+ 
++void OpenVFS::freeUp(const QString &folderPath)
++{
++    const auto localPath = params().root() / folderPath;
++    if (QFileInfo(localPath.toString()).isFile()) {
++        forgetOpen(FileSystem::toFilesystemPath(localPath.toString()));
++        return;
++    }
++    auto path = folderPath.toUtf8();
++    while (path.endsWith('/')) {
++        path.chop(1);
++    }
++    // Collect first: the journal stays locked while the callback runs.
++    QList<QByteArray> files;
++    if (!params().journal->getFilesBelowPath(path, [&files](const SyncJournalFileRecord &record) {
++            if (record._type == ItemTypeFile) {
++                files.append(record._path);
++            }
++        })) {
++        qCWarning(lcOpenVFS) << "Could not read the items below" << folderPath;
++        return;
++    }
++    for (const auto &file : std::as_const(files)) {
++        forgetOpen(FileSystem::toFilesystemPath((params().root() / QString::fromUtf8(file)).toString()));
++    }
++}
++
+ Optional<PinState> OpenVFS::pinState(const QString &folderPath)
+ {
+     for (auto relativePath = FileSystem::Path::relative(folderPath).get();; relativePath = relativePath.parent_path()) {
+@@ -792,6 +879,11 @@ Vfs::AvailabilityResult OpenVFS::availability(const QString &folderPath, const A
+         case OCC::PinState::AlwaysLocal:
+             return VfsItemAvailability::AlwaysLocal;
+         case OCC::PinState::OnlineOnly:
++            // A file a program opened stays on disk with its OnlineOnly pin
++            // until it is freed up: it is local, and the menu offers that.
++            if (attribs.state == ::OpenVFS::Constants::States::Hydrated && !QFileInfo(path.toString()).isDir()) {
++                return VfsItemAvailability::AllHydrated;
++            }
+             return VfsItemAvailability::OnlineOnly;
+         case OCC::PinState::Inherited: {
+             switch (attribs.state) {
+diff --git a/src/libsync/vfs/openvfs/vfs_openvfs.h b/src/libsync/vfs/openvfs/vfs_openvfs.h
+index 6d4fed3..a28e4e1 100644
+--- a/src/libsync/vfs/openvfs/vfs_openvfs.h
++++ b/src/libsync/vfs/openvfs/vfs_openvfs.h
+@@ -47,6 +47,7 @@ public:
+     // LocalInfo statTypeVirtualFile(const std::filesystem::directory_entry &path, ItemType type) override;
+ 
+     bool setPinState(const QString &folderPath, PinState state) override;
++    void freeUp(const QString &folderPath) override;
+     Optional<PinState> pinState(const QString &folderPath) override;
+     [[nodiscard]] AvailabilityResult availability(const QString &folderPath, const AvailabilityRecursivity recursiveCheck) override;
+ 

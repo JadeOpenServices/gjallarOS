@@ -1,0 +1,55 @@
+--- a/src/plugins/splash/script/plugin.c
++++ b/src/plugins/splash/script/plugin.c
+@@ -98,6 +98,7 @@
+         script_lib_string_data_t      *script_string_lib;
+ 
+         uint32_t                       is_animating : 1;
++        uint32_t                       has_quit : 1;
+ 
+         char                          *monospace_font;
+         uint32_t                       should_show_console_messages : 1;
+@@ -378,14 +379,16 @@
+         start_script_animation (plugin);
+ 
+         plugin->is_animating = true;
++        plugin->has_quit = false;
+         return true;
+ }
+ 
+ static void
+ stop_script_animation (ply_boot_splash_plugin_t *plugin)
+ {
+-        script_lib_plymouth_on_quit (plugin->script_state,
+-                                     plugin->script_plymouth_lib);
++        if (!plugin->has_quit)
++                script_lib_plymouth_on_quit (plugin->script_state,
++                                             plugin->script_plymouth_lib);
+         script_lib_sprite_refresh (plugin->script_sprite_lib);
+ 
+         if (plugin->loop != NULL)
+@@ -558,6 +561,25 @@
+ become_idle (ply_boot_splash_plugin_t *plugin,
+              ply_trigger_t            *idle_trigger)
+ {
++        /* Every quit passes here, but a quit that keeps the splash on
++         * screen (quit --retain-splash) never reaches hide_splash_screen.
++         * Run the script's quit function now and draw its frame, so the
++         * frame left on screen is the one the theme chose for the end and
++         * not a moment of its animation. This is what two-step does with
++         * its end animation.
++         */
++        ply_trace ("going idle: animating %d, quit function run %d",
++                   plugin->is_animating, plugin->has_quit);
++        if (plugin->is_animating && !plugin->has_quit) {
++                plugin->has_quit = true;
++                pause_displays (plugin);
++                script_lib_plymouth_on_quit (plugin->script_state,
++                                             plugin->script_plymouth_lib);
++                script_lib_sprite_set_needs_redraw (plugin->script_sprite_lib);
++                script_lib_sprite_refresh (plugin->script_sprite_lib);
++                unpause_displays (plugin);
++        }
++
+         ply_trigger_pull (idle_trigger, NULL);
+ }
+ 

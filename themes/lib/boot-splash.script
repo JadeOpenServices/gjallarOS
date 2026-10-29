@@ -1,0 +1,221 @@
+
+# The build puts the colours, sizes and line files above this point.
+# Started from Stylix's Plymouth script (MIT, Daniel Thwaites and the
+# Stylix contributors).
+
+screen_w = Window.GetWidth();
+screen_h = Window.GetHeight();
+center_x = screen_w / 2;
+center_y = screen_h / 2;
+
+Window.SetBackgroundTopColor(background_r, background_g, background_b);
+Window.SetBackgroundBottomColor(background_r, background_g, background_b);
+
+### LOCKUP ###
+
+# Mark and wordmark share one height, a quarter of it apart.
+mark_ratio = mark_w / mark_h;
+if (has_wordmark) {
+  gap = 0.25;
+  word_ratio = word_w / word_h;
+  height = Math.Min(screen_w * 0.40 / (mark_ratio + gap + word_ratio), screen_h * 0.12);
+} else {
+  gap = 0;
+  word_ratio = 0;
+  height = Math.Min(screen_w * 0.30 / mark_ratio, screen_h * 0.16);
+}
+height = Math.Int(height);
+left = center_x - height * (mark_ratio + gap + word_ratio) / 2;
+top = center_y - height / 2;
+
+# mark.png is padded to a square around the mark, so it can turn in place.
+pad = Math.Int(mark_pad * height / mark_h);
+mark.image = Image("mark.png").Scale(pad, pad);
+mark.sprite = Sprite(mark.image);
+mark.sprite.SetPosition(
+  Math.Int(left + height * mark_ratio / 2 - pad / 2),
+  Math.Int(top + height / 2 - pad / 2),
+  1
+);
+
+if (has_wordmark) {
+  word.image = Image("wordmark.png").Scale(Math.Int(height * word_ratio), height);
+  word.sprite = Sprite(word.image);
+  word.sprite.SetPosition(Math.Int(left + height * (mark_ratio + gap)), top, 1);
+}
+
+### SPINNER ###
+
+# One turn per cycle, easing out of and into the upright pose.
+spinner.frames = 72;
+spinner.active = spin;
+spinner.tick = 0;
+if (spin) {
+  for (i = 0; i < spinner.frames; i++) {
+    t = i / spinner.frames;
+    turn = Math.Sin(Math.Pi * (t - 0.5)) / 2 + 0.5;
+    spinner.image[i] = mark.image.Rotate(2 * Math.Pi * turn);
+  }
+}
+
+fun start_spinner () {
+  global.spinner.active = spin;
+}
+
+fun stop_spinner () {
+  global.spinner.active = 0;
+  mark.sprite.SetImage(mark.image);
+}
+
+### LINE ###
+
+line.mode = "";
+
+fun show_line (mode) {
+  global.line.mode = mode;
+  pool = "boot";
+  if (mode == "reboot" || mode == "shutdown") {
+    pool = mode;
+  }
+  count = line_count[pool];
+  index = Math.Int(Math.Random() * count);
+  if (index >= count) {
+    index = count - 1;
+  }
+
+  image = Image(lines[pool][index]);
+  line_h = height * 0.32;
+  line_w = line_h * image.GetWidth() / image.GetHeight();
+  if (line_w > screen_w * 0.9) {
+    line_h = line_h * screen_w * 0.9 / line_w;
+    line_w = screen_w * 0.9;
+  }
+  global.line.image = image.Scale(Math.Int(line_w), Math.Int(line_h));
+  global.line.sprite = Sprite(line.image);
+  line.sprite.SetPosition(Math.Int(center_x - line_w / 2), Math.Int(screen_h * 0.86 - line_h / 2), 1);
+}
+
+show_line(Plymouth.GetMode());
+
+fun refresh_callback () {
+  if (spinner.active) {
+    global.spinner.tick = (spinner.tick + 1) % (spinner.frames * 2);
+    mark.sprite.SetImage(spinner.image[Math.Int(spinner.tick / 2)]);
+  }
+  # plymouth change-mode can turn a running boot screen into a shutdown one.
+  mode = Plymouth.GetMode();
+  if (mode != line.mode) {
+    show_line(mode);
+  }
+}
+
+Plymouth.SetRefreshFunction(refresh_callback);
+
+### TEXT ###
+
+prompt_y = top + height * 1.5;
+
+fun text_image (text, alpha) {
+  image = Image.Text(text, text_r, text_g, text_b, alpha, prompt_font);
+  if (image.GetWidth() > screen_w * 0.9) {
+    image = image.Scale(
+      Math.Int(screen_w * 0.9),
+      Math.Int(image.GetHeight() * screen_w * 0.9 / image.GetWidth())
+    );
+  }
+  return image;
+}
+
+fun place_prompt (prompt_text) {
+  global.prompt.image = text_image(prompt_text, 1);
+  global.prompt.sprite = Sprite(prompt.image);
+  prompt.sprite.SetPosition(Math.Int(center_x - prompt.image.GetWidth() / 2), Math.Int(prompt_y), 1);
+}
+
+### PASSWORD ###
+
+prompt = null;
+bullets = null;
+bullet.image = text_image("•", 1);
+
+fun password_callback (prompt_text, bullet_count) {
+  stop_spinner();
+  global.answer = null;
+  place_prompt(prompt_text);
+
+  shown = Math.Min(bullet_count, Math.Int(screen_w * 0.8 / bullet.image.GetWidth()));
+  start_x = center_x - shown * bullet.image.GetWidth() / 2;
+  bullets_y = prompt_y + prompt.image.GetHeight() * 2;
+  global.bullets = null;
+  for (i = 0; i < shown; i++) {
+    global.bullets[i].sprite = Sprite(bullet.image);
+    bullets[i].sprite.SetPosition(Math.Int(start_x + i * bullet.image.GetWidth()), Math.Int(bullets_y), 1);
+  }
+}
+
+Plymouth.SetDisplayPasswordFunction(password_callback);
+
+### QUESTION ###
+
+answer = null;
+
+fun question_callback (prompt_text, entry) {
+  stop_spinner();
+  global.bullets = null;
+  place_prompt(prompt_text);
+
+  global.answer.image = text_image(entry, 1);
+  global.answer.sprite = Sprite(answer.image);
+  answer.sprite.SetPosition(
+    Math.Int(center_x - answer.image.GetWidth() / 2),
+    Math.Int(prompt_y + prompt.image.GetHeight() * 2),
+    1
+  );
+}
+
+Plymouth.SetDisplayQuestionFunction(question_callback);
+
+### MESSAGE ###
+
+message = null;
+
+fun message_callback (text) {
+  global.message.text = text;
+  global.message.image = text_image(text, 0.78);
+  global.message.sprite = Sprite(message.image);
+  message.sprite.SetPosition(Math.Int(center_x - message.image.GetWidth() / 2), Math.Int(screen_h * 0.78), 1);
+}
+
+fun hide_message_callback (text) {
+  if (message.text == text) {
+    global.message = null;
+  }
+}
+
+Plymouth.SetDisplayMessageFunction(message_callback);
+Plymouth.SetHideMessageFunction(hide_message_callback);
+
+### NORMAL ###
+
+fun normal_callback () {
+  global.prompt = null;
+  global.bullets = null;
+  global.answer = null;
+  start_spinner();
+}
+
+Plymouth.SetDisplayNormalFunction(normal_callback);
+
+### QUIT ###
+
+# Every quit runs this, also greetd's and unl0kr's quit --retain-splash
+# (pkgs/overlays/plymouth.nix), and that keeps this frame up: the mark rests
+# upright and the prompts are gone.
+fun quit_callback () {
+  global.prompt = null;
+  global.bullets = null;
+  global.answer = null;
+  stop_spinner();
+}
+
+Plymouth.SetQuitFunction(quit_callback);

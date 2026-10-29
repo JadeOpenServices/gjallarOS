@@ -24,10 +24,10 @@ let
     }
     report_home() {
       local home="$1"
-      if ${coreutils}/test -L "$home/.config/hypr/hyprland.conf"; then
-        log "hyprland-config=$(${coreutils}/readlink -f "$home/.config/hypr/hyprland.conf")"
+      if ${coreutils}/test -L "$home/.config/hypr/hyprland.lua"; then
+        log "hyprland-config=$(${coreutils}/readlink -f "$home/.config/hypr/hyprland.lua")"
       else
-        log "hyprland-config missing: $home/.config/hypr/hyprland.conf"
+        log "hyprland-config missing: $home/.config/hypr/hyprland.lua"
       fi
     }
 
@@ -161,8 +161,8 @@ let
         fi
         ${coreutils}/printenv | ${pkgs.gnugrep}/bin/grep -E '^(PATH|XDG_|WAYLAND_DISPLAY|HYPRLAND_INSTANCE_SIGNATURE|DBUS_SESSION_BUS_ADDRESS)=' || true
         # Hyprland opens its IPC socket during init and starts
-        # hyprland-session.target later from exec-once, so one try is enough;
-        # false here is a real finding.
+        # hyprland-session.target later from its hyprland.start hook, so one
+        # try is enough; false here is a real finding.
         hyprland_ready=false
         if ${pkgs.hyprland}/bin/hyprctl monitors >/dev/null 2>&1; then
           hyprland_ready=true
@@ -172,8 +172,8 @@ let
           path="$(${pkgs.findutils}/bin/find "$HOME/.nix-profile/bin" "/etc/profiles/per-user/$USER/bin" -maxdepth 1 -name "$command" \( -type l -o -type f \) -print -quit 2>/dev/null || true)"
           if [ -n "$path" ]; then log "command=$command path=$path"; else log "command=$command missing from user profiles"; fi
         done
-        if ${coreutils}/test -L "$HOME/.config/hypr/hyprland.conf"; then
-          log "hyprland-config=$(${coreutils}/readlink -f "$HOME/.config/hypr/hyprland.conf")"
+        if ${coreutils}/test -L "$HOME/.config/hypr/hyprland.lua"; then
+          log "hyprland-config=$(${coreutils}/readlink -f "$HOME/.config/hypr/hyprland.lua")"
         else
           log 'hyprland-config missing'
         fi
@@ -238,24 +238,7 @@ in
         ];
       };
 
-      # The stock quit units end Plymouth before greetd and drop the splash,
-      # so the console shows through until the greeter draws. greetd quits it
-      # itself, keeping the last frame up until the greeter takes the display.
-      systemd.services.plymouth-quit.enable = false;
-      systemd.services.plymouth-quit-wait.enable = false;
-
-      systemd.services.greetd.serviceConfig.ExecStartPre =
-        let
-          plymouth = "${config.boot.plymouth.package}/bin/plymouth";
-        in
-        pkgs.writeShellScript "handoff-plymouth-to-greetd" ''
-          # No daemon: the splash is off or already gone, nothing to hand over.
-          ${plymouth} --ping || exit 0
-          # --wait returns once plymouthd has exited and let go of the display.
-          if ! ${plymouth} quit --retain-splash --wait; then
-            echo "handoff-plymouth-to-greetd: plymouth quit failed, starting the greeter anyway" >&2
-          fi
-        '';
+      # The hand-over to the greeter: system/wm/common/wayland.nix.
 
       systemd.services.plymouth-poweroff = {
         after = [

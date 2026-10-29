@@ -1,8 +1,8 @@
 diff --git a/src/shell/notification/notification_toast.cpp b/src/shell/notification/notification_toast.cpp
-index 5aa60aa..398f09f 100644
+index 62ab7d2564..94b04303df 100644
 --- a/src/shell/notification/notification_toast.cpp
 +++ b/src/shell/notification/notification_toast.cpp
-@@ -367,7 +367,7 @@ namespace {
+@@ -411,7 +411,7 @@ namespace {
              .fill = toastProgressFillColor(urgency),
              .track = clearColorSpec(),
              .radius = progressHeight(scale) * 0.5F,
@@ -11,7 +11,7 @@ index 5aa60aa..398f09f 100644
              .width = std::max(0.0F, cardW - topProgressInset(scale) * 2.0F),
              .height = progressHeight(scale),
              .visible = showToastProgressAccent(urgency, displayDurationMs),
-@@ -2427,7 +2427,7 @@ InputArea* NotificationToast::buildCard(
+@@ -2626,7 +2626,7 @@ InputArea* NotificationToast::buildCard(
            .fill = toastProgressFillColor(entry.urgency),
            .track = clearColorSpec(),
            .radius = progressHeight(scale) * 0.5F,

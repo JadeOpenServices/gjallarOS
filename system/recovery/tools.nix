@@ -28,6 +28,7 @@ let
       cryptsetup
       gawk
       git
+      gnugrep
       nixos-install-tools
       sbctl
       systemd
@@ -89,6 +90,62 @@ let
       # replaced by a rollback has the same form without the _N.
       snapshot_name='^(home|config)\.[0-9]{8}T[0-9]{6}[+-][0-9]{4}(_[0-9]{1,4})?$'
       replaced_name='^(home|config)\.[0-9]{8}T[0-9]{6}[+-][0-9]{4}$'
+
+      # Resolves PATH inside the installed system at ROOT. Its absolute links
+      # point into its own /nix/store; followed as they are, they would land
+      # in the recovery's files (/etc/fstab is one).
+      installed_path() {
+        root="$1"
+        rest="''${2#/}"
+        resolved=
+        hops=0
+        while [ -n "$rest" ]; do
+          part="''${rest%%/*}"
+          case "$rest" in
+            */*) rest="''${rest#*/}" ;;
+            *) rest= ;;
+          esac
+          case "$part" in
+            "" | .) continue ;;
+            ..)
+              resolved="''${resolved%/*}"
+              continue
+              ;;
+          esac
+          if [ -L "$root$resolved/$part" ]; then
+            hops=$((hops + 1))
+            [ "$hops" -le 40 ] || return 1
+            link="$(readlink "$root$resolved/$part")"
+            case "$link" in
+              /*) resolved= ;;
+            esac
+            rest="''${link#/}''${rest:+/$rest}"
+          else
+            resolved="$resolved/$part"
+          fi
+        done
+        printf '%s\n' "$root$resolved"
+      }
+
+      # open-root mounts the system, not the ESP; without it, bootctl would
+      # write into the root's empty /boot (real HP, 2026-10-08). The mount
+      # options come from the installed fstab, as on a normal boot.
+      mount_esp() {
+        root="$1"
+        if findmnt -rn --mountpoint "$root/boot" >/dev/null 2>&1; then
+          return
+        fi
+        fstab="$(installed_path "$root" /etc/fstab)" && [ -f "$fstab" ] || {
+          printf '%s\n' 'ERROR: the installed system has no readable /etc/fstab.' >&2
+          exit 1
+        }
+        [ "$(awk '$1 !~ /^#/ && $2 == "/boot"' "$fstab" | wc -l)" -eq 1 ] || {
+          printf '%s\n' 'ERROR: installed fstab must define exactly one /boot.' >&2
+          exit 1
+        }
+        mkdir -p "$root/boot"
+        mount --fstab "$fstab" --target-prefix "$root" /boot
+      }
 
       # Mounts the top level of ROOT's Btrfs in a private folder for this
       # command; only the subvolume layout has snapshots.
@@ -195,7 +252,7 @@ let
           device="''${2:?DEVICE required}"
           name="''${3:?mapping NAME required}"
           cryptsetup isLuks "$device"
-          systemd-ask-password -n 'GjallarOS: enter the recovery key or disk passphrase:' |
+          systemd-ask-password --timeout=0 -n 'GjallarOS: enter the recovery key or disk passphrase:' |
             cryptsetup open --type luks --key-file=- "$device" "$name"
           ;;
         mount)
@@ -230,7 +287,10 @@ let
 
           printf '%s\n'             'GjallarOS installed root is encrypted.'             'Authentication is required before its files can be viewed or modified.'
 
-          systemd-ask-password -n             'GjallarOS recovery: enter the recovery key or disk passphrase:' |
+          # No timeout: a prompt that gave up while someone typed a long
+          # recovery key left the rest of it on the screen (e2e-fw13,
+          # 2026-10-28).
+          systemd-ask-password --timeout=0 -n             'GjallarOS recovery: enter the recovery key or disk passphrase:' |
             cryptsetup open               --type luks               --key-file=-               "$device"               "$name"
 
           cleanup_mapping=true
@@ -274,11 +334,25 @@ let
               ;;
           esac
 
-          # Installs since snapshots (ROADMAP section 15) keep / on the
-          # default subvolume @ and the rest on their own; generations and
-          # nixos-enter need /nix. The snapshots stay unmounted.
+          # Installs from before snapshots keep / in @ as well, but the top
+          # level is their default subvolume.
+          if [ "$(findmnt -nro FSROOT --mountpoint "$target")" = / ] &&
+            [ ! -e "$target/etc/NIXOS" ] && [ -e "$target/@/etc/NIXOS" ]; then
+            if ! umount "$target" || ! mount -o rw,subvol=@ "$mapping" "$target"; then
+              umount "$target" >/dev/null 2>&1 || true
+              printf '%s\n' "ERROR: subvolume @ could not be mounted at $target." >&2
+              exit 1
+            fi
+          fi
+
+          # / is on @ and the rest on their own subvolumes; generations and
+          # nixos-enter need /nix. Installs from before snapshots (ROADMAP
+          # section 15) have no @config; their settings are in @. The
+          # snapshots stay unmounted.
           if [ "$(findmnt -nro FSROOT --mountpoint "$target")" = /@ ]; then
+            subvolumes="$(btrfs subvolume list "$target" | awk '{ print $NF }')"
             for sub in @nix:nix @home:home @config:etc/gjallar/system; do
+              printf '%s\n' "$subvolumes" | grep -qxF -- "''${sub%%:*}" || continue
               if ! mount -o rw,subvol="''${sub%%:*}" "$mapping" "$target/''${sub#*:}"; then
                 umount -R "$target" >/dev/null 2>&1 || true
                 printf '%s\n' "ERROR: subvolume ''${sub%%:*} could not be mounted at $target/''${sub#*:}." >&2
@@ -312,6 +386,7 @@ let
             exit 1
           }
           confirm_phrase ROLLBACK
+          mount_esp "$root"
           # A new generation with the old system: the boot menu lists only
           # the newest one, and nothing newer is deleted.
           switch="/nix/var/nix/profiles/system/sw/bin/nix-env -p /nix/var/nix/profiles/system --set $toplevel && /nix/var/nix/profiles/system/bin/switch-to-configuration boot"
@@ -433,17 +508,7 @@ let
             printf '%s\n' 'ERROR: target is not a mounted NixOS installation.' >&2
             exit 1
           }
-          # open-root mounts only the root; without the ESP, bootctl would
-          # write into the root's empty /boot (real HP, 2026-10-08).
-          if ! findmnt -rn --mountpoint "$root/boot" >/dev/null 2>&1; then
-            esp="$(awk '$2 == "/boot" { print $1 }' "$root/etc/fstab")"
-            [ -n "$esp" ] && [ "$(printf '%s\n' "$esp" | wc -l)" -eq 1 ] || {
-              printf '%s\n' 'ERROR: installed fstab must define exactly one /boot.' >&2
-              exit 1
-            }
-            mkdir -p "$root/boot"
-            mount "$esp" "$root/boot"
-          fi
+          mount_esp "$root"
           confirm_phrase REPAIR-BOOT
           NIXOS_INSTALL_BOOTLOADER=1 nixos-enter --root "$root" -- \
             /run/current-system/bin/switch-to-configuration boot
@@ -466,6 +531,7 @@ let
           repo="''${flake%#*}"
           repo="''${repo#path:}"
           host="''${flake##*#}"
+          mount_esp "$root"
           nixos-enter --root "$root" -- /run/current-system/sw/bin/gjallarctl \
             installer deploy --repo "$repo" --hostname "$host" --apply
           ;;
