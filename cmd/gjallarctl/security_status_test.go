@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/flakesource"
+	"github.com/JadeOpenServices/gjallarOS/internal/settings"
 	"github.com/JadeOpenServices/gjallarOS/internal/usbtrust/broker"
 )
 
@@ -215,5 +216,68 @@ func TestUSBDisarmForSwitch(t *testing.T) {
 	armedErr = errors.New("no socket")
 	if code := usbDisarmForSwitch(&errOut); code != 1 || disarmed != 2 {
 		t.Errorf("unknown state: exit %d, disarm runs %d, want 1 and 2", code, disarmed)
+	}
+}
+
+func TestSecurityChecksWaiting(t *testing.T) {
+	now := time.Date(2026, 10, 29, 18, 0, 0, 0, time.Local)
+	oldNow := settingsNow
+	t.Cleanup(func() { settingsNow = oldNow })
+	settingsNow = func() time.Time { return now }
+
+	f := goodSecurityFacts()
+	f.usb.Enforcing = false
+	f.pending = []settings.Pending{{
+		Change:  settings.Change{ID: "synthetic", Keys: []settings.KeyChange{{Key: "usbTrustEnforce", New: []byte("false")}}},
+		ReadyAt: now.Add(30 * time.Minute),
+	}}
+	c := checkByID(t, securityChecks(f), "usb")
+	if c.State != checkOff || c.Fix != "" || c.Switch != "off" || c.Waiting == nil || c.Waiting.Ready || c.Waiting.At != "18:30" {
+		t.Errorf("held off change = %+v waiting %+v", c, c.Waiting)
+	}
+	f.pending[0].ReadyAt = now.Add(-time.Minute)
+	if c := checkByID(t, securityChecks(f), "usb"); c.Waiting == nil || !c.Waiting.Ready || c.Waiting.At != "" {
+		t.Errorf("ready change = %+v", c.Waiting)
+	}
+	f.settings["usbTrustEnforce"] = "false"
+	f.pending[0].Keys[0].New = []byte("true")
+	if c := checkByID(t, securityChecks(f), "usb"); c.Switch != "on" || c.State != checkOff || c.Waiting == nil {
+		t.Errorf("held on change = %+v", c)
+	}
+	f.pending[0].Keys[0].Key = "developerMode"
+	if c := checkByID(t, securityChecks(f), "usb"); c.Waiting != nil {
+		t.Errorf("unrelated change shown on usb: %+v", c.Waiting)
+	}
+	var out, errOut bytes.Buffer
+	if code := runSecurityWaiting("apply", []string{"disk"}, &out, &errOut); code != 2 {
+		t.Errorf("disk apply exit = %d, want 2", code)
+	}
+	if code := runSecurityWaiting("cancel", nil, &out, &errOut); code != 2 {
+		t.Errorf("no id exit = %d, want 2", code)
+	}
+}
+
+func TestUSBRearm(t *testing.T) {
+	armed, armedErr, armErr, arms := true, error(nil), error(nil), 0
+	oldArmed, oldArm := usbArmed, usbArmAsRoot
+	t.Cleanup(func() { usbArmed, usbArmAsRoot = oldArmed, oldArm })
+	usbArmed = func() (bool, error) { return armed, armedErr }
+	usbArmAsRoot = func() error { arms++; return armErr }
+
+	var errOut bytes.Buffer
+	if code := usbRearmIfDisarmed(&errOut); code != 0 || arms != 0 {
+		t.Errorf("armed: exit %d, arm runs %d, want 0 and 0", code, arms)
+	}
+	armed = false
+	if code := usbRearmIfDisarmed(&errOut); code != 0 || arms != 1 {
+		t.Errorf("disarmed: exit %d, arm runs %d, want 0 and 1", code, arms)
+	}
+	armErr = errors.New("wrong password")
+	if code := usbRearmIfDisarmed(&errOut); code != 1 {
+		t.Errorf("failed arm exit = %d, want 1", code)
+	}
+	armedErr = errors.New("no socket")
+	if code := usbRearmIfDisarmed(&errOut); code != 1 || arms != 2 {
+		t.Errorf("unknown state: exit %d, arm runs %d, want 1 and 2", code, arms)
 	}
 }

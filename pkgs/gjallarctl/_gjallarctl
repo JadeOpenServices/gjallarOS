@@ -58,6 +58,7 @@ _gjallarctl_usb() {
     'forget:forget a trusted device'
     'renew:keep trusting a device whose trust lapses soon'
     'disarm:turn enforcement off until the next arm'
+    'arm:turn enforcement back on after a disarm'
     'allow-media:open the card or storage in an allowed reader'
   )
   if (( CURRENT == 2 )); then
@@ -118,6 +119,8 @@ _gjallarctl_security() {
     'status:show the gjallarHorn checks'
     'fix:run the fix for one check'
     'switch:turn a protection on or off'
+    'apply:apply the change waiting for a protection'
+    'cancel:drop the change waiting for a protection'
   )
   if (( CURRENT == 2 )); then
     _describe -t commands 'security command' cmds
@@ -132,6 +135,8 @@ _gjallarctl_security() {
       _arguments '1:check:((disk\:"disk encryption" secure-boot\:"Secure Boot" usb\:"USB device approval" updates\:"update the system" developer\:"turn developer mode off"))' ;;
     switch)
       _arguments '1:protection:((usb\:"USB device approval"))' '2:state:(on off)' ;;
+    apply|cancel)
+      _arguments '1:protection:((usb\:"USB device approval"))' ;;
   esac
 }
 

@@ -15,6 +15,7 @@ import (
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/diskcrypto"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/flakesource"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/secureboot"
+	"github.com/JadeOpenServices/gjallarOS/internal/settings"
 	"github.com/JadeOpenServices/gjallarOS/internal/usbtrust/broker"
 )
 
@@ -40,6 +41,17 @@ type securityCheck struct {
 	// Switch is "on" or "off" for a protection the user may turn off in
 	// settings; empty when it cannot be turned off or is not known.
 	Switch string `json:"switch,omitempty"`
+	// Waiting is a switch change the settings service holds back, such as
+	// a security setting asked for away from home.
+	Waiting *securityWaiting `json:"waiting,omitempty"`
+}
+
+// securityWaiting names the held change by its check: `gjallarctl security
+// apply|cancel ID` find it again, so the page passes no change id.
+type securityWaiting struct {
+	Switch string `json:"switch"` // what the switch is after the change
+	Ready  bool   `json:"ready"`
+	At     string `json:"at,omitempty"` // when it can be applied, 15:04
 }
 
 // securitySwitches are the protections a user may turn off, for example
@@ -63,6 +75,63 @@ func switchState(f securityFacts, id string) string {
 		return "on"
 	}
 	return "off"
+}
+
+// waitingChange is the last held change that sets one of the switch's
+// keys, with the switch state it leads to.
+func waitingChange(f securityFacts, id string) (settings.Pending, string, bool) {
+	keys := securitySwitches[id]
+	for i := len(f.pending) - 1; i >= 0; i-- {
+		change := f.pending[i]
+		values := map[string]string{}
+		for _, k := range change.Keys {
+			values[k.Key] = strings.TrimSpace(string(k.New))
+		}
+		touched, on := false, true
+		for _, key := range keys {
+			value, ok := values[key]
+			if ok {
+				touched = true
+			} else {
+				value = f.settings[key]
+			}
+			if value != "true" {
+				on = false
+			}
+		}
+		if touched {
+			if on {
+				return change, "on", true
+			}
+			return change, "off", true
+		}
+	}
+	return settings.Pending{}, "", false
+}
+
+// withWaiting shows a held switch change on its check: the switch shows
+// the choice, and the fix gives way to apply or cancel.
+func withWaiting(c securityCheck, f securityFacts) securityCheck {
+	change, target, ok := waitingChange(f, c.ID)
+	if !ok {
+		return c
+	}
+	verb := "Turning it on"
+	if target == "off" {
+		verb = "Turning it off"
+		if c.State != checkOK {
+			c.State = checkOff
+		}
+	}
+	w := &securityWaiting{Switch: target, Ready: !change.ReadyAt.After(settingsNow())}
+	if w.Ready {
+		c.Detail += " " + verb + " is ready to apply."
+	} else {
+		w.At = change.ReadyAt.Local().Format("15:04")
+		c.Detail += " " + verb + " waits until " + w.At + "."
+	}
+	c.Switch, c.Fix, c.Waiting = target, "", w
+	return c
 }
 
 // systemProfile changes with every switch to a new system.
@@ -97,6 +166,8 @@ type securityFacts struct {
 
 	// settings holds the keys below as JSON text; missing means unknown.
 	settings map[string]string
+	// pending are the changes the settings service holds for this session.
+	pending []settings.Pending
 
 	findings    []securityFinding
 	findingsErr error
@@ -118,6 +189,7 @@ func securityChecks(f securityFacts) []securityCheck {
 	for i := range checks {
 		if _, ok := securitySwitches[checks[i].ID]; ok {
 			checks[i].Switch = switchState(f, checks[i].ID)
+			checks[i] = withWaiting(checks[i], f)
 		}
 	}
 	return append(checks, hardwareChecks(f)...)
@@ -317,6 +389,9 @@ func gatherSecurityFacts(ctx context.Context, stderr io.Writer) securityFacts {
 				f.settings[name] = string(key.Value)
 			}
 		}
+		if list, err := settingsPendingList(setCtx, bus); err == nil {
+			f.pending = list
+		}
 		cancel()
 		bus.Close()
 	}
@@ -404,7 +479,60 @@ func runSecuritySwitch(args []string, stdout, stderr io.Writer) int {
 	return askSystemSettings(values, stdout, stderr)
 }
 
-// usbArmed and usbDisarmAsRoot are replaced in tests.
+// runSecurityWaiting applies or drops the change held for a switch. Apply
+// runs in a terminal for the password and the rebuild.
+func runSecurityWaiting(action string, args []string, stdout, stderr io.Writer) int {
+	here := len(args) == 2 && args[1] == "--here"
+	if len(args) != 1 && !here {
+		fmt.Fprintln(stderr, securityUsage)
+		return 2
+	}
+	if _, ok := securitySwitches[args[0]]; !ok {
+		fmt.Fprintf(stderr, "ERROR: %q cannot be switched\n", args[0])
+		return 2
+	}
+	if !here {
+		return runInTerminal("GjallarOS security", []string{"security", action, args[0], "--here"}, stderr)
+	}
+	bus, ok := openSettings(stderr)
+	if !ok {
+		return 1
+	}
+	defer bus.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), settingsCallTimeout)
+	defer cancel()
+	f := securityFacts{settings: map[string]string{}}
+	for _, name := range securitySwitches[args[0]] {
+		if key, err := settingsKey(ctx, bus, name); err == nil {
+			f.settings[name] = string(key.Value)
+		}
+	}
+	list, err := settingsPendingList(ctx, bus)
+	if err != nil {
+		fmt.Fprintf(stderr, "ERROR: %v\n", err)
+		return 1
+	}
+	f.pending = list
+	change, target, ok := waitingChange(f, args[0])
+	if !ok {
+		fmt.Fprintf(stderr, "ERROR: no change waits for %s\n", args[0])
+		return 1
+	}
+	if action == "apply" {
+		return settingsApplyCommand(ctx, bus, []string{change.ID}, stdout, stderr)
+	}
+	if err := settingsCancel(ctx, bus, []string{change.ID}, stdout); err != nil {
+		fmt.Fprintf(stderr, "ERROR: %v\n", err)
+		return 1
+	}
+	// Keeping USB blocking on after a disarm: arm it again now.
+	if args[0] == "usb" && target == "off" && switchState(f, "usb") == "on" {
+		return usbRearmIfDisarmed(stderr)
+	}
+	return 0
+}
+
+// usbArmed, usbDisarmAsRoot and usbArmAsRoot are replaced in tests.
 var (
 	usbArmed = func() (bool, error) {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -428,7 +556,36 @@ var (
 		cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 		return cmd.Run()
 	}
+	usbArmAsRoot = func() error {
+		self, err := os.Executable()
+		if err != nil {
+			return err
+		}
+		cmd := exec.Command("sudo", "-k", self, "usb", "arm")
+		cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
+		return cmd.Run()
+	}
 )
+
+// usbRearmIfDisarmed turns blocking back on after a disarm, when settings
+// already have it on and only the broker's next start would arm it.
+func usbRearmIfDisarmed(stderr io.Writer) int {
+	armed, err := usbArmed()
+	if err != nil {
+		fmt.Fprintf(stderr, "ERROR: cannot read the USB blocking state: %v\n", err)
+		return 1
+	}
+	if armed {
+		return 0
+	}
+	fmt.Fprintln(stderr, "Turning USB blocking back on. Enter your password.")
+	if err := usbArmAsRoot(); err != nil {
+		fmt.Fprintf(stderr, "ERROR: USB blocking stays off until the next restart: %v\n", err)
+		return 1
+	}
+	fmt.Fprintln(stderr, "USB blocking is on. New USB devices wait for your approval.")
+	return 0
+}
 
 // usbDisarmForSwitch disarms USB blocking before the off switch, which the
 // settings service refuses while blocking is armed (loophole 23). Disarming
@@ -453,6 +610,22 @@ func usbDisarmForSwitch(stderr io.Writer) int {
 func securityFixHere(id string, stdout, stderr io.Writer) int {
 	switch id {
 	case "usb":
+		bus, ok := openSettings(stderr)
+		if !ok {
+			return 1
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), settingsCallTimeout)
+		f := securityFacts{settings: map[string]string{}}
+		for _, name := range securitySwitches["usb"] {
+			if key, err := settingsKey(ctx, bus, name); err == nil {
+				f.settings[name] = string(key.Value)
+			}
+		}
+		cancel()
+		bus.Close()
+		if switchState(f, "usb") == "on" {
+			return usbRearmIfDisarmed(stderr)
+		}
 		return askSystemSettings(map[string]any{"usbguardEnable": true, "usbTrustEnforce": true}, stdout, stderr)
 	case "developer":
 		return askSystemSettings(map[string]any{"developerMode": false}, stdout, stderr)
@@ -463,4 +636,4 @@ func securityFixHere(id string, stdout, stderr io.Writer) int {
 	return 2
 }
 
-const securityUsage = "Usage: gjallarctl security notice|oddc-notice|status [--json]|fix ID|switch ID on|off"
+const securityUsage = "Usage: gjallarctl security notice|oddc-notice|status [--json]|fix ID|switch ID on|off|apply ID|cancel ID"

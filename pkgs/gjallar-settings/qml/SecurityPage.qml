@@ -70,6 +70,7 @@ Page {
                 delegate: Pane {
                     id: row
                     required property var modelData
+                    readonly property var waiting: modelData.waiting || null
                     Layout.fillWidth: true
                     Layout.leftMargin: page.gap
                     Layout.rightMargin: page.gap
@@ -114,7 +115,7 @@ Page {
                                 Layout.fillWidth: true
                             }
                             RowLayout {
-                                visible: fixButton.visible || protectionSwitch.visible
+                                visible: fixButton.visible || protectionSwitch.visible || row.waiting !== null
                                 Layout.fillWidth: true
                                 Layout.topMargin: page.gap / 2
                                 Button {
@@ -124,10 +125,26 @@ Page {
                                     highlighted: true
                                     onClicked: page.backend.fix(row.modelData.id)
                                 }
+                                // A switch change off the home network waits an
+                                // hour; it can be applied once ready or dropped.
+                                Button {
+                                    visible: row.waiting !== null && row.waiting.ready
+                                    text: "Apply now"
+                                    highlighted: true
+                                    enabled: !page.backend.busy
+                                    onClicked: page.backend.applyWaiting(row.modelData.id)
+                                }
+                                Button {
+                                    visible: row.waiting !== null
+                                    text: row.waiting !== null && row.waiting.switch === "off" ? "Keep it on" : "Keep it off"
+                                    enabled: !page.backend.busy
+                                    onClicked: page.backend.cancelWaiting(row.modelData.id)
+                                }
                                 Item { Layout.fillWidth: true }
                                 Switch {
                                     id: protectionSwitch
                                     visible: (row.modelData.switch || "") !== ""
+                                    enabled: row.waiting === null
                                     text: checked ? "On" : "Off"
                                     checked: row.modelData.switch === "on"
                                     // The settings service asks for the password;

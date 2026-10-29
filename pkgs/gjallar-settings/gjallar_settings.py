@@ -122,6 +122,14 @@ class Backend(QObject):
     def switchProtection(self, check_id, on):
         self._run(["security", "switch", check_id, "on" if on else "off"], lambda *_: self.refreshSecurity())
 
+    @Slot(str)
+    def applyWaiting(self, check_id):
+        self._run(["security", "apply", check_id], lambda *_: self.refreshSecurity())
+
+    @Slot(str)
+    def cancelWaiting(self, check_id):
+        self._run(["security", "cancel", check_id], lambda *_: self.refreshSecurity())
+
     @Slot(str, bool)
     def setApp(self, app_id, installed):
         self._run(["apps", "add" if installed else "remove", app_id, "--window"], lambda *_: self.refreshApps())

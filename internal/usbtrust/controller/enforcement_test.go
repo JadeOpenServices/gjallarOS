@@ -95,6 +95,58 @@ func TestDisarmRequiresDiskPassphrase(t *testing.T) {
 	}
 }
 
+func TestArmAfterDisarmBlocksAgain(t *testing.T) {
+	c, s, implicit := armedFixture(t)
+	ctx := context.Background()
+	if _, err := c.Mutate(ctx, broker.Request{Action: broker.ActionDisarm, RecoveryKey: "correct horse"}); err != nil {
+		t.Fatal(err)
+	}
+	s.doc.Devices = nil
+	response, err := c.Mutate(ctx, broker.Request{Action: broker.ActionArm})
+	if err != nil || !response.Enforcing {
+		t.Fatalf("arm = %+v, %v", response, err)
+	}
+	if !s.doc.Enforcement.Armed || !c.EnforcementEnabled() || len(s.doc.Devices) != 0 {
+		t.Fatalf("arm did not block or changed trust: %+v", s.doc)
+	}
+	if last := (*implicit)[len(*implicit)-1]; last != usbtrust.TargetBlock {
+		t.Fatalf("USBGuard fallback still %q", last)
+	}
+	if response, err := c.Mutate(ctx, broker.Request{Action: broker.ActionArm}); err != nil || !response.Enforcing {
+		t.Fatalf("second arm = %+v, %v", response, err)
+	}
+}
+
+func TestArmRefusedWhenSettingsHaveBlockingOff(t *testing.T) {
+	c, s, _ := armedFixture(t)
+	ctx := context.Background()
+	if _, err := c.Mutate(ctx, broker.Request{Action: broker.ActionDisarm, RecoveryKey: "correct horse"}); err != nil {
+		t.Fatal(err)
+	}
+	c.ArmOnStart = false
+	if _, err := c.Mutate(ctx, broker.Request{Action: broker.ActionArm}); err == nil {
+		t.Fatal("arm went against settings")
+	}
+	if s.doc.Enforcement.Armed {
+		t.Fatal("refused arm armed anyway")
+	}
+}
+
+func TestArmIsRootOnlyWithoutArguments(t *testing.T) {
+	if err := broker.ValidateRequest(broker.Request{Action: broker.ActionArm, RecoveryKey: "x"}); err == nil {
+		t.Fatal("arm accepted a passphrase")
+	}
+	if err := broker.ValidateRequest(broker.Request{Action: broker.ActionArm}); err != nil {
+		t.Fatal(err)
+	}
+	if err := broker.AuthorizePeer(1000, broker.ActionArm, 1000); err == nil {
+		t.Fatal("desktop user armed without root")
+	}
+	if err := broker.AuthorizePeer(0, broker.ActionArm, 1000); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestArmedStateEnforcesWithoutFlag(t *testing.T) {
 	c, _, _ := armedFixture(t)
 	restarted := &Controller{Reader: c.Reader, MachineID: c.MachineID, ModelID: c.ModelID, Apply: c.Apply}

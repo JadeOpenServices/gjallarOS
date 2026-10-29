@@ -43,6 +43,9 @@ func runSecurity(args []string, stdout, stderr io.Writer) int {
 	if len(args) > 0 && args[0] == "switch" {
 		return runSecuritySwitch(args[1:], stdout, stderr)
 	}
+	if len(args) > 0 && (args[0] == "apply" || args[0] == "cancel") {
+		return runSecurityWaiting(args[0], args[1:], stdout, stderr)
+	}
 	fmt.Fprintln(stderr, securityUsage)
 	return 2
 }

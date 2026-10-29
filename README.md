@@ -728,7 +728,8 @@ not built in, so it stays blocked until approved. Enforcement can be turned on
 later with `"usbTrustEnforce": true` in `user.config.json` and a `rebuild`. To
 turn it off, run `sudo gjallarctl usb disarm` first and enter the disk
 encryption passphrase, then set it back to `false` and `rebuild`. Disarm alone
-is temporary: the broker re-arms from the config on its next restart. The other
+is temporary: the broker re-arms from the config on its next restart, or right
+away with `sudo gjallarctl usb arm`. The other
 order is refused by `gjallarctl settings`; done by hand, USBGuard keeps
 blocking unknown devices at boot while the stored state still says armed.
 

@@ -517,6 +517,32 @@ func (c *Controller) disarm(ctx context.Context, key []byte) (broker.Response, e
 	return broker.Response{OK: true, Revision: doc.Revision, Message: "USB enforcement disarmed"}, nil
 }
 
+// rearm does now what the next broker start would do after a disarm, so
+// keeping blocking on needs no restart. It never arms against settings.
+func (c *Controller) rearm(ctx context.Context) (broker.Response, error) {
+	if !c.ArmOnStart {
+		return broker.Response{}, fmt.Errorf("USB blocking is off in settings")
+	}
+	if c.armed.Load() {
+		return broker.Response{OK: true, Message: "USB enforcement already armed", Enforcing: true}, nil
+	}
+	c.disarmed.Store(false)
+	if err := c.syncImplicit(ctx); err != nil {
+		return broker.Response{}, fmt.Errorf("USBGuard fallback: %w", err)
+	}
+	input, err := c.snapshot(ctx)
+	if err != nil {
+		return broker.Response{}, err
+	}
+	if err := c.arm(ctx, &input); err != nil {
+		return broker.Response{}, fmt.Errorf("arm USB enforcement: %w", err)
+	}
+	if err := c.apply(ctx, input); err != nil {
+		return broker.Response{}, err
+	}
+	return broker.Response{OK: true, Revision: input.Trusted.Revision, Message: "USB enforcement armed", Enforcing: true}, nil
+}
+
 func (c *Controller) next(trusted *usbtrust.Document) (usbtrust.Document, error) {
 	doc := usbtrust.Document{Schema: usbtrust.SchemaVersion, MachineID: c.MachineID, ODDCModel: c.ModelID}
 	if trusted != nil {
@@ -623,6 +649,9 @@ func (c *Controller) Mutate(ctx context.Context, request broker.Request) (broker
 	if request.Action == broker.ActionDisarm {
 		return c.disarm(ctx, []byte(request.RecoveryKey))
 	}
+	if request.Action == broker.ActionArm {
+		return c.rearm(ctx)
+	}
 	input, err := c.snapshot(ctx)
 	if err != nil {
 		return broker.Response{}, err
@@ -705,6 +734,7 @@ func persistentMutation(action broker.Action) bool {
 		broker.ActionAcceptReplacement,
 		broker.ActionEnrollInternal,
 		broker.ActionDisarm,
+		broker.ActionArm,
 		broker.ActionRenew:
 		return true
 	default:
