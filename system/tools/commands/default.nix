@@ -1,6 +1,7 @@
 { pkgs, lib, settings, ... }:
 let
   gjallarctl = pkgs.callPackage ../../../pkgs/gjallarctl { };
+  gjallarSettings = pkgs.callPackage ../../../pkgs/gjallar-settings { inherit gjallarctl; };
   checkInstaller = pkgs.writeShellScriptBin "check-installer" ''
     exec ${gjallarctl}/bin/gjallarctl check --repo ${lib.escapeShellArg settings.dotfilesDir} "$@"
   '';
@@ -96,6 +97,7 @@ in
     (goCommand "thermal-status" "thermal-status")
     (goCommand "thermal-test" "thermal-test")
     gjallarctl
+    gjallarSettings
     checkInstaller
     preflight
     pkgs.yad
