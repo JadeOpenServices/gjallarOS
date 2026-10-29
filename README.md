@@ -312,8 +312,9 @@ Some protections have an off switch, for people who run their own:
 
 The switches change security-tier keys, so turning one off waits an hour away
 from home, as above. Until then the card says when the change is ready and
-offers Apply now and Keep it on. A protection that is off shows "Off (your
-choice)" and does not ask again. The recovery system always has the firewall
+offers Apply now and Keep it on. Turning a protection back on is stricter, so
+it applies at once after the password. A protection that is off shows "Off
+(your choice)" and does not ask again. The recovery system always has the firewall
 on.
 
 ### Firefox add-ons

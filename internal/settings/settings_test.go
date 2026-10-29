@@ -156,6 +156,28 @@ func TestPlanDeveloperModeWaitsOnlyWhenTurnedOn(t *testing.T) {
 	}
 }
 
+func TestPlanProtectionWaitsOnlyWhenTurnedOff(t *testing.T) {
+	user := defaults(t)
+	user.USBGuardEnable, user.USBTrustEnforce, user.FirewallEnable = true, true, true
+	user.USBTrustTPMHandle = config.DefaultUSBTrustTPMHandle
+	for _, key := range []string{"usbguardEnable", "usbTrustEnforce", "firewallEnable"} {
+		values := map[string]string{key: `false`}
+		if key == "usbguardEnable" {
+			// The trust check needs USBGuard, so both go off together.
+			values["usbTrustEnforce"] = `false`
+		}
+		change, err := Plan(configText(t, user), raw(values))
+		if err != nil || change.Tier != config.TierSecurity {
+			t.Fatalf("%s off: %s %v", key, change.Tier, err)
+		}
+	}
+	user.USBGuardEnable, user.USBTrustEnforce, user.FirewallEnable = false, false, false
+	change, err := Plan(configText(t, user), raw(map[string]string{"usbguardEnable": `true`, "usbTrustEnforce": `true`, "firewallEnable": `true`}))
+	if err != nil || change.Tier != config.TierEveryday {
+		t.Fatalf("protections on: %s %v", change.Tier, err)
+	}
+}
+
 func TestPlanOnManagedDeviceRefusesTighteningToo(t *testing.T) {
 	user := defaults(t)
 	user.EndpointManagedDevice = true
