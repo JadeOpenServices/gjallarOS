@@ -112,7 +112,7 @@ type Settings struct {
 	ConsoleLoginEnable, USBReviewTechnical, DolphinDriveUsage, FirmwareFlashReadEntry       bool
 	USBTrustTPMHandle                                                                       string
 	USBTrustLapseDays                                                                       int
-	SnapshotsEnable, FirewallEnable                                                         bool
+	SnapshotsEnable, FirewallEnable, VirusScanEnable                                        bool
 	SnapshotsKeepHours, SnapshotsKeepDays                                                   int
 	Name, Email, GitHubUsername, DotfilesDir                                                string
 	RootPasswordFile, UserPasswordFile                                                      string
@@ -172,6 +172,7 @@ func FromUser(user config.User) Settings {
 		USBTrustLapseDays:                   user.USBTrustLapseDays,
 		SnapshotsEnable:                     user.SnapshotsEnable,
 		FirewallEnable:                      user.FirewallEnable,
+		VirusScanEnable:                     user.VirusScanEnable,
 		SnapshotsKeepHours:                  user.SnapshotsKeepHours,
 		SnapshotsKeepDays:                   user.SnapshotsKeepDays,
 		USBReviewTechnical:                  user.USBReviewTechnical,
@@ -271,6 +272,7 @@ var userIntentKeys = []string{
 	"printingEnable",
 	"networkPrintingEnable",
 	"firewallEnable",
+	"virusScanEnable",
 	"dolphinDriveUsage",
 	"firmwareFlashReadEntry",
 	"snapshotsEnable",
@@ -558,6 +560,7 @@ func Render(s Settings) []byte {
 	boolean("printingEnable", s.PrintingEnable)
 	boolean("networkPrintingEnable", s.NetworkPrintingEnable)
 	boolean("firewallEnable", s.FirewallEnable)
+	boolean("virusScanEnable", s.VirusScanEnable)
 	boolean("dolphinDriveUsage", s.DolphinDriveUsage)
 	boolean("firmwareFlashReadEntry", s.FirmwareFlashReadEntry)
 	boolean("snapshotsEnable", s.SnapshotsEnable)

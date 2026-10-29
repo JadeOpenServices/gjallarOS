@@ -12,7 +12,7 @@ import os
 import signal
 import sys
 
-from PySide6.QtCore import Property, QObject, QProcess, Signal, Slot
+from PySide6.QtCore import Property, QObject, QProcess, QStandardPaths, QUrl, Signal, Slot
 from PySide6.QtGui import QFont, QGuiApplication, QIcon
 from PySide6.QtQml import QQmlApplicationEngine
 from PySide6.QtQuickControls2 import QQuickStyle
@@ -48,6 +48,7 @@ class Backend(QObject):
     checksChanged = Signal()
     appsChanged = Signal()
     busyChanged = Signal()
+    scanChanged = Signal()
 
     def __init__(self):
         super().__init__()
@@ -55,20 +56,24 @@ class Backend(QObject):
         self._apps = []
         self._busy = 0
         self._running = set()
+        self._scan = {}
+        self._scanning = ""
 
-    def _run(self, args, done=None):
+    def _run(self, args, done=None, busy=True):
         process = QProcess(self)
         process.setProgram(GJALLARCTL)
         process.setArguments(args)
         self._running.add(process)
-        self._busy += 1
-        self.busyChanged.emit()
+        if busy:
+            self._busy += 1
+            self.busyChanged.emit()
 
         def finished(code, _status):
             output = bytes(process.readAllStandardOutput()).decode(errors="replace")
             self._running.discard(process)
-            self._busy -= 1
-            self.busyChanged.emit()
+            if busy:
+                self._busy -= 1
+                self.busyChanged.emit()
             process.deleteLater()
             if done:
                 done(code, output)
@@ -95,6 +100,18 @@ class Backend(QObject):
     @Property(bool, notify=busyChanged)
     def busy(self):
         return self._busy > 0
+
+    @Property("QVariantMap", notify=scanChanged)
+    def scanResult(self):
+        return self._scan
+
+    @Property(str, notify=scanChanged)
+    def scanning(self):
+        return self._scanning
+
+    @Property(str, constant=True)
+    def downloads(self):
+        return QStandardPaths.writableLocation(QStandardPaths.DownloadLocation)
 
     @Slot()
     def refreshSecurity(self):
@@ -129,6 +146,29 @@ class Backend(QObject):
     @Slot(str)
     def cancelWaiting(self, check_id):
         self._run(["security", "cancel", check_id], lambda *_: self.refreshSecurity())
+
+    @Slot(str)
+    def scan(self, target):
+        """Scan a folder; target is a path or a file:// URL from the folder dialog."""
+        if target.startswith("file:"):
+            target = QUrl(target).toLocalFile()
+        if not target or self._scanning:
+            return
+        self._scanning, self._scan = target, {}
+        self.scanChanged.emit()
+
+        def done(_code, output):
+            try:
+                result = json.loads(output)
+            except ValueError:
+                result = None
+            if not isinstance(result, dict):
+                result = {"target": target, "found": [], "error": "The scan did not finish."}
+            self._scanning, self._scan = "", result
+            self.scanChanged.emit()
+
+        # A scan can take minutes; it does not hold the rest of the page.
+        self._run(["security", "scan", target, "--json"], done, busy=False)
 
     @Slot(str, bool)
     def setApp(self, app_id, installed):

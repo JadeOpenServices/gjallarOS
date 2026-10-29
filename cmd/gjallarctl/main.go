@@ -1811,7 +1811,7 @@ func printUsage(out io.Writer) {
 	fmt.Fprintln(out, "       gjallarctl settings {list|get|set|pending|apply|cancel|export|import|pair}")
 	fmt.Fprintln(out, "       gjallarctl snapshots {list|restore PATH}")
 	fmt.Fprintln(out, "       gjallarctl secure-boot {status|setup|update-dbx} [--repo PATH]")
-	fmt.Fprintln(out, "       gjallarctl security {notice|oddc-notice|status [--json]|fix ID|switch ID on|off|apply ID|cancel ID}")
+	fmt.Fprintln(out, "       gjallarctl security {notice|oddc-notice|status [--json]|scan PATH [--json]|fix ID|switch ID on|off|apply ID|cancel ID}")
 	fmt.Fprintln(out, "       gjallarctl hyprland-render-gpu")
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "Safe GjallarOS maintenance commands. Rebuild invokes sudo explicitly.")

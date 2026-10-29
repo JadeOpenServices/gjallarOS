@@ -20,7 +20,8 @@ func goodSecurityFacts() securityFacts {
 		firewall:   "active",
 		built:      flakesource.BuildSource{Revision: "abc", ODDC: "x", ODDCPinned: "x"},
 		systemAge:  time.Hour,
-		settings:   map[string]string{"usbguardEnable": "true", "usbTrustEnforce": "true", "firewallEnable": "true", "secureBootEnable": "true", "developerMode": "false"},
+		scanSigs:   time.Now().Add(-time.Hour),
+		settings:   map[string]string{"usbguardEnable": "true", "usbTrustEnforce": "true", "firewallEnable": "true", "virusScanEnable": "true", "secureBootEnable": "true", "developerMode": "false"},
 	}
 }
 

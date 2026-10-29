@@ -109,7 +109,7 @@ const (
 var presetSchema = map[string]presetValueType{
 	"hostname": presetString, "username": presetString,
 	"timezone": presetString, "locale": presetString, "keyboardLayout": presetString, "keyboardVariant": presetString,
-	"touchpadWorkspaceSwipe": presetBool, "clamshellEnable": presetBool, "consoleLoginEnable": presetBool, "usbguardEnable": presetBool, "usbTrustEnforce": presetBool, "usbTrustTpmHandle": presetString, "usbTrustLapseDays": presetInt, "snapshotsEnable": presetBool, "snapshotsKeepHours": presetInt, "snapshotsKeepDays": presetInt, "usbReviewTechnicalView": presetBool, "printingEnable": presetBool, "networkPrintingEnable": presetBool, "firewallEnable": presetBool,
+	"touchpadWorkspaceSwipe": presetBool, "clamshellEnable": presetBool, "consoleLoginEnable": presetBool, "usbguardEnable": presetBool, "usbTrustEnforce": presetBool, "usbTrustTpmHandle": presetString, "usbTrustLapseDays": presetInt, "snapshotsEnable": presetBool, "snapshotsKeepHours": presetInt, "snapshotsKeepDays": presetInt, "usbReviewTechnicalView": presetBool, "printingEnable": presetBool, "networkPrintingEnable": presetBool, "firewallEnable": presetBool, "virusScanEnable": presetBool,
 	"dolphinDriveUsage":         presetBool,
 	"firmwareFlashReadEntry":    presetBool,
 	"allowUnvalidatedODDCModel": presetBool,

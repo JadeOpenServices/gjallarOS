@@ -222,7 +222,7 @@ func tightens(key string, oldValue, newValue json.RawMessage) bool {
 	case "developerMode":
 		// Turning developer mode off returns to the official system.
 		return string(newValue) == "false"
-	case "usbguardEnable", "usbTrustEnforce", "firewallEnable":
+	case "usbguardEnable", "usbTrustEnforce", "firewallEnable", "virusScanEnable":
 		// gjallarHorn switches: turning a protection back on applies at
 		// once; turning it off waits.
 		return string(newValue) == "true"

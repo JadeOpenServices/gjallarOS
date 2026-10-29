@@ -59,6 +59,7 @@ type securityWaiting struct {
 var securitySwitches = map[string][]string{
 	"usb":      {"usbguardEnable", "usbTrustEnforce"},
 	"firewall": {"firewallEnable"},
+	"scan":     {"virusScanEnable"},
 }
 
 func switchState(f securityFacts, id string) string {
@@ -160,6 +161,9 @@ type securityFacts struct {
 
 	firewall string // systemctl is-active firewall.service
 
+	scanSigs    time.Time // when the virus signatures were last written
+	scanSigsErr error
+
 	built     flakesource.BuildSource
 	builtErr  error
 	systemAge time.Duration
@@ -176,7 +180,7 @@ type securityFacts struct {
 
 // securitySettingKeys are the settings the checks read to tell a
 // protection the user turned off from one that failed.
-var securitySettingKeys = []string{"usbguardEnable", "usbTrustEnforce", "firewallEnable", "secureBootEnable", "developerMode"}
+var securitySettingKeys = []string{"usbguardEnable", "usbTrustEnforce", "firewallEnable", "virusScanEnable", "secureBootEnable", "developerMode"}
 
 func securityChecks(f securityFacts) []securityCheck {
 	checks := []securityCheck{
@@ -184,6 +188,7 @@ func securityChecks(f securityFacts) []securityCheck {
 		secureBootCheck(f),
 		usbCheck(f),
 		firewallCheck(f),
+		scanCheck(f),
 		updatesCheck(f),
 		developerCheck(f),
 	}
@@ -374,6 +379,7 @@ func gatherSecurityFacts(ctx context.Context, stderr io.Writer) securityFacts {
 
 	out, _ := exec.CommandContext(ctx, "systemctl", "is-active", "firewall.service").Output()
 	f.firewall = strings.TrimSpace(string(out))
+	f.scanSigs, f.scanSigsErr = signatureTime(clamavDBDir)
 
 	if data, err := os.ReadFile(buildSourcePath); err != nil {
 		f.builtErr = err
@@ -643,4 +649,4 @@ func securityFixHere(id string, stdout, stderr io.Writer) int {
 	return 2
 }
 
-const securityUsage = "Usage: gjallarctl security notice|oddc-notice|status [--json]|fix ID|switch ID on|off|apply ID|cancel ID"
+const securityUsage = "Usage: gjallarctl security notice|oddc-notice|status [--json]|scan PATH [--json]|fix ID|switch ID on|off|apply ID|cancel ID"

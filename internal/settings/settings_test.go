@@ -184,9 +184,9 @@ func TestPlanReadsDefaultsOfKeysAnOlderFileLacks(t *testing.T) {
 
 func TestPlanProtectionWaitsOnlyWhenTurnedOff(t *testing.T) {
 	user := defaults(t)
-	user.USBGuardEnable, user.USBTrustEnforce, user.FirewallEnable = true, true, true
+	user.USBGuardEnable, user.USBTrustEnforce, user.FirewallEnable, user.VirusScanEnable = true, true, true, true
 	user.USBTrustTPMHandle = config.DefaultUSBTrustTPMHandle
-	for _, key := range []string{"usbguardEnable", "usbTrustEnforce", "firewallEnable"} {
+	for _, key := range []string{"usbguardEnable", "usbTrustEnforce", "firewallEnable", "virusScanEnable"} {
 		values := map[string]string{key: `false`}
 		if key == "usbguardEnable" {
 			// The trust check needs USBGuard, so both go off together.
@@ -197,8 +197,8 @@ func TestPlanProtectionWaitsOnlyWhenTurnedOff(t *testing.T) {
 			t.Fatalf("%s off: %s %v", key, change.Tier, err)
 		}
 	}
-	user.USBGuardEnable, user.USBTrustEnforce, user.FirewallEnable = false, false, false
-	change, err := Plan(configText(t, user), raw(map[string]string{"usbguardEnable": `true`, "usbTrustEnforce": `true`, "firewallEnable": `true`}))
+	user.USBGuardEnable, user.USBTrustEnforce, user.FirewallEnable, user.VirusScanEnable = false, false, false, false
+	change, err := Plan(configText(t, user), raw(map[string]string{"usbguardEnable": `true`, "usbTrustEnforce": `true`, "firewallEnable": `true`, "virusScanEnable": `true`}))
 	if err != nil || change.Tier != config.TierEveryday {
 		t.Fatalf("protections on: %s %v", change.Tier, err)
 	}

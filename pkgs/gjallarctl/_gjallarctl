@@ -117,6 +117,7 @@ _gjallarctl_security() {
     'notice:show new security notes once, as at login'
     'oddc-notice:show the notice while ODDC is off its pin'
     'status:show the gjallarHorn checks'
+    'scan:scan a file or folder for viruses'
     'fix:run the fix for one check'
     'switch:turn a protection on or off'
     'apply:apply the change waiting for a protection'
@@ -131,12 +132,14 @@ _gjallarctl_security() {
   case $words[1] in
     status)
       _arguments '--json[print the checks as JSON]' ;;
+    scan)
+      _arguments '--json[print the result as JSON]' '1:file or folder:_files' ;;
     fix)
       _arguments '1:check:((disk\:"disk encryption" secure-boot\:"Secure Boot" usb\:"USB device approval" updates\:"update the system" developer\:"turn developer mode off"))' ;;
     switch)
-      _arguments '1:protection:((usb\:"USB device approval" firewall\:"firewall"))' '2:state:(on off)' ;;
+      _arguments '1:protection:((usb\:"USB device approval" firewall\:"firewall" scan\:"virus scan"))' '2:state:(on off)' ;;
     apply|cancel)
-      _arguments '1:protection:((usb\:"USB device approval" firewall\:"firewall"))' ;;
+      _arguments '1:protection:((usb\:"USB device approval" firewall\:"firewall" scan\:"virus scan"))' ;;
   esac
 }
 

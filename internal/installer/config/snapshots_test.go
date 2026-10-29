@@ -103,3 +103,23 @@ func TestParseOldConfigKeepsFirewallOn(t *testing.T) {
 		t.Fatalf("firewallEnable false = %v, %v", user.FirewallEnable, err)
 	}
 }
+
+func TestParseOldConfigKeepsVirusScanOn(t *testing.T) {
+	fields := presetFields(t)
+	delete(fields, "virusScanEnable")
+	contents, err := json.Marshal(fields)
+	if err != nil {
+		t.Fatal(err)
+	}
+	user, err := Parse(contents)
+	if err != nil || !user.VirusScanEnable {
+		t.Fatalf("a config from before the virus scan switch: on = %v, %v", user.VirusScanEnable, err)
+	}
+	fields["virusScanEnable"] = false
+	if contents, err = json.Marshal(fields); err != nil {
+		t.Fatal(err)
+	}
+	if user, err = Parse(contents); err != nil || user.VirusScanEnable {
+		t.Fatalf("virusScanEnable false = %v, %v", user.VirusScanEnable, err)
+	}
+}

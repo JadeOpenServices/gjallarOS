@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Dialogs
 import QtQuick.Layouts
 
 // gjallarHorn (Plane 216): every check of `gjallarctl security status`.
@@ -42,6 +43,12 @@ Page {
     }
 
     background: Rectangle { color: palette.window }
+
+    FolderDialog {
+        id: folderDialog
+        title: "Folder to scan"
+        onAccepted: page.backend.scan(selectedFolder.toString())
+    }
     Component.onCompleted: backend.refreshSecurity()
 
     ScrollView {
@@ -113,6 +120,60 @@ Page {
                                 color: palette.placeholderText
                                 wrapMode: Label.Wrap
                                 Layout.fillWidth: true
+                            }
+                            // The virus scan runs on demand only (no daemon,
+                            // no scanning on access): the user picks what.
+                            RowLayout {
+                                visible: row.modelData.id === "scan" && row.modelData.state !== "off"
+                                Layout.fillWidth: true
+                                Layout.topMargin: page.gap / 2
+                                Button {
+                                    text: "Scan Downloads"
+                                    enabled: page.backend.scanning === "" && page.backend.downloads !== ""
+                                    onClicked: page.backend.scan(page.backend.downloads)
+                                }
+                                Button {
+                                    text: "Choose folder…"
+                                    enabled: page.backend.scanning === ""
+                                    onClicked: folderDialog.open()
+                                }
+                                BusyIndicator {
+                                    visible: page.backend.scanning !== ""
+                                    running: visible
+                                    implicitWidth: 24
+                                    implicitHeight: 24
+                                }
+                            }
+                            Label {
+                                readonly property var result: page.backend.scanResult
+                                readonly property var found: result.found || []
+                                visible: row.modelData.id === "scan" && text !== ""
+                                Layout.fillWidth: true
+                                wrapMode: Label.Wrap
+                                color: found.length > 0 ? page.colours.negative
+                                    : (result.error || "") !== "" ? page.colours.neutral : palette.text
+                                text: {
+                                    if (page.backend.scanning !== "") {
+                                        return "Scanning " + page.backend.scanning + "…"
+                                    }
+                                    if (result.target === undefined) {
+                                        return ""
+                                    }
+                                    let lines = []
+                                    if (found.length > 0) {
+                                        lines.push((found.length === 1 ? "1 file has" : found.length + " files have")
+                                            + " a virus. Do not open them; delete them or ask for help.")
+                                        for (const f of found) {
+                                            lines.push(f.path + " (" + f.signature + ")")
+                                        }
+                                    }
+                                    if ((result.error || "") !== "") {
+                                        lines.push(result.error)
+                                    } else if (found.length === 0) {
+                                        lines.push("No virus found in " + result.target + ".")
+                                    }
+                                    return lines.join("\n")
+                                }
                             }
                             RowLayout {
                                 visible: fixButton.visible || protectionSwitch.visible || row.waiting !== null
