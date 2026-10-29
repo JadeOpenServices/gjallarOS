@@ -1,0 +1,21 @@
+Read the fixed font from its real key and leave a font unset when the key is
+missing.
+
+The KDE integration patch reads settings.value("fixed_L1"), a key that never
+exists, so the monospace font from qt6ct.conf is ignored and every Qt
+application prints "QFont::fromString: Invalid description '(empty)'". It
+also hands an empty string to fromString when "general" is missing.
+
+--- a/src/qt6ct-qtplugin/qt6ctplatformtheme.cpp
++++ b/src/qt6ct-qtplugin/qt6ctplatformtheme.cpp
+@@ -335,6 +335,8 @@
+     settings.beginGroup("Fonts"_L1);
+     m_generalFont = *QGenericUnixTheme::font(QPlatformTheme::SystemFont);
+-    m_generalFont.fromString(settings.value("general"_L1).toString());
++    if(settings.contains("general"_L1))
++        m_generalFont.fromString(settings.value("general"_L1).toString());
+     m_fixedFont = *QGenericUnixTheme::font(QPlatformTheme::FixedFont);
+-    m_fixedFont.fromString(settings.value("fixed_L1").toString());
++    if(settings.contains("fixed"_L1))
++        m_fixedFont.fromString(settings.value("fixed"_L1).toString());
+     settings.endGroup();

@@ -14,7 +14,13 @@ let
         assert lib.assertMsg (scopePrev.qt6ct.version == "0.11")
           "GjallarOS qt6ct KDE integration patch targets qt6ct 0.11; review or remove pkgs/overlays/qt6ct-kde-integration.nix before updating qt6ct.";
         scopePrev.qt6ct.overrideAttrs (old: {
-          patches = (old.patches or [ ]) ++ [ qt6ctKdePatch ];
+          # The KDE patch reads the fixed font from a key that never exists
+          # ("fixed_L1"), so Qt apps ignore the monospace font and warn about
+          # an empty font. Upstream queue: wiki book 753.
+          patches = (old.patches or [ ]) ++ [
+            qt6ctKdePatch
+            ../patches/qt6ct-kde-fixed-font-key.patch
+          ];
 
           buildInputs = (old.buildInputs or [ ]) ++ [
             scopeFinal.qtdeclarative
