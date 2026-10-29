@@ -352,8 +352,8 @@ func runDiskProtectionSetup(command []string, stderr io.Writer) int {
 
 // runInTerminal runs a gjallarctl command in a terminal window and waits
 // for it. The command's output (next steps, errors) stays readable until
-// Enter.
-func runInTerminal(title string, command []string, stderr io.Writer) int {
+// Enter. command holds every argument after the program name.
+var runInTerminal = func(title string, command []string, stderr io.Writer) int {
 	self, err := os.Executable()
 	if err != nil {
 		fmt.Fprintf(stderr, "ERROR: %v\n", err)

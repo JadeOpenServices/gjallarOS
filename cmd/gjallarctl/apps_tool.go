@@ -27,7 +27,7 @@ func runApps(args []string, stdout, stderr io.Writer) int {
 	// --window runs the change in a terminal, so the app window's button
 	// shows the password prompt and the build output.
 	if len(args) == 3 && args[2] == "--window" && (args[0] == "add" || args[0] == "remove") {
-		return runInTerminal("GjallarOS apps", args[:2], stderr)
+		return runInTerminal("GjallarOS apps", []string{"apps", args[0], args[1]}, stderr)
 	}
 	switch {
 	case len(args) >= 1 && args[0] == "list" && len(args) <= 2:
