@@ -9,6 +9,7 @@ gjallarctl, which asks the settings service and with it for the password.
 import configparser
 import json
 import os
+import signal
 import sys
 
 from PySide6.QtCore import Property, QObject, QProcess, Signal, Slot
@@ -127,6 +128,9 @@ class Backend(QObject):
 
 
 def main():
+    # Qt's event loop never hands Ctrl+C to Python, so let it end the window
+    # the usual way when started from a terminal.
+    signal.signal(signal.SIGINT, signal.SIG_DFL)
     app = QGuiApplication(sys.argv)
     app.setApplicationName("GjallarOS Settings")
     app.setDesktopFileName("gjallar-settings")
