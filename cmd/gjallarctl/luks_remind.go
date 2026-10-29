@@ -344,19 +344,28 @@ func runLUKSRemind(args []string, stderr io.Writer) int {
 // runDiskProtectionSetup opens a terminal with the setup command, waits for
 // it, then updates the state, so the bar follows at once.
 func runDiskProtectionSetup(command []string, stderr io.Writer) int {
+	if code := runInTerminal("GjallarOS disk protection", command, stderr); code != 0 {
+		return code
+	}
+	return runLUKSRemind([]string{"--refresh"}, stderr)
+}
+
+// runInTerminal runs a gjallarctl command in a terminal window and waits
+// for it. The command's output (next steps, errors) stays readable until
+// Enter.
+func runInTerminal(title string, command []string, stderr io.Writer) int {
 	self, err := os.Executable()
 	if err != nil {
 		fmt.Fprintf(stderr, "ERROR: %v\n", err)
 		return 1
 	}
-	// The command's output (next steps, errors) stays readable until Enter.
 	script := `"$@"; printf '\nPress Enter to close. '; read -r _`
-	args := append([]string{"--title=GjallarOS disk protection", "-e", "sh", "-c", script, "sh", self}, command...)
+	args := append([]string{"--title=" + title, "-e", "sh", "-c", script, "sh", self}, command...)
 	if err := exec.Command("ghostty", args...).Run(); err != nil {
 		fmt.Fprintf(stderr, "ERROR: terminal: %v\n", err)
 		return 1
 	}
-	return runLUKSRemind([]string{"--refresh"}, stderr)
+	return 0
 }
 
 func runtimeStatePath() string {

@@ -90,6 +90,27 @@ _gjallarctl_thunderbolt() {
   _arguments '--uid[device UID from thunderbolt status]:uid:'
 }
 
+_gjallarctl_security() {
+  local -a cmds=(
+    'notice:show new security notes once, as at login'
+    'oddc-notice:show the notice while ODDC is off its pin'
+    'status:show the gjallarHorn checks'
+    'fix:run the fix for one check'
+  )
+  if (( CURRENT == 2 )); then
+    _describe -t commands 'security command' cmds
+    return
+  fi
+  shift words
+  (( CURRENT-- ))
+  case $words[1] in
+    status)
+      _arguments '--json[print the checks as JSON]' ;;
+    fix)
+      _arguments '1:check:((disk\:"disk encryption" secure-boot\:"Secure Boot" usb\:"USB device approval" updates\:"update the system" developer\:"turn developer mode off"))' ;;
+  esac
+}
+
 _gjallarctl_luks() {
   local -a cmds=(
     'status:show how the system disk unlocks'
@@ -356,7 +377,7 @@ _gjallarctl() {
         helpme) _arguments '--text[print instead of opening a window]' ;;
         tpm2) _arguments '1:tpm2 command:((reenroll\:"enroll the TPM2 key again"))' ;;
         luks) _gjallarctl_luks ;;
-        security) _arguments '1:security command:((notice\:"show new security notes once, as at login" oddc-notice\:"show the notice while ODDC is off its pin"))' ;;
+        security) _gjallarctl_security ;;
         secure-boot)
           _arguments '1:secure-boot command:((status\:"show Secure Boot ownership" setup\:"set up Secure Boot on this installed system" update-dbx\:"install the newest dbx revocation list from LVFS"))' \
             '--repo[GjallarOS checkout]:checkout:_files -/' ;;

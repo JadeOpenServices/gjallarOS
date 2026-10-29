@@ -138,7 +138,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	case "secure-boot":
 		return runSecureBoot(args[1:], stdout, stderr)
 	case "security":
-		return runSecurity(args[1:], stderr)
+		return runSecurity(args[1:], stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "ERROR: unknown command %q\n", args[0])
 		printUsage(stderr)
@@ -1808,7 +1808,7 @@ func printUsage(out io.Writer) {
 	fmt.Fprintln(out, "       gjallarctl settings {list|get|set|pending|apply|cancel|export|import|pair}")
 	fmt.Fprintln(out, "       gjallarctl snapshots {list|restore PATH}")
 	fmt.Fprintln(out, "       gjallarctl secure-boot {status|setup|update-dbx} [--repo PATH]")
-	fmt.Fprintln(out, "       gjallarctl security notice|oddc-notice")
+	fmt.Fprintln(out, "       gjallarctl security {notice|oddc-notice|status [--json]|fix ID}")
 	fmt.Fprintln(out, "       gjallarctl hyprland-render-gpu")
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "Safe GjallarOS maintenance commands. Rebuild invokes sudo explicitly.")
