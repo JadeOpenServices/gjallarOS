@@ -3,8 +3,10 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"os"
 	"slices"
 	"time"
 
@@ -14,7 +16,9 @@ import (
 const appsUsage = "Usage: gjallarctl apps list [--json] | add ID [--window] | remove ID [--window]"
 
 // catalogueEntry is one app as the app window shows it (Plane 220).
-// Installed is null when the settings service does not answer.
+// Installed is the saved choice and is null when the settings service does
+// not answer; the list's "settings" field then says why. Built is whether
+// the running system has the app, null when that is not recorded.
 type catalogueEntry struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`
@@ -22,6 +26,20 @@ type catalogueEntry struct {
 	Category    string `json:"category"`
 	Icon        string `json:"icon"`
 	Installed   *bool  `json:"installed"`
+	Built       *bool  `json:"built"`
+}
+
+// appsBuiltPath lists the apps the running system was built with.
+var appsBuiltPath = "/etc/gjallar/apps.json"
+
+// builtApps reads appsBuiltPath; known is false on a system built before
+// it was written.
+func builtApps() (built []string, known bool) {
+	data, err := os.ReadFile(appsBuiltPath)
+	if err != nil || json.Unmarshal(data, &built) != nil {
+		return nil, false
+	}
+	return built, true
 }
 
 func runApps(args []string, stdout, stderr io.Writer) int {
@@ -53,10 +71,16 @@ func runAppsList(asJSON bool, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "ERROR: %v\n", err)
 		return 1
 	}
-	selected, known := selectedApps(stderr)
-	entries := catalogueEntries(catalogue, selected, known)
+	selected, state, rebuilding := selectedApps(stderr)
+	entries := catalogueEntries(catalogue, selected, state == settingsAnswered)
+	if built, ok := builtApps(); ok {
+		for i := range entries {
+			has := slices.Contains(built, entries[i].ID)
+			entries[i].Built = &has
+		}
+	}
 	if asJSON {
-		data, err := json.Marshal(map[string]any{"apps": entries})
+		data, err := json.Marshal(map[string]any{"apps": entries, "settings": state, "rebuilding": rebuilding})
 		if err != nil {
 			fmt.Fprintf(stderr, "ERROR: %v\n", err)
 			return 1
@@ -71,9 +95,25 @@ func runAppsList(asJSON bool, stdout, stderr io.Writer) int {
 		} else if e.Installed != nil {
 			mark = " "
 		}
-		fmt.Fprintf(stdout, "%s %-14s %-14s %s\n", mark, e.ID, e.Category, e.Description)
+		fmt.Fprintf(stdout, "%s %-14s %-14s %s%s\n", mark, e.ID, e.Category, e.Description, appWaits(e, rebuilding))
 	}
 	return 0
+}
+
+// appWaits says when a saved choice is not built yet.
+func appWaits(e catalogueEntry, rebuilding bool) string {
+	if e.Installed == nil || e.Built == nil || *e.Installed == *e.Built {
+		return ""
+	}
+	switch {
+	case *e.Installed && rebuilding:
+		return " (installing now)"
+	case *e.Installed:
+		return " (installed with the next rebuild)"
+	case rebuilding:
+		return " (removing now)"
+	}
+	return " (removed with the next rebuild)"
 }
 
 func catalogueEntries(catalogue []apps.App, selected []string, known bool) []catalogueEntry {
@@ -89,12 +129,21 @@ func catalogueEntries(catalogue []apps.App, selected []string, known bool) []cat
 	return entries
 }
 
-// selectedApps reads the apps setting; known is false when the settings
-// service does not answer.
-func selectedApps(stderr io.Writer) (selected []string, known bool) {
+// What selectedApps learned from the settings service.
+const (
+	settingsAnswered = "ok"
+	// settingsNotThere: no settings service, the system still builds from
+	// the user's own checkout.
+	settingsNotThere = "missing"
+	settingsFailed   = "failed"
+)
+
+// selectedApps reads the apps setting, says whether the settings service
+// answered and whether a rebuild is running.
+func selectedApps(stderr io.Writer) (selected []string, state string, rebuilding bool) {
 	bus, ok := openSettings(stderr)
 	if !ok {
-		return nil, false
+		return nil, settingsFailed, false
 	}
 	defer bus.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -103,11 +152,19 @@ func selectedApps(stderr io.Writer) (selected []string, known bool) {
 	if err == nil {
 		err = json.Unmarshal(key.Value, &selected)
 	}
-	if err != nil {
+	switch {
+	case errors.Is(err, errSettingsMissing):
 		fmt.Fprintf(stderr, "ERROR: read apps: %v\n", err)
-		return nil, false
+		return nil, settingsNotThere, false
+	case err != nil:
+		fmt.Fprintf(stderr, "ERROR: read apps: %v\n", err)
+		return nil, settingsFailed, false
 	}
-	return selected, true
+	rebuilding, _, err = bus.Rebuild(ctx)
+	if err != nil {
+		fmt.Fprintf(stderr, "rebuild state: %v\n", err)
+	}
+	return selected, settingsAnswered, rebuilding
 }
 
 // runAppsChange asks the settings service for the apps list with one app

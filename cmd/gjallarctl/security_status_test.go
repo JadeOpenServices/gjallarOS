@@ -148,6 +148,10 @@ func TestSecurityChecksDeveloper(t *testing.T) {
 	if c := checkByID(t, securityChecks(f), "developer"); c.State != checkUnknown {
 		t.Errorf("no settings answer = %s, want unknown", c.State)
 	}
+	f.settingsMissing = true
+	if c := checkByID(t, securityChecks(f), "developer"); c.State != checkWeak || c.Fix != "" {
+		t.Errorf("no settings service = %+v, want weak without a fix", c)
+	}
 }
 
 func TestSecurityChecksHardware(t *testing.T) {

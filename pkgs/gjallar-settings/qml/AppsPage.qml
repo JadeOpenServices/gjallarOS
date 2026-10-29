@@ -48,7 +48,9 @@ Page {
             Layout.rightMargin: page.gap
             wrapMode: Label.Wrap
             color: page.colours.neutral
-            text: "The settings service did not answer, so this list cannot show what is installed or change it."
+            text: page.backend.appsSettings === "missing"
+                ? "This system still builds from your own checkout, so this list cannot show what is installed or change it. Run gjallarctl system move to switch to the system checkout."
+                : "The settings service did not answer, so this list cannot show what is installed or change it."
         }
 
         Label {
@@ -114,6 +116,19 @@ Page {
                         Label {
                             text: row.modelData.description
                             color: palette.placeholderText
+                            wrapMode: Label.Wrap
+                            Layout.fillWidth: true
+                        }
+                        // The saved choice differs from the running system.
+                        Label {
+                            readonly property bool waits: typeof row.modelData.installed === "boolean"
+                                && typeof row.modelData.built === "boolean"
+                                && row.modelData.installed !== row.modelData.built
+                            visible: waits
+                            text: row.modelData.installed
+                                ? (page.backend.appsRebuilding ? "Installing now" : "Installed with the next rebuild")
+                                : (page.backend.appsRebuilding ? "Removing now" : "Removed with the next rebuild")
+                            color: page.colours.neutral
                             wrapMode: Label.Wrap
                             Layout.fillWidth: true
                         }

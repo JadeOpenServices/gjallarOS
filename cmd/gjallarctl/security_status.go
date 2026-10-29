@@ -171,6 +171,9 @@ type securityFacts struct {
 
 	// settings holds the keys below as JSON text; missing means unknown.
 	settings map[string]string
+	// settingsMissing is true when the system has no settings service: it
+	// still builds from the user's own checkout.
+	settingsMissing bool
 	// pending are the changes the settings service holds for this session.
 	pending []settings.Pending
 
@@ -328,6 +331,11 @@ func developerCheck(f securityFacts) securityCheck {
 	case "false":
 		c.State, c.Detail = checkOK, "Off. The system is built only from the official release."
 	default:
+		if f.settingsMissing {
+			// Without the system checkout your own folder is the build.
+			c.State, c.Detail = checkWeak, "Your own checkout still builds the system. Run gjallarctl system move to switch to the system checkout."
+			break
+		}
 		c.State, c.Detail = checkUnknown, "The settings service does not answer."
 	}
 	return c
@@ -396,8 +404,11 @@ func gatherSecurityFacts(ctx context.Context, stderr io.Writer) securityFacts {
 	if bus, ok := openSettings(stderr); ok {
 		setCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		for _, name := range securitySettingKeys {
-			if key, err := settingsKey(setCtx, bus, name); err == nil {
+			key, err := settingsKey(setCtx, bus, name)
+			if err == nil {
 				f.settings[name] = string(key.Value)
+			} else if errors.Is(err, errSettingsMissing) {
+				f.settingsMissing = true
 			}
 		}
 		if list, err := settingsPendingList(setCtx, bus); err == nil {

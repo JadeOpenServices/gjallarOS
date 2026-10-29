@@ -98,6 +98,8 @@ class Backend(QObject):
         super().__init__()
         self._checks = []
         self._apps = []
+        self._appsSettings = ""
+        self._appsRebuilding = False
         self._busy = 0
         self._running = set()
         self._scan = {}
@@ -141,6 +143,16 @@ class Backend(QObject):
     def apps(self):
         return self._apps
 
+    # "ok", "missing" (no settings service: the system still builds from
+    # the user's own checkout) or "failed".
+    @Property(str, notify=appsChanged)
+    def appsSettings(self):
+        return self._appsSettings
+
+    @Property(bool, notify=appsChanged)
+    def appsRebuilding(self):
+        return self._appsRebuilding
+
     @Property(bool, notify=busyChanged)
     def busy(self):
         return self._busy > 0
@@ -171,6 +183,15 @@ class Backend(QObject):
         def done(_code, output):
             entries = self._parse(output, "apps")
             self._apps = entries if entries is not None else []
+            try:
+                answer = json.loads(output)
+            except ValueError:
+                answer = None
+            if not isinstance(answer, dict):
+                answer = {}
+            state = answer.get("settings", "")
+            self._appsSettings = state if isinstance(state, str) else ""
+            self._appsRebuilding = answer.get("rebuilding") is True
             self.appsChanged.emit()
 
         self._run(["apps", "list", "--json"], done)
