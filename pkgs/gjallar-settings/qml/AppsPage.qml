@@ -93,6 +93,14 @@ Page {
                 RowLayout {
                     anchors.fill: parent
                     spacing: page.gap
+                    Image {
+                        source: "image://appicon/" + row.modelData.id
+                        sourceSize: Qt.size(40, 40)
+                        Layout.preferredWidth: 40
+                        Layout.preferredHeight: 40
+                        Layout.alignment: Qt.AlignTop
+                        Accessible.ignored: true
+                    }
                     ColumnLayout {
                         Layout.fillWidth: true
                         spacing: 2

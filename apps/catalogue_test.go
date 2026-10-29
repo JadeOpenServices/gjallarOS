@@ -12,6 +12,9 @@ func TestCatalogue(t *testing.T) {
 		if app.Name == "" || app.Category == "" {
 			t.Errorf("%s: name and category are required", app.ID)
 		}
+		if !iconName.MatchString(app.Icon) {
+			t.Errorf("%s: icon %q", app.ID, app.Icon)
+		}
 		if app.Installer != "" {
 			asked[app.ID] = true
 		}
@@ -51,5 +54,18 @@ func TestRetired(t *testing.T) {
 	}
 	if len(kept) != 2 || kept[0] != "git" || kept[1] != "vlc" || len(dropped) != 1 || dropped[0] != "drawio" {
 		t.Fatalf("kept %v dropped %v", kept, dropped)
+	}
+}
+
+func TestIconName(t *testing.T) {
+	for _, name := range []string{"org.kde.dolphin", "libreoffice-startcenter", "vlc"} {
+		if !iconName.MatchString(name) {
+			t.Errorf("%q refused", name)
+		}
+	}
+	for _, name := range []string{"", "../icon", "/usr/share/icons/x.svg", "http://example.com/x", ".hidden", "a b"} {
+		if iconName.MatchString(name) {
+			t.Errorf("%q accepted", name)
+		}
 	}
 }

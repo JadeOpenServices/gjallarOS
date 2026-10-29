@@ -20,6 +20,7 @@ type catalogueEntry struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
 	Category    string `json:"category"`
+	Icon        string `json:"icon"`
 	Installed   *bool  `json:"installed"`
 }
 
@@ -78,7 +79,7 @@ func runAppsList(asJSON bool, stdout, stderr io.Writer) int {
 func catalogueEntries(catalogue []apps.App, selected []string, known bool) []catalogueEntry {
 	entries := make([]catalogueEntry, 0, len(catalogue))
 	for _, app := range catalogue {
-		e := catalogueEntry{ID: app.ID, Name: app.Name, Description: app.Description, Category: app.Category}
+		e := catalogueEntry{ID: app.ID, Name: app.Name, Description: app.Description, Category: app.Category, Icon: app.Icon}
 		if known {
 			installed := slices.Contains(selected, app.ID)
 			e.Installed = &installed

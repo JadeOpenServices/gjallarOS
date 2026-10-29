@@ -9,16 +9,34 @@ gjallarctl, which asks the settings service and with it for the password.
 import configparser
 import json
 import os
+import re
 import signal
 import sys
 
-from PySide6.QtCore import Property, QObject, QProcess, QStandardPaths, QUrl, Signal, Slot
+from PySide6.QtCore import Property, QObject, QProcess, QSize, QStandardPaths, QUrl, Signal, Slot
 from PySide6.QtGui import QFont, QGuiApplication, QIcon
 from PySide6.QtQml import QQmlApplicationEngine
+from PySide6.QtQuick import QQuickImageProvider
 from PySide6.QtQuickControls2 import QQuickStyle
 
 GJALLARCTL = "@gjallarctl@"
+ICON_DIR = "@icons@"
 QML_DIR = "@qml@"
+
+# Freedesktop category icons for apps the icon theme has no icon for.
+CATEGORY_ICONS = {
+    "communication": "applications-internet",
+    "compatibility": "applications-other",
+    "development": "applications-development",
+    "files": "system-file-manager",
+    "graphics": "applications-graphics",
+    "media": "applications-multimedia",
+    "network": "applications-internet",
+    "office": "applications-office",
+    "security": "security-high",
+    "system": "applications-system",
+}
+APP_ID = re.compile(r"[a-z0-9][a-z0-9-]*")
 
 # Obsidian (themes/palettes/openjade.nix) for the colours Qt's palette has
 # no role for, until Noctalia has written its colour scheme.
@@ -42,6 +60,32 @@ def theme_colours():
         if len(value) == 7 and value.startswith("#"):
             colours[name] = value
     return colours
+
+
+class AppIconProvider(QQuickImageProvider):
+    """image://appicon/<id>: the repo icon, else the theme icon, else the category icon (Plane 273)."""
+
+    def __init__(self, backend):
+        super().__init__(QQuickImageProvider.ImageType.Pixmap)
+        self._backend = backend
+
+    def requestPixmap(self, app_id, size, requested):
+        side = max(requested.width(), requested.height(), 32)
+        size.setWidth(side)
+        size.setHeight(side)
+        icon = QIcon()
+        if APP_ID.fullmatch(app_id):
+            path = os.path.join(ICON_DIR, app_id + ".svg")
+            if os.path.isfile(path):
+                icon = QIcon(path)
+            app = next((a for a in self._backend.apps if isinstance(a, dict) and a.get("id") == app_id), {})
+            if icon.isNull():
+                icon = QIcon.fromTheme(app.get("icon") or app_id)
+            if icon.isNull():
+                icon = QIcon.fromTheme(CATEGORY_ICONS.get(app.get("category"), "applications-other"))
+        if icon.isNull():
+            icon = QIcon.fromTheme("applications-other")
+        return icon.pixmap(QSize(side, side))
 
 
 class Backend(QObject):
@@ -195,6 +239,7 @@ def main():
 
     backend = Backend()
     engine = QQmlApplicationEngine()
+    engine.addImageProvider("appicon", AppIconProvider(backend))
     engine.setInitialProperties({"backend": backend, "startPage": start, "colours": theme_colours()})
     engine.load(os.path.join(QML_DIR, "Main.qml"))
     if not engine.rootObjects():

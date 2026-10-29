@@ -2,5 +2,6 @@
   "name": "Dolphin",
   "description": "KDE file manager with the Gwenview image viewer, themed and wired to Nextcloud when present.",
   "category": "files",
+  "icon": "org.kde.dolphin",
   "default": true
 }

@@ -11,6 +11,11 @@
 let
   python = python3.withPackages (p: [ p.pyside6 ]);
   share = "share/gjallar-settings";
+  # Repo app icons, apps/<id>/icon.svg (Plane 273); checked below.
+  appIcons = lib.fileset.toSource {
+    root = ../../apps;
+    fileset = lib.fileset.fileFilter (file: file.name == "icon.svg") ../../apps;
+  };
 in
 stdenv.mkDerivation {
   pname = "gjallar-settings";
@@ -19,6 +24,7 @@ stdenv.mkDerivation {
   src = lib.fileset.toSource {
     root = ./.;
     fileset = lib.fileset.unions [
+      ./check_icon.py
       ./gjallar_settings.py
       ./qml
     ];
@@ -47,8 +53,16 @@ stdenv.mkDerivation {
   installPhase = ''
     runHook preInstall
     install -Dm444 -t "$out/${share}/qml" qml/*.qml
+    mkdir -p "$out/${share}/icons"
+    for icon in ${appIcons}/*/icon.svg; do
+      [ -e "$icon" ] || continue
+      ${python.interpreter} -I check_icon.py "$icon"
+      id=$(basename "$(dirname "$icon")")
+      install -Dm444 "$icon" "$out/${share}/icons/$id.svg"
+    done
     substitute gjallar_settings.py "$out/${share}/gjallar_settings.py" \
       --subst-var-by gjallarctl ${lib.getExe gjallarctl} \
+      --subst-var-by icons "$out/${share}/icons" \
       --subst-var-by qml "$out/${share}/qml"
     makeWrapper ${python.interpreter} "$out/bin/gjallar-settings" \
       --add-flags "-I $out/${share}/gjallar_settings.py" \
