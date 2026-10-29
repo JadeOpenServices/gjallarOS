@@ -76,7 +76,9 @@ type scanResult struct {
 // scanCommand runs clamscan as the user in a transient unit that has no
 // network, sees the system and home read-only and may not gain rights. A
 // file that exploits the scanner gets nothing to write to and nobody to
-// talk to.
+// talk to. RestrictAddressFamilies is empty on purpose: systemd-run sends
+// the word "none" as a family name, which the manager rejects, while an
+// empty allow list over D-Bus means no socket families at all.
 var scanCommand = func(clamscan, target string) *exec.Cmd {
 	return exec.Command("systemd-run", "--user", "--pipe", "--wait", "--collect", "--quiet",
 		"--unit=gjallar-scan-"+fmt.Sprint(os.Getpid()),
@@ -87,7 +89,7 @@ var scanCommand = func(clamscan, target string) *exec.Cmd {
 		"-p", "ProtectSystem=strict",
 		"-p", "ProtectHome=read-only",
 		"-p", "NoNewPrivileges=yes",
-		"-p", "RestrictAddressFamilies=none",
+		"-p", "RestrictAddressFamilies=",
 		"-p", "RestrictNamespaces=yes",
 		"-p", "LockPersonality=yes",
 		"-p", "SystemCallArchitectures=native",
@@ -191,6 +193,8 @@ func scan(result *scanResult) int {
 		result.Error = "The scan did not finish."
 		if msg := strings.TrimSpace(errOut.String()); msg != "" {
 			result.Error += " " + lastLine(msg)
+		} else if exit == nil {
+			result.Error += " " + err.Error()
 		}
 	}
 	if len(result.Found) > 0 {
