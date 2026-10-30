@@ -60,7 +60,7 @@ func TestLoadApp(t *testing.T) {
 func TestLoadAppRefusesBadRecords(t *testing.T) {
 	for _, record := range []string{
 		`{"name":"../Synthetic App","exe":"app.exe"}`,
-		`{"name":"Synthetic App","exe":""}`,
+		`{"name":"Synthetic App","exe":"a\u0000b"}`,
 		`{"name":"Synthetic App"`,
 	} {
 		home, _ := appHome(t, record)
@@ -114,6 +114,7 @@ func TestApps(t *testing.T) {
 	dir := filepath.Dir(paths.Record)
 	for name, data := range map[string]string{
 		"broken.json":   `{"name":"../x","exe":"app.exe"}`,
+		"empty.json":    `{"name":"Empty","exe":""}`,
 		"Bad Id.json":   `{"name":"Other","exe":"app.exe"}`,
 		"notes.txt":     "SYNTHETIC",
 		"another.json~": "{}",
@@ -129,11 +130,62 @@ func TestApps(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(apps) != 2 || apps[0].ID != "broken" || apps[0].Err == nil ||
-		apps[1].ID != "synthetic" || apps[1].Err != nil || apps[1].App.Name != "Synthetic App" {
+	if len(apps) != 3 || apps[0].ID != "broken" || apps[0].Err == nil ||
+		apps[1].ID != "empty" || apps[1].Err == nil || !strings.Contains(apps[1].Err.Error(), "gjallar-wine program empty") ||
+		apps[2].ID != "synthetic" || apps[2].Err != nil || apps[2].App.Name != "Synthetic App" {
 		t.Fatalf("apps %+v", apps)
 	}
 	if apps, err := Apps(t.TempDir()); err != nil || apps != nil {
 		t.Errorf("no records folder: %v %v", apps, err)
+	}
+}
+
+func TestLoadAppWithoutProgram(t *testing.T) {
+	home, _ := appHome(t, `{"name":"Synthetic App","exe":""}`)
+	a, _, err := LoadApp(home, "synthetic")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.Ready("synthetic") == nil {
+		t.Error("app without a program is ready")
+	}
+}
+
+func TestWriteRecord(t *testing.T) {
+	home := t.TempDir()
+	paths := PathsFor(home, "synthetic", "Synthetic App")
+	want := App{Name: "Synthetic App", Exe: `C:\Program Files\Synthetic\app.exe`}
+	if err := WriteRecord(paths, want); err != nil {
+		t.Fatal(err)
+	}
+	got, err := readRecord(paths.Record)
+	if err != nil || got != want {
+		t.Fatalf("read back %+v %v", got, err)
+	}
+	if info, err := os.Stat(paths.Record); err != nil || info.Mode().Perm() != 0o600 {
+		t.Errorf("record mode %v %v", info, err)
+	}
+	entries, _ := os.ReadDir(filepath.Dir(paths.Record))
+	if len(entries) != 1 {
+		t.Errorf("left over files: %v", entries)
+	}
+	if err := WriteRecord(paths, App{Name: "../x"}); err == nil {
+		t.Error("bad name written")
+	}
+}
+
+func TestIDFromName(t *testing.T) {
+	for name, want := range map[string]string{
+		"Synthetic App":          "synthetic-app",
+		"  Tool 2000 (x) ":       "tool-2000-x",
+		"7 Zip":                  "app-7-zip",
+		"Ünïcode":                "n-code",
+		"!!!":                    "app",
+		strings.Repeat("ab", 40): strings.Repeat("ab", 24),
+	} {
+		got := IDFromName(name)
+		if got != want || !ValidID(got) {
+			t.Errorf("IDFromName(%q) = %q, want %q", name, got, want)
+		}
 	}
 }

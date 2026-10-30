@@ -53,7 +53,7 @@ func TestSandboxArgs(t *testing.T) {
 		}
 	}
 	tail := args[slices.Index(args, "--")+1:]
-	want := []string{"/store/gjallar-wine", "lock", "--sym", s.Prefix, "--sym", "/tmp", "--refer", "/", "--", "/store/wine", `C:\notepad.exe`, "a b"}
+	want := []string{"/store/gjallar-wine", "lock", "--sym", s.Prefix, "--sym", "/tmp", "--refer", "/", "--", "/store/gjallar-wine", "stay", "/store/wine", `C:\notepad.exe`, "a b"}
 	if !slices.Equal(tail, want) {
 		t.Errorf("command = %q, want %q", tail, want)
 	}

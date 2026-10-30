@@ -26,8 +26,16 @@ type App struct {
 	// Name is the files folder's name and what the user sees.
 	Name string `json:"name"`
 	// Exe is the program Wine starts, as a path inside the prefix
-	// (C:\...) or in the files folder.
+	// (C:\...) or in the files folder (D:\...). Empty until one is chosen.
 	Exe string `json:"exe"`
+}
+
+// Ready says whether app id has a program to start.
+func (a App) Ready(id string) error {
+	if a.Exe == "" {
+		return fmt.Errorf("no program chosen yet; gjallar-wine program %s shows the choices", id)
+	}
+	return nil
 }
 
 // Paths are one app's folders, below a home without symbolic links.
@@ -102,10 +110,66 @@ func readRecord(record string) (App, error) {
 	if !ValidName(a.Name) {
 		return App{}, fmt.Errorf("%s: %q is not a folder name", record, a.Name)
 	}
-	if a.Exe == "" || strings.ContainsRune(a.Exe, 0) {
-		return App{}, fmt.Errorf("%s names no program", record)
+	if strings.ContainsRune(a.Exe, 0) {
+		return App{}, fmt.Errorf("%s: the program's path is broken", record)
 	}
 	return a, nil
+}
+
+// WriteRecord saves app a at paths.Record in one step, so a reader sees
+// the old record or the new one.
+func WriteRecord(paths Paths, a App) error {
+	if !ValidName(a.Name) || strings.ContainsRune(a.Exe, 0) {
+		return fmt.Errorf("%q is not a folder name", a.Name)
+	}
+	data, err := json.MarshalIndent(a, "", "  ")
+	if err != nil {
+		return err
+	}
+	dir := filepath.Dir(paths.Record)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(dir, ".record-*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp.Name())
+	if _, err := tmp.Write(append(data, '\n')); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmp.Name(), paths.Record)
+}
+
+// IDFromName makes an app id from a name: letters and digits kept in
+// lowercase, everything else one dash.
+func IDFromName(name string) string {
+	var b strings.Builder
+	dash := false
+	for _, r := range strings.ToLower(name) {
+		switch {
+		case r >= 'a' && r <= 'z' || r >= '0' && r <= '9':
+			if dash && b.Len() > 0 {
+				b.WriteByte('-')
+			}
+			dash = false
+			b.WriteRune(r)
+		default:
+			dash = true
+		}
+	}
+	id := b.String()
+	if id == "" || id[0] < 'a' {
+		id = "app-" + id
+	}
+	if len(id) > MaxID {
+		id = id[:MaxID]
+	}
+	return strings.Trim(id, "-")
 }
 
 // Listed is one app record as Apps found it. Err says why the record
@@ -134,6 +198,9 @@ func Apps(home string) ([]Listed, error) {
 			continue
 		}
 		a, err := readRecord(filepath.Join(dir, entry.Name()))
+		if err == nil {
+			err = a.Ready(id)
+		}
 		apps = append(apps, Listed{ID: id, App: a, Err: err})
 	}
 	return apps, nil

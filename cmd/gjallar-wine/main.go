@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
+	"syscall"
 )
 
 // Tool paths, set by the package.
@@ -39,11 +41,15 @@ func run(args []string, stdout, stderr io.Writer) int {
 			return 2
 		}
 		return runApp(args[1], args[2:], stderr)
-	// hold and lock are the launcher's own steps inside the sandbox.
+	// hold, lock and stay are the launcher's own steps inside the sandbox.
 	case "hold":
 		return hold()
 	case "lock":
 		return lock(args[1:], stderr)
+	case "stay":
+		signals := make(chan os.Signal, 1)
+		signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
+		return stay(args[1:], signals, stderr)
 	}
 	fmt.Fprintf(stderr, "ERROR: unknown command %q\n%s\n", args[0], usage)
 	return 2

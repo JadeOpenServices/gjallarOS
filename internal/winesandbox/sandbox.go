@@ -10,7 +10,8 @@ type Sandbox struct {
 	// Bwrap is the bubblewrap binary.
 	Bwrap string
 	// Self is this launcher's binary; it runs inside the sandbox to turn
-	// Landlock on before Wine starts.
+	// Landlock on before Wine starts, and keeps the sandbox until Wine
+	// has ended.
 	Self string
 	// Wine is the wine binary.
 	Wine string
@@ -107,7 +108,9 @@ func (s Sandbox) Args(args []string) []string {
 		// Symbolic links only in the prefix and /tmp: one in the files
 		// folder could point other programs at files outside.
 		s.Self, "lock", "--sym", s.Prefix, "--sym", "/tmp", "--refer", "/", "--",
-		s.Wine,
+		// The sandbox ends with this first program, so it waits for all of
+		// Wine to end.
+		s.Self, "stay", s.Wine,
 	}
 	return append(out, args...)
 }

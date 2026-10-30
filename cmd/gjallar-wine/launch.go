@@ -414,6 +414,67 @@ func lock(args []string, stderr io.Writer) int {
 	return 1
 }
 
+// stay runs Wine as the sandbox's first program. The sandbox ends when
+// that program does, so stay waits until wineserver is gone too: until
+// then other programs of the app (an installer's children, a launcher's
+// game) still run, and wineserver has not yet saved the registry. A
+// signal goes on to Wine, and then stops the app's other programs too.
+func stay(args []string, signals <-chan os.Signal, stderr io.Writer) int {
+	if len(args) == 0 || !filepath.IsAbs(args[0]) {
+		fmt.Fprintln(stderr, "ERROR: stay needs Wine, as a full path")
+		return 2
+	}
+	wine := exec.Command(args[0], args[1:]...)
+	wine.Stdin, wine.Stdout, wine.Stderr = os.Stdin, os.Stdout, os.Stderr
+	if err := wine.Start(); err != nil {
+		fmt.Fprintf(stderr, "ERROR: start Wine: %v\n", err)
+		return 1
+	}
+	done := make(chan error, 1)
+	go func() { done <- wine.Wait() }()
+	stopped := false
+	var waitErr error
+wait:
+	for {
+		select {
+		case sig := <-signals:
+			stopped = true
+			wine.Process.Signal(sig)
+		case waitErr = <-done:
+			break wait
+		}
+	}
+	code, err := exitCode(waitErr)
+	if err != nil {
+		fmt.Fprintf(stderr, "ERROR: %v\n", err)
+		code = 1
+	}
+
+	server := filepath.Join(filepath.Dir(args[0]), "wineserver")
+	mode := "-w"
+	if stopped {
+		mode = "-k"
+	}
+	for {
+		cmd := exec.Command(server, mode)
+		cmd.Stdout, cmd.Stderr = stderr, stderr
+		if err := cmd.Start(); err != nil {
+			fmt.Fprintf(stderr, "ERROR: start wineserver: %v\n", err)
+			return code
+		}
+		go func() { done <- cmd.Wait() }()
+		select {
+		case <-done:
+			return code
+		case <-signals:
+			// Waiting gave way to stopping.
+			cmd.Process.Kill()
+			<-done
+			mode = "-k"
+		}
+	}
+}
+
 func parseLock(args []string) (sym, refer, argv []string, err error) {
 	for len(args) > 0 {
 		switch args[0] {
