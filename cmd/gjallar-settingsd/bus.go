@@ -19,6 +19,7 @@ import (
 	"github.com/JadeOpenServices/gjallarOS/internal/nettrust"
 	"github.com/JadeOpenServices/gjallarOS/internal/settings"
 	"github.com/JadeOpenServices/gjallarOS/internal/usbtrust"
+	"github.com/JadeOpenServices/gjallarOS/internal/winesandbox"
 )
 
 const (
@@ -360,6 +361,16 @@ func (o object) PauseVPN(sender dbus.Sender) (string, *dbus.Error) {
 
 func (o object) ResumeVPN(sender dbus.Sender) *dbus.Error {
 	return busError(o.svc.ResumeVPN(context.Background(), string(sender)))
+}
+
+func (o object) Wine(sender dbus.Sender) (string, *dbus.Error) {
+	programs, err := o.svc.Wine(context.Background(), string(sender))
+	return answer(programs, err)
+}
+
+func (o object) SetWine(sender dbus.Sender, id string, internet, home bool) (string, *dbus.Error) {
+	programs, err := o.svc.SetWine(context.Background(), string(sender), id, winesandbox.Flags{Internet: internet, Home: home})
+	return answer(programs, err)
 }
 
 func answer(value any, err error) (string, *dbus.Error) {

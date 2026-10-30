@@ -95,6 +95,13 @@ type service struct {
 	writePause func(string, nettrust.Pause) error
 	userName   func(uint32) (string, error)
 
+	// wineDir holds the Wine apps' network switches; wineChanged tells
+	// the launchers they changed. wineMu keeps writes from losing each
+	// other.
+	wineDir     string
+	wineChanged func()
+	wineMu      sync.Mutex
+
 	// keys signs and checks settings files; device is this machine's
 	// app-specific id in them. Without keys, Export and Import refuse.
 	keys   *keyStore
@@ -118,6 +125,8 @@ func newService(sys system, checkoutPath string, checkout func(string) error) *s
 		pausePath:    nettrust.PausePath,
 		writePause:   nettrust.WritePause,
 		userName:     lookupUserName,
+		wineDir:      wineDir,
+		wineChanged:  func() {},
 		pending:      map[string]settings.Change{},
 	}
 }

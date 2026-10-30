@@ -112,3 +112,16 @@ func TestRulesetHome(t *testing.T) {
 		t.Errorf("Internet off but last rule = %q", lines[len(lines)-1])
 	}
 }
+
+func TestValidID(t *testing.T) {
+	for id, want := range map[string]bool{
+		"notepad": true, "notepad-plus-2": true, "a": true,
+		"": false, "2notepad": false, "Notepad": false, "note pad": false, "note_pad": false,
+		"notepad-": false, "-notepad": false, "../x": false, "note.pad": false,
+		strings.Repeat("a", MaxID): true, strings.Repeat("a", MaxID+1): false,
+	} {
+		if got := ValidID(id); got != want {
+			t.Errorf("ValidID(%q) = %v, want %v", id, got, want)
+		}
+	}
+}
