@@ -115,7 +115,7 @@ class Backend(QObject):
         self._running = set()
         self._scan = {}
         self._scanning = ""
-        self._wineTool = shutil.which("gjallar-wine") or ""
+        self._wineTool = ""
 
     def _run(self, args, done=None, busy=True, program=GJALLARCTL):
         process = QProcess(self)
@@ -188,7 +188,7 @@ class Backend(QObject):
 
     # gjallar-wine comes with the Wine app (apps/wine); without it there is
     # nothing to set up.
-    @Property(bool, constant=True)
+    @Property(bool, notify=appsChanged)
     def wineTool(self):
         return self._wineTool != ""
 
@@ -219,6 +219,8 @@ class Backend(QObject):
             state = answer.get("settings", "")
             self._appsSettings = state if isinstance(state, str) else ""
             self._appsRebuilding = answer.get("rebuilding") is True
+            # Turning Wine on or off in this window adds or removes it.
+            self._wineTool = shutil.which("gjallar-wine") or ""
             self.appsChanged.emit()
 
         self._run(["apps", "list", "--json"], done)
