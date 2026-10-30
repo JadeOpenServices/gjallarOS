@@ -4,7 +4,8 @@ import QtQuick.Layouts
 
 // The app catalogue (Plane 220): `gjallarctl apps list --json`, one switch
 // per app. Installing or removing runs in a terminal with the password
-// prompt and the build output.
+// prompt and the build output. Wine apps (Plane 272) follow in their own
+// section with their two network switches.
 Page {
     id: page
 
@@ -20,13 +21,21 @@ Page {
             || a.name.toLowerCase().includes(query)
             || a.description.toLowerCase().includes(query)
             || a.id.toLowerCase().includes(query))
-        return list.sort((a, b) => a.category.localeCompare(b.category) || a.name.localeCompare(b.name))
+        list.sort((a, b) => a.category.localeCompare(b.category) || a.name.localeCompare(b.name))
+        const wine = backend.wineApps.filter(w => query === ""
+            || (w.name || "").toLowerCase().includes(query)
+            || (w.program || "").toLowerCase().includes(query)
+            || w.id.toLowerCase().includes(query))
+        return list.concat(wine.map(w => Object.assign({ wine: true, category: "Wine apps" }, w)))
     }
     // installed is null (undefined here) when the settings service does not answer.
     readonly property bool known: backend.apps.length > 0 && backend.apps.every(a => typeof a.installed === "boolean")
 
     background: Rectangle { color: palette.window }
-    Component.onCompleted: backend.refreshApps()
+    Component.onCompleted: {
+        backend.refreshApps()
+        backend.refreshWine()
+    }
 
     ColumnLayout {
         anchors.fill: parent
@@ -42,13 +51,14 @@ Page {
         }
 
         Label {
-            visible: page.backend.apps.length > 0 && !page.known
+            readonly property bool wineUnknown: page.backend.wineApps.length > 0 && page.backend.wineSettings !== "ok"
+            visible: (page.backend.apps.length > 0 && !page.known) || wineUnknown
             Layout.fillWidth: true
             Layout.leftMargin: page.gap
             Layout.rightMargin: page.gap
             wrapMode: Label.Wrap
             color: page.colours.neutral
-            text: page.backend.appsSettings === "missing"
+            text: (page.known ? page.backend.wineSettings : page.backend.appsSettings) === "missing"
                 ? "This system still builds from your own checkout, so this list cannot show what is installed or change it. Run gjallarctl system move to switch to the system checkout."
                 : "The settings service did not answer, so this list cannot show what is installed or change it."
         }
@@ -91,56 +101,115 @@ Page {
                 width: ListView.view.width - page.gap * 2
                 padding: page.gap
                 background: Rectangle { radius: 12; color: palette.alternateBase }
+                contentItem: Loader {
+                    sourceComponent: row.modelData.wine ? wineRow : appRow
+                }
 
-                RowLayout {
-                    anchors.fill: parent
-                    spacing: page.gap
-                    Image {
-                        source: "image://appicon/" + row.modelData.id
-                        sourceSize: Qt.size(40, 40)
-                        Layout.preferredWidth: 40
-                        Layout.preferredHeight: 40
-                        Layout.alignment: Qt.AlignTop
-                        Accessible.ignored: true
+                Component {
+                    id: appRow
+                    RowLayout {
+                        spacing: page.gap
+                        Image {
+                            source: "image://appicon/" + row.modelData.id
+                            sourceSize: Qt.size(40, 40)
+                            Layout.preferredWidth: 40
+                            Layout.preferredHeight: 40
+                            Layout.alignment: Qt.AlignTop
+                            Accessible.ignored: true
+                        }
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            spacing: 2
+                            Label {
+                                text: row.modelData.name
+                                font.pixelSize: 15
+                                font.weight: Font.DemiBold
+                                Layout.fillWidth: true
+                                elide: Label.ElideRight
+                            }
+                            Label {
+                                text: row.modelData.description
+                                color: palette.placeholderText
+                                wrapMode: Label.Wrap
+                                Layout.fillWidth: true
+                            }
+                            // The saved choice differs from the running system.
+                            Label {
+                                readonly property bool waits: typeof row.modelData.installed === "boolean"
+                                    && typeof row.modelData.built === "boolean"
+                                    && row.modelData.installed !== row.modelData.built
+                                visible: waits
+                                text: row.modelData.installed
+                                    ? (page.backend.appsRebuilding ? "Installing now" : "Installed with the next rebuild")
+                                    : (page.backend.appsRebuilding ? "Removing now" : "Removed with the next rebuild")
+                                color: page.colours.neutral
+                                wrapMode: Label.Wrap
+                                Layout.fillWidth: true
+                            }
+                        }
+                        Switch {
+                            enabled: typeof row.modelData.installed === "boolean" && !page.backend.busy
+                            checked: row.modelData.installed === true
+                            Accessible.name: (checked ? "Remove " : "Install ") + row.modelData.name
+                            // The switch follows the catalogue once the change is in.
+                            onToggled: {
+                                page.backend.setApp(row.modelData.id, checked)
+                                checked = Qt.binding(() => row.modelData.installed === true)
+                            }
+                        }
                     }
+                }
+
+                Component {
+                    id: wineRow
                     ColumnLayout {
-                        Layout.fillWidth: true
                         spacing: 2
                         Label {
-                            text: row.modelData.name
+                            text: row.modelData.name || row.modelData.id
                             font.pixelSize: 15
                             font.weight: Font.DemiBold
                             Layout.fillWidth: true
                             elide: Label.ElideRight
                         }
                         Label {
-                            text: row.modelData.description
-                            color: palette.placeholderText
-                            wrapMode: Label.Wrap
+                            text: row.modelData.removed ? "Removed"
+                                : row.modelData.error ? row.modelData.error
+                                : row.modelData.program || "No program picked"
+                            color: row.modelData.error ? page.colours.neutral : palette.placeholderText
+                            wrapMode: Label.WrapAnywhere
                             Layout.fillWidth: true
                         }
-                        // The saved choice differs from the running system.
-                        Label {
-                            readonly property bool waits: typeof row.modelData.installed === "boolean"
-                                && typeof row.modelData.built === "boolean"
-                                && row.modelData.installed !== row.modelData.built
-                            visible: waits
-                            text: row.modelData.installed
-                                ? (page.backend.appsRebuilding ? "Installing now" : "Installed with the next rebuild")
-                                : (page.backend.appsRebuilding ? "Removing now" : "Removed with the next rebuild")
-                            color: page.colours.neutral
-                            wrapMode: Label.Wrap
-                            Layout.fillWidth: true
-                        }
-                    }
-                    Switch {
-                        enabled: typeof row.modelData.installed === "boolean" && !page.backend.busy
-                        checked: row.modelData.installed === true
-                        Accessible.name: (checked ? "Remove " : "Install ") + row.modelData.name
-                        // The switch follows the catalogue once the change is in.
-                        onToggled: {
-                            page.backend.setApp(row.modelData.id, checked)
-                            checked = Qt.binding(() => row.modelData.installed === true)
+                        Repeater {
+                            model: [
+                                { key: "internet", label: "Internet", on: "On" },
+                                { key: "home", label: "Home network", on: "On · home + tailnet" },
+                            ]
+                            RowLayout {
+                                required property var modelData
+                                readonly property bool value: row.modelData[modelData.key] === true
+                                spacing: page.gap
+                                Layout.fillWidth: true
+                                Label {
+                                    text: parent.modelData.label
+                                    Layout.fillWidth: true
+                                }
+                                Label {
+                                    text: parent.value ? parent.modelData.on : "Off"
+                                    color: palette.placeholderText
+                                }
+                                Switch {
+                                    id: netSwitch
+                                    // A removed app's switches can only go off.
+                                    enabled: page.backend.wineSettings === "ok" && !page.backend.busy
+                                        && (!row.modelData.removed || checked)
+                                    checked: parent.value
+                                    Accessible.name: parent.modelData.label + " for " + (row.modelData.name || row.modelData.id)
+                                    onToggled: {
+                                        page.backend.setWine(row.modelData.id, parent.modelData.key, checked)
+                                        checked = Qt.binding(() => parent.value)
+                                    }
+                                }
+                            }
                         }
                     }
                 }

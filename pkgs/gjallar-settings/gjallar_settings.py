@@ -1,8 +1,9 @@
 """GjallarOS settings window: gjallarHorn and the app catalogue.
 
 Plane 216 (gjallarHorn), 218 (settings window) and 220 (apps). The window
-holds no rights of its own: it reads `gjallarctl security status --json`
-and `gjallarctl apps list --json`, and every change goes through
+holds no rights of its own: it reads `gjallarctl security status --json`,
+`gjallarctl apps list --json` and `gjallarctl wine list --json` (Plane
+272), and every change goes through
 gjallarctl, which asks the settings service and with it for the password.
 """
 
@@ -37,6 +38,8 @@ CATEGORY_ICONS = {
     "system": "applications-system",
 }
 APP_ID = re.compile(r"[a-z0-9][a-z0-9-]*")
+# Wine app ids as gjallar-wine makes them.
+WINE_ID = re.compile(r"[a-z][a-z0-9-]*")
 
 # Obsidian (themes/palettes/openjade.nix) for the colours Qt's palette has
 # no role for, until Noctalia has written its colour scheme.
@@ -91,6 +94,7 @@ class AppIconProvider(QQuickImageProvider):
 class Backend(QObject):
     checksChanged = Signal()
     appsChanged = Signal()
+    wineChanged = Signal()
     busyChanged = Signal()
     scanChanged = Signal()
 
@@ -100,6 +104,8 @@ class Backend(QObject):
         self._apps = []
         self._appsSettings = ""
         self._appsRebuilding = False
+        self._wine = []
+        self._wineSettings = ""
         self._busy = 0
         self._running = set()
         self._scan = {}
@@ -153,6 +159,15 @@ class Backend(QObject):
     def appsRebuilding(self):
         return self._appsRebuilding
 
+    @Property("QVariantList", notify=wineChanged)
+    def wineApps(self):
+        return self._wine
+
+    # As appsSettings, for the Wine apps' network switches.
+    @Property(str, notify=wineChanged)
+    def wineSettings(self):
+        return self._wineSettings
+
     @Property(bool, notify=busyChanged)
     def busy(self):
         return self._busy > 0
@@ -195,6 +210,27 @@ class Backend(QObject):
             self.appsChanged.emit()
 
         self._run(["apps", "list", "--json"], done)
+
+    @Slot()
+    def refreshWine(self):
+        def done(_code, output):
+            entries = self._parse(output, "apps")
+            self._wine = [e for e in entries or [] if isinstance(e, dict)]
+            try:
+                state = json.loads(output).get("settings", "")
+            except (ValueError, AttributeError):
+                state = ""
+            self._wineSettings = state if isinstance(state, str) else ""
+            self.wineChanged.emit()
+
+        self._run(["wine", "list", "--json"], done)
+
+    @Slot(str, str, bool)
+    def setWine(self, app_id, switch, on):
+        """Switch a Wine app's "internet" or "home" network on or off."""
+        if not WINE_ID.fullmatch(app_id) or switch not in ("internet", "home"):
+            return
+        self._run(["wine", "set", app_id, "--" + switch, "on" if on else "off"], lambda *_: self.refreshWine())
 
     @Slot(str)
     def fix(self, check_id):

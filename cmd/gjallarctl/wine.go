@@ -18,7 +18,7 @@ import (
 // the settings service (Plane 272, wiki 746). gjallar-wine reads the same
 // switches when it starts an app.
 
-const wineUsage = `usage: gjallarctl wine list [--ids]              your Wine apps and their switches
+const wineUsage = `usage: gjallarctl wine list [--ids|--json]       your Wine apps and their switches
        gjallarctl wine set ID [--internet on|off] [--home on|off]
                                                 switch app ID's network
 Internet lets the app reach the internet. Home lets it reach your tailnet,
@@ -41,9 +41,9 @@ func runWine(args []string, stdout, stderr io.Writer) int {
 	}
 	switch {
 	case args[0] == "list" && len(args) == 1:
-		return wineList(false, stdout, stderr)
-	case args[0] == "list" && len(args) == 2 && args[1] == "--ids":
-		return wineList(true, stdout, stderr)
+		return wineList("", stdout, stderr)
+	case args[0] == "list" && len(args) == 2 && (args[1] == "--ids" || args[1] == "--json"):
+		return wineList(args[1], stdout, stderr)
 	case args[0] == "set" && len(args) >= 2:
 		return wineSet(args[1], args[2:], stdout, stderr)
 	}
@@ -51,7 +51,19 @@ func runWine(args []string, stdout, stderr io.Writer) int {
 	return 2
 }
 
-func wineList(idsOnly bool, stdout, stderr io.Writer) int {
+// wineEntry is one row of gjallarctl wine list --json, which the settings
+// window reads.
+type wineEntry struct {
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	Program  string `json:"program"`
+	Error    string `json:"error,omitempty"`
+	Internet bool   `json:"internet"`
+	Home     bool   `json:"home"`
+	Removed  bool   `json:"removed,omitempty"`
+}
+
+func wineList(mode string, stdout, stderr io.Writer) int {
 	home, err := wineHome()
 	if err != nil {
 		fmt.Fprintf(stderr, "ERROR: %v\n", err)
@@ -62,7 +74,7 @@ func wineList(idsOnly bool, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "ERROR: %v\n", err)
 		return 1
 	}
-	if idsOnly {
+	if mode == "--ids" {
 		for _, a := range apps {
 			fmt.Fprintln(stdout, a.ID)
 		}
@@ -72,6 +84,9 @@ func wineList(idsOnly bool, stdout, stderr io.Writer) int {
 	if err != nil && !errors.Is(err, errShown) {
 		// The apps still show; they stay offline until the service answers.
 		fmt.Fprintf(stderr, "ERROR: read the switches: %v\n", err)
+	}
+	if mode == "--json" {
+		return wineListJSON(apps, programs, err, stdout, stderr)
 	}
 	if len(apps) == 0 && len(programs) == 0 {
 		fmt.Fprintln(stdout, "No Wine apps yet.")
@@ -92,6 +107,38 @@ func wineList(idsOnly bool, stdout, stderr io.Writer) int {
 		}
 	}
 	return wineExit(err)
+}
+
+func wineListJSON(apps []winesandbox.Listed, programs map[string]winesandbox.Flags, switchErr error, stdout, stderr io.Writer) int {
+	answer := struct {
+		Settings string      `json:"settings"`
+		Apps     []wineEntry `json:"apps"`
+	}{Settings: settingsAnswered, Apps: []wineEntry{}}
+	switch {
+	case errors.Is(switchErr, errSettingsMissing):
+		answer.Settings = settingsNotThere
+	case switchErr != nil:
+		answer.Settings = settingsFailed
+	}
+	for _, a := range apps {
+		e := wineEntry{ID: a.ID, Internet: programs[a.ID].Internet, Home: programs[a.ID].Home}
+		if a.Err != nil {
+			e.Error = a.Err.Error()
+		} else {
+			e.Name, e.Program = a.App.Name, a.App.Exe
+		}
+		answer.Apps = append(answer.Apps, e)
+	}
+	for _, id := range slices.Sorted(maps.Keys(programs)) {
+		if !slices.ContainsFunc(apps, func(a winesandbox.Listed) bool { return a.ID == id }) {
+			answer.Apps = append(answer.Apps, wineEntry{ID: id, Internet: programs[id].Internet, Home: programs[id].Home, Removed: true})
+		}
+	}
+	if err := json.NewEncoder(stdout).Encode(answer); err != nil {
+		fmt.Fprintf(stderr, "ERROR: %v\n", err)
+		return 1
+	}
+	return wineExit(switchErr)
 }
 
 func wineExit(err error) int {

@@ -334,7 +334,7 @@ _gjallarctl_wine() {
   (( CURRENT-- ))
   local -a ids
   case $words[1] in
-    list) _arguments '--ids[print only the app ids]' ;;
+    list) _arguments '(--json)--ids[print only the app ids]' '(--ids)--json[print the list as JSON]' ;;
     set)
       ids=(${(f)"$(gjallarctl wine list --ids 2>/dev/null)"})
       _arguments "1:app id:(${ids[*]})" \

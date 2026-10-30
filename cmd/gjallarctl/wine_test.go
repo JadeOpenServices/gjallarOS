@@ -103,7 +103,7 @@ func TestWineSetRefuses(t *testing.T) {
 		{"set", "synthetic", "--internet", "on", "--internet", "off"},
 		{"set", "synthetic", "--wifi", "on"},
 		{"set", "../synthetic", "--internet", "on"},
-		{"list", "--json"},
+		{"list", "--yaml"},
 		{"remove", "synthetic"},
 	} {
 		var stdout, stderr bytes.Buffer
@@ -120,5 +120,30 @@ func TestWineSetRefuses(t *testing.T) {
 	if code := run([]string{"wine", "set", "synthetic", "--internet", "off"}, &stdout, &stderr); code != 1 ||
 		!strings.Contains(stderr.String(), "your own user") {
 		t.Errorf("root: %d %q", code, stderr.String())
+	}
+}
+
+func TestWineListJSON(t *testing.T) {
+	bus := &fakeSettingsBus{wine: map[string]winesandbox.Flags{"synthetic": {Internet: true}, "gone": {Home: true}}}
+	useFakeSettings(t, bus)
+	wineFakeHome(t)
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"wine", "list", "--json"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("code %d: %s", code, stderr.String())
+	}
+	want := `{"settings":"ok","apps":[{"id":"synthetic","name":"Synthetic App","program":"app.exe","internet":true,"home":false},` +
+		`{"id":"gone","name":"","program":"","internet":false,"home":true,"removed":true}]}` + "\n"
+	if stdout.String() != want {
+		t.Errorf("json:\n%s", stdout.String())
+	}
+
+	useFakeSettings(t, &fakeSettingsBus{missing: true})
+	stdout.Reset()
+	if code := run([]string{"wine", "list", "--json"}, &stdout, &stderr); code != 1 {
+		t.Fatalf("code %d", code)
+	}
+	want = `{"settings":"missing","apps":[{"id":"synthetic","name":"Synthetic App","program":"app.exe","internet":false,"home":false}]}` + "\n"
+	if stdout.String() != want {
+		t.Errorf("json without service:\n%s", stdout.String())
 	}
 }
