@@ -137,6 +137,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runSettings(args[1:], stdout, stderr)
 	case "snapshots":
 		return runSnapshots(args[1:], stdout, stderr)
+	case "wine":
+		return runWine(args[1:], stdout, stderr)
 	case "secure-boot":
 		return runSecureBoot(args[1:], stdout, stderr)
 	case "security":
@@ -1814,6 +1816,7 @@ func printUsage(out io.Writer) {
 	fmt.Fprintln(out, "       gjallarctl apps {list [--json]|add ID|remove ID} [--window]")
 	fmt.Fprintln(out, "       gjallarctl settings {list|get|set|pending|apply|cancel|export|import|pair}")
 	fmt.Fprintln(out, "       gjallarctl snapshots {list|restore PATH}")
+	fmt.Fprintln(out, "       gjallarctl wine {list [--ids]|set ID [--internet on|off] [--home on|off]}")
 	fmt.Fprintln(out, "       gjallarctl secure-boot {status|setup|update-dbx} [--repo PATH]")
 	fmt.Fprintln(out, "       gjallarctl security {notice|oddc-notice|status [--json]|scan PATH [--json]|fix ID|switch ID on|off|apply ID|cancel ID}")
 	fmt.Fprintln(out, "       gjallarctl hyprland-render-gpu")

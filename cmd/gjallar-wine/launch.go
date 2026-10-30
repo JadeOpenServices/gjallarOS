@@ -63,7 +63,7 @@ func launch(id string, args []string, stderr io.Writer) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	a, paths, err := loadApp(home, id)
+	a, paths, err := winesandbox.LoadApp(home, id)
 	if err != nil {
 		return 0, err
 	}
