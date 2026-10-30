@@ -120,6 +120,7 @@ Page {
             Layout.bottomMargin: 0
             placeholderText: "Search apps"
             Accessible.name: "Search apps"
+            onTextChanged: list.positionViewAtBeginning()
         }
 
         Label {
@@ -149,7 +150,10 @@ Page {
             Layout.fillHeight: true
             clip: true
             spacing: page.gap / 2
-            model: page.shown
+            // A count, not the list itself: a new list would rebuild every row
+            // and scroll back to the top each time a switch changes. The rows
+            // read their entry from page.shown and follow it in place.
+            model: page.shown.length
             boundsBehavior: Flickable.StopAtBounds
             leftMargin: page.gap
             rightMargin: page.gap
@@ -168,138 +172,146 @@ Page {
                 }
             }
 
-            section.property: "category"
-            section.delegate: Label {
-                required property string section
-                width: ListView.view.width - page.gap * 2
-                leftPadding: page.gap
-                topPadding: page.gap
-                bottomPadding: page.gap / 4
-                text: section.charAt(0).toUpperCase() + section.slice(1)
-                font.weight: Font.DemiBold
-                color: palette.highlight
-            }
-
-            delegate: Pane {
+            delegate: ColumnLayout {
                 id: row
-                required property var modelData
+                required property int index
+                readonly property var entry: page.shown[row.index] || {}
                 width: ListView.view.width - page.gap * 2
-                padding: page.gap
-                background: Rectangle { radius: 12; color: palette.alternateBase }
-                contentItem: Loader {
-                    sourceComponent: row.modelData.wine ? wineRow : appRow
+                spacing: 0
+
+                // Section headings live in the rows: ListView sections need
+                // a model with roles.
+                Label {
+                    readonly property string category: row.entry.category || ""
+                    visible: row.index === 0 || (page.shown[row.index - 1] || {}).category !== category
+                    Layout.fillWidth: true
+                    leftPadding: page.gap
+                    topPadding: page.gap
+                    bottomPadding: page.gap / 4
+                    text: category.charAt(0).toUpperCase() + category.slice(1)
+                    font.weight: Font.DemiBold
+                    color: palette.highlight
                 }
 
-                Component {
-                    id: appRow
-                    RowLayout {
-                        spacing: page.gap
-                        Image {
-                            source: "image://appicon/" + row.modelData.id
-                            sourceSize: Qt.size(40, 40)
-                            Layout.preferredWidth: 40
-                            Layout.preferredHeight: 40
-                            Layout.alignment: Qt.AlignTop
-                            Accessible.ignored: true
+                Pane {
+                    Layout.fillWidth: true
+                    padding: page.gap
+                    background: Rectangle { radius: 12; color: palette.alternateBase }
+                    contentItem: Loader {
+                        sourceComponent: row.entry.wine ? wineRow : appRow
+                    }
+
+                    Component {
+                        id: appRow
+                        RowLayout {
+                            spacing: page.gap
+                            Image {
+                                source: "image://appicon/" + row.entry.id
+                                sourceSize: Qt.size(40, 40)
+                                Layout.preferredWidth: 40
+                                Layout.preferredHeight: 40
+                                Layout.alignment: Qt.AlignTop
+                                Accessible.ignored: true
+                            }
+                            ColumnLayout {
+                                Layout.fillWidth: true
+                                spacing: 2
+                                Label {
+                                    text: row.entry.name
+                                    font.pixelSize: 15
+                                    font.weight: Font.DemiBold
+                                    Layout.fillWidth: true
+                                    elide: Label.ElideRight
+                                }
+                                Label {
+                                    text: row.entry.description
+                                    color: palette.placeholderText
+                                    wrapMode: Label.Wrap
+                                    Layout.fillWidth: true
+                                }
+                                // The saved choice differs from the running system.
+                                Label {
+                                    readonly property bool waits: typeof row.entry.installed === "boolean"
+                                        && typeof row.entry.built === "boolean"
+                                        && row.entry.installed !== row.entry.built
+                                    visible: waits
+                                    text: row.entry.installed
+                                        ? (page.backend.appsRebuilding ? "Installing now" : "Installed with the next rebuild")
+                                        : (page.backend.appsRebuilding ? "Removing now" : "Removed with the next rebuild")
+                                    color: page.colours.neutral
+                                    wrapMode: Label.Wrap
+                                    Layout.fillWidth: true
+                                }
+                            }
+                            Switch {
+                                enabled: typeof row.entry.installed === "boolean" && !page.backend.busy
+                                checked: row.entry.installed === true
+                                Accessible.name: (checked ? "Remove " : "Install ") + row.entry.name
+                                // The switch follows the catalogue once the change is in.
+                                onToggled: {
+                                    page.backend.setApp(row.entry.id, checked)
+                                    checked = Qt.binding(() => row.entry.installed === true)
+                                }
+                            }
                         }
+                    }
+
+                    Component {
+                        id: wineRow
                         ColumnLayout {
-                            Layout.fillWidth: true
                             spacing: 2
                             Label {
-                                text: row.modelData.name
+                                text: row.entry.name || row.entry.id
                                 font.pixelSize: 15
                                 font.weight: Font.DemiBold
                                 Layout.fillWidth: true
                                 elide: Label.ElideRight
                             }
                             Label {
-                                text: row.modelData.description
-                                color: palette.placeholderText
-                                wrapMode: Label.Wrap
+                                text: row.entry.removed ? "Removed"
+                                    : row.entry.error ? row.entry.error
+                                    : row.entry.program || "No program picked"
+                                color: row.entry.error ? page.colours.neutral : palette.placeholderText
+                                wrapMode: Label.WrapAnywhere
                                 Layout.fillWidth: true
                             }
-                            // The saved choice differs from the running system.
-                            Label {
-                                readonly property bool waits: typeof row.modelData.installed === "boolean"
-                                    && typeof row.modelData.built === "boolean"
-                                    && row.modelData.installed !== row.modelData.built
-                                visible: waits
-                                text: row.modelData.installed
-                                    ? (page.backend.appsRebuilding ? "Installing now" : "Installed with the next rebuild")
-                                    : (page.backend.appsRebuilding ? "Removing now" : "Removed with the next rebuild")
-                                color: page.colours.neutral
-                                wrapMode: Label.Wrap
-                                Layout.fillWidth: true
+                            Button {
+                                visible: page.backend.wineTool && !row.entry.removed && !row.entry.error
+                                    && !row.entry.program
+                                enabled: !page.backend.busy
+                                text: "Pick program…"
+                                Accessible.name: "Pick the program " + (row.entry.name || row.entry.id) + " starts"
+                                onClicked: page.backend.pickWineProgram(row.entry.id)
                             }
-                        }
-                        Switch {
-                            enabled: typeof row.modelData.installed === "boolean" && !page.backend.busy
-                            checked: row.modelData.installed === true
-                            Accessible.name: (checked ? "Remove " : "Install ") + row.modelData.name
-                            // The switch follows the catalogue once the change is in.
-                            onToggled: {
-                                page.backend.setApp(row.modelData.id, checked)
-                                checked = Qt.binding(() => row.modelData.installed === true)
-                            }
-                        }
-                    }
-                }
-
-                Component {
-                    id: wineRow
-                    ColumnLayout {
-                        spacing: 2
-                        Label {
-                            text: row.modelData.name || row.modelData.id
-                            font.pixelSize: 15
-                            font.weight: Font.DemiBold
-                            Layout.fillWidth: true
-                            elide: Label.ElideRight
-                        }
-                        Label {
-                            text: row.modelData.removed ? "Removed"
-                                : row.modelData.error ? row.modelData.error
-                                : row.modelData.program || "No program picked"
-                            color: row.modelData.error ? page.colours.neutral : palette.placeholderText
-                            wrapMode: Label.WrapAnywhere
-                            Layout.fillWidth: true
-                        }
-                        Button {
-                            visible: page.backend.wineTool && !row.modelData.removed && !row.modelData.error
-                                && !row.modelData.program
-                            enabled: !page.backend.busy
-                            text: "Pick program…"
-                            Accessible.name: "Pick the program " + (row.modelData.name || row.modelData.id) + " starts"
-                            onClicked: page.backend.pickWineProgram(row.modelData.id)
-                        }
-                        Repeater {
-                            model: [
-                                { key: "internet", label: "Internet", on: "On" },
-                                { key: "home", label: "Home network", on: "On · home + tailnet" },
-                            ]
-                            RowLayout {
-                                required property var modelData
-                                readonly property bool value: row.modelData[modelData.key] === true
-                                spacing: page.gap
-                                Layout.fillWidth: true
-                                Label {
-                                    text: parent.modelData.label
+                            Repeater {
+                                model: [
+                                    { key: "internet", label: "Internet", on: "On" },
+                                    { key: "home", label: "Home network", on: "On · home + tailnet" },
+                                ]
+                                RowLayout {
+                                    required property var modelData
+                                    readonly property bool value: row.entry[modelData.key] === true
+                                    spacing: page.gap
                                     Layout.fillWidth: true
-                                }
-                                Label {
-                                    text: parent.value ? parent.modelData.on : "Off"
-                                    color: palette.placeholderText
-                                }
-                                Switch {
-                                    id: netSwitch
-                                    // A removed app's switches can only go off.
-                                    enabled: page.backend.wineSettings === "ok" && !page.backend.busy
-                                        && (!row.modelData.removed || checked)
-                                    checked: parent.value
-                                    Accessible.name: parent.modelData.label + " for " + (row.modelData.name || row.modelData.id)
-                                    onToggled: {
-                                        page.backend.setWine(row.modelData.id, parent.modelData.key, checked)
-                                        checked = Qt.binding(() => parent.value)
+                                    Label {
+                                        text: parent.modelData.label
+                                        Layout.fillWidth: true
+                                    }
+                                    Label {
+                                        text: parent.value ? parent.modelData.on : "Off"
+                                        color: palette.placeholderText
+                                    }
+                                    Switch {
+                                        id: netSwitch
+                                        // A removed app's switches can only go off.
+                                        enabled: page.backend.wineSettings === "ok" && !page.backend.busy
+                                            && (!row.entry.removed || checked)
+                                        checked: parent.value
+                                        Accessible.name: parent.modelData.label + " for " + (row.entry.name || row.entry.id)
+                                        onToggled: {
+                                            page.backend.setWine(row.entry.id, parent.modelData.key, checked)
+                                            checked = Qt.binding(() => parent.value)
+                                        }
                                     }
                                 }
                             }
