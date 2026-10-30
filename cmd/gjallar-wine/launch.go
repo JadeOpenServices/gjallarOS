@@ -143,9 +143,14 @@ func launch(id string, program, args []string, stderr io.Writer) (int, error) {
 		return 0, fmt.Errorf("make the app's namespaces: %w", err)
 	}
 	// The holder ends when its stdin closes; pasta ends with the namespace.
+	holderDone := make(chan struct{})
+	go func() {
+		holder.Wait()
+		close(holderDone)
+	}()
 	defer func() {
 		holdIn.Close()
-		holder.Wait()
+		<-holderDone
 	}()
 	ns := nsenter(holder.Process.Pid)
 
@@ -227,6 +232,9 @@ func launch(id string, program, args []string, stderr io.Writer) (int, error) {
 			timer.Reset(time.Until(next))
 		}
 	}
+	// Without the holder the rules can no longer change, so a switch turned
+	// off would not reach the app.
+	holderGone := (<-chan struct{})(holderDone)
 	for {
 		select {
 		case err := <-done:
@@ -234,6 +242,9 @@ func launch(id string, program, args []string, stderr io.Writer) (int, error) {
 				return 1, nil
 			}
 			return exitCode(err)
+		case <-holderGone:
+			holderGone = nil
+			fail(errors.New("the app's network holder ended"))
 		case <-changed:
 			again()
 		case err := <-watchErrs:
