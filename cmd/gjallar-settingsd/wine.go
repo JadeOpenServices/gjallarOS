@@ -132,7 +132,7 @@ func (s *service) SetWine(ctx context.Context, sender, id string, want winesandb
 	}
 	if on := wineOpens(have, want); on != "" {
 		if err := s.sys.Authorize(ctx, sender, wineAction, map[string]string{
-			"polkit.message":             fmt.Sprintf("Let the app %s reach %s", id, on),
+			"polkit.message":             fmt.Sprintf("Let the Wine app %q reach %s", id, on),
 			"org.gjallaros.wine.program": id,
 		}); err != nil {
 			return nil, err
