@@ -5,12 +5,14 @@ holds no rights of its own: it reads `gjallarctl security status --json`,
 `gjallarctl apps list --json` and `gjallarctl wine list --json` (Plane
 272), and every change goes through
 gjallarctl, which asks the settings service and with it for the password.
+New Wine apps are set up with gjallar-wine in a terminal, as the user.
 """
 
 import configparser
 import json
 import os
 import re
+import shutil
 import signal
 import sys
 
@@ -40,6 +42,9 @@ CATEGORY_ICONS = {
 APP_ID = re.compile(r"[a-z0-9][a-z0-9-]*")
 # Wine app ids as gjallar-wine makes them.
 WINE_ID = re.compile(r"[a-z][a-z0-9-]*")
+# Setup and program choice run in a terminal, as gjallarctl's own --window
+# commands do: the output and questions stay readable until Enter.
+TERMINAL_SCRIPT = """"$@"; printf '\\nPress Enter to close. '; read -r _"""
 
 # Obsidian (themes/palettes/openjade.nix) for the colours Qt's palette has
 # no role for, until Noctalia has written its colour scheme.
@@ -110,10 +115,11 @@ class Backend(QObject):
         self._running = set()
         self._scan = {}
         self._scanning = ""
+        self._wineTool = shutil.which("gjallar-wine") or ""
 
-    def _run(self, args, done=None, busy=True):
+    def _run(self, args, done=None, busy=True, program=GJALLARCTL):
         process = QProcess(self)
-        process.setProgram(GJALLARCTL)
+        process.setProgram(program)
         process.setArguments(args)
         self._running.add(process)
         if busy:
@@ -180,6 +186,12 @@ class Backend(QObject):
     def scanning(self):
         return self._scanning
 
+    # gjallar-wine comes with the Wine app (apps/wine); without it there is
+    # nothing to set up.
+    @Property(bool, constant=True)
+    def wineTool(self):
+        return self._wineTool != ""
+
     @Property(str, constant=True)
     def downloads(self):
         return QStandardPaths.writableLocation(QStandardPaths.DownloadLocation)
@@ -231,6 +243,27 @@ class Backend(QObject):
         if not WINE_ID.fullmatch(app_id) or switch not in ("internet", "home"):
             return
         self._run(["wine", "set", app_id, "--" + switch, "on" if on else "off"], lambda *_: self.refreshWine())
+
+    def _wineTerminal(self, title, args):
+        self._run(["--title=" + title, "-e", "sh", "-c", TERMINAL_SCRIPT, "sh", self._wineTool, *args],
+                  lambda *_: self.refreshWine(), program="ghostty")
+
+    @Slot(str, str)
+    def setUpWine(self, name, installer):
+        """Add a Wine app called name and run its installer, a file:// URL from the file dialog."""
+        name = name.strip()
+        if installer.startswith("file:"):
+            installer = QUrl(installer).toLocalFile()
+        # gjallar-wine checks both again; these only keep a wrong pick out.
+        if not self._wineTool or not name or not os.path.isabs(installer) or not os.path.isfile(installer):
+            return
+        self._wineTerminal("GjallarOS Wine app", ["add", name, installer])
+
+    @Slot(str)
+    def pickWineProgram(self, app_id):
+        """Choose the program a Wine app starts, from the programs its shortcuts start."""
+        if self._wineTool and WINE_ID.fullmatch(app_id):
+            self._wineTerminal("GjallarOS Wine app", ["program", app_id])
 
     @Slot(str)
     def fix(self, check_id):

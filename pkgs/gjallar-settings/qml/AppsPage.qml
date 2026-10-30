@@ -1,11 +1,13 @@
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Dialogs
 import QtQuick.Layouts
 
 // The app catalogue (Plane 220): `gjallarctl apps list --json`, one switch
 // per app. Installing or removing runs in a terminal with the password
 // prompt and the build output. Wine apps (Plane 272) follow in their own
-// section with their two network switches.
+// section with their two network switches, and new ones are set up from
+// the end of the list.
 Page {
     id: page
 
@@ -35,6 +37,76 @@ Page {
     Component.onCompleted: {
         backend.refreshApps()
         backend.refreshWine()
+    }
+
+    FileDialog {
+        id: installerDialog
+        title: "Installer"
+        nameFilters: ["Installers (*.exe *.msi *.EXE *.MSI)"]
+        currentFolder: "file://" + encodeURI(page.backend.downloads)
+        onAccepted: setUp.installer = selectedFile.toString()
+    }
+
+    Dialog {
+        id: setUp
+        property string installer: ""
+        readonly property string installerName: decodeURIComponent(installer.slice(installer.lastIndexOf("/") + 1))
+        title: "New Wine app"
+        modal: true
+        anchors.centerIn: parent
+        width: Math.min(page.width - page.gap * 2, 420)
+        onOpened: {
+            installer = ""
+            appName.text = ""
+            appName.forceActiveFocus()
+        }
+
+        ColumnLayout {
+            anchors.fill: parent
+            spacing: page.gap / 2
+            Label { text: "Name" }
+            TextField {
+                id: appName
+                Layout.fillWidth: true
+                placeholderText: "Example Editor"
+                Accessible.name: "Name"
+                maximumLength: 64
+            }
+            Label {
+                text: "Its files go in WineApps/" + (appName.text.trim() || "…")
+                color: palette.placeholderText
+                wrapMode: Label.WrapAnywhere
+                Layout.fillWidth: true
+            }
+            RowLayout {
+                spacing: page.gap / 2
+                Layout.fillWidth: true
+                Button {
+                    text: "Choose installer…"
+                    onClicked: installerDialog.open()
+                }
+                Label {
+                    text: setUp.installerName || "None chosen"
+                    color: palette.placeholderText
+                    elide: Label.ElideMiddle
+                    Layout.fillWidth: true
+                }
+            }
+        }
+
+        footer: DialogButtonBox {
+            Button {
+                text: "Set up"
+                enabled: appName.text.trim() !== "" && !appName.text.trim().startsWith(".")
+                    && !appName.text.includes("/") && setUp.installer !== ""
+                DialogButtonBox.buttonRole: DialogButtonBox.AcceptRole
+            }
+            Button {
+                text: "Cancel"
+                DialogButtonBox.buttonRole: DialogButtonBox.RejectRole
+            }
+        }
+        onAccepted: page.backend.setUpWine(appName.text, installer)
     }
 
     ColumnLayout {
@@ -82,6 +154,19 @@ Page {
             leftMargin: page.gap
             rightMargin: page.gap
             ScrollBar.vertical: ScrollBar {}
+
+            footer: Item {
+                visible: page.backend.wineTool
+                width: ListView.view.width - page.gap * 2
+                height: visible ? newWine.implicitHeight + page.gap * 2 : 0
+                Button {
+                    id: newWine
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: "Set up a Wine app…"
+                    enabled: !page.backend.busy
+                    onClicked: setUp.open()
+                }
+            }
 
             section.property: "category"
             section.delegate: Label {
@@ -178,6 +263,14 @@ Page {
                             color: row.modelData.error ? page.colours.neutral : palette.placeholderText
                             wrapMode: Label.WrapAnywhere
                             Layout.fillWidth: true
+                        }
+                        Button {
+                            visible: page.backend.wineTool && !row.modelData.removed && !row.modelData.error
+                                && !row.modelData.program
+                            enabled: !page.backend.busy
+                            text: "Pick program…"
+                            Accessible.name: "Pick the program " + (row.modelData.name || row.modelData.id) + " starts"
+                            onClicked: page.backend.pickWineProgram(row.modelData.id)
                         }
                         Repeater {
                             model: [
