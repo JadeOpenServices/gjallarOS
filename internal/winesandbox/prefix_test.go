@@ -23,6 +23,7 @@ func basePrefix(t *testing.T, home, user string) string {
 		filepath.Join(prefix, "dosdevices", "e:"): home,
 		filepath.Join(userDir, "Documents"):       filepath.Join(home, "Documents"),
 		filepath.Join(userDir, "Desktop"):         filepath.Join(home, "Desktop"),
+		filepath.Join(userDir, "Templates"):       filepath.Join(home, "Templates"),
 	} {
 		if err := os.Symlink(target, link); err != nil {
 			t.Fatal(err)
@@ -55,8 +56,10 @@ func TestFixPrefix(t *testing.T) {
 	if info, err := os.Lstat(filepath.Join(userDir, "Music")); err != nil || !info.IsDir() {
 		t.Errorf("Wine's own Music folder replaced: %v %v", info, err)
 	}
-	if info, err := os.Lstat(filepath.Join(userDir, "Desktop")); err != nil || !info.IsDir() {
-		t.Errorf("Desktop is not a folder: %v %v", info, err)
+	for _, name := range []string{"Desktop", "Templates"} {
+		if info, err := os.Lstat(filepath.Join(userDir, name)); err != nil || !info.IsDir() {
+			t.Errorf("%s is not a folder: %v %v", name, info, err)
+		}
 	}
 }
 

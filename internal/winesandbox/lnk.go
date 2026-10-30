@@ -135,7 +135,7 @@ func Shortcuts(prefix string) (map[string]fs.FileInfo, error) {
 		}
 		for _, dir := range dirs {
 			// A link would lead the walk out of the prefix.
-			if realDir(dir) != nil {
+			if RealDir(dir) != nil {
 				continue
 			}
 			err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {

@@ -189,3 +189,55 @@ func TestIDFromName(t *testing.T) {
 		}
 	}
 }
+
+func TestRemoveApp(t *testing.T) {
+	exists := func(path string) bool {
+		_, err := os.Lstat(path)
+		return err == nil
+	}
+	home, paths := appHome(t, `{"name":"Synthetic App","exe":""}`)
+	if err := os.WriteFile(filepath.Join(paths.Files, "kept.txt"), []byte("SYNTHETIC"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// A link in the prefix leads out; removing the prefix leaves its target.
+	outside := filepath.Join(t.TempDir(), "outside.txt")
+	if err := os.WriteFile(outside, []byte("SYNTHETIC"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Dir(outside), filepath.Join(paths.Prefix, "out")); err != nil {
+		t.Fatal(err)
+	}
+	if err := RemoveApp(home, "synthetic", false); err != nil {
+		t.Fatal(err)
+	}
+	if exists(paths.Record) || exists(paths.Prefix) || !exists(filepath.Join(paths.Files, "kept.txt")) || !exists(outside) {
+		t.Errorf("record %t prefix %t files %t outside %t",
+			exists(paths.Record), exists(paths.Prefix), exists(paths.Files), exists(outside))
+	}
+	if err := RemoveApp(home, "synthetic", false); err == nil {
+		t.Error("removing a gone app succeeded")
+	}
+	if err := RemoveApp(home, "synthetic", true); err == nil {
+		t.Error("files of an app without record removed")
+	}
+
+	home, paths = appHome(t, `{"name":"Synthetic App","exe":""}`)
+	if err := RemoveApp(home, "synthetic", true); err != nil {
+		t.Fatal(err)
+	}
+	if exists(paths.Files) || !exists(filepath.Dir(paths.Files)) {
+		t.Errorf("files folder %t, WineApps %t", exists(paths.Files), exists(filepath.Dir(paths.Files)))
+	}
+
+	// A prefix left without its record still goes.
+	home, paths = appHome(t, `{"name":"Synthetic App","exe":""}`)
+	if err := os.Remove(paths.Record); err != nil {
+		t.Fatal(err)
+	}
+	if err := RemoveApp(home, "synthetic", false); err != nil || exists(paths.Prefix) {
+		t.Errorf("leftover prefix: %t %v", exists(paths.Prefix), err)
+	}
+	if err := RemoveApp(home, "../x", false); err == nil {
+		t.Error("bad id accepted")
+	}
+}

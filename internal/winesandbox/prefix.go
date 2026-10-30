@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
@@ -25,9 +26,10 @@ const InitMarker = ".gjallar-wine-initialized"
 var userFolders = []string{"Documents", "Downloads", "Music", "Pictures", "Videos"}
 
 // FixPrefix turns a copied base prefix into app prefix's own: drives C:
-// and D: only, and the user folders of user in the files folder. Desktop
-// becomes a plain folder, so shortcuts an installer puts there stay in
-// the prefix.
+// and D: only, and the user folders of user in the files folder. Every
+// other link in the user's folder, such as Desktop, becomes a plain
+// folder, so nothing there leads out and shortcuts an installer puts on
+// the Desktop stay in the prefix.
 func FixPrefix(prefix, files, user string) error {
 	devices := filepath.Join(prefix, "dosdevices")
 	entries, err := os.ReadDir(devices)
@@ -50,30 +52,38 @@ func FixPrefix(prefix, files, user string) error {
 	if err := os.MkdirAll(userDir, 0o700); err != nil {
 		return err
 	}
-	for _, name := range append(userFolders, "Desktop") {
+	if entries, err = os.ReadDir(userDir); err != nil {
+		return err
+	}
+	var links []string
+	for _, entry := range entries {
+		if entry.Type()&os.ModeSymlink != 0 {
+			if err := os.Remove(filepath.Join(userDir, entry.Name())); err != nil {
+				return err
+			}
+			links = append(links, entry.Name())
+		}
+	}
+	for _, name := range userFolders {
 		path := filepath.Join(userDir, name)
 		info, err := os.Lstat(path)
 		switch {
 		case errors.Is(err, os.ErrNotExist):
 		case err != nil:
 			return err
-		case info.Mode()&os.ModeSymlink != 0:
-			if err := os.Remove(path); err != nil {
-				return err
-			}
 		case info.IsDir():
 			// A folder Wine made itself: keep what is in it.
 			continue
 		default:
 			return fmt.Errorf("%s is not a folder", path)
 		}
-		if name == "Desktop" {
-			if err := os.Mkdir(path, 0o700); err != nil {
-				return err
-			}
-			continue
-		}
 		if err := os.Symlink(files, path); err != nil {
+			return err
+		}
+		links = slices.DeleteFunc(links, func(l string) bool { return l == name })
+	}
+	for _, name := range append(links, "Desktop") {
+		if err := os.Mkdir(filepath.Join(userDir, name), 0o700); err != nil && !errors.Is(err, os.ErrExist) {
 			return err
 		}
 	}

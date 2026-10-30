@@ -12,6 +12,7 @@ import (
 	"os/signal"
 	"os/user"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -45,7 +46,13 @@ var errSettingsMissing = errors.New("the settings service is not on this system"
 // verdict runs out. If they cannot be, the app is stopped.
 
 func runApp(id string, args []string, stderr io.Writer) int {
-	code, err := launch(id, args, stderr)
+	lock, err := lockApp(id)
+	if err != nil {
+		fmt.Fprintf(stderr, "ERROR: %v\n", err)
+		return 1
+	}
+	defer lock.Close()
+	code, err := launch(id, nil, args, stderr)
 	if err != nil {
 		fmt.Fprintf(stderr, "ERROR: %v\n", err)
 		return 1
@@ -53,7 +60,9 @@ func runApp(id string, args []string, stderr io.Writer) int {
 	return code
 }
 
-func launch(id string, args []string, stderr io.Writer) (int, error) {
+// launch starts program with args in app id's sandbox, or the app's own
+// program when program is nil. The caller holds the app's lock.
+func launch(id string, program, args []string, stderr io.Writer) (int, error) {
 	u, err := user.Current()
 	if err != nil {
 		return 0, err
@@ -66,6 +75,12 @@ func launch(id string, args []string, stderr io.Writer) (int, error) {
 	a, paths, err := winesandbox.LoadApp(home, id)
 	if err != nil {
 		return 0, err
+	}
+	if program == nil {
+		if err := a.Ready(id); err != nil {
+			return 0, err
+		}
+		program = []string{a.Exe}
 	}
 	self, err := os.Executable()
 	if err != nil {
@@ -174,7 +189,7 @@ func launch(id string, args []string, stderr io.Writer) (int, error) {
 		Prefix:     paths.Prefix,
 		Files:      paths.Files,
 		ID:         id,
-	}.Args(append([]string{a.Exe}, args...))...)...)
+	}.Args(append(slices.Clone(program), args...))...)...)
 	prog.Stdout, prog.Stderr = os.Stdout, os.Stderr
 	prog.Cancel = func() error { return prog.Process.Signal(syscall.SIGTERM) }
 	prog.WaitDelay = 10 * time.Second
@@ -235,6 +250,20 @@ func launch(id string, args []string, stderr io.Writer) (int, error) {
 // makeRunDir makes the private folder for one start of the app, below a
 // gjallar-wine folder in the runtime dir that only uid can open.
 func makeRunDir(runtimeDir, instance string, uid int) (string, error) {
+	parent, err := runParent(runtimeDir, uid)
+	if err != nil {
+		return "", err
+	}
+	dir := filepath.Join(parent, instance)
+	if err := os.Mkdir(dir, 0o700); err != nil {
+		return "", err
+	}
+	return dir, nil
+}
+
+// runParent makes the gjallar-wine folder in the runtime dir, which only
+// uid can open.
+func runParent(runtimeDir string, uid int) (string, error) {
 	parent := filepath.Join(runtimeDir, "gjallar-wine")
 	if err := os.Mkdir(parent, 0o700); err != nil && !errors.Is(err, os.ErrExist) {
 		return "", err
@@ -247,11 +276,7 @@ func makeRunDir(runtimeDir, instance string, uid int) (string, error) {
 	if !info.IsDir() || !ok || int(st.Uid) != uid || info.Mode().Perm() != 0o700 {
 		return "", fmt.Errorf("%s must be a folder only you can open", parent)
 	}
-	dir := filepath.Join(parent, instance)
-	if err := os.Mkdir(dir, 0o700); err != nil {
-		return "", err
-	}
-	return dir, nil
+	return parent, nil
 }
 
 // nsenter is the command prefix that runs a tool in the holder's
@@ -372,11 +397,7 @@ func (sw *switches) read(ctx context.Context) (winesandbox.Flags, error) {
 	call := sw.conn.Object(settings.BusName, dbus.ObjectPath(settings.ObjectPath)).
 		CallWithContext(ctx, settings.Interface+".Wine", 0)
 	if call.Err != nil {
-		var busErr dbus.Error
-		if errors.As(call.Err, &busErr) && busErr.Name == "org.freedesktop.DBus.Error.ServiceUnknown" {
-			return winesandbox.Flags{}, errSettingsMissing
-		}
-		return winesandbox.Flags{}, call.Err
+		return winesandbox.Flags{}, busError(call.Err)
 	}
 	var answer string
 	if err := call.Store(&answer); err != nil {
@@ -387,6 +408,16 @@ func (sw *switches) read(ctx context.Context) (winesandbox.Flags, error) {
 		return winesandbox.Flags{}, fmt.Errorf("read the service's answer: %w", err)
 	}
 	return programs[sw.id], nil
+}
+
+// busError gives errSettingsMissing when the settings service is not
+// there, and err otherwise.
+func busError(err error) error {
+	var busErr dbus.Error
+	if errors.As(err, &busErr) && busErr.Name == "org.freedesktop.DBus.Error.ServiceUnknown" {
+		return errSettingsMissing
+	}
+	return err
 }
 
 func (sw *switches) Close() {

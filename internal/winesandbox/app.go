@@ -83,7 +83,7 @@ func LoadApp(home, id string) (App, Paths, error) {
 	}
 	paths := PathsFor(home, id, a.Name)
 	for _, dir := range []string{paths.Prefix, paths.Files} {
-		if err := realDir(dir); err != nil {
+		if err := RealDir(dir); err != nil {
 			return App{}, Paths{}, err
 		}
 	}
@@ -206,9 +206,61 @@ func Apps(home string) ([]Listed, error) {
 	return apps, nil
 }
 
-// realDir checks that dir is a folder reached without symbolic links:
+// RemoveApp removes app id's record and prefix, and with files its files
+// folder too. The record goes first, so a half-removed app no longer
+// starts. A record that is gone leaves a prefix to remove, but no files
+// folder to find.
+func RemoveApp(home, id string, files bool) error {
+	if !ValidID(id) {
+		return fmt.Errorf("%q is not an app id", id)
+	}
+	paths := PathsFor(home, id, "")
+	a, err := readRecord(paths.Record)
+	known := err == nil
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	if files && !known {
+		return fmt.Errorf("app %s has no record, so its files folder is not known; remove it from ~/WineApps yourself", id)
+	}
+	if known {
+		if err := os.Remove(paths.Record); err != nil {
+			return err
+		}
+	}
+	// RemoveAll does not follow links, but the folders above must not lead
+	// elsewhere either.
+	prefixes := filepath.Dir(paths.Prefix)
+	switch err := RealDir(prefixes); {
+	case errors.Is(err, os.ErrNotExist):
+		if !known {
+			return fmt.Errorf("no app %s; gjallarctl wine list shows the apps", id)
+		}
+	case err != nil:
+		return err
+	default:
+		if _, err := os.Lstat(paths.Prefix); errors.Is(err, os.ErrNotExist) && !known {
+			return fmt.Errorf("no app %s; gjallarctl wine list shows the apps", id)
+		}
+		if err := os.RemoveAll(paths.Prefix); err != nil {
+			return err
+		}
+	}
+	if files {
+		paths = PathsFor(home, id, a.Name)
+		if err := RealDir(filepath.Dir(paths.Files)); err != nil {
+			return err
+		}
+		if err := os.RemoveAll(paths.Files); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// RealDir checks that dir is a folder reached without symbolic links:
 // bwrap would follow one and give the app whatever it points at.
-func realDir(dir string) error {
+func RealDir(dir string) error {
 	resolved, err := filepath.EvalSymlinks(dir)
 	if err != nil {
 		return err

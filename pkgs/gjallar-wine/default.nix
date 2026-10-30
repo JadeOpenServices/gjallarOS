@@ -6,7 +6,10 @@
   nftables,
   util-linux,
   iproute2,
+  coreutils,
   _wine,
+  # Wine's setup for the base prefix; without it gjallar-wine add refuses.
+  wineInit ? null,
 }:
 
 buildGoModule {
@@ -44,7 +47,9 @@ buildGoModule {
     "-X main.nsenterPath=${util-linux}/bin/nsenter"
     "-X main.ipPath=${iproute2}/bin/ip"
     "-X main.winePath=${_wine}/bin/wine"
-  ];
+    "-X main.cpPath=${coreutils}/bin/cp"
+  ]
+  ++ lib.optional (wineInit != null) "-X main.initPath=${wineInit}/bin/wine-win11-init";
 
   env.CGO_ENABLED = "0";
 
