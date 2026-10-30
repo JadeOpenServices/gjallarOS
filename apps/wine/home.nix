@@ -8,6 +8,10 @@
 
 let
   winePackage = pkgs._wine;
+  sandboxLauncher = pkgs.callPackage ../../pkgs/gjallar-wine {
+    inherit wineInit;
+    dolphinPlace = pkgs.callPackage ../../pkgs/dolphin-place { };
+  };
 
   # The winetricks vkd3d verb asks the GitHub API for the latest release, which
   # fails offline and under its rate limit. The hash is the digest GitHub lists
@@ -284,6 +288,46 @@ lib.mkIf config.gjallar.apps.wine.enable {
       (pkgs.writeTextDir "share/zsh/site-functions/_wine-win11" ''
         #compdef wine-win11
         _arguments '1:Windows program:_files -g "*.(exe|msi|bat|lnk|EXE|MSI|BAT|LNK)"' '*::argument:_files'
+      '')
+
+      sandboxLauncher
+      # hold, lock and stay are the launcher's own steps, so they are not offered.
+      (pkgs.writeTextDir "share/zsh/site-functions/_gjallar-wine" ''
+        #compdef gjallar-wine
+        _gjallar_wine_ids() {
+          local -a ids
+          ids=(''${HOME}/.local/share/gjallar-wine/apps/*.json(N:t:r))
+          _describe -t apps 'Wine app' ids
+        }
+        _gjallar_wine_installers() {
+          _files -g '*.(exe|msi|EXE|MSI)'
+        }
+        local -a commands
+        commands=(
+          'add:add an app and run its installer'
+          'install:run an installer in an app'
+          'program:show or pick the program an app starts'
+          'run:start a Wine app in its sandbox'
+          'remove:remove an app'
+        )
+        if (( CURRENT == 2 )); then
+          _describe -t commands 'gjallar-wine command' commands
+          return
+        fi
+        case $words[2] in
+          add)
+            (( CURRENT == 4 )) && _gjallar_wine_installers ;;
+          install)
+            if (( CURRENT == 3 )); then _gjallar_wine_ids
+            elif (( CURRENT == 4 )); then _gjallar_wine_installers; fi ;;
+          program)
+            (( CURRENT == 3 )) && _gjallar_wine_ids ;;
+          run)
+            if (( CURRENT == 3 )); then _gjallar_wine_ids; else _files; fi ;;
+          remove)
+            if (( CURRENT == 3 )); then _gjallar_wine_ids
+            elif (( CURRENT == 4 )); then compadd -- --delete-files; fi ;;
+        esac
       '')
 
       pkgs.winetricks

@@ -321,6 +321,28 @@ _gjallarctl_settings_pair() {
   esac
 }
 
+_gjallarctl_wine() {
+  local -a cmds=(
+    'list:show your Wine apps and their network switches'
+    'set:switch an app'"'"'s internet or home network'
+  )
+  if (( CURRENT == 2 )); then
+    _describe -t commands 'wine command' cmds
+    return
+  fi
+  shift words
+  (( CURRENT-- ))
+  local -a ids
+  case $words[1] in
+    list) _arguments '(--json)--ids[print only the app ids]' '(--ids)--json[print the list as JSON]' ;;
+    set)
+      ids=(${(f)"$(gjallarctl wine list --ids 2>/dev/null)"})
+      _arguments "1:app id:(${ids[*]})" \
+        '--internet[reach the internet]:state:(on off)' \
+        '--home[reach the tailnet and home network]:state:(on off)' ;;
+  esac
+}
+
 _gjallarctl_snapshots() {
   local -a cmds=(
     'list:show the snapshots of /home, newest first'
@@ -390,6 +412,7 @@ _gjallarctl() {
     'apps:install or remove catalogue apps'
     'settings:change GjallarOS settings'
     'snapshots:restore your files from the /home snapshots'
+    'wine:Wine apps and their network switches'
     'tpm2:TPM2 disk unlock'
     'luks:system disk unlock methods and recovery key'
     'secure-boot:Secure Boot with GjallarOS keys'
@@ -422,6 +445,7 @@ _gjallarctl() {
         apps) _gjallarctl_apps ;;
         settings) _gjallarctl_settings ;;
         snapshots) _gjallarctl_snapshots ;;
+        wine) _gjallarctl_wine ;;
         oddc) _gjallarctl_oddc ;;
         helpme) _arguments '--text[print instead of opening a window]' ;;
         tpm2) _arguments '1:tpm2 command:((reenroll\:"enroll the TPM2 key again"))' ;;

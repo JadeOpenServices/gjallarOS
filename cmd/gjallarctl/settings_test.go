@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,6 +15,7 @@ import (
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/config"
 	"github.com/JadeOpenServices/gjallarOS/internal/localchanges"
 	"github.com/JadeOpenServices/gjallarOS/internal/settings"
+	"github.com/JadeOpenServices/gjallarOS/internal/winesandbox"
 )
 
 // fakeSettingsBus answers like gjallar-settingsd. Its keys, ids and times
@@ -37,6 +39,8 @@ type fakeSettingsBus struct {
 	pairs    []settings.PairOffer
 	checked  [][]byte
 	asked    []string
+	wine     map[string]winesandbox.Flags
+	wineSets []string
 }
 
 // fakeOffer is the SYNTHETIC offer the fake bus makes of any pairing file.
@@ -147,6 +151,20 @@ func (b *fakeSettingsBus) Call(_ context.Context, method string, args ...any) (s
 	case "ResumeVPN":
 		b.asked = append(b.asked, method)
 		return "", nil
+	case "Wine":
+		return answer(b.wine)
+	case "SetWine":
+		id := args[0].(string)
+		flags := winesandbox.Flags{Internet: args[1].(bool), Home: args[2].(bool)}
+		b.wineSets = append(b.wineSets, fmt.Sprintf("%s %+v", id, flags))
+		if b.wine == nil {
+			b.wine = map[string]winesandbox.Flags{}
+		}
+		b.wine[id] = flags
+		if flags == (winesandbox.Flags{}) {
+			delete(b.wine, id)
+		}
+		return answer(b.wine)
 	case "PairList":
 		return answer(b.pairs)
 	case "PairRemove":
