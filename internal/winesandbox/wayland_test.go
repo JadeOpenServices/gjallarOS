@@ -42,6 +42,10 @@ func fakeCompositor(t *testing.T, ln *net.UnixListener, offer bool, got chan<- [
 	buf := make([]byte, 4096)
 	oob := make([]byte, 64)
 	var pending []byte
+	// fds counts the files that came with the bytes read so far. They
+	// belong to create_listener, which may come in the same read as the
+	// bind before it.
+	fds := 0
 	for {
 		n, oobn, _, _, err := conn.ReadMsgUnix(buf, oob)
 		if err != nil {
@@ -51,9 +55,9 @@ func fakeCompositor(t *testing.T, ln *net.UnixListener, offer bool, got chan<- [
 		if oobn > 0 {
 			msgs, _ := unix.ParseSocketControlMessage(oob[:oobn])
 			for _, m := range msgs {
-				fds, _ := unix.ParseUnixRights(&m)
-				seen = append(seen, "fds")
-				for _, fd := range fds {
+				rights, _ := unix.ParseUnixRights(&m)
+				fds += len(rights)
+				for _, fd := range rights {
 					unix.Close(fd)
 				}
 			}
@@ -81,6 +85,11 @@ func fakeCompositor(t *testing.T, ln *net.UnixListener, offer bool, got chan<- [
 			case obj == 2 && op == 0:
 				iface, _ := wlString(body[4:])
 				seen = append(seen, "bind "+iface)
+			case obj == 4 && op == 1:
+				if fds == 2 {
+					seen = append(seen, "fds")
+				}
+				fds = 0
 			case obj == 5 && op >= 1 && op <= 3:
 				s, _ := wlString(body)
 				seen = append(seen, s)

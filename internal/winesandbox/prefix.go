@@ -11,7 +11,8 @@ import (
 
 // Every app's prefix starts as a copy of one base prefix that Wine's setup
 // made once. The copy then sees only its own C: drive and its files folder
-// as D:, and its user folders lead into the files folder.
+// as D:, and its user folders lead to folders of the same name in the files
+// folder (wiki 746, Files).
 
 // BasePrefix is the prefix new apps are copied from.
 func BasePrefix(home string) string {
@@ -22,14 +23,15 @@ func BasePrefix(home string) string {
 const InitMarker = ".gjallar-wine-initialized"
 
 // userFolders are the user's folders that Wine links to the home's own
-// folders. In an app they lead into its files folder instead.
+// folders. In an app they lead to the files folder's own instead.
 var userFolders = []string{"Documents", "Downloads", "Music", "Pictures", "Videos"}
 
 // FixPrefix turns a copied base prefix into app prefix's own: drives C:
 // and D: only, and the user folders of user in the files folder. Every
 // other link in the user's folder, such as Desktop, becomes a plain
-// folder, so nothing there leads out and shortcuts an installer puts on
-// the Desktop stay in the prefix.
+// folder, so nothing there leads out, and shortcuts an installer puts on
+// the Desktop stay in the prefix: in the files folder a double click in
+// the file manager would start them outside the sandbox.
 func FixPrefix(prefix, files, user string) error {
 	devices := filepath.Join(prefix, "dosdevices")
 	entries, err := os.ReadDir(devices)
@@ -72,12 +74,21 @@ func FixPrefix(prefix, files, user string) error {
 		case err != nil:
 			return err
 		case info.IsDir():
-			// A folder Wine made itself: keep what is in it.
-			continue
+			// A folder Wine made itself: replaced when empty, else kept.
+			if err := os.Remove(path); err != nil {
+				continue
+			}
 		default:
 			return fmt.Errorf("%s is not a folder", path)
 		}
-		if err := os.Symlink(files, path); err != nil {
+		target := filepath.Join(files, name)
+		if err := os.Mkdir(target, 0o700); err != nil && !errors.Is(err, os.ErrExist) {
+			return err
+		}
+		if err := RealDir(target); err != nil {
+			return err
+		}
+		if err := os.Symlink(target, path); err != nil {
 			return err
 		}
 		links = slices.DeleteFunc(links, func(l string) bool { return l == name })

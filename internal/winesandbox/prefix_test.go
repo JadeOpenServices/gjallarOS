@@ -12,10 +12,13 @@ func basePrefix(t *testing.T, home, user string) string {
 	t.Helper()
 	prefix := filepath.Join(t.TempDir(), "prefix")
 	userDir := filepath.Join(prefix, "drive_c", "users", user)
-	for _, dir := range []string{filepath.Join(prefix, "dosdevices"), userDir, filepath.Join(userDir, "Music")} {
+	for _, dir := range []string{filepath.Join(prefix, "dosdevices"), userDir, filepath.Join(userDir, "Music"), filepath.Join(userDir, "Videos")} {
 		if err := os.MkdirAll(dir, 0o700); err != nil {
 			t.Fatal(err)
 		}
+	}
+	if err := os.WriteFile(filepath.Join(userDir, "Videos", "kept.txt"), []byte("SYNTHETIC"), 0o600); err != nil {
+		t.Fatal(err)
 	}
 	for link, target := range map[string]string{
 		filepath.Join(prefix, "dosdevices", "c:"): "../drive_c",
@@ -48,13 +51,17 @@ func TestFixPrefix(t *testing.T) {
 		}
 	}
 	userDir := filepath.Join(prefix, "drive_c", "users", "tester")
-	for _, name := range []string{"Documents", "Downloads", "Pictures", "Videos"} {
-		if got, err := os.Readlink(filepath.Join(userDir, name)); err != nil || got != files {
-			t.Errorf("%s -> %q %v", name, got, err)
+	for _, name := range []string{"Documents", "Downloads", "Music", "Pictures"} {
+		want := filepath.Join(files, name)
+		if got, err := os.Readlink(filepath.Join(userDir, name)); err != nil || got != want {
+			t.Errorf("%s -> %q %v, want %q", name, got, err, want)
+		}
+		if info, err := os.Lstat(want); err != nil || !info.IsDir() {
+			t.Errorf("%s: %v %v", want, info, err)
 		}
 	}
-	if info, err := os.Lstat(filepath.Join(userDir, "Music")); err != nil || !info.IsDir() {
-		t.Errorf("Wine's own Music folder replaced: %v %v", info, err)
+	if _, err := os.Stat(filepath.Join(userDir, "Videos", "kept.txt")); err != nil {
+		t.Errorf("Wine's own folder with files replaced: %v", err)
 	}
 	for _, name := range []string{"Desktop", "Templates"} {
 		if info, err := os.Lstat(filepath.Join(userDir, name)); err != nil || !info.IsDir() {
