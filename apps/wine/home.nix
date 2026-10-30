@@ -8,6 +8,7 @@
 
 let
   winePackage = pkgs._wine;
+  sandboxLauncher = pkgs.callPackage ../../pkgs/gjallar-wine { };
 
   # The winetricks vkd3d verb asks the GitHub API for the latest release, which
   # fails offline and under its rate limit. The hash is the digest GitHub lists
@@ -284,6 +285,18 @@ lib.mkIf config.gjallar.apps.wine.enable {
       (pkgs.writeTextDir "share/zsh/site-functions/_wine-win11" ''
         #compdef wine-win11
         _arguments '1:Windows program:_files -g "*.(exe|msi|bat|lnk|EXE|MSI|BAT|LNK)"' '*::argument:_files'
+      '')
+
+      sandboxLauncher
+      # hold and lock are the launcher's own steps, so only run is offered.
+      (pkgs.writeTextDir "share/zsh/site-functions/_gjallar-wine" ''
+        #compdef gjallar-wine
+        _gjallar_wine_ids() {
+          local -a ids
+          ids=(''${HOME}/.local/share/gjallar-wine/apps/*.json(N:t:r))
+          _describe -t apps 'Wine app' ids
+        }
+        _arguments '1:command:((run\:"start a Wine app in its sandbox"))' '2:app:_gjallar_wine_ids' '*::argument:_files'
       '')
 
       pkgs.winetricks
