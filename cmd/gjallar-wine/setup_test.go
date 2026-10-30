@@ -19,6 +19,7 @@ import (
 // and stand-ins for the settings service and the sandbox.
 type fakeSetup struct {
 	home, count string
+	places      string
 	switches    []string
 	setErr      error
 	launched    [][]string
@@ -34,6 +35,7 @@ func newFakeSetup(t *testing.T) *fakeSetup {
 	f := &fakeSetup{home: t.TempDir()}
 	tools := t.TempDir()
 	f.count = filepath.Join(tools, "runs")
+	f.places = filepath.Join(tools, "places")
 	script := func(name, body string) string {
 		path := filepath.Join(tools, name)
 		if err := os.WriteFile(path, []byte("#!/bin/sh\n"+body), 0o700); err != nil {
@@ -51,14 +53,17 @@ ln -s "$HOME" "$WINEPREFIX/drive_c/users/tester/Documents"
 touch "$WINEPREFIX/`+winesandbox.InitMarker+`"
 `)
 	script("wineserver", "exit 0\n")
+	place := script("place", `printf '%s|' "$@" >> "`+f.places+`"
+echo >> "`+f.places+`"
+`)
 
-	oldInit, oldCp, oldWine := initPath, cpPath, winePath
+	oldInit, oldCp, oldWine, oldPlace := initPath, cpPath, winePath, placePath
 	oldUser, oldLaunch, oldSet := currentUser, launchApp, setWine
 	t.Cleanup(func() {
-		initPath, cpPath, winePath = oldInit, oldCp, oldWine
+		initPath, cpPath, winePath, placePath = oldInit, oldCp, oldWine, oldPlace
 		currentUser, launchApp, setWine = oldUser, oldLaunch, oldSet
 	})
-	initPath, cpPath, winePath = init, cp, filepath.Join(tools, "wine")
+	initPath, cpPath, winePath, placePath = init, cp, filepath.Join(tools, "wine"), place
 	currentUser = func() (string, string, error) { return "tester", f.home, nil }
 	setWine = func(id string, internet, home bool) error {
 		if internet || home {
@@ -78,6 +83,19 @@ touch "$WINEPREFIX/`+winesandbox.InitMarker+`"
 	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
 	t.Setenv("XDG_STATE_HOME", "")
 	return f
+}
+
+// placeCalls gives the Places tool's runs, one line each.
+func (f *fakeSetup) placeCalls(t *testing.T) []string {
+	t.Helper()
+	data, err := os.ReadFile(f.places)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	return strings.Split(strings.TrimSuffix(string(data), "\n"), "\n")
 }
 
 func (f *fakeSetup) runs(t *testing.T) int {
@@ -161,6 +179,9 @@ func TestAddApp(t *testing.T) {
 	}
 	if len(f.launched) != 0 {
 		t.Errorf("started %v without an installer", f.launched)
+	}
+	if got, want := f.placeCalls(t), []string{"add|" + paths.Files + "|Synthetic App|folder-wine|"}; !slices.Equal(got, want) {
+		t.Errorf("Places %q, want %q", got, want)
 	}
 
 	if err := addApp([]string{"Synthetic App"}, io.Discard, io.Discard); err == nil {
@@ -363,6 +384,9 @@ func TestRemoveCmd(t *testing.T) {
 	}
 	if !slices.Equal(f.switches, []string{"keep", "keep", "gone"}) {
 		t.Errorf("switches cleared for %v", f.switches)
+	}
+	if got := f.placeCalls(t)[2:]; !slices.Equal(got, []string{"remove|" + keep.Files + "|", "remove|" + gone.Files + "|"}) {
+		t.Errorf("Places %q", got)
 	}
 	for _, bad := range [][]string{{}, {"keep", "--files"}, {"keep", "--delete-files", "x"}, {"Keep"}} {
 		if err := removeCmd(bad, io.Discard); err == nil {

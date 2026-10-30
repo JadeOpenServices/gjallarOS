@@ -8,7 +8,10 @@
 
 let
   winePackage = pkgs._wine;
-  sandboxLauncher = pkgs.callPackage ../../pkgs/gjallar-wine { inherit wineInit; };
+  sandboxLauncher = pkgs.callPackage ../../pkgs/gjallar-wine {
+    inherit wineInit;
+    dolphinPlace = pkgs.callPackage ../../pkgs/dolphin-place { };
+  };
 
   # The winetricks vkd3d verb asks the GitHub API for the latest release, which
   # fails offline and under its rate limit. The hash is the digest GitHub lists

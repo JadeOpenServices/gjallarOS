@@ -25,11 +25,32 @@ import (
 // through launch, inside it. Each holds the app's lock, so one prefix has
 // one Wine at a time.
 
-// Set by the package: Wine's one-time setup and the copy tool.
+// Set by the package: Wine's one-time setup, the copy tool and the tool
+// that adds a files folder to the file manager's Places. Without placePath
+// the Places stay as they are.
 var (
-	initPath = ""
-	cpPath   = "cp"
+	initPath  = ""
+	cpPath    = "cp"
+	placePath = ""
 )
+
+// placeIcon is the Papirus icon of an app's entry in Places.
+const placeIcon = "folder-wine"
+
+// setPlace runs the Places tool with args.
+func setPlace(args ...string) error {
+	if placePath == "" {
+		return nil
+	}
+	out, err := exec.Command(placePath, args...).CombinedOutput()
+	if err != nil {
+		if msg := strings.TrimSpace(string(out)); msg != "" {
+			return fmt.Errorf("%s: %w", msg, err)
+		}
+		return err
+	}
+	return nil
+}
 
 // Replaced by the tests.
 var (
@@ -155,6 +176,9 @@ func addApp(args []string, stdout, stderr io.Writer) error {
 		return err
 	}
 	fmt.Fprintf(stdout, "Added app %s. Its files folder is %s, which the app sees as D:.\n", id, paths.Files)
+	if err := setPlace("add", paths.Files, name, placeIcon); err != nil {
+		fmt.Fprintf(stderr, "WARNING: %s is not in the file manager's Places: %v\n", paths.Files, err)
+	}
 	fmt.Fprintf(stdout, "It has no network: gjallarctl wine set %s --internet on lets it reach the internet.\n", id)
 	if installer == "" {
 		fmt.Fprintf(stdout, "Next: gjallar-wine install %s INSTALLER, or gjallar-wine program %s D:\\PROGRAM.exe for a program in the files folder.\n", id, id)
@@ -508,9 +532,12 @@ func removeCmd(args []string, stdout io.Writer) error {
 		return err
 	}
 	defer lock.Close()
-	var kept string
-	if !files {
-		if _, paths, err := winesandbox.LoadApp(home, id); err == nil {
+	// The files folder, to take out of Places and to tell where the files
+	// stay. Unknown if the record is broken.
+	var place, kept string
+	if _, paths, err := winesandbox.LoadApp(home, id); err == nil {
+		place = paths.Files
+		if !files {
 			kept = paths.Files
 		}
 	}
@@ -519,6 +546,11 @@ func removeCmd(args []string, stdout io.Writer) error {
 	}
 	if err := winesandbox.RemoveApp(home, id, files); err != nil {
 		return err
+	}
+	if place != "" {
+		if err := setPlace("remove", place); err != nil {
+			return fmt.Errorf("removed app %s, but %s stays in the file manager's Places: %w", id, place, err)
+		}
 	}
 	switch {
 	case files:

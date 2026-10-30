@@ -10,6 +10,8 @@
   _wine,
   # Wine's setup for the base prefix; without it gjallar-wine add refuses.
   wineInit ? null,
+  # Adds each app's files folder to the file manager's Places.
+  dolphinPlace ? null,
 }:
 
 buildGoModule {
@@ -49,7 +51,8 @@ buildGoModule {
     "-X main.winePath=${_wine}/bin/wine"
     "-X main.cpPath=${coreutils}/bin/cp"
   ]
-  ++ lib.optional (wineInit != null) "-X main.initPath=${wineInit}/bin/wine-win11-init";
+  ++ lib.optional (wineInit != null) "-X main.initPath=${wineInit}/bin/wine-win11-init"
+  ++ lib.optional (dolphinPlace != null) "-X main.placePath=${lib.getExe dolphinPlace}";
 
   env.CGO_ENABLED = "0";
 
