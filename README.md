@@ -782,6 +782,13 @@ never expire. Without a built-in USB keyboard, the keyboard and mouse used last
 never expire either. `gjallarctl settings` turns it on or shortens it at once;
 turning it off (`0`) or lengthening it waits out the security delay.
 
+With enforcement on, approving a USB device does not open its storage. Every
+stick, memory card, disc and disk, a disk in a dock or enclosure included,
+stays closed until you open it from its notice. A disk in a dock is named by
+the disk inside, then the dock. Storage closes again when the medium is
+swapped, when the device is unplugged, and when the USB trust service
+restarts. A rebuild can restart it, so unmount USB disks before a rebuild.
+
 The review dialog opens in a simple view. "Techy view" shows IDs, ports and
 interfaces for that dialog only. The "Always techy view" box writes
 `"usbReviewTechnicalView": true` or `false` into `user.config.json`, so the

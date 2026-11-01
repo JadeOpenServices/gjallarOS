@@ -3,6 +3,7 @@ package mediagate
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -34,7 +35,7 @@ func (k *fakeKernel) add(id string, usb, removable bool, typ int, devnum string)
 	}
 	h := strings.SplitN(id, ":", 2)[0]
 	real := filepath.Join(parent, "host"+h, "target"+strings.Join(strings.Split(id, ":")[:3], ":"), id)
-	mustWrite(k.t, filepath.Join(real, "type"), string(rune('0'+typ)))
+	mustWrite(k.t, filepath.Join(real, "type"), strconv.Itoa(typ))
 	inquiry := []byte{byte(typ), 0}
 	if removable {
 		inquiry[1] = 0x80
@@ -314,19 +315,54 @@ func TestUnknownProbeFailsClosed(t *testing.T) {
 	}
 }
 
-func TestFixedAndNonUSBDisksBind(t *testing.T) {
-	g, k, _ := newGate(t)
+// Plane 289: a USB disk that reports a fixed medium (an SSD, a disk in a
+// dock, or a stick that clears its removable bit) waits for the owner like a
+// card. Disks that are not behind USB stay the kernel's.
+func TestFixedUSBDiskStaysClosedUntilAllowed(t *testing.T) {
+	g, k, probe := newGate(t)
 	k.add("0:0:0:0", false, false, 0, "")
-	k.add("6:0:0:0", true, false, 0, "5") // USB SSD: no medium to swap
-	g.Sync(true)
+	real := k.add("6:0:0:0", true, false, 0, "5")
+	mustWrite(t, filepath.Join(real, "vendor"), "SYNTHETIC ")
+	mustWrite(t, filepath.Join(real, "model"), "EXAMPLE SSD 1TB  ")
+	k.setBound("6:0:0:0", true)
+	probe["6:0:0:0"] = MediumPresent
+	if err := g.Sync(true); err != nil {
+		t.Fatal(err)
+	}
 	if k.bound("0:0:0:0") {
 		t.Fatal("gate touched a non-USB disk")
 	}
-	if !k.bound("6:0:0:0") {
-		t.Fatal("fixed USB disk was not bound")
+	if k.bound("6:0:0:0") {
+		t.Fatal("fixed USB disk opened without the owner")
 	}
-	if media, _ := g.MediaPolicy(); len(media) != 0 {
-		t.Fatal("fixed disk listed as a medium")
+	media, _ := g.MediaPolicy()
+	if len(media) != 1 || media[0].Kind != "disk" || media[0].Disk != "SYNTHETIC EXAMPLE SSD 1TB" || media[0].Reader != "USB DISK" {
+		t.Fatalf("media = %+v", media)
+	}
+	if err := g.AllowMedia("6:0:0:0", media[0].Connection); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.Sync(true); err != nil {
+		t.Fatal(err)
+	}
+	if !k.bound("6:0:0:0") {
+		t.Fatal("allowed fixed disk not opened")
+	}
+}
+
+// Every type sd or sr would bind is gated; others (an enclosure here) are
+// not storage and bind as before.
+func TestGatedTypes(t *testing.T) {
+	for typ, want := range map[int]bool{0: true, 4: true, 5: true, 7: true, 14: true, 20: true, 1: false, 13: false} {
+		if got := (LUN{Type: typ}).Gated(); got != want {
+			t.Errorf("type %d gated = %v, want %v", typ, got, want)
+		}
+	}
+	g, k, _ := newGate(t)
+	k.add("6:0:0:0", true, false, 13, "5")
+	g.Sync(true)
+	if !k.bound("6:0:0:0") {
+		t.Fatal("enclosure LUN not bound")
 	}
 }
 
@@ -365,8 +401,27 @@ func TestParseSense(t *testing.T) {
 	if classify(scsiResult{status: statusGood}) != MediumPresent {
 		t.Fatal("GOOD is not present")
 	}
-	if classify(scsiResult{status: statusCheck, key: 2, asc: 0x04}) != MediumUnknown {
+	if classify(scsiResult{status: statusCheck, key: 2, asc: 0x04, asq: 0x01}) != MediumUnknown {
 		t.Fatal("becoming ready must wait")
+	}
+	if classify(scsiResult{status: statusCheck, key: 2, asc: 0x04, asq: 0x02}) != MediumPresent {
+		t.Fatal("a stopped disk must be offered, sd starts it on open")
+	}
+}
+
+func TestCapacity16(t *testing.T) {
+	data := make([]byte, 32)
+	// SYNTHETIC: 4 TB in 512-byte blocks, last LBA 7814037167.
+	data[3], data[4], data[5], data[6], data[7] = 0x01, 0xd1, 0xc0, 0xbe, 0xaf
+	data[10] = 0x02
+	if got := capacity16(data); got != 7814037168*512 {
+		t.Fatalf("capacity16 = %d", got)
+	}
+	for i := range 8 {
+		data[i] = 0xff
+	}
+	if got := capacity16(data); got != 0 {
+		t.Fatalf("overflowing capacity = %d, want unknown", got)
 	}
 }
 
@@ -451,7 +506,8 @@ func TestDiskKind(t *testing.T) {
 		mustWrite(t, filepath.Join(k.add(id, true, true, 0, "5"), "model"), model)
 	}
 	k.add("7:0:0:0", false, false, 0, "")
-	for id, want := range map[string]string{"6:0:0:0": "sd-card", "6:0:0:1": "card", "7:0:0:0": "", "9:0:0:0": ""} {
+	k.add("6:0:0:2", true, false, 0, "5")
+	for id, want := range map[string]string{"6:0:0:0": "sd-card", "6:0:0:1": "card", "6:0:0:2": "disk", "7:0:0:0": "", "9:0:0:0": ""} {
 		got, err := DiskKind(k.root, id)
 		if err != nil {
 			t.Fatal(err)

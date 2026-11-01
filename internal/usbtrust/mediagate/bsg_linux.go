@@ -55,13 +55,17 @@ const (
 	senseNotReady     = 0x02
 	senseUnitAttn     = 0x06
 	ascMediumAbsent   = 0x3a
-	ascBecomingReady  = 0x04
+	ascNotReady       = 0x04
+	ascqNeedsStart    = 0x02 // INITIALIZING COMMAND REQUIRED: a stopped disk
 	ascMediumChanged  = 0x28
 	ascPowerOnReset   = 0x29
 	commandTimeoutMs  = 3000
 	opTestUnitReady   = 0x00
 	opReadCapacity10  = 0x25
+	opReadCapacity16  = 0x9e // SERVICE ACTION IN(16)
+	saReadCapacity16  = 0x10
 	readCapacityBytes = 8
+	readCap16Bytes    = 32
 )
 
 var _ = [1]struct{}{}[unsafe.Sizeof(sgIOv4{})-160]
@@ -154,7 +158,11 @@ func classify(r scsiResult) Medium {
 	switch {
 	case r.key == senseNotReady && r.asc == ascMediumAbsent:
 		return MediumAbsent
-	case r.key == senseNotReady && r.asc == ascBecomingReady:
+	case r.key == senseNotReady && r.asc == ascNotReady && r.asq == ascqNeedsStart:
+		// A stopped disk. The medium is there and waits for START STOP
+		// UNIT, which sd sends once the owner opens it.
+		return MediumPresent
+	case r.key == senseNotReady && r.asc == ascNotReady:
 		// The medium is spinning up or initializing; the next poll decides.
 		return MediumUnknown
 	case r.key == senseUnitAttn && (r.asc == ascMediumChanged || r.asc == ascPowerOnReset):
@@ -172,7 +180,9 @@ func (b BSG) Medium(id string) (Medium, error) {
 }
 
 // Capacity is for display only; READ CAPACITY returns what the reader reports
-// about the medium and does not read its blocks.
+// about the medium and does not read its blocks. A disk of 2 TiB or more
+// answers the 10-byte form with the largest block number, so the 16-byte form
+// gives its size.
 func (b BSG) Capacity(id string) (uint64, error) {
 	cdb := make([]byte, 10)
 	cdb[0] = opReadCapacity10
@@ -186,8 +196,29 @@ func (b BSG) Capacity(id string) (uint64, error) {
 	}
 	last := binary.BigEndian.Uint32(data[0:4])
 	block := binary.BigEndian.Uint32(data[4:8])
-	if last == 0xffffffff {
-		return 0, nil
+	if last != 0xffffffff {
+		return (uint64(last) + 1) * uint64(block), nil
 	}
-	return (uint64(last) + 1) * uint64(block), nil
+	cdb = make([]byte, 16)
+	cdb[0], cdb[1] = opReadCapacity16, saReadCapacity16
+	binary.BigEndian.PutUint32(cdb[10:14], readCap16Bytes)
+	data = make([]byte, readCap16Bytes)
+	if r, err = b.command(id, cdb, data); err != nil {
+		return 0, err
+	}
+	if r.status != statusGood {
+		return 0, fmt.Errorf("READ CAPACITY(16) %s: status %#x", id, r.status)
+	}
+	return capacity16(data), nil
+}
+
+// capacity16 reads a READ CAPACITY(16) reply. A block count that overflows
+// reads as unknown.
+func capacity16(data []byte) uint64 {
+	last := binary.BigEndian.Uint64(data[0:8])
+	block := uint64(binary.BigEndian.Uint32(data[8:12]))
+	if last == ^uint64(0) || block == 0 || (last+1) > ^uint64(0)/block {
+		return 0
+	}
+	return (last + 1) * block
 }

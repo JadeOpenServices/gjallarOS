@@ -582,13 +582,22 @@ func usbMediaLook(kind string) (icon, summary string) {
 		return "media-flash-memory-stick", "Memory Stick inserted"
 	case usbtrust.MediaCard:
 		return "media-flash", "Memory card inserted"
+	case usbtrust.MediaDisk:
+		return "drive-harddisk", "USB disk connected"
 	}
 	return "drive-removable-media-usb", "USB storage connected"
 }
 
-// usbMediaNotice builds the notice for a closed medium.
+// usbMediaNotice builds the notice for a closed medium. A disk in a dock or
+// enclosure goes by the disk's own name first (Q171), with the case after it.
 func usbMediaNotice(m usbtrust.MediaDecision) desktopNotice {
 	body := usbMediaReader(m)
+	if m.Disk != "" && m.Disk != m.Reader {
+		body = m.Disk
+		if m.Reader != "" {
+			body += " in " + m.Reader
+		}
+	}
 	if m.Bytes > 0 {
 		body += fmt.Sprintf(", %.1f GB", float64(m.Bytes)/1e9)
 	}

@@ -434,6 +434,14 @@ in
             "session"
           ];
         };
+        # Noctalia picks one of eleven lock effects at random (pixel,
+        # honeycomb, stripes, ...) and runs it for 1.5 s. Lock and unlock
+        # use a plain cross-fade instead, short enough to feel instant but
+        # still soft. 100 ms is the shortest Noctalia accepts.
+        lockscreen = {
+          transition = [ "fade" ];
+          transition_duration = 200;
+        };
         wallpaper = {
           directory = "${config.home.homeDirectory}/Pictures";
           automation.recursive = true;
