@@ -13,18 +13,16 @@ import (
 
 // Apply uses runtime actions only. USBGuard's persistent allowlist is never
 // mutated; after restart every authorization is derived again from signed state.
+//
+// A device that leaves between the observation and the enforcement has
+// nothing left to enforce: USBGuard hands every new connection a new runtime
+// ID, so a gone ID never comes back as another device. Failing the whole plan
+// for it made the daemon block every device, Bluetooth and keyboard included,
+// whenever something was unplugged during a check (Plane 288).
 func (s LiveSource) Apply(ctx context.Context, policy []usbtrust.Decision) error {
-	output, err := s.Runner.Output(ctx, s.Binary, "list-devices")
+	current, err := s.runtimeDevices(ctx)
 	if err != nil {
 		return err
-	}
-	live, err := ParseLines(string(output))
-	if err != nil {
-		return err
-	}
-	current := make(map[string]Observation, len(live))
-	for _, o := range live {
-		current[o.Device.RuntimeID] = o
 	}
 	// Revalidate the whole plan before permitting anything. Block transitions
 	// precede allows, including revocation after a permanent record is forgotten.
@@ -42,21 +40,53 @@ func (s LiveSource) Apply(ctx context.Context, policy []usbtrust.Decision) error
 		}
 		o, exists := current[d.RuntimeID]
 		if !exists {
-			return fmt.Errorf("USB device disconnected before enforcement")
+			continue
 		}
 		if !sameIdentity(o.Device.Identity, d.Identity) {
 			return fmt.Errorf("USB identity changed before enforcement")
 		}
 	}
 	for _, d := range plan {
-		if current[d.RuntimeID].Target == string(d.Target) {
+		o, exists := current[d.RuntimeID]
+		if !exists || o.Target == string(d.Target) {
 			continue
 		}
 		if _, err := s.Runner.Output(ctx, s.Binary, string(d.Target)+"-device", d.RuntimeID); err != nil {
+			if s.departed(ctx, d.RuntimeID) {
+				continue
+			}
 			return err
 		}
 	}
 	return nil
+}
+
+func (s LiveSource) runtimeDevices(ctx context.Context) (map[string]Observation, error) {
+	output, err := s.Runner.Output(ctx, s.Binary, "list-devices")
+	if err != nil {
+		return nil, err
+	}
+	live, err := ParseLines(string(output))
+	if err != nil {
+		return nil, err
+	}
+	current := make(map[string]Observation, len(live))
+	for _, o := range live {
+		current[o.Device.RuntimeID] = o
+	}
+	return current, nil
+}
+
+// departed tells a refused action on a device that has just left apart from
+// a real failure. Only a fresh list without the ID counts; any doubt keeps the
+// error, so the caller still fails closed.
+func (s LiveSource) departed(ctx context.Context, runtimeID string) bool {
+	current, err := s.runtimeDevices(ctx)
+	if err != nil {
+		return false
+	}
+	_, present := current[runtimeID]
+	return !present
 }
 
 func (s LiveSource) BlockAll(ctx context.Context) error {
