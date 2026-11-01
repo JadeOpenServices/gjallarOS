@@ -26,6 +26,7 @@ buildGoModule {
       ../../cmd
       ../../internal/ai
       ../../internal/binarycache
+      ../../internal/devgate
       ../../internal/gittest
       ../../internal/hardware
       ../../internal/input
