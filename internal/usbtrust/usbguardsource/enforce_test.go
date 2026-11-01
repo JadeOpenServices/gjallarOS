@@ -43,6 +43,26 @@ func TestEnforcementRevalidatesIdentityAndNeverPersists(t *testing.T) {
 	}
 }
 
+// The controller adds the Bluetooth address it read from the Bluetooth
+// stack; USBGuard never reports it, so it must not fail the revalidation.
+func TestEnforcementIgnoresBluetoothAddress(t *testing.T) {
+	line := `7: block id 13d3:3571 hash "synthetic-radio" parent-hash "parent" via-port "1-5" with-interface { e0:01:01 e0:01:01 }`
+	parsed, err := ParseLine(line)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := &enforcementRunner{lines: line}
+	s := LiveSource{Runner: r, Binary: "usbguard"}
+	plan := []usbtrust.Decision{{ObservedDevice: parsed.Device, Target: usbtrust.TargetAllow}}
+	plan[0].Identity.BluetoothAddress = "00:00:5E:00:53:01"
+	if err := s.Apply(context.Background(), plan); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(r.calls, [][]string{{"list-devices"}, {"allow-device", "7"}}) {
+		t.Fatal(r.calls)
+	}
+}
+
 func TestRevocationsPrecedeAllows(t *testing.T) {
 	r := &enforcementRunner{lines: "12: block id 1234:5678 hash \"a\"\n13: allow id 1234:9999 hash \"b\""}
 	observed, err := ParseLines(r.lines)
