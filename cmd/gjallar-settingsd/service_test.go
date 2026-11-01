@@ -304,31 +304,6 @@ func TestRequestLimits(t *testing.T) {
 	}
 }
 
-func TestReadVerdictTrustsOnlyFreshRootVerdict(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "vpn-trust.json")
-	if err := os.WriteFile(path, []byte(`{"trust":"home","reason":"r","bypass":[],"exitNode":""}`), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	now := time.Now()
-	if verdict, ok := readVerdict(path, now); os.Geteuid() == 0 && (!ok || verdict.Trust != nettrust.TrustHome) {
-		t.Fatal("a fresh root verdict is not home")
-	}
-	if _, ok := readVerdict(path, now); os.Geteuid() != 0 && ok {
-		t.Fatal("a verdict not owned by root counts as home")
-	}
-	if _, ok := readVerdict(path, now.Add(verdictMaxAge+time.Minute)); ok {
-		t.Fatal("a stale verdict counts as home")
-	}
-	link := filepath.Join(dir, "link.json")
-	if err := os.Symlink(path, link); err != nil {
-		t.Fatal(err)
-	}
-	if _, ok := readVerdict(link, now); ok {
-		t.Fatal("a link counts as home")
-	}
-}
-
 // The peer names and addresses are SYNTHETIC.
 func TestHostnameMustBeFree(t *testing.T) {
 	f := newFixture(t)

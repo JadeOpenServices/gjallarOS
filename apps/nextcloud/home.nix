@@ -352,7 +352,7 @@ PY
   '';
 
   dolphinPlace = pkgs.writeShellScript "nextcloud-dolphin-place" ''
-    exec ${lib.getExe pkgs.python3} ${./dolphin-place.py} ${lib.escapeShellArg dolphinNextcloudIcons.places}
+    exec ${lib.getExe (pkgs.callPackage ../../pkgs/dolphin-place { })} add "$HOME/Nextcloud" Nextcloud ${lib.escapeShellArg dolphinNextcloudIcons.places}
   '';
 
   enrollmentLauncher = pkgs.writeShellScriptBin "nextcloud-enroll" ''

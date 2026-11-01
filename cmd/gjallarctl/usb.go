@@ -26,7 +26,7 @@ import (
 
 func runUSB(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		fmt.Fprintln(stderr, "Usage: gjallarctl usb {status|audit|policy|review|provision-key|allow-once|trust-permanent|keep-blocked|enroll-internal|accept-replacement|forget|renew|disarm|allow-media} [--runtime-id ID --connection TOKEN] [--trusted-id ID] [--role ROLE] [--portable=true|false] [--media H:C:T:L --connection TOKEN]")
+		fmt.Fprintln(stderr, "Usage: gjallarctl usb {status|audit|policy|review|provision-key|allow-once|trust-permanent|keep-blocked|enroll-internal|accept-replacement|forget|renew|disarm|arm|allow-media} [--runtime-id ID --connection TOKEN] [--trusted-id ID] [--role ROLE] [--portable=true|false] [--media H:C:T:L --connection TOKEN]")
 		return 2
 	}
 	if args[0] == "review" {

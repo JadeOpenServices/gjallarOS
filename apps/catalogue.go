@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io/fs"
 	"path"
+	"regexp"
 	"slices"
 )
 
@@ -31,7 +32,13 @@ type App struct {
 	// Installer is the installer's yes/no question; empty means the
 	// installer never asks and takes Default.
 	Installer string `json:"installer"`
+	// Icon is the icon theme name; empty means the app ID. A repo icon
+	// (apps/<id>/icon.svg) comes first when the app has one (Plane 273).
+	Icon string `json:"icon"`
 }
+
+// iconName keeps icon names to plain theme names: no paths, no URLs.
+var iconName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$`)
 
 // Catalogue returns every app, sorted by ID.
 func Catalogue() ([]App, error) {
@@ -51,6 +58,12 @@ func Catalogue() ([]App, error) {
 			return nil, fmt.Errorf("%s: %w", file, err)
 		}
 		app.ID = path.Dir(file)
+		if app.Icon == "" {
+			app.Icon = app.ID
+		}
+		if !iconName.MatchString(app.Icon) {
+			return nil, fmt.Errorf("%s: icon %q is not an icon theme name", file, app.Icon)
+		}
 		out = append(out, app)
 	}
 	return out, nil

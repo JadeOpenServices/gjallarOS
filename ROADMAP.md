@@ -452,7 +452,7 @@ Plan agreed 2026-10-10. Channels decided 2026-10-20 (Q16): `main` became
       1. A branch bumps all flake inputs (nixpkgs, Home Manager, Noctalia,
          the ODDC pin and the rest).
       2. The full `.vm/installer-e2e/REGRESSION.md` runs in VMs.
-      3. Merge to `main` and tag.
+      3. Merge to `dev` and tag.
       4. `staging` moves to the tag. The Framework 13 and the ZBook x2 G4
          run it for a while.
       5. `stable` moves to the same tag.
@@ -574,6 +574,134 @@ Plan agreed 2026-10-10. Channels decided 2026-10-20 (Q16): `main` became
       on cache.nixos.org for our nixpkgs pin), the qt6ct patch 2 %. A cache
       of these saves about 63 %. Kernel modules and the initrd depend on the
       device and always build locally (2 %).
+
+### Organisation and updates (Jade, 2026-11-01, Q157-Q167)
+
+Wiki 752 "Answered 2026-11-01" has the answers word for word.
+
+- [ ] **Who runs what.** `dev` is where tickets land, each tested in the VM
+      that matches the device first. `staging` is Jade's daily system and
+      moves only after a full REGRESSION pass. `stable` moves per release
+      pack and through the hotfix lane. New installs get `stable` with
+      developer mode off.
+- [ ] **Developer mode unlocks channels** (Q157, Q161). `staging`, `dev` and
+      `gjallarctl rebuild --update BRANCH` need `developerMode`. Without it
+      the channel setting refuses anything but `stable` and the system
+      tools offer no way around that. Developer mode stays refused on
+      JODS-managed devices, so a hand edit of `user.config.json` changes
+      nothing there. This is the phase until Genbu MDM exists, not a
+      workaround.
+- [ ] **Developer grant, after Genbu MDM** (later phase). JODS/Genbu signs a
+      grant bound to one device (machine id plus the TPM key), with a scope
+      (`staging`, `dev`, branches) and an expiry. The local setting then
+      only works on standalone devices; a joined device needs the grant. A
+      revoked or expired grant moves the device back to `stable` at once,
+      without a downgrade of the running system (it waits for `stable` to
+      catch up). Root on the device stays out of the threat model
+      (loophole 15). Standalone devices without Genbu keep working.
+- [ ] **Branches** (Q158). `rebuild --update BRANCH` takes a channel or a
+      feature branch, the latter with a warning. It is one shot:
+      `releaseChannel` stays and the next plain update goes back to it.
+      `--back` is the only way to a deliberate downgrade.
+- [ ] **Tags** (Q159). Every merge that changes a patched package gets a
+      tag, on `dev` too, so VM runs and slow devices pull from the cache.
+      Several dev merges in a row share one tag. A promotion to `staging`
+      or `stable` reuses the cache entries (they are keyed by store path)
+      and builds nothing new.
+- [ ] **Hotfix lane** (Q160). A fix that cannot wait for a pack goes to
+      `staging` after the full REGRESSION pass, soaks on the Framework 13,
+      gets its own tag on `stable` and is merged back into `dev`. First
+      user: H0 (278 and 279), held until the passkey report is understood.
+- [ ] **Release packs** (Q167). Each pack is a Plane module and a label.
+      H0 hotfix (278, 279). P1 Wine (272, 275, 277, Lobu-Online import,
+      274). P2 one CLI (`gjallarctl` tree, help, completion, legacy
+      folder). P3 Settings and Updates (276, Updates page). P4 Nextcloud
+      266.
+
+#### Updates page and card (Q162-Q165)
+
+- [ ] **Own Updates page** in the settings app, linked from Security.
+      Shows the channel, the running tag, the newest tag, the state
+      (current, update found, prepared, waiting for a restart) and the
+      changelog.
+- [ ] **Check as root, ask as the user.** A root timer fetches and checks
+      only, and writes a status file that root owns and every user can
+      read. It holds tags, dates, the rating and the changelog, never a
+      secret. The card and the page only read it.
+- [ ] **Prepare and install.** Prepare builds the new system in the
+      background without a password: on mains power, not on a metered
+      network, once per version. Install switches to it and always needs
+      the password or the fingerprint through polkit.
+- [ ] **The card** in gjallarHorn stays until it is answered or swiped away,
+      like "set keys now". It never asks for a password itself; Prepare
+      runs from the card, Install opens the Updates page. Its state is
+      stored per version, so a relogin or restart does not bring back a
+      card that was handled.
+- [ ] **Behaviour by rating** (AppStream urgency: low, medium, high,
+      critical; tags security, fixes, features):
+      - low and medium: Later offers tonight, tomorrow or next week. A swipe
+        brings it back after 3 days, then after 7, then only the Updates
+        page shows it.
+      - high: a swipe brings it back the next day.
+      - critical: no swipe. Prepare, Install or remind in 1 h.
+      - The card gets more visible with the age of the update.
+      - Forced restart is a separate Genbu setting for a later phase and
+        stays off on standalone devices.
+- [ ] **Quiet during calls and screen sharing.** The card waits while the
+      camera, the microphone or a screen share is in use. Security pass
+      (2026-11-01):
+      - The signal comes from the user's own PipeWire session, the same
+        source the bar's privacy widget reads. No new permission; checked
+        at build time.
+      - A program could hold a fake stream open to hide updates. The quiet
+        time is capped at 2 h, 1 h for critical. The Updates page and the
+        bar show the real state the whole time.
+      - Stream names come from other apps. Only the media class counts;
+        names are never shown, parsed, logged or passed to a shell.
+      - The "sharing now" value stays in the user session. It is not
+        logged and never goes to root, JODS or Genbu.
+- [ ] **Changelog box.** A simple view (plain "What's new" lines) and a
+      technical view (the `GJAL` subjects, Plane numbers and the package
+      version changes from the closure diff). Shown as plain text only.
+- [ ] **Before install** (Q165). Install now or at the next restart. A
+      notice first says what will happen: which services restart, whether
+      Wi-Fi drops, whether a logout or restart follows and which apps close.
+      Nothing is closed for the user, so there is time to save work and
+      finish forms. A kernel change suggests the next restart; the power
+      menu then shows "Restart to update". No full-screen "working on
+      updates" screen.
+- [ ] **Fake notices.** Other apps can send notifications that look like
+      the card. The card is fed from the root status file and installing
+      only ever asks through polkit, so a fake notice cannot get the
+      password by itself. The Updates page explains this.
+
+#### Old names (Q166)
+
+- [ ] **One legacy folder.** `system/tools/legacy/` holds one table for
+      every rename: commands, settings keys, config fields and paths. Each
+      row has the old name, the new name, the version it was removed in,
+      the version it can be deleted in and the Plane item.
+- [ ] Old commands are not run. The zsh `command_not_found_handler` prints
+      the new name and stops.
+- [ ] Old settings keys and config fields are translated once, with a
+      notice.
+- [ ] A flake check fails when an old name is still a real command, is
+      used outside the legacy folder, or has a row past its delete version.
+- [ ] The rule goes into README, the job rules (wiki 691) and memory.
+
+#### Update sources
+
+- Apple, declarative software updates:
+  https://support.apple.com/guide/deployment/install-and-enforce-software-updates-depd30715cbb/web
+- Microsoft, update deadlines and grace periods:
+  https://learn.microsoft.com/en-us/windows/deployment/update/wufb-compliancedeadlines
+- ChromeOS RelaunchNotification policy:
+  https://chromeenterprise.google/policies/#RelaunchNotification
+- Nudge (macOS update prompts): https://github.com/macadmins/nudge
+- systemd offline updates:
+  https://www.freedesktop.org/software/systemd/man/latest/systemd.offline-updates.html
+- AppStream release urgency:
+  https://www.freedesktop.org/software/appstream/docs/chap-Metadata.html#tag-releases
 
 Sources:
 

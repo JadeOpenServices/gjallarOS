@@ -62,6 +62,14 @@ const introspection = `<node>
     <method name="PairRemove"><arg name="id" type="s" direction="in"/></method>
     <method name="PauseVPN"><arg name="pause" type="s" direction="out"/></method>
     <method name="ResumeVPN"/>
+    <method name="Wine"><arg name="programs" type="s" direction="out"/></method>
+    <method name="SetWine">
+      <arg name="id" type="s" direction="in"/>
+      <arg name="internet" type="b" direction="in"/>
+      <arg name="home" type="b" direction="in"/>
+      <arg name="programs" type="s" direction="out"/>
+    </method>
+    <signal name="WineChanged"/>
   </interface>` + introspect.IntrospectDataString + `</node>`
 
 func main() {
@@ -86,6 +94,11 @@ func main() {
 		svc.keys = nil
 	} else if _, err := svc.keys.trusted(); err != nil {
 		log.Printf("settings files: %v", err)
+	}
+	svc.wineChanged = func() {
+		if err := conn.Emit(objectPath, interfaceName+".WineChanged"); err != nil {
+			log.Printf("wine: tell the launchers: %v", err)
+		}
 	}
 	if err := conn.Export(object{svc}, objectPath, interfaceName); err != nil {
 		log.Fatal(err)

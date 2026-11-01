@@ -116,6 +116,7 @@
         gjallarctl = pkgs.callPackage ./pkgs/gjallarctl { };
         "gjallar-usbtrustd" = pkgs.callPackage ./pkgs/gjallar-usbtrustd { };
         "gjallar-settingsd" = pkgs.callPackage ./pkgs/gjallar-settingsd { };
+        "gjallar-settings" = pkgs.callPackage ./pkgs/gjallar-settings { inherit gjallarctl; };
         "gjallar-recovery-install" = pkgs.callPackage ./pkgs/gjallar-recovery-install { };
         "gjallar-installer" = pkgs.callPackage ./pkgs/gjallar-installer { inherit (inputs) oddc; };
         "gjallar-recovery-iso" = self.nixosConfigurations.gjallar-recovery.config.system.build.isoImage;
@@ -160,6 +161,7 @@
             gjallarctl
             gjallar-usbtrustd
             gjallar-settingsd
+            gjallar-settings
             noctalia
             noctalia-greeter
             monique

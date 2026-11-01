@@ -23,6 +23,7 @@ const (
 	ActionAcceptReplacement = usbtrust.ActionAcceptReplacement
 	ActionEnrollInternal    = usbtrust.ActionEnrollInternal
 	ActionDisarm            = usbtrust.ActionDisarm
+	ActionArm               = usbtrust.ActionArm
 	ActionAllowMedia        = usbtrust.ActionAllowMedia
 	ActionRenew             = usbtrust.ActionRenew
 )
@@ -117,7 +118,7 @@ func ValidateRequest(request Request) error {
 	}
 
 	switch request.Action {
-	case ActionProvisionKey:
+	case ActionProvisionKey, ActionArm:
 		return noMutationArguments(request)
 	case ActionStatus, ActionAudit, ActionPolicy:
 		return noMutationArguments(request)

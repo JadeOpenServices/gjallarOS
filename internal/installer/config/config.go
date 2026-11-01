@@ -42,6 +42,8 @@ type User struct {
 	USBReviewTechnical     bool                   `json:"usbReviewTechnicalView" tier:"everyday"`
 	PrintingEnable         bool                   `json:"printingEnable" tier:"everyday"`
 	NetworkPrintingEnable  bool                   `json:"networkPrintingEnable" tier:"security"`
+	FirewallEnable         bool                   `json:"firewallEnable" tier:"security" scope:"device"`
+	VirusScanEnable        bool                   `json:"virusScanEnable" tier:"security" scope:"device"`
 	DolphinDriveUsage      bool                   `json:"dolphinDriveUsage" tier:"everyday"`
 	FirmwareFlashReadEntry bool                   `json:"firmwareFlashReadEntry" tier:"critical" scope:"device"`
 	SnapshotsEnable        bool                   `json:"snapshotsEnable" tier:"security" scope:"device"`
@@ -154,6 +156,8 @@ func Defaults() (User, error) {
 		JODSDesktopProfile:      "headless",
 		ReleaseChannel:          DefaultReleaseChannel,
 		SnapshotsEnable:         true,
+		FirewallEnable:          true,
+		VirusScanEnable:         true,
 		SnapshotsKeepHours:      DefaultSnapshotsKeepHours,
 		SnapshotsKeepDays:       DefaultSnapshotsKeepDays,
 		WriteConfig:             true,
@@ -328,6 +332,14 @@ func Parse(contents []byte) (User, error) {
 	// Configurations written before snapshots existed get the defaults.
 	if _, ok := fields["snapshotsEnable"]; !ok {
 		user.SnapshotsEnable = true
+	}
+	// The firewall was always on before it could be switched off.
+	if _, ok := fields["firewallEnable"]; !ok {
+		user.FirewallEnable = true
+	}
+	// The virus scan is part of gjallarHorn; older files get it too.
+	if _, ok := fields["virusScanEnable"]; !ok {
+		user.VirusScanEnable = true
 	}
 	if _, ok := fields["snapshotsKeepHours"]; !ok {
 		user.SnapshotsKeepHours = DefaultSnapshotsKeepHours

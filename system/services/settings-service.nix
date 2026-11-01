@@ -79,6 +79,15 @@ let
           <allow_active>auth_admin</allow_active>
         </defaults>
       </action>
+      <action id="org.gjallaros.wine.network">
+        <description>Let a Wine app reach the network</description>
+        <message>Authentication is required to let this app reach the network</message>
+        <defaults>
+          <allow_any>no</allow_any>
+          <allow_inactive>no</allow_inactive>
+          <allow_active>auth_admin</allow_active>
+        </defaults>
+      </action>
       <action id="org.gjallaros.settings.pair">
         <description>Pair your account with your account on another device</description>
         <message>Authentication is required to pair your account with another device</message>

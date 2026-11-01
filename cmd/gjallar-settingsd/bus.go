@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/netip"
 	"os"
 	"sync"
@@ -20,6 +19,7 @@ import (
 	"github.com/JadeOpenServices/gjallarOS/internal/nettrust"
 	"github.com/JadeOpenServices/gjallarOS/internal/settings"
 	"github.com/JadeOpenServices/gjallarOS/internal/usbtrust"
+	"github.com/JadeOpenServices/gjallarOS/internal/winesandbox"
 )
 
 const (
@@ -32,9 +32,6 @@ const (
 
 	// passwordTimeout is how long a password dialog may stay open.
 	passwordTimeout = 5 * time.Minute
-	// verdictMaxAge is older than the trust timer's five minutes, so a
-	// verdict that stopped being renewed no longer counts as home.
-	verdictMaxAge = 15 * time.Minute
 )
 
 var vpnTrustPath = "/run/gjallar/vpn-trust.json"
@@ -155,12 +152,12 @@ func (b busSystem) Authorize(ctx context.Context, sender, action string, details
 
 // Home reads root's own network verdict.
 func (busSystem) Home() bool {
-	verdict, ok := readVerdict(vpnTrustPath, time.Now())
+	verdict, ok := nettrust.ReadVerdict(vpnTrustPath, time.Now())
 	return ok && verdict.Trust == nettrust.TrustHome
 }
 
 func (busSystem) Network() (string, bool) {
-	verdict, ok := readVerdict(vpnTrustPath, time.Now())
+	verdict, ok := nettrust.ReadVerdict(vpnTrustPath, time.Now())
 	if !ok || !verdict.Trusted() || verdict.Device == "" {
 		return "", false
 	}
@@ -168,7 +165,7 @@ func (busSystem) Network() (string, bool) {
 }
 
 func (busSystem) Verdict() (nettrust.Verdict, bool) {
-	return readVerdict(vpnTrustPath, time.Now())
+	return nettrust.ReadVerdict(vpnTrustPath, time.Now())
 }
 
 // ReapplyVPN restarts the trust decision; a run still probing the old state
@@ -192,20 +189,6 @@ func (busSystem) NameTaken(ctx context.Context, device, name string) (netip.Addr
 	return namecheck.Ask(ctx, namecheck.SocketPath, device, name)
 }
 
-// readVerdict reads root's network verdict. Only a fresh verdict in a file
-// root wrote counts; anything else is not ok.
-func readVerdict(path string, now time.Time) (nettrust.Verdict, bool) {
-	data, written, ok := readRootFile(path)
-	if !ok || now.Sub(written) > verdictMaxAge {
-		return nettrust.Verdict{}, false
-	}
-	var verdict nettrust.Verdict
-	if err := json.Unmarshal(data, &verdict); err != nil {
-		return nettrust.Verdict{}, false
-	}
-	return verdict, true
-}
-
 // SystemDiskOnUSB reads root's boot check of the system disk
 // (gjallar-system-disk).
 func (busSystem) SystemDiskOnUSB() string {
@@ -223,33 +206,11 @@ func readSystemDisk(path string) string {
 	var fact struct {
 		USBReason *string `json:"usbReason"`
 	}
-	data, _, ok := readRootFile(path)
+	data, _, ok := nettrust.ReadRootFile(path)
 	if !ok || json.Unmarshal(data, &fact) != nil || fact.USBReason == nil {
 		return "the boot check of the system disk has no answer, so it is not known whether the system disk is a USB drive."
 	}
 	return *fact.USBReason
-}
-
-// readRootFile reads a small regular file only root can write, and when it
-// was written.
-func readRootFile(path string) ([]byte, time.Time, bool) {
-	file, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
-	if err != nil {
-		return nil, time.Time{}, false
-	}
-	defer file.Close()
-	info, err := file.Stat()
-	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0o022 != 0 {
-		return nil, time.Time{}, false
-	}
-	if stat, ok := info.Sys().(*syscall.Stat_t); !ok || stat.Uid != 0 {
-		return nil, time.Time{}, false
-	}
-	data, err := io.ReadAll(io.LimitReader(file, 64<<10))
-	if err != nil {
-		return nil, time.Time{}, false
-	}
-	return data, info.ModTime(), true
 }
 
 func (b busSystem) unit(ctx context.Context) (dbus.BusObject, error) {
@@ -400,6 +361,16 @@ func (o object) PauseVPN(sender dbus.Sender) (string, *dbus.Error) {
 
 func (o object) ResumeVPN(sender dbus.Sender) *dbus.Error {
 	return busError(o.svc.ResumeVPN(context.Background(), string(sender)))
+}
+
+func (o object) Wine(sender dbus.Sender) (string, *dbus.Error) {
+	programs, err := o.svc.Wine(context.Background(), string(sender))
+	return answer(programs, err)
+}
+
+func (o object) SetWine(sender dbus.Sender, id string, internet, home bool) (string, *dbus.Error) {
+	programs, err := o.svc.SetWine(context.Background(), string(sender), id, winesandbox.Flags{Internet: internet, Home: home})
+	return answer(programs, err)
 }
 
 func answer(value any, err error) (string, *dbus.Error) {

@@ -80,3 +80,46 @@ func TestValidateSnapshotRetention(t *testing.T) {
 		t.Fatalf("retention checked while snapshots are off: %v", err)
 	}
 }
+
+func TestParseOldConfigKeepsFirewallOn(t *testing.T) {
+	fields := presetFields(t)
+	delete(fields, "firewallEnable")
+	contents, err := json.Marshal(fields)
+	if err != nil {
+		t.Fatal(err)
+	}
+	user, err := Parse(contents)
+	if err != nil {
+		t.Fatalf("Parse() rejected a config without firewallEnable: %v", err)
+	}
+	if !user.FirewallEnable {
+		t.Fatal("a config from before the firewall switch turned the firewall off")
+	}
+	fields["firewallEnable"] = false
+	if contents, err = json.Marshal(fields); err != nil {
+		t.Fatal(err)
+	}
+	if user, err = Parse(contents); err != nil || user.FirewallEnable {
+		t.Fatalf("firewallEnable false = %v, %v", user.FirewallEnable, err)
+	}
+}
+
+func TestParseOldConfigKeepsVirusScanOn(t *testing.T) {
+	fields := presetFields(t)
+	delete(fields, "virusScanEnable")
+	contents, err := json.Marshal(fields)
+	if err != nil {
+		t.Fatal(err)
+	}
+	user, err := Parse(contents)
+	if err != nil || !user.VirusScanEnable {
+		t.Fatalf("a config from before the virus scan switch: on = %v, %v", user.VirusScanEnable, err)
+	}
+	fields["virusScanEnable"] = false
+	if contents, err = json.Marshal(fields); err != nil {
+		t.Fatal(err)
+	}
+	if user, err = Parse(contents); err != nil || user.VirusScanEnable {
+		t.Fatalf("virusScanEnable false = %v, %v", user.VirusScanEnable, err)
+	}
+}

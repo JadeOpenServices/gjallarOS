@@ -95,6 +95,13 @@ type service struct {
 	writePause func(string, nettrust.Pause) error
 	userName   func(uint32) (string, error)
 
+	// wineDir holds the Wine apps' network switches; wineChanged tells
+	// the launchers they changed. wineMu keeps writes from losing each
+	// other.
+	wineDir     string
+	wineChanged func()
+	wineMu      sync.Mutex
+
 	// keys signs and checks settings files; device is this machine's
 	// app-specific id in them. Without keys, Export and Import refuse.
 	keys   *keyStore
@@ -118,6 +125,8 @@ func newService(sys system, checkoutPath string, checkout func(string) error) *s
 		pausePath:    nettrust.PausePath,
 		writePause:   nettrust.WritePause,
 		userName:     lookupUserName,
+		wineDir:      wineDir,
+		wineChanged:  func() {},
 		pending:      map[string]settings.Change{},
 	}
 }
@@ -134,9 +143,18 @@ func (s *service) readConfig() ([]byte, map[string]json.RawMessage, error) {
 	return data, fields, nil
 }
 
+// effective reads the configuration with defaults for keys it lacks.
+func (s *service) effective() (map[string]json.RawMessage, error) {
+	data, _, err := s.readConfig()
+	if err != nil {
+		return nil, err
+	}
+	return settings.Effective(data)
+}
+
 // List returns every key with its tier and current value, sorted by key.
 func (s *service) List() ([]settings.KeyValue, error) {
-	_, fields, err := s.readConfig()
+	fields, err := s.effective()
 	if err != nil {
 		return nil, err
 	}
@@ -158,7 +176,7 @@ func (s *service) Get(key string) (settings.KeyValue, error) {
 	if err != nil {
 		return settings.KeyValue{}, fmt.Errorf("%w: %v", errRefused, err)
 	}
-	_, fields, err := s.readConfig()
+	fields, err := s.effective()
 	if err != nil {
 		return settings.KeyValue{}, err
 	}

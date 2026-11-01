@@ -112,7 +112,7 @@ type Settings struct {
 	ConsoleLoginEnable, USBReviewTechnical, DolphinDriveUsage, FirmwareFlashReadEntry       bool
 	USBTrustTPMHandle                                                                       string
 	USBTrustLapseDays                                                                       int
-	SnapshotsEnable                                                                         bool
+	SnapshotsEnable, FirewallEnable, VirusScanEnable                                        bool
 	SnapshotsKeepHours, SnapshotsKeepDays                                                   int
 	Name, Email, GitHubUsername, DotfilesDir                                                string
 	RootPasswordFile, UserPasswordFile                                                      string
@@ -171,6 +171,8 @@ func FromUser(user config.User) Settings {
 		USBTrustTPMHandle:                   user.USBTrustTPMHandle,
 		USBTrustLapseDays:                   user.USBTrustLapseDays,
 		SnapshotsEnable:                     user.SnapshotsEnable,
+		FirewallEnable:                      user.FirewallEnable,
+		VirusScanEnable:                     user.VirusScanEnable,
 		SnapshotsKeepHours:                  user.SnapshotsKeepHours,
 		SnapshotsKeepDays:                   user.SnapshotsKeepDays,
 		USBReviewTechnical:                  user.USBReviewTechnical,
@@ -269,6 +271,8 @@ var userIntentKeys = []string{
 	"usbReviewTechnicalView",
 	"printingEnable",
 	"networkPrintingEnable",
+	"firewallEnable",
+	"virusScanEnable",
 	"dolphinDriveUsage",
 	"firmwareFlashReadEntry",
 	"snapshotsEnable",
@@ -555,6 +559,8 @@ func Render(s Settings) []byte {
 	boolean("usbReviewTechnicalView", s.USBReviewTechnical)
 	boolean("printingEnable", s.PrintingEnable)
 	boolean("networkPrintingEnable", s.NetworkPrintingEnable)
+	boolean("firewallEnable", s.FirewallEnable)
+	boolean("virusScanEnable", s.VirusScanEnable)
 	boolean("dolphinDriveUsage", s.DolphinDriveUsage)
 	boolean("firmwareFlashReadEntry", s.FirmwareFlashReadEntry)
 	boolean("snapshotsEnable", s.SnapshotsEnable)

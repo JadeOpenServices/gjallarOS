@@ -101,7 +101,7 @@ Taken in a QEMU test VM at 1920×1080.</sub>
 | **App catalogue** | One list in `user.config.json` picks the apps; each app owns its whole module. |
 | **Local AI** | Optional localhost-only Ollama with hardware-aware model selection, or a central HTTPS server with a sealed token. |
 | **Recovery** | Trusted recovery boot entry, recovery ISO, generation rollback without deleting anything newer. |
-| **Apps** | VSCodium, Thunderbird, web apps (Teams, Plane), system-wide Wine, optional Nemu. |
+| **Apps** | VSCodium, Thunderbird, web apps (Teams, Plane), Wine apps each in their own sandbox, optional Nemu. |
 | **Maintenance** | Helpers for rebuilding, cleanup, thermal status, and updates. |
 
 <details>
@@ -289,6 +289,40 @@ asks each app's `installer` question (today `ai`, `containers`, `nemu`,
 and the Home Manager side (`user/apps/default.nix`). The old `aiEnable`,
 `containersEnable` and `nemuEnable` keys are rejected; list `ai`,
 `containers` or `nemu` in `apps` instead.
+
+`gjallarctl apps list` shows the catalogue and what is installed;
+`gjallarctl apps add <id>` and `gjallarctl apps remove <id>` change the list
+and rebuild. The Apps page of the settings window does the same.
+
+### Settings window and gjallarHorn
+
+GjallarOS Settings (`gjallar-settings`) has two pages, also in the launcher on
+their own: Apps and gjallarHorn. gjallarHorn shows the security checks of this
+device (disk encryption, Secure Boot, USB devices, firewall, virus scan,
+updates, developer mode) and a fix button where one helps. `gjallarctl security status`
+prints the same checks. The window has no rights of its own; every change goes
+through `gjallarctl settings` and asks for the password.
+
+Some protections have an off switch, for people who run their own:
+
+| Key | Default | Switch |
+| --- | --- | --- |
+| `usbguardEnable`, `usbTrustEnforce` | `true` | USB devices |
+| `firewallEnable` | `true` | Firewall |
+| `virusScanEnable` | `true` | Virus scan |
+
+The switches change security-tier keys, so turning one off waits an hour away
+from home, as above. Until then the card says when the change is ready and
+offers Apply now and Keep it on. Turning a protection back on is stricter, so
+it applies at once after the password. A protection that is off shows "Off
+(your choice)" and does not ask again. The recovery system always has the firewall
+on.
+
+The virus scan is ClamAV, on demand only: no scanner daemon and no scanning of
+files as they open. freshclam fetches the signatures about once an hour (the
+first download is roughly 230 MB). Scan Downloads or Choose folder on the
+gjallarHorn page, or `gjallarctl security scan PATH`, runs `clamscan` as you
+in a sandbox without network that sees the system and your home read-only.
 
 ### Firefox add-ons
 
@@ -728,7 +762,8 @@ not built in, so it stays blocked until approved. Enforcement can be turned on
 later with `"usbTrustEnforce": true` in `user.config.json` and a `rebuild`. To
 turn it off, run `sudo gjallarctl usb disarm` first and enter the disk
 encryption passphrase, then set it back to `false` and `rebuild`. Disarm alone
-is temporary: the broker re-arms from the config on its next restart. The other
+is temporary: the broker re-arms from the config on its next restart, or right
+away with `sudo gjallarctl usb arm`. The other
 order is refused by `gjallarctl settings`; done by hand, USBGuard keeps
 blocking unknown devices at boot while the stored state still says armed.
 

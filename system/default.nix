@@ -25,6 +25,7 @@
     ./hardware/memory.nix
 
     ./security/firewall.nix
+    ./security/virus-scan.nix
     ./security/local-hardening.nix
     ./security/console-lockdown.nix
     ./security/disk-unlock.nix
