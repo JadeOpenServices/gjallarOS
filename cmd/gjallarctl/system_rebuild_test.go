@@ -171,4 +171,22 @@ func TestSystemRebuildNeedsDeveloperGrant(t *testing.T) {
 	if _, err := os.Stat(developerGrantPath); !os.IsNotExist(err) {
 		t.Fatalf("grant left after a stable rebuild: %v", err)
 	}
+
+	// A running system from before the gate cannot take the proof, so it
+	// builds the version that can; the gate holds again once it is there.
+	savedSocket := devproofSocketPath
+	t.Cleanup(func() { devproofSocketPath = savedSocket })
+	devproofSocketPath = filepath.Join(t.TempDir(), "missing.socket")
+	user.ReleaseChannel = "staging"
+	stderr.Reset()
+	if code := checkDeveloperGrant(true, user, &stderr); code != 0 || !strings.Contains(stderr.String(), "confirm-developer once") {
+		t.Fatalf("migration from a system without the gate: %d %q", code, stderr.String())
+	}
+	if _, err := os.Stat(developerGrantPath); !os.IsNotExist(err) {
+		t.Fatalf("the migration wrote a grant: %v", err)
+	}
+	devproofSocketPath = savedSocket
+	if code := checkDeveloperGrant(true, user, &stderr); code != 1 {
+		t.Fatal("staging without a grant built on a system with the gate")
+	}
 }

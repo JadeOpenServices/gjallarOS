@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -37,6 +38,10 @@ var localChangesPath = localchanges.Path
 // or recovery key proof (Plane 283); tests replace it.
 var developerGrantPath = devgate.GrantPath
 
+// devproofSocketPath is the proof helper's socket unit; a running system
+// without it was built before the gate. Tests replace it.
+var devproofSocketPath = "/etc/systemd/system/gjallar-devproof.socket"
+
 // checkDeveloperGrant stops a system rebuild of a developer channel or
 // developer mode that nobody confirmed with the startup PIN or the
 // recovery key. A grant that does not load confirms nothing. It then
@@ -44,13 +49,23 @@ var developerGrantPath = devgate.GrantPath
 // the settings service, by hand or by gjallarctl system developer-off,
 // would otherwise leave a grant that lets the setting back on without the
 // proof.
+//
+// The check needs a running system that can take the proof. A system
+// built before the gate has no gjallar-devproof and no way to confirm, so
+// refusing there would keep it on the old version for good. Such a system
+// has no gate to keep, so it builds the version that brings the gate,
+// and from then on the check applies.
 func checkDeveloperGrant(system bool, cfg config.User, stderr io.Writer) int {
 	if !system {
 		return 0
 	}
 	if err := devgate.Check(developerGrantPath, cfg.Channel(), cfg.DeveloperMode); err != nil {
-		fmt.Fprintf(stderr, "[GjallarOS] Error: %v; nothing rebuilt\n", err)
-		return 1
+		if _, statErr := os.Stat(devproofSocketPath); errors.Is(statErr, os.ErrNotExist) {
+			fmt.Fprintln(stderr, "[GjallarOS] Notice: the running system cannot check the startup PIN or the recovery key yet; building the version that can. Afterwards run gjallarctl settings confirm-developer once")
+		} else {
+			fmt.Fprintf(stderr, "[GjallarOS] Error: %v; nothing rebuilt\n", err)
+			return 1
+		}
 	}
 	if _, err := devgate.Narrow(developerGrantPath, cfg.Channel(), cfg.DeveloperMode); err != nil {
 		fmt.Fprintf(stderr, "[GjallarOS] Error: %v; nothing rebuilt\n", err)
