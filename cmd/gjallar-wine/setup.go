@@ -193,7 +193,7 @@ func setupLog(home string) string {
 	if !filepath.IsAbs(state) {
 		state = filepath.Join(home, ".local", "state")
 	}
-	return filepath.Join(state, "wine-win11", "setup.log")
+	return filepath.Join(state, "gjallar-wine", "setup.log")
 }
 
 // ensureBase makes the base prefix once, outside any sandbox, with Wine's
@@ -393,13 +393,13 @@ func installApp(id, installer string, in io.Reader, interactive bool, stdout, st
 	}
 	if a.Exe == "" && len(found) == 1 {
 		a.Exe = found[0]
-		if err := winesandbox.WriteRecord(paths, a); err != nil {
+		if err := saveApp(paths, id, a, stderr); err != nil {
 			return err
 		}
-		fmt.Fprintf(stdout, "App %s starts %s. gjallar-wine run %s starts it.\n", id, a.Exe, id)
+		fmt.Fprintf(stdout, "App %s starts %s. It is in the app menu, and gjallar-wine run %s starts it.\n", id, a.Exe, id)
 		return nil
 	}
-	return chooseProgram(id, "", in, interactive, stdout)
+	return chooseProgram(id, "", in, interactive, stdout, stderr)
 }
 
 // copyFile copies a plain file to a new file dst.
@@ -433,14 +433,14 @@ func programCmd(args []string, stdout io.Writer) error {
 	if len(args) == 2 {
 		choice = args[1]
 	}
-	return chooseProgram(args[0], choice, os.Stdin, stdinIsTerminal(), stdout)
+	return chooseProgram(args[0], choice, os.Stdin, stdinIsTerminal(), stdout, os.Stderr)
 }
 
 // chooseProgram sets the program app id starts. choice is a number from
 // the list of programs its shortcuts start, a path on C: or D:, or a host
 // path in the app's folders. Without a choice it lists the programs, and
 // asks for one when interactive. The caller holds the app's lock.
-func chooseProgram(id, choice string, in io.Reader, interactive bool, stdout io.Writer) error {
+func chooseProgram(id, choice string, in io.Reader, interactive bool, stdout, stderr io.Writer) error {
 	_, home, err := currentUser()
 	if err != nil {
 		return err
@@ -507,10 +507,10 @@ func chooseProgram(id, choice string, in io.Reader, interactive bool, stdout io.
 		return fmt.Errorf("%s is not an .exe file", win)
 	}
 	a.Exe = win
-	if err := winesandbox.WriteRecord(paths, a); err != nil {
+	if err := saveApp(paths, id, a, stderr); err != nil {
 		return err
 	}
-	fmt.Fprintf(stdout, "App %s starts %s.\n", id, win)
+	fmt.Fprintf(stdout, "App %s starts %s. It is in the app menu.\n", id, win)
 	return nil
 }
 
@@ -546,6 +546,9 @@ func removeCmd(args []string, stdout io.Writer) error {
 	}
 	if err := winesandbox.RemoveApp(home, id, files); err != nil {
 		return err
+	}
+	if err := removeMenu(home, id); err != nil {
+		return fmt.Errorf("removed app %s, but its entry stays in the app menu: %w", id, err)
 	}
 	if place != "" {
 		if err := setPlace("remove", place); err != nil {

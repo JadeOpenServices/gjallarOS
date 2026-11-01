@@ -1,4 +1,8 @@
 #compdef gjallar-settings
 
 # Keep in step with the start pages in gjallar_settings.py.
-_arguments '1:page:((security\:"security checks" apps\:"app catalogue"))'
+local state
+_arguments \
+  '1:page:((security\:"security checks" apps\:"app catalogue" wine-setup\:"set up a Wine app with an installer"))' \
+  '2: :->installer'
+[[ $state == installer && $words[2] == wine-setup ]] && _files -g '*.(#i)(exe|msi)(-.)'

@@ -82,6 +82,7 @@ echo >> "`+f.places+`"
 	t.Setenv("HOME", f.home)
 	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
 	t.Setenv("XDG_STATE_HOME", "")
+	t.Setenv("XDG_DATA_HOME", "")
 	return f
 }
 
@@ -315,27 +316,27 @@ func TestChooseProgram(t *testing.T) {
 	}
 
 	var out strings.Builder
-	if err := chooseProgram("synthetic", "", strings.NewReader(""), false, &out); err != nil || !strings.Contains(out.String(), `2  C:\Program Files\Synthetic\viewer.exe`) {
+	if err := chooseProgram("synthetic", "", strings.NewReader(""), false, &out, io.Discard); err != nil || !strings.Contains(out.String(), `2  C:\Program Files\Synthetic\viewer.exe`) {
 		t.Errorf("list %q %v", out.String(), err)
 	}
-	if err := chooseProgram("synthetic", "", strings.NewReader("2\n"), true, io.Discard); err != nil || exe() != `C:\Program Files\Synthetic\viewer.exe` {
+	if err := chooseProgram("synthetic", "", strings.NewReader("2\n"), true, io.Discard, io.Discard); err != nil || exe() != `C:\Program Files\Synthetic\viewer.exe` {
 		t.Errorf("asked: %q %v", exe(), err)
 	}
 	out.Reset()
-	if err := chooseProgram("synthetic", "", strings.NewReader("\n"), true, &out); err != nil || exe() != `C:\Program Files\Synthetic\viewer.exe` || !strings.Contains(out.String(), "* 2") {
+	if err := chooseProgram("synthetic", "", strings.NewReader("\n"), true, &out, io.Discard); err != nil || exe() != `C:\Program Files\Synthetic\viewer.exe` || !strings.Contains(out.String(), "* 2") {
 		t.Errorf("kept: %q %q %v", exe(), out.String(), err)
 	}
-	if err := chooseProgram("synthetic", "1", nil, false, io.Discard); err != nil || exe() != `C:\Program Files\Synthetic\tool.exe` {
+	if err := chooseProgram("synthetic", "1", nil, false, io.Discard, io.Discard); err != nil || exe() != `C:\Program Files\Synthetic\tool.exe` {
 		t.Errorf("number: %q %v", exe(), err)
 	}
-	if err := chooseProgram("synthetic", `d:\Portable\run.exe`, nil, false, io.Discard); err != nil || exe() != `d:\Portable\run.exe` {
+	if err := chooseProgram("synthetic", `d:\Portable\run.exe`, nil, false, io.Discard, io.Discard); err != nil || exe() != `d:\Portable\run.exe` {
 		t.Errorf("D: path: %q %v", exe(), err)
 	}
-	if err := chooseProgram("synthetic", filepath.Join(paths.Files, "Portable", "run.exe"), nil, false, io.Discard); err != nil || exe() != `D:\Portable\run.exe` {
+	if err := chooseProgram("synthetic", filepath.Join(paths.Files, "Portable", "run.exe"), nil, false, io.Discard, io.Discard); err != nil || exe() != `D:\Portable\run.exe` {
 		t.Errorf("host path: %q %v", exe(), err)
 	}
 	for _, bad := range []string{"0", "3", `D:\readme.txt`, `D:\out.exe`, outside, `Z:\nix\x.exe`, `D:\missing.exe`, `D:\Portable`, "run.exe"} {
-		if err := chooseProgram("synthetic", bad, nil, false, io.Discard); err == nil {
+		if err := chooseProgram("synthetic", bad, nil, false, io.Discard, io.Discard); err == nil {
 			t.Errorf("choice %q accepted", bad)
 		}
 	}

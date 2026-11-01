@@ -31,6 +31,10 @@ const usage = `usage:
   gjallar-wine run ID [ARGS...]            start the app ID in its sandbox
   gjallar-wine remove ID [--delete-files]  remove the app ID; its files folder
                                            stays unless --delete-files is given
+  gjallar-wine import NAME PREFIX          make a copy of a Wine prefix set up
+                                           without gjallar-wine into the app NAME
+  gjallar-wine menu                        bring the app menu in line with the
+                                           apps; runs after each rebuild
 ID is the app's id, as gjallarctl wine list shows it. CHOICE is a number from
 the list or a program's path on C: or D:, such as D:\Tool\tool.exe. An
 installer is an .exe or .msi file.`
@@ -56,6 +60,11 @@ func run(args []string, stdout, stderr io.Writer) int {
 		err = programCmd(args[1:], stdout)
 	case "remove":
 		err = removeCmd(args[1:], stdout)
+	case "import":
+		err = importCmd(args[1:], stdout, stderr)
+	// menu brings the app menu in line with the apps, after each rebuild.
+	case "menu":
+		err = menuCmd(args[1:], stderr)
 	case "run":
 		if len(args) < 2 {
 			fmt.Fprintln(stderr, usage)

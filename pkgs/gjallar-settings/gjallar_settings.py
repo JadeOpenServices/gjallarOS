@@ -311,6 +311,16 @@ class Backend(QObject):
         self._run(["apps", "add" if installed else "remove", app_id, "--window"], lambda *_: self.refreshApps())
 
 
+def wine_installer(arg):
+    """The file:// URL of installer arg, a path or a file:// URL, or "" if it is no installer file."""
+    path = QUrl(arg).toLocalFile() if arg.startswith("file:") else arg
+    if not os.path.isabs(path) or not os.path.isfile(path):
+        return ""
+    if os.path.splitext(path)[1].lower() not in (".exe", ".msi"):
+        return ""
+    return QUrl.fromLocalFile(os.path.normpath(path)).toString()
+
+
 def main():
     # Qt's event loop never hands Ctrl+C to Python, so let it end the window
     # the usual way when started from a terminal.
@@ -325,14 +335,23 @@ def main():
     QQuickStyle.setStyle("Fusion")
 
     start = sys.argv[1] if len(sys.argv) > 1 else ""
-    if start not in ("", "security", "apps"):
-        print("Usage: gjallar-settings [security|apps]", file=sys.stderr)
+    installer = ""
+    if start == "wine-setup" and len(sys.argv) == 3:
+        # A double click on an installer in the file manager (Plane 275).
+        installer = wine_installer(sys.argv[2])
+        if not installer:
+            print("gjallar-settings: wine-setup needs an .exe or .msi file", file=sys.stderr)
+            return 2
+        start = "apps"
+    elif start not in ("", "security", "apps") or len(sys.argv) > 2:
+        print("Usage: gjallar-settings [security|apps|wine-setup INSTALLER]", file=sys.stderr)
         return 2
 
     backend = Backend()
     engine = QQmlApplicationEngine()
     engine.addImageProvider("appicon", AppIconProvider(backend))
-    engine.setInitialProperties({"backend": backend, "startPage": start, "colours": theme_colours()})
+    engine.setInitialProperties({"backend": backend, "startPage": start, "wineInstaller": installer,
+                                 "colours": theme_colours()})
     engine.load(os.path.join(QML_DIR, "Main.qml"))
     if not engine.rootObjects():
         return 1

@@ -14,6 +14,9 @@ Page {
     required property var backend
     required property var colours
     required property int gap
+    // An installer to set up as a new Wine app when the page opens: a
+    // double click on it in the file manager (Plane 275).
+    property string installer: ""
     title: "Apps"
 
     // Sorted by category so the list sections stay together.
@@ -37,6 +40,9 @@ Page {
     Component.onCompleted: {
         backend.refreshApps()
         backend.refreshWine()
+        if (installer !== "") {
+            setUp.openWith(installer)
+        }
     }
 
     FileDialog {
@@ -55,11 +61,13 @@ Page {
         modal: true
         anchors.centerIn: parent
         width: Math.min(page.width - page.gap * 2, 420)
-        onOpened: {
-            installer = ""
+        // Opens empty, or with an installer already chosen.
+        function openWith(file) {
+            installer = file
             appName.text = ""
-            appName.forceActiveFocus()
+            open()
         }
+        onOpened: appName.forceActiveFocus()
 
         ColumnLayout {
             anchors.fill: parent
@@ -168,7 +176,7 @@ Page {
                     anchors.verticalCenter: parent.verticalCenter
                     text: "Set up a Wine app…"
                     enabled: !page.backend.busy
-                    onClicked: setUp.open()
+                    onClicked: setUp.openWith("")
                 }
             }
 
