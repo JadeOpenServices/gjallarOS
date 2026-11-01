@@ -51,6 +51,29 @@ func TestMenuFollowsApps(t *testing.T) {
 	}
 }
 
+func TestWindowClass(t *testing.T) {
+	for exe, want := range map[string]string{
+		`C:\Program Files\Example\Example-SYNTHETIC.EXE`: "example-synthetic.exe",
+		`C:\windows\notepad.exe`:                         "notepad.exe",
+		`D:\Über Tool.exe`:                               "über tool.exe",
+		`C:\bad\line` + "\n" + `Exec=x.exe`:              "",
+		`C:\bad\tab` + "\t" + `.exe`:                     "",
+		`C:\dir\`:                                        "",
+		"":                                               "",
+	} {
+		if got := windowClass(exe); got != want {
+			t.Errorf("windowClass(%q) = %q, want %q", exe, got, want)
+		}
+	}
+	entry := menuEntry("x", winesandbox.App{Name: "X", Exe: `C:\X.exe`})
+	if !strings.Contains(entry, "\nStartupWMClass=x.exe\n") {
+		t.Errorf("entry %q has no window class", entry)
+	}
+	if strings.Contains(menuEntry("y", winesandbox.App{Name: "Y"}), "StartupWMClass") {
+		t.Error("window class without a program")
+	}
+}
+
 func TestMenuCmd(t *testing.T) {
 	f := newFakeSetup(t)
 	if err := addApp([]string{"Old"}, io.Discard, io.Discard); err != nil {
@@ -64,7 +87,7 @@ func TestMenuCmd(t *testing.T) {
 	dir := filepath.Join(f.home, ".local/share/applications")
 	stale := filepath.Join(dir, "gjallar-wine-gone.desktop")
 	foreign := filepath.Join(dir, "gjallar-wine-mine.desktop")
-	writeFile(t, stale, []byte(menuEntry("gone", "Gone")))
+	writeFile(t, stale, []byte(menuEntry("gone", winesandbox.App{Name: "Gone"})))
 	writeFile(t, foreign, []byte("[Desktop Entry]\nName=SYNTHETIC own entry\n"))
 	if err := os.Symlink(stale, filepath.Join(dir, "gjallar-wine-link.desktop")); err != nil {
 		t.Fatal(err)

@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/JadeOpenServices/gjallarOS/internal/winesandbox"
 )
@@ -35,19 +37,40 @@ func menuFile(home, id string) string {
 	return filepath.Join(menuDir(home), "gjallar-wine-"+id+".desktop")
 }
 
-// menuEntry is the menu entry of app id named name. TryExec hides it once
-// Wine is turned off and gjallar-wine is gone. The name has no control
-// characters or backslashes (ValidName), so it needs no escapes.
-func menuEntry(id, name string) string {
-	return "[Desktop Entry]\n" +
+// menuEntry is app id's menu entry. TryExec hides it once Wine is turned
+// off and gjallar-wine is gone. The name has no control characters or
+// backslashes (ValidName), so it needs no escapes.
+func menuEntry(id string, a winesandbox.App) string {
+	entry := "[Desktop Entry]\n" +
 		"Type=Application\n" +
-		"Name=" + name + "\n" +
+		"Name=" + a.Name + "\n" +
 		"Comment=Wine app\n" +
 		"Exec=gjallar-wine run " + id + "\n" +
 		"TryExec=gjallar-wine\n" +
 		"Icon=wine\n" +
-		"Terminal=false\n" +
-		menuMarker + "=" + id + "\n"
+		"Terminal=false\n"
+	if class := windowClass(a.Exe); class != "" {
+		entry += "StartupWMClass=" + class + "\n"
+	}
+	return entry + menuMarker + "=" + id + "\n"
+}
+
+// windowClass is the window class Wine gives the program's windows, so the
+// dock and the task switcher put them with the menu entry: the program's
+// file name, lowercased (setup_options in dlls/winex11.drv/x11drv_main.c).
+// A name with a character an entry value cannot hold as it is, or that is
+// not UTF-8, gets no class.
+func windowClass(exe string) string {
+	name := exe[strings.LastIndexAny(exe, `\/`)+1:]
+	if name == "" || len(name) > 255 {
+		return ""
+	}
+	for _, r := range name {
+		if !unicode.IsPrint(r) || r == utf8.RuneError {
+			return ""
+		}
+	}
+	return strings.ToLower(name)
 }
 
 // setMenu writes app id's menu entry when it has a program and removes it
@@ -66,7 +89,7 @@ func setMenu(home, id string, a winesandbox.App) error {
 		return err
 	}
 	defer os.Remove(tmp.Name())
-	if _, err := tmp.WriteString(menuEntry(id, a.Name)); err != nil {
+	if _, err := tmp.WriteString(menuEntry(id, a)); err != nil {
 		tmp.Close()
 		return err
 	}
