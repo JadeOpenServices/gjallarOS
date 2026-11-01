@@ -42,7 +42,11 @@ const settingsUsage = `usage: gjallarctl settings list [--names]   every key wit
        gjallarctl settings pair add FILE       pair with the device that made FILE
        gjallarctl settings pair list [--ids]
        gjallarctl settings pair remove ID
+       gjallarctl settings confirm-developer   confirm a developer channel or developer
+                                               mode set before the startup PIN check
 ID may be the start of the id; without one, the only waiting change is used.
+Turning on a developer channel or developer mode asks for the startup PIN
+or the recovery key at the terminal.
 A saved file imports on the device and account that made it, and for the
 account that paired with that one; settings of the device stay behind.`
 
@@ -108,7 +112,7 @@ func runSettings(args []string, stdout, stderr io.Writer) int {
 		return runSettingsNames(args, stdout, stderr)
 	}
 	switch command {
-	case "list", "get", "set", "pending", "apply", "cancel", "export", "import", "pair":
+	case "list", "get", "set", "pending", "apply", "cancel", "export", "import", "pair", "confirm-developer":
 	default:
 		fmt.Fprintf(stderr, "ERROR: unknown settings command %q\n%s\n", command, settingsUsage)
 		return 2
@@ -145,6 +149,8 @@ func runSettings(args []string, stdout, stderr io.Writer) int {
 		return settingsImport(ctx, bus, args, stdout, stderr)
 	case "pair":
 		return settingsPair(ctx, bus, args, stdout, stderr)
+	case "confirm-developer":
+		return settingsConfirmDeveloper(ctx, bus, args, stdout, stderr)
 	}
 	if err != nil {
 		fmt.Fprintf(stderr, "ERROR: %v\n", err)
@@ -288,8 +294,20 @@ func settingsRequest(ctx context.Context, bus settingsBus, values map[string]jso
 		fmt.Fprintf(stderr, "ERROR: %v\n", err)
 		return 1
 	}
-	answer, err := bus.Call(ctx, "Request", string(request))
-	if err != nil {
+	var answer string
+	if needsDeveloperProof(values) {
+		kind, secret, err := settingsReadProof(stderr)
+		if err != nil {
+			fmt.Fprintf(stderr, "ERROR: %v\n", err)
+			return 1
+		}
+		answer, err = bus.Call(ctx, "RequestWithProof", string(request), kind, secret)
+		clear(secret)
+		if err != nil {
+			fmt.Fprintf(stderr, "ERROR: %v\n", err)
+			return 1
+		}
+	} else if answer, err = bus.Call(ctx, "Request", string(request)); err != nil {
 		fmt.Fprintf(stderr, "ERROR: %v\n", err)
 		return 1
 	}

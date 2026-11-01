@@ -6,12 +6,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/JadeOpenServices/gjallarOS/internal/devgate"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/config"
 	"github.com/JadeOpenServices/gjallarOS/internal/localchanges"
 	"github.com/JadeOpenServices/gjallarOS/internal/settings"
@@ -41,6 +43,8 @@ type fakeSettingsBus struct {
 	asked    []string
 	wine     map[string]winesandbox.Flags
 	wineSets []string
+	// proofs holds "method kind secret" for each call that carried one.
+	proofs []string
 }
 
 // fakeOffer is the SYNTHETIC offer the fake bus makes of any pairing file.
@@ -72,7 +76,13 @@ func (b *fakeSettingsBus) Call(_ context.Context, method string, args ...any) (s
 			list = append(list, v)
 		}
 		return answer(list)
-	case "Request":
+	case "ConfirmDeveloper":
+		b.proofs = append(b.proofs, method+" "+args[0].(string)+" "+string(args[1].([]byte)))
+		return "", nil
+	case "Request", "RequestWithProof":
+		if method == "RequestWithProof" {
+			b.proofs = append(b.proofs, method+" "+args[1].(string)+" "+string(args[2].([]byte)))
+		}
 		request := args[0].(string)
 		b.requests = append(b.requests, request)
 		var values map[string]json.RawMessage
@@ -198,10 +208,12 @@ func (b *fakeSettingsBus) Rebuild(context.Context) (bool, string, error) {
 func useFakeSettings(t *testing.T, bus *fakeSettingsBus) {
 	t.Helper()
 	t.Setenv("HOME", t.TempDir())
-	oldConnect, oldNow, oldSleep, oldEUID, oldStdin := settingsConnect, settingsNow, settingsSleep, settingsEUID, settingsStdin
+	oldConnect, oldNow, oldSleep, oldEUID, oldStdin, oldProof := settingsConnect, settingsNow, settingsSleep, settingsEUID, settingsStdin, settingsReadProof
 	t.Cleanup(func() {
-		settingsConnect, settingsNow, settingsSleep, settingsEUID, settingsStdin = oldConnect, oldNow, oldSleep, oldEUID, oldStdin
+		settingsConnect, settingsNow, settingsSleep, settingsEUID, settingsStdin, settingsReadProof = oldConnect, oldNow, oldSleep, oldEUID, oldStdin, oldProof
 	})
+	// Tests never read the real terminal; the EXAMPLE PIN stands in.
+	settingsReadProof = func(io.Writer) (string, []byte, error) { return devgate.ProofPIN, []byte("2468"), nil }
 	settingsConnect = func() (settingsBus, error) { return bus, nil }
 	settingsNow = func() time.Time { return settingsTestNow }
 	settingsSleep = func(context.Context, time.Duration) error { return nil }

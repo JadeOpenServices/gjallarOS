@@ -271,6 +271,7 @@ _gjallarctl_settings() {
     'export:save the settings in a file signed with your key'
     'import:ask for the change a saved settings file makes'
     'pair:trust settings files of your account on another device'
+    'confirm-developer:confirm a developer channel or developer mode with the startup PIN or recovery key'
   )
   if (( CURRENT == 2 )); then
     _describe -t commands 'settings command' cmds
