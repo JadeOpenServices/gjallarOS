@@ -8,6 +8,11 @@
 }:
 let
   shell = settings.themeDetails.shell or "noctalia";
+  sessionEnvironment = lib.concatStringsSep " && " [
+    "${pkgs.coreutils}/bin/env -u HL_INITIAL_WORKSPACE_TOKEN ${pkgs.dbus}/bin/dbus-update-activation-environment --systemd --all"
+    "${pkgs.systemd}/bin/systemctl --user stop hyprland-session.target"
+    "${pkgs.systemd}/bin/systemctl --user start hyprland-session.target"
+  ];
 
 in
 {
@@ -94,14 +99,32 @@ in
     # points the portal at a per-user dir with only hyprland.portal, which
     # drops AppChooser and with it OpenURI, so xdg-open fails.
     portalPackage = null;
-    systemd.enable = true;
+    # The session start below replaces Home Manager's systemd integration.
+    systemd.enable = false;
     # Noctalia and the apps it launches run as user units. They need the
-    # whole session environment, XDG_SESSION_ID for the polkit agent among it.
-    systemd.variables = [ "--all" ];
+    # whole session environment, XDG_SESSION_ID for the polkit agent among
+    # it, so everything is handed to systemd and D-Bus but one variable.
+    # Hyprland gives every command it starts its own HL_INITIAL_WORKSPACE_TOKEN,
+    # which places that command's first window on the workspace it was
+    # started from. Exported, this command's token (workspace 1 at login)
+    # would reach every user service, and the first window any of them
+    # opens (USB review, setup windows) would land on workspace 1 instead
+    # of the one in use (Plane 279). Home Manager's own start command has
+    # no way to leave a variable out, so this replaces it.
+    settings.exec-once = lib.mkBefore [ sessionEnvironment ];
     extraConfig = ''
       source = ~/.local/state/noctalia/hyprland-colors.conf
       source = ~/.config/hypr/monitors.conf
     '';
   };
 
+  # Home Manager's hyprland-session target, which the start command above
+  # starts and the session's user units hang off.
+  systemd.user.targets.hyprland-session.Unit = {
+    Description = "Hyprland compositor session";
+    Documentation = [ "man:systemd.special(7)" ];
+    BindsTo = [ "graphical-session.target" ];
+    Wants = [ "graphical-session-pre.target" ];
+    After = [ "graphical-session-pre.target" ];
+  };
 }
