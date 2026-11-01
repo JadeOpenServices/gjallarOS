@@ -654,11 +654,20 @@ func (s *service) writeConfig(change settings.Change) error {
 }
 
 // writeLocal makes the change's folder root's copy. It is errRefused when
-// developer mode is off by now or the copy is no longer the one the change
+// developer mode is off or has no grant by now, or the copy is no longer the one the change
 // was asked against. The caller holds s.mu.
 func (s *service) writeLocal(change settings.Change) error {
 	if err := s.developerMode(); err != nil {
 		return err
+	}
+	data, _, err := s.readConfig()
+	if err != nil {
+		return err
+	}
+	if _, covered, err := s.developerNeed(data, change); err != nil {
+		return err
+	} else if !covered {
+		return fmt.Errorf("%w: developer mode has no confirmed grant; run gjallarctl settings confirm-developer first", errRefused)
 	}
 	current, err := s.readLocal(s.localPath)
 	if err != nil {

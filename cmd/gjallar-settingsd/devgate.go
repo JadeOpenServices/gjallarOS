@@ -23,13 +23,16 @@ type proof struct {
 // developerNeed reports what the configuration after change asks of the
 // developer grant, and whether the grant on disk already covers it. A
 // grant that does not load covers nothing.
+// A local-folder change leaves the configuration as it is, so it needs
+// what the configuration already needs: the folder is built only with
+// developer mode on.
 func (s *service) developerNeed(data []byte, change settings.Change) (devgate.Grant, bool, error) {
-	if change.Local != nil {
-		return devgate.Grant{}, true, nil
-	}
-	updated, err := change.Apply(data)
-	if err != nil {
-		return devgate.Grant{}, false, fmt.Errorf("%w: %v", errRefused, err)
+	updated := data
+	if change.Local == nil {
+		var err error
+		if updated, err = change.Apply(data); err != nil {
+			return devgate.Grant{}, false, fmt.Errorf("%w: %v", errRefused, err)
+		}
 	}
 	cfg, err := config.Parse(updated)
 	if err != nil {

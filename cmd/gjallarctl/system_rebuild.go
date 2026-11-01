@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/JadeOpenServices/gjallarOS/internal/devgate"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/config"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/flakesource"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/systemcheckout"
@@ -31,6 +32,24 @@ type rebuildOptions struct {
 
 // localChangesPath is root's copy of the developer-mode folder.
 var localChangesPath = localchanges.Path
+
+// developerGrantPath is the settings service's record of the startup PIN
+// or recovery key proof (Plane 283); tests replace it.
+var developerGrantPath = devgate.GrantPath
+
+// checkDeveloperGrant stops a system rebuild of a developer channel or
+// developer mode that nobody confirmed with the startup PIN or the
+// recovery key. A grant that does not load confirms nothing.
+func checkDeveloperGrant(system bool, cfg config.User, stderr io.Writer) int {
+	if !system {
+		return 0
+	}
+	if err := devgate.Check(developerGrantPath, cfg.Channel(), cfg.DeveloperMode); err != nil {
+		fmt.Fprintf(stderr, "[GjallarOS] Error: %v; nothing rebuilt\n", err)
+		return 1
+	}
+	return 0
+}
 
 // recoveryEntryPath exists only in the trusted recovery boot entry; tests
 // replace it.

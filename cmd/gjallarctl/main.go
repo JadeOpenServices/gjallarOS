@@ -1942,6 +1942,18 @@ func rebuildCheckout(repo string, opts rebuildOptions, system bool, stdout, stde
 	hardwareUpdate, channel, switchNow := opts.hardwareUpdate, opts.channel, opts.switchNow
 	update, updateInputs, rebuildArgs := opts.update, opts.updateInputs, opts.rebuildArgs
 
+	// The channel pull below follows the configuration, so the grant is
+	// checked before anything is fetched (Plane 283).
+	if system {
+		user, err := config.Load(filepath.Join(repo, "user.config.json"))
+		if err != nil {
+			fmt.Fprintf(stderr, "[GjallarOS] Error: %v; nothing rebuilt\n", err)
+			return 1
+		}
+		if code := checkDeveloperGrant(system, user, stderr); code != 0 {
+			return code
+		}
+	}
 	if update {
 		if code := pullCheckout(repo, stdout, stderr); code != 0 {
 			return code
@@ -2003,6 +2015,11 @@ func rebuildCheckout(repo string, opts rebuildOptions, system bool, stdout, stde
 	if err != nil {
 		fmt.Fprintf(stderr, "[GjallarOS] Error: load user configuration: %v\n", err)
 		return 1
+	}
+	// Checked again on the configuration this build reads, which may have
+	// changed since the check above.
+	if code := checkDeveloperGrant(system, userConfig, stderr); code != 0 {
+		return code
 	}
 	legacyWebApplications := config.HasLegacyWebApplications(rawConfig)
 	retiredEntries := config.RetiredEntries(rawConfig)
