@@ -100,7 +100,12 @@ func (s LiveSource) SetImplicitTarget(ctx context.Context, target usbtrust.Targe
 	return err
 }
 
+// sameIdentity compares what USBGuard reports. The Bluetooth address comes
+// from the Bluetooth stack, not from USBGuard, so list-devices never carries
+// it: comparing it failed every plan that held a Bluetooth controller with a
+// known address, and fail-closed then blocked every device each second.
 func sameIdentity(a, b usbtrust.Identity) bool {
+	a.BluetoothAddress, b.BluetoothAddress = "", ""
 	a.Interfaces = append([]string(nil), a.Interfaces...)
 	b.Interfaces = append([]string(nil), b.Interfaces...)
 	sort.Strings(a.Interfaces)
