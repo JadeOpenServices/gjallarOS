@@ -68,7 +68,9 @@ type LUN struct {
 // USB LUN that sd or sr would turn into a block device. The removable bit is
 // not asked: the device sets it itself, so a stick that reports a fixed disk
 // would pass, and a disk in a dock is as much a stranger as a card (Plane
-// 289, loophole 39).
+// 289, loophole 39). gjallar-scsi-bind-ungated in
+// system/services/removable-media.nix keeps the same type list; a type
+// missing there is bound by udev before the gate runs.
 func (l LUN) Gated() bool {
 	switch l.Type {
 	case typeDisk, typeWORM, typeROM, typeMOD, typeRBC, typeZBC:

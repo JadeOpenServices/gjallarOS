@@ -127,17 +127,17 @@ let
     AuditFilePath=/dev/null
   '';
 
-  # Binds a USB SCSI device unless the media gate owns it: a removable disk
-  # or optical drive, the same test as mediagate LUN.Gated. Reads only the
-  # device type and the removable bit of the INQUIRY data, never the medium.
+  # Binds a USB SCSI device unless the media gate owns it: every type that
+  # sd or sr turns into a block device, removable bit or not. This must stay
+  # the same list as mediagate LUN.Gated: a type bound here is read by sd and
+  # probed by udisks before the gate can close it (Plane 289). Reads only the
+  # device type, never the medium.
   scsiBindUngated = pkgs.writeShellScript "gjallar-scsi-bind-ungated" ''
     [[ $1 =~ ^[0-9]+:[0-9]+:[0-9]+:[0-9]+$ ]] || exit 1
-    dev=/sys/bus/scsi/devices/$1
-    type=$(<"$dev/type") || exit 1
-    flags=$(${pkgs.coreutils}/bin/od -An -tu1 -j1 -N1 "$dev/inquiry") || exit 1
-    if [[ $type == 0 || $type == 5 ]] && (( flags & 128 )); then
-      exit 0
-    fi
+    type=$(</sys/bus/scsi/devices/$1/type) || exit 1
+    case $type in
+      0 | 4 | 5 | 7 | 14 | 20) exit 0 ;;
+    esac
     echo "$1" > /sys/bus/scsi/drivers_probe
   '';
   scsiBindRules = ''
@@ -354,7 +354,8 @@ in
       # early stage 2 (loophole 13a, Plane 195). With blocking on, autoprobe
       # goes off before udevd runs in stage 1 and stays off across the switch
       # to stage 2. The rules above bind everything the gate does not own, so
-      # SATA disks and USB disks that are not removable still boot.
+      # SATA and NVMe disks still boot. A system disk on USB stays closed, so
+      # blocking is refused on such a machine (gjallar-system-disk).
       boot.initrd = lib.mkIf (cfg.enforce && config.boot.initrd.systemd.enable) {
         availableKernelModules = [ "scsi_mod" ];
         services.udev.rules = scsiBindRules;
