@@ -592,14 +592,15 @@ in
     # A shell started by the session before this unit existed holds the
     # single-instance lock, so the unit would fail until the next login.
     # Take its environment (XDG_SESSION_ID for logind and polkit; that
-    # session did not import it) and stop it; the unit takes over.
+    # session did not import it) and stop it; the unit takes over. The
+    # workspace token Hyprland gave that one launch stays behind (Plane 279).
     "${pkgs.writeShellScript "noctalia-take-over" ''
       lock="''${XDG_RUNTIME_DIR:-/tmp}/noctalia-''${WAYLAND_DISPLAY:-wayland-0}.lock"
       [ -e "$lock" ] || exit 0
       ${pkgs.util-linux}/bin/flock -n "$lock" true && exit 0
       for pid in $(${pkgs.psmisc}/bin/fuser "$lock" 2>/dev/null); do
         ${pkgs.gnugrep}/bin/grep -zE '^[A-Za-z_][A-Za-z0-9_]*=' "/proc/$pid/environ" \
-          | ${pkgs.gnugrep}/bin/grep -zvE '^(_|SHLVL|PWD|OLDPWD)=' \
+          | ${pkgs.gnugrep}/bin/grep -zvE '^(_|SHLVL|PWD|OLDPWD|HL_INITIAL_WORKSPACE_TOKEN)=' \
           | ${pkgs.findutils}/bin/xargs -0 -r ${pkgs.systemd}/bin/systemctl --user set-environment || true
         kill -TERM "$pid" 2>/dev/null || true
       done
