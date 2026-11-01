@@ -512,6 +512,9 @@ func ValidateJODS(user User) error {
 	if user.DeveloperMode {
 		return fmt.Errorf("developerMode builds local Nix code; it is not available on JODS-managed devices")
 	}
+	if user.Channel() != DefaultReleaseChannel {
+		return fmt.Errorf("releaseChannel %q takes untested code; JODS-managed devices stay on %s", user.Channel(), DefaultReleaseChannel)
+	}
 	parsed, err := url.Parse(user.JODSEndpoint)
 	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil {
 		return fmt.Errorf("JODS endpoint must be an HTTPS URL without embedded credentials")

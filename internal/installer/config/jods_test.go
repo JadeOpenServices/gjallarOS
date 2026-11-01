@@ -46,6 +46,13 @@ func TestValidateJODS(t *testing.T) {
 	if err := ValidateJODS(u); err == nil {
 		t.Fatal("accepted loopback JODS endpoint")
 	}
+	for _, channel := range []string{"dev", "staging"} {
+		u = validManagedUser()
+		u.ReleaseChannel = channel
+		if err := ValidateJODS(u); err == nil {
+			t.Fatalf("accepted the %s channel on a managed device", channel)
+		}
+	}
 }
 
 func TestUnmanagedJODSDoesNotRequireConfiguration(t *testing.T) {
