@@ -49,6 +49,7 @@ type LUN struct {
 	DevNum    string // changes on every replug
 	VIDPID    string
 	Product   string
+	Vendor    string // SCSI vendor string, e.g. "SAMSUNG" for a disk in a dock
 	Model     string // SCSI model string, e.g. "SD/MMC" on a card reader
 	Type      int
 	Removable bool
@@ -58,15 +59,44 @@ type LUN struct {
 	// sees a media change, so a swap is caught even when sd, not the gate,
 	// received the unit attention.
 	DiskSeq string
-	// Slots counts the gated LUNs of the same USB device. A multi-slot
-	// reader has one per slot.
+	// Slots counts the gated removable LUNs of the same USB device. A
+	// multi-slot reader has one per slot.
 	Slots int
 }
 
-// Gated reports whether the LUN's medium needs the owner's approval: a
-// removable disk (card slot, stick) or optical drive.
+// Gated reports whether the LUN's medium needs the owner's approval: every
+// USB LUN that sd or sr would turn into a block device. The removable bit is
+// not asked: the device sets it itself, so a stick that reports a fixed disk
+// would pass, and a disk in a dock is as much a stranger as a card (Plane
+// 289, loophole 39).
 func (l LUN) Gated() bool {
-	return l.Removable && (l.Type == 0 || l.Type == 5)
+	switch l.Type {
+	case typeDisk, typeWORM, typeROM, typeMOD, typeRBC, typeZBC:
+		return true
+	}
+	return false
+}
+
+// SCSI peripheral device types that sd (disk, MOD, RBC, ZBC) or sr (WORM,
+// ROM) binds.
+const (
+	typeDisk = 0x00
+	typeWORM = 0x04
+	typeROM  = 0x05
+	typeMOD  = 0x07
+	typeRBC  = 0x0e
+	typeZBC  = 0x14
+)
+
+// countSlots counts the gated removable LUNs per USB device.
+func countSlots(luns []LUN) map[string]int {
+	slots := map[string]int{}
+	for _, lun := range luns {
+		if lun.Gated() && lun.Removable {
+			slots[lun.Port]++
+		}
+	}
+	return slots
 }
 
 type state struct {
@@ -141,12 +171,7 @@ func (g *Gate) Sync(enforcing bool) error {
 		}
 		return errors.Join(errs...)
 	}
-	slots := map[string]int{}
-	for _, lun := range luns {
-		if lun.Gated() {
-			slots[lun.Port]++
-		}
-	}
+	slots := countSlots(luns)
 	seen := map[string]bool{}
 	var errs []error
 	for _, lun := range luns {
@@ -301,7 +326,7 @@ func (g *Gate) AllowMedia(id, connection string) error {
 }
 
 func decision(st *state) usbtrust.MediaDecision {
-	return usbtrust.MediaDecision{
+	d := usbtrust.MediaDecision{
 		ID:         st.lun.ID,
 		Connection: st.token,
 		Reader:     st.lun.Product,
@@ -311,14 +336,21 @@ func decision(st *state) usbtrust.MediaDecision {
 		Kind:       mediaKind(st.lun, st.emptySeen),
 		Allowed:    st.allowed,
 	}
+	if d.Kind == usbtrust.MediaDisk {
+		d.Disk = strings.Join(strings.Fields(st.lun.Vendor+" "+st.lun.Model), " ")
+	}
+	return d
 }
 
 // mediaKind guesses what the medium is from what the reader reports about
 // itself. It only picks the notice's words and icon, never a decision: a
 // device can claim any name.
 func mediaKind(lun LUN, emptySeen bool) string {
-	if lun.Type == 5 {
+	switch {
+	case lun.Type == typeROM || lun.Type == typeWORM:
 		return usbtrust.MediaDisc
+	case !lun.Removable:
+		return usbtrust.MediaDisk
 	}
 	kind := cardKind(lun.Model)
 	// The USB product name covers every slot of a multi-slot reader, so it
@@ -341,12 +373,7 @@ func DiskKind(sysfs, id string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	slots := map[string]int{}
-	for _, lun := range luns {
-		if lun.Gated() {
-			slots[lun.Port]++
-		}
-	}
+	slots := countSlots(luns)
 	for _, lun := range luns {
 		if lun.ID == id && lun.Gated() {
 			lun.Slots = slots[lun.Port]
@@ -469,6 +496,7 @@ func (g *Gate) scan() ([]LUN, error) {
 			DevNum:  readTrim(filepath.Join(usbDev, "devnum")),
 			VIDPID:  readTrim(filepath.Join(usbDev, "idVendor")) + ":" + readTrim(filepath.Join(usbDev, "idProduct")),
 			Product: readTrim(filepath.Join(usbDev, "product")),
+			Vendor:  readTrim(filepath.Join(real, "vendor")),
 			Model:   readTrim(filepath.Join(real, "model")),
 			Type:    -1,
 		}
