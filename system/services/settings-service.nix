@@ -360,8 +360,12 @@ lib.mkIf (settings.dotfilesDir == "/etc/gjallar/system") {
       # cryptsetup takes its lock here.
       ReadWritePaths = [ "-/run/cryptsetup" ];
       DevicePolicy = "closed";
+      # Root sits on a device-mapper device (the open LUKS volume, maybe
+      # LVM); lsblk walks from it down to the LUKS partition.
       DeviceAllow = [
+        "block-device-mapper r"
         "block-blkext r"
+        "block-mmc r"
         "block-sd r"
         "block-virtblk r"
         "/dev/tpmrm0 rw"
