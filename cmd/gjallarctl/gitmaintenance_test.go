@@ -17,6 +17,8 @@ func TestMain(m *testing.M) {
 		panic(err)
 	}
 	installercheck.SystemRepositoryFile = filepath.Join(dir, "repository")
+	// Nor the machine's developer grant.
+	developerGrantPath = filepath.Join(dir, "developer-grant.json")
 	status := m.Run()
 	os.RemoveAll(dir)
 	os.Exit(status)

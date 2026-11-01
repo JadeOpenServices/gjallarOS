@@ -152,4 +152,23 @@ func TestSystemRebuildNeedsDeveloperGrant(t *testing.T) {
 	if code := checkDeveloperGrant(true, user, &stderr); code != 1 {
 		t.Fatal("a broken grant let dev build")
 	}
+
+	// A configuration changed outside the settings service narrows the
+	// grant at the next rebuild.
+	if err := devgate.Save(developerGrantPath, devgate.Grant{Channels: true, DeveloperMode: true, Proof: devgate.ProofPIN}); err != nil {
+		t.Fatal(err)
+	}
+	if code := checkDeveloperGrant(true, user, &stderr); code != 0 {
+		t.Fatalf("dev with a wide grant: %d %q", code, stderr.String())
+	}
+	if g, err := devgate.Load(developerGrantPath); err != nil || !g.Channels || g.DeveloperMode {
+		t.Fatalf("grant after a rebuild without developer mode: %+v %v", g, err)
+	}
+	user.ReleaseChannel = "stable"
+	if code := checkDeveloperGrant(true, user, &stderr); code != 0 {
+		t.Fatalf("stable with a grant: %d %q", code, stderr.String())
+	}
+	if _, err := os.Stat(developerGrantPath); !os.IsNotExist(err) {
+		t.Fatalf("grant left after a stable rebuild: %v", err)
+	}
 }

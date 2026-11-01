@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 
+	"github.com/JadeOpenServices/gjallarOS/internal/devgate"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/config"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/flakesource"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/systemcheckout"
@@ -124,6 +125,14 @@ func writeDeveloperOff(path string) error {
 	}
 	if on {
 		return fmt.Errorf("%s still turns developer mode on after writing it", path)
+	}
+	user, err := config.Parse(updated)
+	if err != nil {
+		return err
+	}
+	// Turning developer mode on again needs the proof again.
+	if _, err := devgate.Narrow(developerGrantPath, user.Channel(), false); err != nil {
+		return err
 	}
 	return nil
 }

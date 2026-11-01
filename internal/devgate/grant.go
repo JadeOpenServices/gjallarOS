@@ -127,3 +127,22 @@ func Check(path, channel string, developerMode bool) error {
 	}
 	return fmt.Errorf("%s needs the startup PIN or the recovery key once; run gjallarctl settings confirm-developer, or switch back with gjallarctl settings set releaseChannel=stable developerMode=false", what)
 }
+
+// Narrow drops from the grant at path whatever channel and developerMode
+// no longer ask for, so turning a setting back on needs the proof again.
+// A grant that does not load is removed. It reports whether the file
+// changed.
+func Narrow(path, channel string, developerMode bool) (bool, error) {
+	old, err := Load(path)
+	if err != nil {
+		return true, Save(path, Grant{})
+	}
+	need := Needs(channel, developerMode)
+	g := old
+	g.Channels = g.Channels && need.Channels
+	g.DeveloperMode = g.DeveloperMode && need.DeveloperMode
+	if g == old {
+		return false, nil
+	}
+	return true, Save(path, g)
+}

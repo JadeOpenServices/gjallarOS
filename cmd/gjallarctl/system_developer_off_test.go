@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/JadeOpenServices/gjallarOS/internal/devgate"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/config"
 )
 
@@ -57,12 +58,19 @@ func useDeveloperOff(t *testing.T, developerMode bool, nextBoot string) string {
 
 func TestSystemDeveloperOffTurnsItOffAndChecksTheNextBoot(t *testing.T) {
 	path := useDeveloperOff(t, true, `{"revision":"0123456789abcdef"}`)
+	if err := devgate.Save(developerGrantPath, devgate.Grant{DeveloperMode: true, Proof: devgate.ProofPIN}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = devgate.Save(developerGrantPath, devgate.Grant{}) })
 	var stdout, stderr bytes.Buffer
 	if status := systemDeveloperOff(nil, &stdout, &stderr); status != 0 {
 		t.Fatalf("status %d: %s", status, stderr.String())
 	}
 	if on, err := developerModeIn(path); err != nil || on {
 		t.Fatalf("developer mode after: %v %v", on, err)
+	}
+	if g, err := devgate.Load(developerGrantPath); err != nil || !g.Empty() {
+		t.Fatalf("grant after developer-off: %+v %v", g, err)
 	}
 	for _, want := range []string{"Developer mode: off in " + path, "rebuilt", "PASS: the next boot is the official system 0123456"} {
 		if !strings.Contains(stdout.String(), want) {

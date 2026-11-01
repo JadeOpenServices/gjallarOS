@@ -89,6 +89,41 @@ func TestCheck(t *testing.T) {
 	}
 }
 
+func TestNarrow(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "grant.json")
+	if changed, err := Narrow(path, "dev", true); err != nil || changed {
+		t.Fatalf("no grant: %v %v", changed, err)
+	}
+	wide := Grant{Channels: true, DeveloperMode: true, Proof: ProofPIN}
+	if err := Save(path, wide); err != nil {
+		t.Fatal(err)
+	}
+	if changed, err := Narrow(path, "staging", true); err != nil || changed {
+		t.Fatalf("grant that fits: %v %v", changed, err)
+	}
+	if changed, err := Narrow(path, "dev", false); err != nil || !changed {
+		t.Fatalf("developer mode off: %v %v", changed, err)
+	}
+	if g, _ := Load(path); !g.Channels || g.DeveloperMode || g.Proof != ProofPIN {
+		t.Fatalf("narrowed grant = %+v", g)
+	}
+	if changed, err := Narrow(path, "stable", false); err != nil || !changed {
+		t.Fatalf("back to stable: %v %v", changed, err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("grant left on stable: %v", err)
+	}
+	if err := os.WriteFile(path, []byte("{"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if changed, err := Narrow(path, "dev", true); err != nil || !changed {
+		t.Fatalf("broken grant: %v %v", changed, err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("broken grant left: %v", err)
+	}
+}
+
 func TestBudget(t *testing.T) {
 	start := time.Date(2026, 11, 1, 12, 0, 0, 0, time.UTC)
 	var b Budget
