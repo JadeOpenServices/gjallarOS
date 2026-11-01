@@ -1,6 +1,7 @@
 package diskcrypto
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/json"
@@ -199,6 +200,23 @@ func TestTPM2Token(ctx context.Context, device, tokenID, pin string) error {
 		return fmt.Errorf("security chip unlock test: %w: %s", err, strings.TrimSpace(string(out)))
 	}
 	return nil
+}
+
+// TestTPM2PIN is TestTPM2Token for a PIN the caller clears after use.
+// Its error never carries cryptsetup's output.
+func TestTPM2PIN(ctx context.Context, device, tokenID string, pin []byte) error {
+	cmd := exec.CommandContext(ctx, "cryptsetup", "open", "--test-passphrase", "--token-only", "--token-id", tokenID, device)
+	cmd.Env = append(os.Environ(), "LD_LIBRARY_PATH="+tokenPluginDir)
+	cmd.Stdin = bytes.NewReader(pin)
+	return cmd.Run()
+}
+
+// TestKeySlot checks that key opens keyslot slot of device. Nothing is
+// unlocked: --test-passphrase only runs the key derivation.
+func TestKeySlot(ctx context.Context, device string, slot int, key []byte) error {
+	cmd := exec.CommandContext(ctx, "cryptsetup", "open", "--test-passphrase", "--key-slot", strconv.Itoa(slot), "--key-file=-", device)
+	cmd.Stdin = bytes.NewReader(key)
+	return cmd.Run()
 }
 
 // RefreshTPM2KeyslotRecord rewrites the record the first-boot enrollment
