@@ -28,6 +28,16 @@ const introspection = `<node>
       <arg name="values" type="s" direction="in"/>
       <arg name="change" type="s" direction="out"/>
     </method>
+    <method name="RequestWithProof">
+      <arg name="values" type="s" direction="in"/>
+      <arg name="kind" type="s" direction="in"/>
+      <arg name="secret" type="ay" direction="in"/>
+      <arg name="change" type="s" direction="out"/>
+    </method>
+    <method name="ConfirmDeveloper">
+      <arg name="kind" type="s" direction="in"/>
+      <arg name="secret" type="ay" direction="in"/>
+    </method>
     <method name="RequestLocal">
       <arg name="files" type="a{say}" direction="in"/>
       <arg name="change" type="s" direction="out"/>

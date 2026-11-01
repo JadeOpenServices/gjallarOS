@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/JadeOpenServices/gjallarOS/internal/devgate"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/config"
 	"github.com/JadeOpenServices/gjallarOS/internal/nettrust"
 	"github.com/JadeOpenServices/gjallarOS/internal/settings"
@@ -127,6 +128,10 @@ func newFixture(t *testing.T) *fixture {
 	}
 	f.svc = newService(f.sys, dir, func(string) error { return nil })
 	f.svc.now = func() time.Time { return f.now }
+	f.svc.grantPath = filepath.Join(dir, "developer-grant.json")
+	f.svc.askProof = func(context.Context, string, []byte) (devgate.Reply, error) {
+		return devgate.Reply{}, errors.New("no proof check in this test")
+	}
 	return f
 }
 

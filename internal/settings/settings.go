@@ -55,6 +55,9 @@ type Change struct {
 	// Local is set instead of Keys for a new developer-mode folder.
 	Local *LocalChange `json:"local,omitempty"`
 	Asked time.Time    `json:"asked"`
+	// Proof is how the caller proved a developer channel or developer
+	// mode (Plane 283): "pin" or "recovery", never the secret itself.
+	Proof string `json:"proof,omitempty"`
 }
 
 // LocalChange replaces root's copy of the developer-mode folder.

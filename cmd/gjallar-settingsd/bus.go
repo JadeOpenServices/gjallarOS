@@ -288,6 +288,15 @@ func (o object) Request(sender dbus.Sender, values string) (string, *dbus.Error)
 	return answer(change, err)
 }
 
+func (o object) RequestWithProof(sender dbus.Sender, values, kind string, secret []byte) (string, *dbus.Error) {
+	change, err := o.svc.RequestWithProof(context.Background(), string(sender), values, kind, secret)
+	return answer(change, err)
+}
+
+func (o object) ConfirmDeveloper(sender dbus.Sender, kind string, secret []byte) *dbus.Error {
+	return busError(o.svc.ConfirmDeveloper(context.Background(), string(sender), kind, secret))
+}
+
 func (o object) RequestLocal(sender dbus.Sender, files map[string][]byte) (string, *dbus.Error) {
 	change, err := o.svc.RequestLocal(context.Background(), string(sender), files)
 	return answer(change, err)
