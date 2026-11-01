@@ -2,7 +2,7 @@
 # stops at a download prompt and an offline first start never ends. nixpkgs
 # 26.05 pairs Wine 11.8 with wine-mono 11.0.0, but appwiz.cpl in 11.8 only
 # takes 11.1.0 and asks to download it, so swap in the 11.1.0 installer.
-# Test: fw13 VM, offline wine-win11-init ends without a prompt. Remove once
+# Test: fw13 VM, offline gjallar-wine-init ends without a prompt. Remove once
 # nixpkgs release-26.05 ships wine-mono 11.1.0 next to 11.8.
 final: prev:
 

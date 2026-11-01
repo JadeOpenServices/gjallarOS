@@ -9,6 +9,8 @@ ApplicationWindow {
 
     required property var backend
     required property string startPage
+    // An installer to set up as a new Wine app, as a file:// URL, or "".
+    required property string wineInstaller
     required property var colours
 
     width: 560
@@ -169,6 +171,6 @@ ApplicationWindow {
 
     Component {
         id: appsPage
-        AppsPage { backend: window.backend; colours: window.colours; gap: window.gap }
+        AppsPage { backend: window.backend; colours: window.colours; gap: window.gap; installer: window.wineInstaller }
     }
 }

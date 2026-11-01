@@ -101,7 +101,7 @@ Taken in a QEMU test VM at 1920×1080.</sub>
 | **App catalogue** | One list in `user.config.json` picks the apps; each app owns its whole module. |
 | **Local AI** | Optional localhost-only Ollama with hardware-aware model selection, or a central HTTPS server with a sealed token. |
 | **Recovery** | Trusted recovery boot entry, recovery ISO, generation rollback without deleting anything newer. |
-| **Apps** | VSCodium, Thunderbird, web apps (Teams, Plane), system-wide Wine, optional Nemu. |
+| **Apps** | VSCodium, Thunderbird, web apps (Teams, Plane), Wine apps each in their own sandbox, optional Nemu. |
 | **Maintenance** | Helpers for rebuilding, cleanup, thermal status, and updates. |
 
 <details>
