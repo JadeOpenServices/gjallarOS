@@ -9,6 +9,7 @@ import (
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/config"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/diskcrypto"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/prompt"
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/secureboot"
 )
 
 // tpm12Notice is printed when the only TPM is a TPM 1.2.
@@ -180,4 +181,44 @@ func collectStartupUnlock(ctx context.Context, ui prompt.UI, kind diskcrypto.TPM
 		fmt.Fprintln(ui.Out, "This device has no touchscreen GjallarOS can use at startup: typing the PIN or the recovery key needs a keyboard attached.")
 	}
 	return nil
+}
+
+// firmwareTrustReport is what the firmware trusts, read before any Secure
+// Boot question so the user sees it whatever they choose (Plane 293).
+func firmwareTrustReport(t secureboot.FirmwareTrust) string {
+	var b strings.Builder
+	b.WriteString("What this firmware trusts:\n")
+	for _, line := range t.Lines() {
+		b.WriteString("  " + line + "\n")
+	}
+	for _, f := range t.Findings() {
+		mark := "  Note: "
+		if f.Critical {
+			mark = "  WARNING: "
+		}
+		b.WriteString(mark + f.Text + "\n")
+	}
+	return b.String()
+}
+
+// lockedFirmwareNotice ends the install on firmware whose setup the user
+// cannot open: turning Secure Boot off and installing own keys both need it.
+const lockedFirmwareNotice = `The firmware setup is locked, so Secure Boot cannot be turned off and GjallarOS cannot install its own keys here.
+GjallarOS cannot start on this machine yet. Support for locked firmware is being built: a boot loader signed for the keys this firmware already trusts.
+Installation stopped before anything was installed.
+`
+
+// askFirmwareLocked asks whether the firmware setup is locked, when the
+// firmware enforces Secure Boot outside Setup Mode and its setup may have a
+// password. A password the kernel reports set makes "locked" the default;
+// the user may still know it.
+func askFirmwareLocked(ctx context.Context, ui prompt.UI, t secureboot.FirmwareTrust) (bool, error) {
+	if t.SecureBoot != secureboot.FlagOn || !t.MayBeLocked() {
+		return false, nil
+	}
+	question := "Is the firmware setup (BIOS) locked with a password you do not know?"
+	if t.AdminPassword == secureboot.PasswordSet {
+		question = "The firmware setup (BIOS) has a password. Is it locked for you, because you do not know that password?"
+	}
+	return ui.Confirm(ctx, question, t.AdminPassword == secureboot.PasswordSet)
 }
