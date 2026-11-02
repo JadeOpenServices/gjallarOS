@@ -34,6 +34,7 @@ import (
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/deviceprofilecache"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/discovery"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/diskcrypto"
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/diskplan"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/firefoxstore"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/firmware"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/flakesource"
@@ -536,7 +537,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 	}
 
 	if needsDeviceRebind {
-		if s.user.UnattendedInstall || s.user.EndpointManagedDevice {
+		if s.user.UnattendedInstall || s.user.Management.Enable {
 			return fail(
 				errOut,
 				errors.New(
@@ -644,7 +645,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 	securityRequested := s.user.SecureBootPrompt ||
 		s.user.SecureBootEnable ||
 		s.user.LUKSTPM2Enable ||
-		s.user.JODSPrebootLockEnable ||
+		s.user.PrebootLock.Enable ||
 		s.user.USBTrustEnforce
 
 	// TPM 1.2 has only SHA-1 PCRs; systemd-cryptenroll and the measured-boot
@@ -710,7 +711,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 
 			fmt.Fprintln(
 				out,
-				"Updated user.config.json for this TPM-less machine: secureBootPrompt=false, secureBootEnable=false, luksTpm2Enable=false, jodsPrebootLockEnable=false, usbTrustEnforce=false, usbTrustTpmHandle=\"\".",
+				"Updated user.config.json for this TPM-less machine: secureBootPrompt=false, secureBootEnable=false, luksTpm2Enable=false, prebootLock.enable=false, usbTrustEnforce=false, usbTrustTpmHandle=\"\".",
 			)
 		}
 	}
@@ -736,7 +737,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 
 	if tpmAvailable &&
 		s.user.SecureBootPrompt &&
-		!s.user.EndpointManagedDevice &&
+		!s.user.Management.Enable &&
 		s.secureBootFirmware.Policy.Supported {
 		// Taking over firmware key ownership needs informed consent: show
 		// what is replaced, what stays trusted, and what the user must keep
@@ -788,7 +789,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 	} else if tpmAvailable &&
 		s.user.SecureBootPrompt &&
 		!s.user.SecureBootEnable &&
-		!s.user.EndpointManagedDevice {
+		!s.user.Management.Enable {
 		fmt.Fprint(out, noSecureBootPolicyNotice(resolvedDevice.ModelID))
 		fmt.Fprint(out, secureBootDeclinedNotice("Once ODDC has a Secure Boot setup for this machine, gjallarctl secure-boot setup turns it on."))
 	} else if s.user.SecureBootEnable &&
@@ -813,7 +814,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 	); err != nil {
 		if mayOfferSecureBootFallback(
 			s.user.SecureBootEnable,
-			s.user.EndpointManagedDevice,
+			s.user.Management.Enable,
 			s.user.UnattendedInstall,
 		) {
 
@@ -932,7 +933,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 	if err := configureRecoveryProvisioning(ctx, ui, opt, &s); err != nil {
 		return fail(errOut, err)
 	}
-	if s.user.EndpointManagedDevice && s.user.JODSAllowInsecureTLS {
+	if s.user.Management.Enable && s.user.Management.AllowInsecureTLS {
 		if err := confirmInsecureJODS(ctx, ui); err != nil {
 			return fail(errOut, err)
 		}
@@ -942,7 +943,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 	if err := validateSelections(s.user, choices); err != nil {
 		return fail(errOut, err)
 	}
-	if s.user.JODSPrebootLockEnable && (!s.user.RecoveryEnable || !s.user.SecureBootEnable) {
+	if s.user.PrebootLock.Enable && (!s.user.RecoveryEnable || !s.user.SecureBootEnable) {
 		return fail(errOut, errors.New("JODS preboot locking requires both the trusted recovery entry and Secure Boot"))
 	}
 	if err := config.Validate(s.user); err != nil {
@@ -995,7 +996,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 	// before the device has completed its JODS pre-install enrollment and
 	// recovery-identity attestation. The legacy post-install enrollment path
 	// is intentionally insufficient for this boundary.
-	if s.render.EndpointManagedDevice && !s.existing {
+	if s.render.Management.Enable && !s.existing {
 		return fail(
 			errOut,
 			errors.New(
@@ -1089,7 +1090,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 				"GjallarOS Secure Boot is not set up on this install; TPM2 disk unlock stays off.",
 			)
 		} else if tpm2FollowsRequest(
-			s.render.EndpointManagedDevice,
+			s.render.Management.Enable,
 			persistentInstalledHost,
 		) {
 			s.render.LUKSTPM2Enable = s.user.LUKSTPM2Enable
@@ -1104,7 +1105,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 		if err := nixrender.WriteAtomic(settingsPath, s.render); err != nil {
 			return fail(errOut, err)
 		}
-		if !s.render.EndpointManagedDevice && !s.existing {
+		if !s.render.Management.Enable && !s.existing {
 			// A fresh target does not have its canonical LUKS2 root yet.
 			// Running installer luks here would operate against the installer
 			// environment instead of the future target.
@@ -1120,7 +1121,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 			fmt.Fprintln(out, "Existing LUKS keyslots retained; disk-key migration was not rerun.")
 		}
 	}
-	if s.render.JODSPrebootLockEnable && !s.render.LUKSTPM2Enable {
+	if s.render.PrebootLock.Enable && !s.render.LUKSTPM2Enable {
 		return fail(errOut, errors.New("JODS preboot locking requires verified TPM2 LUKS enrollment; configuration was left unactivated"))
 	}
 	if notice := developerConfirmNotice(s.user, s.existing, s.render.LUKSTPM2Enable); notice != "" {
@@ -1329,11 +1330,11 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 
 			if maintenanceRequired {
 				// The maintenance boot already ran for this transaction and
-				// still left no JODS-RECOVERY; another one would loop.
+				// still left no recovery partition; another one would loop.
 				if os.Getenv("GJALLAR_INSTALLER_RESUME_STATE") == installerresume.StateMaintenanceReboot {
 					return fail(
 						errOut,
-						errors.New("recovery-storage maintenance did not provision JODS-RECOVERY; automatic retry disabled"),
+						errors.New("recovery-storage maintenance did not provision the recovery partition; automatic retry disabled"),
 					)
 				}
 
@@ -1342,7 +1343,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 					"PASS: one-shot recovery-storage maintenance environment installed",
 				)
 
-				// The rerun after maintenance formats and fills JODS-RECOVERY
+				// The rerun after maintenance formats and fills the recovery partition
 				// and finishes Secure Boot; it stopped here before (e2e-target,
 				// 2026-10-05). It runs without a terminal, so only presets
 				// continue on their own.
@@ -1569,7 +1570,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 	}
 
 	if runRebuild {
-		if s.render.EndpointManagedDevice {
+		if s.render.Management.Enable {
 			if s.existing {
 				if err := activateJODSEnrollment(ctx, true); err != nil {
 					return fail(errOut, err)
@@ -1584,7 +1585,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 		}
 		if s.user.AutoReboot {
 			_ = attached(ctx, "sudo", "systemctl", "reboot")
-		} else if !s.render.EndpointManagedDevice {
+		} else if !s.render.Management.Enable {
 			yes, _ := ui.Confirm(
 				ctx,
 				"Deployment complete. Reboot now?",
@@ -1595,7 +1596,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 			}
 		}
 	}
-	if s.render.EndpointManagedDevice && !runRebuild {
+	if s.render.Management.Enable && !runRebuild {
 		fmt.Fprintln(out, "JODS configured, not contacted: enrollment waits for a successful installation rebuild.")
 	}
 
@@ -1636,10 +1637,10 @@ func activateJODSEnrollment(ctx context.Context, installationSucceeded bool) err
 	if err := runJODSCommand(ctx, "sudo", "install", "-m", "0600", "/dev/null", "/var/lib/gjallarOS/installation-complete"); err != nil {
 		return fmt.Errorf("mark installation complete: %w", err)
 	}
-	if err := runJODSCommand(ctx, "sudo", "systemctl", "start", "jods-mdm-agent-enroll.service"); err != nil {
+	if err := runJODSCommand(ctx, "sudo", "systemctl", "start", "mdm-agent-enroll.service"); err != nil {
 		return fmt.Errorf("submit JODS enrollment: %w", err)
 	}
-	if err := runJODSCommand(ctx, "sudo", "systemctl", "enable", "--now", "jods-mdm-agent-enroll.timer"); err != nil {
+	if err := runJODSCommand(ctx, "sudo", "systemctl", "enable", "--now", "mdm-agent-enroll.timer"); err != nil {
 		return fmt.Errorf("enable JODS enrollment retry timer: %w", err)
 	}
 	return nil
@@ -1770,7 +1771,7 @@ func prepareHost(
 	plan := bootstrap.Build(data, s.preset)
 	if len(plan.Missing) > 0 {
 		fmt.Fprintf(out, "Missing helpers/options: %s\nProposed configuration:\n%s\n", strings.Join(plan.Missing, ", "), plan.Updated)
-		if !s.user.EndpointManagedDevice && os.Getenv("GJALLAR_INSTALLER_RESUMED") != "1" {
+		if !s.user.Management.Enable && os.Getenv("GJALLAR_INSTALLER_RESUMED") != "1" {
 			yes, err := ui.Confirm(ctx, "Apply prerequisite configuration and rebuild?", false)
 			if err != nil {
 				return fail(errOut, err)
@@ -1857,34 +1858,34 @@ func collectInteractive(ctx context.Context, ui prompt.UI, root string, partitio
 	if err := collectJODSManagement(ctx, ui, managedBlocker, running, u); err != nil {
 		return err
 	}
-	if u.EndpointManagedDevice {
+	if u.Management.Enable {
 		localDevelopment, err := ui.Confirm(ctx, "Use a clearly marked local-development JODS server?", false)
 		if err != nil {
 			return err
 		}
-		endpointDefault := strings.TrimSpace(a.JODSEndpoint)
+		endpointDefault := strings.TrimSpace(a.Management.Endpoint)
 		if endpointDefault == "" && !localDevelopment {
 			endpointDefault = "https://admin.oss-ad.eu:1666"
 		}
-		u.JODSEndpoint, err = ui.Value(ctx, "JODS HTTPS endpoint", endpointDefault)
+		u.Management.Endpoint, err = ui.Value(ctx, "JODS HTTPS endpoint", endpointDefault)
 		if err != nil {
 			return err
 		}
-		u.JODSPolicySigningKey, err = ui.Value(ctx, "JODS policy-signing Ed25519 public key (64 hexadecimal characters)", a.JODSPolicySigningKey)
+		u.Management.PolicySigningPublicKey, err = ui.Value(ctx, "JODS policy-signing Ed25519 public key (64 hexadecimal characters)", a.Management.PolicySigningPublicKey)
 		if err != nil {
 			return err
 		}
-		u.JODSRecoverySigningKey, err = ui.Value(ctx, "JODS recovery-command Ed25519 public key (different 64 hexadecimal characters)", a.JODSRecoverySigningKey)
+		u.Management.RecoveryCommandSigningPublicKey, err = ui.Value(ctx, "JODS recovery-command Ed25519 public key (different 64 hexadecimal characters)", a.Management.RecoveryCommandSigningPublicKey)
 		if err != nil {
 			return err
 		}
 		enrollmentModes := []string{"auto", "manual", "jade-registry-only"}
-		u.JODSEnrollmentMode, err = ui.Choice(ctx, "JODS enrollment mode", offeredOr(a.JODSEnrollmentMode, enrollmentModes, "manual"), enrollmentModes)
+		u.Management.EnrollmentMode, err = ui.Choice(ctx, "JODS enrollment mode", offeredOr(a.Management.EnrollmentMode, enrollmentModes, "manual"), enrollmentModes)
 		if err != nil {
 			return err
 		}
 		if localDevelopment {
-			u.JODSAllowInsecureTLS, err = ui.Confirm(ctx, "Allow a self-signed JODS TLS certificate for local development?", a.JODSAllowInsecureTLS)
+			u.Management.AllowInsecureTLS, err = ui.Confirm(ctx, "Allow a self-signed JODS TLS certificate for local development?", a.Management.AllowInsecureTLS)
 			if err != nil {
 				return err
 			}
@@ -1894,19 +1895,19 @@ func collectInteractive(ctx context.Context, ui prompt.UI, root string, partitio
 			deviceDefault = "laptop"
 		}
 		deviceClasses := []string{"pc", "vm", "laptop", "kiosk", "workstation"}
-		u.JODSDeviceClass, err = ui.Choice(ctx, "JODS device class", offeredOr(a.JODSDeviceClass, deviceClasses, deviceDefault), deviceClasses)
+		u.Management.DeviceClass, err = ui.Choice(ctx, "JODS device class", offeredOr(a.Management.DeviceClass, deviceClasses, deviceDefault), deviceClasses)
 		if err != nil {
 			return err
 		}
 		profileDefault := "hyprland"
-		if running != nil && running.JODSDesktopProfile != "" {
-			profileDefault = running.JODSDesktopProfile
+		if running != nil && running.Management.DesktopProfile != "" {
+			profileDefault = running.Management.DesktopProfile
 		}
-		u.JODSDesktopProfile, err = ui.Value(ctx, "JODS desktop profile", profileDefault)
+		u.Management.DesktopProfile, err = ui.Value(ctx, "JODS desktop profile", profileDefault)
 		if err != nil {
 			return err
 		}
-		u.JODSDesktopProfile = strings.ToLower(strings.TrimSpace(u.JODSDesktopProfile))
+		u.Management.DesktopProfile = strings.ToLower(strings.TrimSpace(u.Management.DesktopProfile))
 	}
 	if err != nil {
 		return err
@@ -2022,7 +2023,7 @@ func collectInteractive(ctx context.Context, ui prompt.UI, root string, partitio
 // nothing checks it before it starts.
 const noRecoveryPartitionNotice = "No recovery partition: it needs GjallarOS Secure Boot, which is off for this install. The disk is not shrunk."
 
-// freshRecoveryPartition says whether a fresh disk gets JODS-RECOVERY. The
+// freshRecoveryPartition says whether a fresh disk gets a recovery partition. The
 // boot entry alone needs no partition; the partition comes only with
 // GjallarOS Secure Boot (collectRecovery).
 func freshRecoveryPartition(u config.User) bool {
@@ -2649,25 +2650,25 @@ func disableTPMDependentSecurity(u *config.User) {
 	u.SecureBootPrompt = false
 	u.SecureBootEnable = false
 	u.LUKSTPM2Enable = false
-	u.JODSPrebootLockEnable = false
+	u.PrebootLock.Enable = false
 	u.USBTrustEnforce = false
 	u.USBTrustLapseDays = 0
 	u.USBTrustTPMHandle = ""
 }
 
 func normalizeManagementSafety(u *config.User) {
-	if u.EndpointManagedDevice {
+	if u.Management.Enable {
 		// A managed endpoint must never enter the managed state with a weaker
 		// local boot/recovery posture. These are one security contract.
 		u.SecureBootEnable = true
 		u.LUKSTPM2Enable = true
 		u.RecoveryEnable = true
 		u.RecoveryPartitionEnable = true
-		u.JODSPrebootLockEnable = true
+		u.PrebootLock.Enable = true
 		return
 	}
 
-	u.JODSPrebootLockEnable = false
+	u.PrebootLock.Enable = false
 }
 
 func configureWeatherLocation(ctx context.Context, ui prompt.UI, u *config.User, out io.Writer) error {
@@ -2768,7 +2769,7 @@ func configureRecoveryProvisioning(ctx context.Context, ui prompt.UI, opt option
 	if s.recoveryPartition == "" &&
 		!s.user.RecoveryPartitionEnable &&
 		!explicitTarget {
-		if s.user.EndpointManagedDevice && !s.existing {
+		if s.user.Management.Enable && !s.existing {
 			return errors.New(
 				"managed fresh installation requires creation of an independent recovery partition",
 			)
@@ -2803,7 +2804,7 @@ func configureRecoveryProvisioning(ctx context.Context, ui prompt.UI, opt option
 		if !yes {
 			s.recoveryPartition = ""
 			s.recoveryDeclined = true
-			if s.user.EndpointManagedDevice && !s.existing {
+			if s.user.Management.Enable && !s.existing {
 				return errors.New("managed fresh installation requires an independent recovery partition")
 			}
 			return nil
@@ -2869,12 +2870,12 @@ func rootEncrypted(ctx context.Context, mountpoint string) bool {
 // the Secure Boot check after the whole interview.
 func collectJODSManagement(ctx context.Context, ui prompt.UI, blocker string, running, u *config.User) error {
 	if blocker != "" {
-		u.EndpointManagedDevice = false
+		u.Management.Enable = false
 		fmt.Fprintf(ui.Out, "No JODS management: %s\n", blocker)
 		return nil
 	}
 	var err error
-	u.EndpointManagedDevice, err = ui.Confirm(ctx, "Manage this machine with JODS?", running != nil && running.EndpointManagedDevice)
+	u.Management.Enable, err = ui.Confirm(ctx, "Manage this machine with JODS?", running != nil && running.Management.Enable)
 	return err
 }
 
@@ -3105,7 +3106,7 @@ func prepareInstalledRecoveryStorage(
 		s.recoveryPartition = present.Partition
 		fmt.Fprintf(
 			out,
-			"PASS: JODS-RECOVERY already present at %s; no storage changes were made\n",
+			"PASS: recovery partition already present at %s; no storage changes were made\n",
 			present.Partition,
 		)
 		return false, nil
@@ -3139,7 +3140,7 @@ func prepareInstalledRecoveryStorage(
 		s.recoveryPartition = result.RecoveryPartition
 		fmt.Fprintf(
 			out,
-			"PASS: existing encrypted-Btrfs layout has exact 12 GiB JODS-RECOVERY at %s\n",
+			"PASS: existing encrypted-Btrfs layout has an exact 12 GiB recovery partition at %s\n",
 			result.RecoveryPartition,
 		)
 		return false, nil
@@ -3181,16 +3182,13 @@ func prepareInstalledRecoveryStorage(
 }
 
 var findRecoveryPartition = func(ctx context.Context) string {
-	out, err := exec.CommandContext(ctx, "lsblk", "-pnro", "PATH,PARTLABEL,LABEL").Output()
+	out, err := exec.CommandContext(ctx, "lsblk", "-pnro", "PATH,PARTLABEL").Output()
 	if err != nil {
 		return ""
 	}
 	for _, line := range strings.Split(string(out), "\n") {
 		fields := strings.Fields(line)
-		if len(fields) >= 2 && (fields[1] == "JODS-RECOVERY" || fields[1] == "JODSRECOV") {
-			return fields[0]
-		}
-		if len(fields) >= 3 && fields[2] == "JODSRECOV" {
+		if len(fields) >= 2 && fields[1] == diskplan.RecoveryPartLabel {
 			return fields[0]
 		}
 	}
@@ -3220,7 +3218,7 @@ func provisionRecoveryPartition(ctx context.Context, root string, s state) error
 		}
 		s.recoveryPartition = findRecoveryPartition(ctx)
 		if s.recoveryPartition == "" {
-			return errors.New("recovery partition creation completed but JODS-RECOVERY was not detected")
+			return errors.New("recovery partition creation completed but the partition was not detected")
 		}
 	}
 	// The recovery configuration imports untracked generated/state.nix, so a

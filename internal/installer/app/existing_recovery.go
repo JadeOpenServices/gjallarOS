@@ -109,7 +109,7 @@ func handleExistingRecoveryFilesystem(
 	message := fmt.Sprintf(
 		"Dedicated GjallarOS recovery storage cannot be enabled on this existing installation.\n\n"+
 			"Current root filesystem: %s\n\n"+
-			"GjallarOS currently supports shrinking an existing root for the dedicated JODS-RECOVERY partition only when the root filesystem is Btrfs. "+
+			"GjallarOS currently supports shrinking an existing root for the dedicated recovery partition only when the root filesystem is Btrfs. "+
 			"The current %s root cannot use the supported live inspection and maintenance shrink path.\n\n"+
 			"To use this recovery feature, reinstall or migrate the root filesystem to Btrfs.\n\n"+
 			"Continue installing GjallarOS without the recovery feature?",

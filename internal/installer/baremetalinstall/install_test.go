@@ -380,7 +380,7 @@ func TestInstallHasNoJODSEnrollmentOrPhoneHome(t *testing.T) {
 	joined := strings.ToLower(callsText(r.calls))
 
 	for _, forbidden := range []string{
-		"jods-mdm-agent",
+		"mdm-agent",
 		"jods-endpoint",
 		"enroll.service",
 		"enroll.timer",

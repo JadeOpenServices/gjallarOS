@@ -22,6 +22,7 @@ let
         usbguardEnable = true;
         usbTrustEnforce = false;
         usbTrustTpmHandle = "0x81000042";
+        management.enable = false;
       };
       modules = [
         oddc.nixosModules.default

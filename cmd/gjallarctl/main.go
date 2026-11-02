@@ -2129,7 +2129,7 @@ func rebuildCheckout(repo string, opts rebuildOptions, system bool, stdout, stde
 	// Managed JODS endpoints deliberately remove the desktop user from
 	// wheel. Rebuilds on those systems therefore cross the explicit root
 	// authentication boundary instead of attempting sudo.
-	managedDevice := userConfig.EndpointManagedDevice
+	managedDevice := userConfig.Management.Enable
 
 	// JODS moves the pin on managed endpoints; elsewhere the user decides.
 	if !hardwareUpdate && !managedDevice {

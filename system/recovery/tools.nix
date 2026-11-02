@@ -11,8 +11,9 @@ let
     name = "gjallar-recovery-execute";
     runtimeInputs = with pkgs; [
       coreutils
+      findutils
       gawk
-      gptfdisk
+      gnugrep
       jq
       util-linux
     ];

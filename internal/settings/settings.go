@@ -134,7 +134,7 @@ func Plan(data []byte, values map[string]json.RawMessage) (Change, error) {
 		if tier == config.TierInstaller {
 			return Change{}, fmt.Errorf("%s only applies while installing and cannot be changed here", key)
 		}
-		if current.EndpointManagedDevice && tier != config.TierEveryday {
+		if current.Management.Enable && tier != config.TierEveryday {
 			return Change{}, fmt.Errorf("%s is a %s setting; JODS manages it on this device", key, tier)
 		}
 		newValue, err := compact(value)

@@ -73,36 +73,32 @@ type User struct {
 	// ThunderbirdSmartCard adds smart card support for Thunderbird keys.
 	ThunderbirdSmartCard bool `json:"thunderbirdSmartCard" tier:"security"`
 
-	NextcloudEnable           bool   `json:"nextcloudEnable" tier:"security"`
-	NextcloudHost             string `json:"nextcloudHost" tier:"security"`
-	Theme                     string `json:"theme" tier:"everyday"`
-	DebugFunctions            bool   `json:"debugFunctions" tier:"security"`
-	OverrideAISelection       bool   `json:"overrideAiSelection" tier:"everyday"`
-	OverrideModelWith         string `json:"overrideModelWith" tier:"everyday"`
-	AIAgentMode               string `json:"aiAgentMode" tier:"security"`
-	AIEndpoint                string `json:"aiEndpoint" tier:"security"`
-	AIRemoteModel             string `json:"aiRemoteModel" tier:"everyday"`
-	AIRemoteContextTokens     int    `json:"aiRemoteContextTokens" tier:"everyday"`
-	LUKSTPM2Enable            bool   `json:"luksTpm2Enable" tier:"critical" scope:"device"`
-	LUKSTPM2PIN               bool   `json:"luksTpm2Pin" tier:"critical" scope:"device"`
-	RecoveryEnable            bool   `json:"recoveryEnable" tier:"critical" scope:"device"`
-	RecoveryPartitionEnable   bool   `json:"recoveryPartitionEnable" tier:"critical" scope:"device"`
-	JODSPrebootLockEnable     bool   `json:"jodsPrebootLockEnable" tier:"critical" scope:"device"`
-	SecureBootEnable          bool   `json:"secureBootEnable" tier:"critical" scope:"device"`
-	SecureBootPrompt          bool   `json:"secureBootPrompt" tier:"critical" scope:"device"`
-	SecureBootShim            bool   `json:"secureBootShim" tier:"critical" scope:"device"` // shim first, for firmware with fixed keys
-	FirmwarePasswordLock      bool   `json:"firmwarePasswordLock" tier:"critical" scope:"device"`
-	EndpointManagedDevice     bool   `json:"endpointManagedDevice" tier:"critical" scope:"device"`
-	JODSEndpoint              string `json:"jodsEndpoint" tier:"critical" scope:"device"`
-	JODSPolicySigningKey      string `json:"jodsPolicySigningPublicKey" tier:"critical" scope:"device"`
-	JODSRecoverySigningKey    string `json:"jodsRecoveryCommandSigningPublicKey" tier:"critical" scope:"device"`
-	JODSEnrollmentMode        string `json:"jodsEnrollmentMode" tier:"critical" scope:"device"`
-	JODSAllowInsecureTLS      bool   `json:"jodsAllowInsecureTls" tier:"critical" scope:"device"`
-	JODSDeviceClass           string `json:"jodsDeviceClass" tier:"critical" scope:"device"`
-	JODSDesktopProfile        string `json:"jodsDesktopProfile" tier:"critical" scope:"device"`
-	JODSFingerprintEnroll     bool   `json:"jodsFingerprintEnrollmentAllowed" tier:"critical" scope:"device"`
-	AllowUnvalidatedODDCModel bool   `json:"allowUnvalidatedODDCModel" tier:"critical" scope:"device"`
-	DeveloperMode             bool   `json:"developerMode" tier:"critical" scope:"device"`
+	NextcloudEnable         bool   `json:"nextcloudEnable" tier:"security"`
+	NextcloudHost           string `json:"nextcloudHost" tier:"security"`
+	Theme                   string `json:"theme" tier:"everyday"`
+	DebugFunctions          bool   `json:"debugFunctions" tier:"security"`
+	OverrideAISelection     bool   `json:"overrideAiSelection" tier:"everyday"`
+	OverrideModelWith       string `json:"overrideModelWith" tier:"everyday"`
+	AIAgentMode             string `json:"aiAgentMode" tier:"security"`
+	AIEndpoint              string `json:"aiEndpoint" tier:"security"`
+	AIRemoteModel           string `json:"aiRemoteModel" tier:"everyday"`
+	AIRemoteContextTokens   int    `json:"aiRemoteContextTokens" tier:"everyday"`
+	LUKSTPM2Enable          bool   `json:"luksTpm2Enable" tier:"critical" scope:"device"`
+	LUKSTPM2PIN             bool   `json:"luksTpm2Pin" tier:"critical" scope:"device"`
+	RecoveryEnable          bool   `json:"recoveryEnable" tier:"critical" scope:"device"`
+	RecoveryPartitionEnable bool   `json:"recoveryPartitionEnable" tier:"critical" scope:"device"`
+	// PrebootLock is the JODS preboot lock; it needs recovery, Secure Boot
+	// and TPM2 LUKS.
+	PrebootLock          PrebootLockIntent `json:"prebootLock" tier:"critical" scope:"device"`
+	SecureBootEnable     bool              `json:"secureBootEnable" tier:"critical" scope:"device"`
+	SecureBootPrompt     bool              `json:"secureBootPrompt" tier:"critical" scope:"device"`
+	SecureBootShim       bool              `json:"secureBootShim" tier:"critical" scope:"device"` // shim first, for firmware with fixed keys
+	FirmwarePasswordLock bool              `json:"firmwarePasswordLock" tier:"critical" scope:"device"`
+	// Management makes JODS manage the device. Off, it is a standalone
+	// install and the other management fields are not used.
+	Management                ManagementIntent `json:"management" tier:"critical" scope:"device"`
+	AllowUnvalidatedODDCModel bool             `json:"allowUnvalidatedODDCModel" tier:"critical" scope:"device"`
+	DeveloperMode             bool             `json:"developerMode" tier:"critical" scope:"device"`
 	// SettingsSigningKey is the main user's own OpenSSH public key for
 	// settings files (ROADMAP "Pairing and own keys"); empty means
 	// GjallarOS manages that user's signing key.
@@ -153,17 +149,19 @@ func Defaults() (User, error) {
 		RecoveryPartitionEnable: true,
 		SecureBootPrompt:        true,
 		FirmwarePasswordLock:    true,
-		JODSEnrollmentMode:      "manual",
-		JODSDeviceClass:         "laptop",
-		JODSDesktopProfile:      "headless",
-		ReleaseChannel:          DefaultReleaseChannel,
-		SnapshotsEnable:         true,
-		FirewallEnable:          true,
-		VirusScanEnable:         true,
-		SnapshotsKeepHours:      DefaultSnapshotsKeepHours,
-		SnapshotsKeepDays:       DefaultSnapshotsKeepDays,
-		WriteConfig:             true,
-		RunRebuild:              true,
+		Management: ManagementIntent{
+			EnrollmentMode: "manual",
+			DeviceClass:    "laptop",
+			DesktopProfile: "headless",
+		},
+		ReleaseChannel:     DefaultReleaseChannel,
+		SnapshotsEnable:    true,
+		FirewallEnable:     true,
+		VirusScanEnable:    true,
+		SnapshotsKeepHours: DefaultSnapshotsKeepHours,
+		SnapshotsKeepDays:  DefaultSnapshotsKeepDays,
+		WriteConfig:        true,
+		RunRebuild:         true,
 	}, nil
 }
 
@@ -499,14 +497,14 @@ func ValidateProjectTools(user User) error {
 }
 
 var jodsPublicKeyPattern = regexp.MustCompile(`^[0-9a-fA-F]{64}$`)
-var jodsDesktopProfilePattern = regexp.MustCompile(`^[A-Za-z0-9._+:-]{1,64}$`)
+var desktopProfilePattern = regexp.MustCompile(`^[A-Za-z0-9._+:-]{1,64}$`)
 
 func ValidateJODS(user User) error {
-	if !user.EndpointManagedDevice {
-		if user.JODSFingerprintEnroll {
+	if !user.Management.Enable {
+		if user.Management.FingerprintEnrollmentAllowed {
 			return fmt.Errorf("JODS fingerprint enrollment policy requires endpoint management enrollment")
 		}
-		if user.JODSPrebootLockEnable {
+		if user.PrebootLock.Enable {
 			return fmt.Errorf("JODS preboot locking requires explicit JODS endpoint management enrollment")
 		}
 		return nil
@@ -517,27 +515,27 @@ func ValidateJODS(user User) error {
 	if user.Channel() != DefaultReleaseChannel {
 		return fmt.Errorf("releaseChannel %q takes untested code; JODS-managed devices stay on %s", user.Channel(), DefaultReleaseChannel)
 	}
-	parsed, err := url.Parse(user.JODSEndpoint)
+	parsed, err := url.Parse(user.Management.Endpoint)
 	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil {
 		return fmt.Errorf("JODS endpoint must be an HTTPS URL without embedded credentials")
 	}
-	if !jodsPublicKeyPattern.MatchString(user.JODSPolicySigningKey) {
+	if !jodsPublicKeyPattern.MatchString(user.Management.PolicySigningPublicKey) {
 		return fmt.Errorf("JODS policy-signing public key must be exactly 64 hexadecimal characters")
 	}
-	if !jodsPublicKeyPattern.MatchString(user.JODSRecoverySigningKey) {
+	if !jodsPublicKeyPattern.MatchString(user.Management.RecoveryCommandSigningPublicKey) {
 		return fmt.Errorf("JODS recovery-command signing public key must be exactly 64 hexadecimal characters")
 	}
-	if strings.EqualFold(user.JODSPolicySigningKey, user.JODSRecoverySigningKey) {
+	if strings.EqualFold(user.Management.PolicySigningPublicKey, user.Management.RecoveryCommandSigningPublicKey) {
 		return fmt.Errorf("JODS policy and recovery-command signing keys must differ")
 	}
-	if !oneOf(user.JODSEnrollmentMode, "auto", "manual", "jade-registry-only") {
-		return fmt.Errorf("invalid JODS enrollment mode: %q", user.JODSEnrollmentMode)
+	if !oneOf(user.Management.EnrollmentMode, "auto", "manual", "jade-registry-only") {
+		return fmt.Errorf("invalid JODS enrollment mode: %q", user.Management.EnrollmentMode)
 	}
-	if !oneOf(user.JODSDeviceClass, "pc", "vm", "laptop", "kiosk", "workstation") {
-		return fmt.Errorf("invalid JODS device class: %q", user.JODSDeviceClass)
+	if !oneOf(user.Management.DeviceClass, "pc", "vm", "laptop", "kiosk", "workstation") {
+		return fmt.Errorf("invalid JODS device class: %q", user.Management.DeviceClass)
 	}
-	if !jodsDesktopProfilePattern.MatchString(strings.TrimSpace(user.JODSDesktopProfile)) {
-		return fmt.Errorf("invalid JODS desktop profile: %q", user.JODSDesktopProfile)
+	if !desktopProfilePattern.MatchString(strings.TrimSpace(user.Management.DesktopProfile)) {
+		return fmt.Errorf("invalid JODS desktop profile: %q", user.Management.DesktopProfile)
 	}
 	host := parsed.Hostname()
 	if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {

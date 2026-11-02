@@ -37,7 +37,6 @@
     "vscodium"
   ],
   "email": "you@example.com",
-  "endpointManagedDevice": false,
   "firefoxAddons": {
     "privacy": {
       "enable": true,
@@ -80,20 +79,22 @@
   "forceRedeploy": false,
   "githubUsername": "UsernameHere",
   "hostname": "gjallarOS",
-  "jodsAllowInsecureTls": false,
-  "jodsDesktopProfile": "headless",
-  "jodsDeviceClass": "laptop",
-  "jodsEndpoint": "",
-  "jodsEnrollmentMode": "manual",
-  "jodsFingerprintEnrollmentAllowed": false,
-  "jodsPolicySigningPublicKey": "",
-  "jodsPrebootLockEnable": false,
-  "jodsRecoveryCommandSigningPublicKey": "",
   "keyboardLayout": "de",
   "keyboardVariant": "",
   "locale": "en_US.UTF-8",
   "luksTpm2Enable": false,
   "luksTpm2Pin": false,
+  "management": {
+    "enable": false,
+    "endpoint": "",
+    "policySigningPublicKey": "",
+    "recoveryCommandSigningPublicKey": "",
+    "enrollmentMode": "manual",
+    "allowInsecureTls": false,
+    "deviceClass": "laptop",
+    "desktopProfile": "headless",
+    "fingerprintEnrollmentAllowed": false
+  },
   "name": "Your Name",
   "networkPrintingEnable": false,
   "firewallEnable": true,
@@ -105,6 +106,9 @@
   "nextcloudHost": "",
   "overrideAiSelection": false,
   "overrideModelWith": "",
+  "prebootLock": {
+    "enable": false
+  },
   "preferredBrowser": "firefox",
   "preferredEditor": "vscodium",
   "printingEnable": false,

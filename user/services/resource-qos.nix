@@ -35,7 +35,7 @@ let
       fi
 
       if [ "$#" -eq 0 ]; then
-        echo "usage: gjallar-run [--family desktop|jods|ai|background] COMMAND [ARG...]" >&2
+        echo "usage: gjallar-run [--family desktop|management|ai|background] COMMAND [ARG...]" >&2
         exit 64
       fi
 
@@ -47,8 +47,8 @@ let
           slice="a"
           weight=${toString managedWeight}
           ;;
-        jods)
-          app_name="jods-$command_name"
+        management)
+          app_name="management-$command_name"
           slice="a"
           weight=${toString managedWeight}
           ;;
@@ -201,7 +201,7 @@ in
     (pkgs.writeTextDir "share/zsh/site-functions/_gjallar-run" ''
       #compdef gjallar-run
       _arguments \
-        '--family[resource family]:family:(desktop jods ai background)' \
+        '--family[resource family]:family:(desktop management ai background)' \
         '*::command:_normal'
     '')
   ];

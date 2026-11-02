@@ -70,8 +70,8 @@ let
       secureBootPrompt = true;
       secureBootShim = getSetting "secureBootShim" false;
 
-      endpointManagedDevice = false;
-      jodsPrebootLockEnable = false;
+      management.enable = false;
+      prebootLock.enable = false;
 
       autoReboot = false;
       runUpdateChecks = false;
@@ -170,7 +170,7 @@ in
   boot.initrd.systemd.enable = lib.mkForce false;
 
   # Stage 1 sets up both devices before it mounts anything:
-  # - partition UKI (gjallar.iso=): only a vfat JODSRECOV partition whose
+  # - partition UKI (gjallar.iso=): only a vfat GJALLAR-REC partition whose
   #   ISO store matches gjallar.verity= is used; the store is read through
   #   dm-verity, so a changed block fails to read instead of running.
   # - GRUB findiso= and USB/DVD boot (root=): no hash to check against, the
@@ -263,7 +263,7 @@ in
       for delay in 0 5 10; do
         sleep "$delay"
         udevadm settle
-        for dev in $(blkid -t LABEL=JODSRECOV -o device); do
+        for dev in $(blkid -t LABEL=GJALLAR-REC -o device); do
           mount -t vfat -o ro,nodev,nosuid,noexec "$dev" /gjallar-src || continue
           if [ -f "/gjallar-src$gjallarIso" ] \
             && gjallarAttach "/gjallar-src$gjallarIso" "$gjallarVerity"; then

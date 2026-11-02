@@ -153,20 +153,14 @@ func prepare(
 			return Result{}, fmt.Errorf("validate recovery partition: %w", err)
 		}
 
-		// FAT volume labels are limited to 11 characters. The canonical GPT
-		// partition label remains JODS-RECOVERY; the filesystem label uses the
-		// existing short compatibility label JODSRECOV.
+		// FAT volume labels are limited to 11 characters.
 		recoveryLabel := strings.TrimSpace(recovery.Filesystem.Label)
 		if len(recoveryLabel) > 11 {
-			if strings.EqualFold(recovery.Label, "JODS-RECOVERY") {
-				recoveryLabel = "JODSRECOV"
-			} else {
-				cleanupESP()
-				return Result{}, fmt.Errorf(
-					"recovery FAT filesystem label %q exceeds 11 characters",
-					recovery.Filesystem.Label,
-				)
-			}
+			cleanupESP()
+			return Result{}, fmt.Errorf(
+				"recovery FAT filesystem label %q exceeds 11 characters",
+				recovery.Filesystem.Label,
+			)
 		}
 
 		if err := makeFAT(ctx, runner, recoveryDevice, recoveryLabel); err != nil {

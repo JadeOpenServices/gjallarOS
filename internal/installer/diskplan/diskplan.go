@@ -24,6 +24,11 @@ const (
 	RoleRecovery = "recovery"
 
 	EncryptionLUKS2 = "luks2"
+
+	// Recovery partition labels (JODS-565, device contract v2): the GPT
+	// partition name and the FAT label, 11 characters at most.
+	RecoveryPartLabel = "GJALLAR-RECOVERY"
+	RecoveryFSLabel   = "GJALLAR-REC"
 )
 
 var guidPattern = regexp.MustCompile(`(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)

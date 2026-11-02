@@ -44,7 +44,8 @@ func TestTierOf(t *testing.T) {
 		"tailscale":        TierSecurity,
 		"secureBootEnable": TierCritical,
 		"luksTpm2Pin":      TierCritical,
-		"jodsEndpoint":     TierCritical,
+		"management":       TierCritical,
+		"prebootLock":      TierCritical,
 		"forceRedeploy":    TierInstaller,
 		"runRebuild":       TierInstaller,
 	} {

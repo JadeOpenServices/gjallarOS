@@ -49,13 +49,13 @@ func plan() diskplan.Plan {
 	recovery := &diskplan.Partition{
 		Role:      diskplan.RoleRecovery,
 		Number:    3,
-		Label:     "JODS-RECOVERY",
+		Label:     "GJALLAR-RECOVERY",
 		TypeGUID:  "bc13c2ff-59e6-4262-a352-b275fd6f7172",
 		PARTUUID:  "99999999-8888-7777-6666-555555555555",
 		SizeBytes: 12 * 1024 * 1024 * 1024,
 		Filesystem: diskplan.Filesystem{
 			Type:  "vfat",
-			Label: "JODS-RECOVERY",
+			Label: "GJALLAR-REC",
 		},
 		MountPoint: "/recovery",
 	}
@@ -144,7 +144,7 @@ func TestProvisionCreatesOnlyCanonicalPartitions(t *testing.T) {
 	        "size": %d,
 	        "fstype": null,
 	        "partn": 3,
-	        "partlabel": "JODS-RECOVERY",
+	        "partlabel": "GJALLAR-RECOVERY",
 	        "parttype": %q,
 	        "partuuid": %q
 	      }
@@ -274,7 +274,7 @@ func TestProvisionRejectsFilesystemAlreadyPresent(t *testing.T) {
 	        "size":%d,
 	        "fstype":null,
 	        "partn":3,
-	        "partlabel":"JODS-RECOVERY",
+	        "partlabel":"GJALLAR-RECOVERY",
 	        "parttype":%q,
 	        "partuuid":%q
 	      }

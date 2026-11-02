@@ -99,7 +99,7 @@
     shell = pkgs.${settings.shell};
     description = settings.username;
     extraGroups = [ "networkmanager" ]
-    ++ lib.optionals (!settings.endpointManagedDevice) [ "wheel" ];
+    ++ lib.optionals (!settings.management.enable) [ "wheel" ];
     # Set by the installer. NixOS reads it only when it creates the account;
     # a later passwd change stays.
     hashedPasswordFile = lib.mkIf (
