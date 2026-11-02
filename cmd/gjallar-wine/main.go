@@ -61,6 +61,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		err = repairCmd(args[1:], stdout, stderr)
 	case "undo":
 		err = undoCmd(args[1:], stdout, stderr)
+	case "doctor":
+		err = doctorCmd(args[1:], stdout, stderr)
 	case "import":
 		err = importCmd(args[1:], stdout, stderr)
 	case "check":

@@ -165,6 +165,38 @@ func TestScanKinds(t *testing.T) {
 	}
 }
 
+// wineStub moves the PE header of a synthetic file 64 bytes on, the way
+// Wine lays out its libraries, and puts mark in the room it makes.
+func wineStub(data []byte, mark string) []byte {
+	f := append([]byte{}, data[:64]...)
+	binary.LittleEndian.PutUint32(f[0x3c:], 128)
+	stub := make([]byte, 64)
+	copy(stub, mark)
+	f = append(f, stub...)
+	// The headers end before secOff, so the padding takes the shift.
+	f = append(f, data[64:secOff-64]...)
+	return append(f, data[secOff:]...)
+}
+
+func TestScanWineBuiltin(t *testing.T) {
+	data := synthetic("", ".text")
+	if r := scan(t, data); r.WineBuiltin {
+		t.Errorf("plain file seen as Wine's: %+v", r)
+	}
+	for _, mark := range []string{"Wine builtin DLL", "Wine placeholder"} {
+		r := scan(t, wineStub(data, mark))
+		if !r.WineBuiltin || r.Machine != "x86" || len(r.Imports) != 2 {
+			t.Errorf("%s: %+v", mark, r)
+		}
+	}
+	if r := scan(t, wineStub(data, "This program can")); r.WineBuiltin {
+		t.Errorf("publisher stub seen as Wine's: %+v", r)
+	}
+	if err := (Report{Kind: "other", WineBuiltin: true}).Check(); err == nil {
+		t.Error("Check let a Wine mark through on a file that is not pe")
+	}
+}
+
 func TestManifest(t *testing.T) {
 	for _, c := range []struct{ xml, level, dpi string }{
 		{`<a><dpiAware>True/PM</dpiAware></a>`, "", "permonitor"},
