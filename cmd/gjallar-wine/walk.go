@@ -199,7 +199,11 @@ func doctorCmd(args []string, stdout, stderr io.Writer) error {
 		fmt.Fprintln(stdout, "  a .NET program (from its .NET header): its import table names only mscoree.dll, and .NET loads the rest itself, so this walk sees little of what it needs")
 	}
 	w.report(id, a, tab, stdout)
-	return reportStart(paths, id, a, tab, stdout)
+	if err := reportStart(paths, id, a, tab, stdout); err != nil {
+		return err
+	}
+	reportGraphics(id, stdout)
+	return nil
 }
 
 // run walks from the program's tables: libraries needed at start first,
