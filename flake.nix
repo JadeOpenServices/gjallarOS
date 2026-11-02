@@ -256,6 +256,12 @@
           fixModule = ./system/fixes/systemd-partition-reread;
         };
 
+        adb-usbguard-allow = import ./tests/nix/adb-usbguard-allow.nix {
+          inherit pkgs;
+          patchedTools = pkgs.android-tools;
+          stockTools = nixpkgs.legacyPackages.${system}.android-tools;
+        };
+
         udiskie-new-media-only = import ./tests/nix/udiskie-new-media-only.nix {
           inherit pkgs;
           stockUdiskie = nixpkgs.legacyPackages.${system}.udiskie;
