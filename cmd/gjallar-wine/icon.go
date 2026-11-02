@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -10,9 +9,7 @@ import (
 	"image/png"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"runtime/debug"
 	"slices"
 	"strings"
 	"time"
@@ -179,51 +176,16 @@ func readFrom(dirFD int, name, kind string) (map[int]*image.NRGBA, error) {
 	return readIcon(kind, f)
 }
 
-// sandboxedIcon runs "gjallar-wine icon KIND" in bubblewrap with src as
-// its fd 3. The sandbox holds only this binary: no files, no devices, no
-// network, its own user, process and IPC namespaces, no capabilities, an
-// empty environment, and it ends with this process. It must answer within
-// iconTimeout and send no more than iconOutMax bytes.
+// sandboxedIcon reads src's icon in the sandbox that sandboxed sets up.
 func sandboxedIcon(kind string, src *os.File) (map[int]*image.NRGBA, error) {
-	self, err := os.Executable()
+	out, err := sandboxed(iconTimeout, iconOutMax, src, "icon", kind)
+	if errors.Is(err, errStepNone) {
+		return nil, winicon.ErrNoIcon
+	}
 	if err != nil {
 		return nil, err
 	}
-	if !strings.HasPrefix(self, "/nix/store/") {
-		return nil, fmt.Errorf("%s is not in the Nix store; start the installed gjallar-wine", self)
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), iconTimeout)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, bwrapPath,
-		"--unshare-all", "--die-with-parent", "--new-session", "--cap-drop", "ALL", "--clearenv",
-		"--ro-bind", self, self,
-		"--", self, "icon", kind)
-	cmd.ExtraFiles = []*os.File{src}
-	out := &capped{max: iconOutMax}
-	errOut := &capped{max: 4 << 10}
-	cmd.Stdout, cmd.Stderr = out, errOut
-	err = cmd.Run()
-	var exit *exec.ExitError
-	switch {
-	case errors.As(err, &exit) && exit.ExitCode() == iconNone:
-		return nil, winicon.ErrNoIcon
-	case err != nil:
-		return nil, fmt.Errorf("icon reader: %w: %s", err, strings.TrimSpace(errOut.buf.String()))
-	}
-	return parseIconOut(out.buf.Bytes())
-}
-
-// capped keeps up to max bytes and fails once more come.
-type capped struct {
-	buf bytes.Buffer
-	max int
-}
-
-func (c *capped) Write(p []byte) (int, error) {
-	if c.buf.Len()+len(p) > c.max {
-		return 0, errors.New("icon reader sent too much")
-	}
-	return c.buf.Write(p)
+	return parseIconOut(out)
 }
 
 // parseIconOut reads the sandbox's answer: for each size, in rising order
@@ -255,9 +217,6 @@ func parseIconOut(data []byte) (map[int]*image.NRGBA, error) {
 // iconMem is the icon reader's memory limit.
 const iconMem = 512 << 20
 
-// iconNone is the icon reader's exit code for a file without an icon.
-const iconNone = 3
-
 // iconCmd is the icon reader inside the sandbox: it reads fd 3 and writes
 // the answer parseIconOut reads.
 func iconCmd(args []string, stdout, stderr io.Writer) int {
@@ -266,18 +225,13 @@ func iconCmd(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	// Memory for the decoder, well above what the limits in winicon allow.
-	// RLIMIT_DATA counts the memory the Go runtime maps for use; it leaves
-	// out the address space the runtime only reserves, which RLIMIT_AS
-	// counts, so that limit stopped the runtime growing its heap at all.
-	limit := &unix.Rlimit{Cur: iconMem, Max: iconMem}
-	if err := unix.Setrlimit(unix.RLIMIT_DATA, limit); err != nil {
+	if err := limitStep(iconMem, 0); err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
-	debug.SetMemoryLimit(iconMem / 2)
 	imgs, err := decodeIcon(args[0], os.NewFile(3, "icon source"))
 	if errors.Is(err, winicon.ErrNoIcon) {
-		return iconNone
+		return stepNone
 	}
 	if err != nil {
 		fmt.Fprintln(stderr, err)

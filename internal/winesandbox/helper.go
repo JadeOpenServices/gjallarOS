@@ -28,10 +28,13 @@ const CommandsUsage = `       gjallarctl wine add NAME [INSTALLER]  add an app w
                                              installed programs stay
        gjallarctl wine undo ID               put back the app ID as it was before
                                              the last reset or repair
+       gjallarctl wine check INSTALLER       tell what an installer or program is
+                                             built for and needs, without running it
        gjallarctl wine import NAME PREFIX    make a copy of a Wine prefix set up
                                              elsewhere into the app NAME
        gjallarctl wine menu                  bring the app menu in line with the
                                              apps; runs after each rebuild
 ID is the app's id, as gjallarctl wine list shows it. CHOICE is a number from
 the list or a program's path on C: or D:, such as D:\Tool\tool.exe. An
-installer is an .exe or .msi file.`
+installer is an .exe or .msi file; add and install check it the same way
+before they run it.`

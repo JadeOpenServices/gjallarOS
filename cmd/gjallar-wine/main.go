@@ -59,6 +59,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		err = undoCmd(args[1:], stdout, stderr)
 	case "import":
 		err = importCmd(args[1:], stdout, stderr)
+	case "check":
+		err = checkCmd(args[1:], stdout, stderr)
 	// menu brings the app menu in line with the apps, after each rebuild.
 	case "menu":
 		err = menuCmd(args[1:], stderr)
@@ -76,6 +78,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 	// icon reads an app's icon inside its own sandbox (icon.go).
 	case "icon":
 		return iconCmd(args[1:], stdout, stderr)
+	// scan reads an installer's headers inside its own sandbox (scan.go).
+	case "scan":
+		return scanCmd(args[1:], stdout, stderr)
 	case "stay":
 		signals := make(chan os.Signal, 1)
 		signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
