@@ -37,12 +37,12 @@ func TestRenderRecoveryPolicyDefaultsDisabled(t *testing.T) {
 	for _, want := range []string{
 		"recoveryEnable = false;",
 		"recoveryPartitionEnable = false;",
-		"jodsPrebootLockEnable = false;",
+		"prebootLock = { enable = false; };",
 		"secureBootEnable = false;",
 		"usbTrustEnforce = false;",
 		`usbTrustTpmHandle = "";`,
 		"usbReviewTechnicalView = false;",
-		"endpointManagedDevice = false;",
+		"management = { enable = false; ",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("missing %q from settings:\n%s", want, got)
@@ -70,24 +70,19 @@ func TestRenderWeatherLocation(t *testing.T) {
 
 func TestRenderJODSSettings(t *testing.T) {
 	got := string(Render(Settings{
-		EndpointManagedDevice:               true,
-		JODSEndpoint:                        "https://jods.example.test:1666",
-		JODSPolicySigningPublicKey:          strings.Repeat("ab", 32),
-		JODSRecoveryCommandSigningPublicKey: strings.Repeat("cd", 32),
-		JODSEnrollmentMode:                  "jade-registry-only",
-		JODSAllowInsecureTLS:                false,
-		JODSDeviceClass:                     "laptop",
-		JODSDesktopProfile:                  "headless",
+		Management: config.ManagementIntent{
+			Enable:                          true,
+			Endpoint:                        "https://jods.example.test:1666",
+			PolicySigningPublicKey:          strings.Repeat("ab", 32),
+			RecoveryCommandSigningPublicKey: strings.Repeat("cd", 32),
+			EnrollmentMode:                  "jade-registry-only",
+			AllowInsecureTLS:                false,
+			DeviceClass:                     "laptop",
+			DesktopProfile:                  "headless",
+		},
 	}))
 	for _, want := range []string{
-		"endpointManagedDevice = true;",
-		`jodsEndpoint = "https://jods.example.test:1666";`,
-		`jodsRecoveryCommandSigningPublicKey = "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd";`,
-		`jodsEnrollmentMode = "jade-registry-only";`,
-		"jodsAllowInsecureTls = false;",
-		`jodsDeviceClass = "laptop";`,
-		`jodsDesktopProfile = "headless";`,
-		"jodsFingerprintEnrollmentAllowed = false;",
+		`management = { enable = true; endpoint = "https://jods.example.test:1666"; policySigningPublicKey = "abababababababababababababababababababababababababababababababab"; recoveryCommandSigningPublicKey = "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"; enrollmentMode = "jade-registry-only"; allowInsecureTls = false; deviceClass = "laptop"; desktopProfile = "headless"; fingerprintEnrollmentAllowed = false; };`,
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("missing %q from settings:\n%s", want, got)
@@ -148,21 +143,23 @@ func TestFromUserMapsRoutedIntent(t *testing.T) {
 				Endpoint: "https://plane.example.test",
 			},
 		},
-		EndpointManagedDevice:  true,
-		JODSEndpoint:           "https://jods.example.test",
-		JODSPolicySigningKey:   strings.Repeat("ab", 32),
-		JODSRecoverySigningKey: strings.Repeat("cd", 32),
-		JODSEnrollmentMode:     "manual",
-		JODSDeviceClass:        "laptop",
-		JODSDesktopProfile:     "headless",
-		JODSFingerprintEnroll:  true,
-		Theme:                  "noctalia",
-		Editors:                []string{"vscodium"},
-		Browsers:               []string{"firefox"},
-		PreferredEditor:        "vscodium",
-		PreferredBrowser:       "firefox",
-		Shell:                  "zsh",
-		AIAgentMode:            "workspace",
+		Management: config.ManagementIntent{
+			Enable:                          true,
+			Endpoint:                        "https://jods.example.test",
+			PolicySigningPublicKey:          strings.Repeat("ab", 32),
+			RecoveryCommandSigningPublicKey: strings.Repeat("cd", 32),
+			EnrollmentMode:                  "manual",
+			DeviceClass:                     "laptop",
+			DesktopProfile:                  "headless",
+			FingerprintEnrollmentAllowed:    true,
+		},
+		Theme:            "noctalia",
+		Editors:          []string{"vscodium"},
+		Browsers:         []string{"firefox"},
+		PreferredEditor:  "vscodium",
+		PreferredBrowser: "firefox",
+		Shell:            "zsh",
+		AIAgentMode:      "workspace",
 	}
 
 	got := FromUser(user)
@@ -186,7 +183,7 @@ func TestFromUserMapsRoutedIntent(t *testing.T) {
 		)
 	}
 
-	if got.JODSEndpoint != user.JODSEndpoint ||
+	if got.Management.Endpoint != user.Management.Endpoint ||
 		got.Theme != user.Theme {
 		t.Fatalf(
 			"routed strings were not mapped: %#v",
@@ -247,10 +244,12 @@ rec {
 				Endpoint: "https://plane.example.test",
 			},
 		},
-		Theme:              "noctalia",
-		AIAgentMode:        "workspace",
-		JODSEnrollmentMode: "manual",
-		DeveloperMode:      true,
+		Theme:       "noctalia",
+		AIAgentMode: "workspace",
+		Management: config.ManagementIntent{
+			EnrollmentMode: "manual",
+		},
+		DeveloperMode: true,
 	}
 
 	if err := SyncUserIntent(path, user); err != nil {

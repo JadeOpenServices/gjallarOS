@@ -14,9 +14,9 @@ type Features struct {
 	USBTrustTPMHandle      string
 	NemuEnable             bool
 	RecoveryEnable         bool
-	JODSPrebootLockEnable  bool
+	PrebootLockEnable      bool
 	SecureBootEnable       bool
-	EndpointManagedDevice  bool
+	ManagementEnable       bool
 	TouchpadWorkspaceSwipe bool
 	PrintingEnable         bool
 	NetworkPrintingEnable  bool
@@ -28,9 +28,9 @@ func FromUser(user config.User) Features {
 		DebugFunctions: user.DebugFunctions, ContainersEnable: user.HasApp("containers"),
 		ClamshellEnable: user.ClamshellEnable, USBGuardEnable: user.USBGuardEnable, USBTrustEnforce: user.USBTrustEnforce, USBTrustTPMHandle: user.USBTrustTPMHandle, PrintingEnable: user.PrintingEnable, NetworkPrintingEnable: user.NetworkPrintingEnable,
 		NemuEnable:     user.HasApp("nemu"),
-		RecoveryEnable: user.RecoveryEnable, JODSPrebootLockEnable: user.JODSPrebootLockEnable,
+		RecoveryEnable: user.RecoveryEnable, PrebootLockEnable: user.PrebootLock.Enable,
 		SecureBootEnable:       user.SecureBootEnable,
-		EndpointManagedDevice:  user.EndpointManagedDevice,
+		ManagementEnable:       user.Management.Enable,
 		TouchpadWorkspaceSwipe: user.TouchpadWorkspaceSwipe,
 	}
 }

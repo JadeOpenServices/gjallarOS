@@ -84,9 +84,9 @@ let
 in
 lib.mkMerge [
   {
-    assertions = lib.optional settings.jodsPrebootLockEnable {
+    assertions = lib.optional settings.prebootLock.enable {
       assertion =
-        settings.endpointManagedDevice
+        settings.management.enable
         && settings.recoveryEnable
         && settings.secureBootEnable
         && settings.luksTpm2Enable;
@@ -135,7 +135,7 @@ lib.mkMerge [
         sudo gjallar-recover developer-off
       '';
     }
-    // lib.optionalAttrs settings.endpointManagedDevice {
+    // lib.optionalAttrs settings.management.enable {
       services.jods-mdm-agent.recoveryExecutorEnable = true;
     };
   })
@@ -347,13 +347,13 @@ lib.mkMerge [
     };
   })
 
-  (lib.mkIf (settings.recoveryEnable || settings.jodsPrebootLockEnable) {
+  (lib.mkIf (settings.recoveryEnable || settings.prebootLock.enable) {
     environment.etc."jods/preboot-policy".text = ''
       version=1
       recovery=${if settings.recoveryEnable then "signed-independent-xbootldr" else "disabled"}
       root_unlock=human-recovery-credential-only
       external_media_tpm_unlock=forbidden
-      jods_lock=${if settings.jodsPrebootLockEnable then "measured-boot-required" else "disabled"}
+      jods_lock=${if settings.prebootLock.enable then "measured-boot-required" else "disabled"}
       modes=repair,reinstall,fresh
       default_mode=repair
     '';

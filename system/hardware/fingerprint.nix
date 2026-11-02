@@ -7,13 +7,13 @@
 }:
 
 let
-  managed = settings.endpointManagedDevice or false;
+  managed = settings.management.enable or false;
 
   gjallarctlPackage = pkgs.callPackage ../../pkgs/gjallarctl { };
   gjallarSudoAuth = "${gjallarctlPackage}/bin/gjallar-sudo-auth";
 
   jodsEnrollmentAllowed =
-    settings.jodsFingerprintEnrollmentAllowed or false;
+    settings.management.fingerprintEnrollmentAllowed or false;
 
   # ODDC marks readers with no Linux driver (the ZBook x2's VFS495) as
   # support.linux.status = "unsupported". Treat those as no reader, so sudo and
@@ -58,12 +58,12 @@ lib.mkMerge [
       {
         assertion = !jodsEnrollmentAllowed || managed;
         message =
-          "jodsFingerprintEnrollmentAllowed is valid only on a JODS-managed device.";
+          "management.fingerprintEnrollmentAllowed is valid only on a JODS-managed device.";
       }
       {
         assertion = !jodsEnrollmentAllowed || fingerprintPresent;
         message =
-          "jodsFingerprintEnrollmentAllowed requires fingerprint hardware in the resolved ODDC device.";
+          "management.fingerprintEnrollmentAllowed requires fingerprint hardware in the resolved ODDC device.";
       }
     ];
 

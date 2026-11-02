@@ -7,7 +7,7 @@
 }:
 let
   gjallarctlPackage = pkgs.callPackage ../../pkgs/gjallarctl { };
-  managed = settings.endpointManagedDevice or false;
+  managed = settings.management.enable or false;
 
   # gjallarctl luks remind opens Ghostty and zenity; setup inside the
   # terminal needs sudo and the usual system tools.

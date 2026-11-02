@@ -176,7 +176,7 @@ func startSystemRebuild(opts rebuildOptions, stdout, stderr io.Writer) int {
 	}
 
 	userConfig, err := config.Load(filepath.Join(systemcheckout.Path, "user.config.json"))
-	if err == nil && userConfig.EndpointManagedDevice && os.Geteuid() != 0 {
+	if err == nil && userConfig.Management.Enable && os.Geteuid() != 0 {
 		fmt.Fprintln(stdout, "[GjallarOS] Managed endpoint: authenticating as root for rebuild.")
 		return runCommand(context.Background(), stdout, stderr, "su", "-l", "-c", shellJoin(rootArgs), "root")
 	}

@@ -70,8 +70,8 @@ let
       secureBootPrompt = true;
       secureBootShim = getSetting "secureBootShim" false;
 
-      endpointManagedDevice = false;
-      jodsPrebootLockEnable = false;
+      management.enable = false;
+      prebootLock.enable = false;
 
       autoReboot = false;
       runUpdateChecks = false;

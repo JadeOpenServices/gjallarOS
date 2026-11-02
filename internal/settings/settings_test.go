@@ -80,13 +80,13 @@ func TestPlanRefuses(t *testing.T) {
 
 func TestPlanOnManagedDeviceAllowsEverydayOnly(t *testing.T) {
 	user := defaults(t)
-	user.EndpointManagedDevice = true
-	user.JODSEndpoint = "https://jods.example.test:1666"
-	user.JODSPolicySigningKey = strings.Repeat("ab", 32)
-	user.JODSRecoverySigningKey = strings.Repeat("cd", 32)
-	user.JODSEnrollmentMode = "manual"
-	user.JODSDeviceClass = "laptop"
-	user.JODSDesktopProfile = "headless"
+	user.Management.Enable = true
+	user.Management.Endpoint = "https://jods.example.test:1666"
+	user.Management.PolicySigningPublicKey = strings.Repeat("ab", 32)
+	user.Management.RecoveryCommandSigningPublicKey = strings.Repeat("cd", 32)
+	user.Management.EnrollmentMode = "manual"
+	user.Management.DeviceClass = "laptop"
+	user.Management.DesktopProfile = "headless"
 	data := configText(t, user)
 	if _, err := Plan(data, raw(map[string]string{"weatherCity": `"Example City"`})); err != nil {
 		t.Fatalf("everyday change refused: %v", err)
@@ -219,13 +219,13 @@ func TestPlanProtectionWaitsOnlyWhenTurnedOff(t *testing.T) {
 
 func TestPlanOnManagedDeviceRefusesTighteningToo(t *testing.T) {
 	user := defaults(t)
-	user.EndpointManagedDevice = true
-	user.JODSEndpoint = "https://jods.example.test:1666"
-	user.JODSPolicySigningKey = strings.Repeat("ab", 32)
-	user.JODSRecoverySigningKey = strings.Repeat("cd", 32)
-	user.JODSEnrollmentMode = "manual"
-	user.JODSDeviceClass = "laptop"
-	user.JODSDesktopProfile = "headless"
+	user.Management.Enable = true
+	user.Management.Endpoint = "https://jods.example.test:1666"
+	user.Management.PolicySigningPublicKey = strings.Repeat("ab", 32)
+	user.Management.RecoveryCommandSigningPublicKey = strings.Repeat("cd", 32)
+	user.Management.EnrollmentMode = "manual"
+	user.Management.DeviceClass = "laptop"
+	user.Management.DesktopProfile = "headless"
 	if _, err := Plan(configText(t, user), raw(map[string]string{"usbTrustLapseDays": `30`})); err == nil {
 		t.Fatal("JODS-managed lapse changed locally")
 	}
@@ -358,5 +358,35 @@ func TestLocalMessageCapsFiles(t *testing.T) {
 	message := change.Message()
 	if strings.Count(message, "\nlocal ") != MaxShownFiles || !strings.HasSuffix(message, "\nand 5 more") {
 		t.Fatalf("message %q", message)
+	}
+}
+
+func TestEffectiveShowsOldManagementKeysUnderTheirNewNames(t *testing.T) {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(configText(t, defaults(t)), &fields); err != nil {
+		t.Fatal(err)
+	}
+	delete(fields, "management")
+	delete(fields, "prebootLock")
+	fields["endpointManagedDevice"] = json.RawMessage(`false`)
+	fields["jodsPrebootLockEnable"] = json.RawMessage(`false`)
+	data, err := json.Marshal(fields)
+	if err != nil {
+		t.Fatal(err)
+	}
+	effective, err := Effective(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"endpointManagedDevice", "jodsPrebootLockEnable"} {
+		if _, ok := effective[key]; ok {
+			t.Fatalf("Effective still shows %s", key)
+		}
+	}
+	if _, ok := effective["management"]; !ok {
+		t.Fatal("Effective has no management")
+	}
+	if !strings.Contains(string(effective["prebootLock"]), `"enable":false`) {
+		t.Fatalf("prebootLock = %s", effective["prebootLock"])
 	}
 }

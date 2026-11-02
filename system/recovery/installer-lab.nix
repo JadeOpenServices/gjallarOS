@@ -41,8 +41,8 @@ with open(src, "r", encoding="utf-8") as handle:
 config["secureBootEnable"] = False
 config["secureBootPrompt"] = False
 config["luksTpm2Enable"] = False
-config["jodsPrebootLockEnable"] = False
-config["endpointManagedDevice"] = False
+config.setdefault("prebootLock", {})["enable"] = False
+config.setdefault("management", {})["enable"] = False
 # The harness drives installed VMs through a root login on tty2.
 config["consoleLoginEnable"] = True
 

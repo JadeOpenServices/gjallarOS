@@ -8,7 +8,7 @@
 }:
 let
   cfg = config.services.jods-mdm-agent;
-  enabled = settings.endpointManagedDevice or false;
+  enabled = settings.management.enable or false;
   statusWriter = pkgs.writeShellScript "gjallar-jods-status" ''
     set -eu
     install -d -m 0700 /var/lib/gjallarOS
@@ -58,16 +58,16 @@ in
 
   services.jods-mdm-agent = lib.mkIf enabled {
     enable = true;
-    endpoint = settings.jodsEndpoint;
-    policySigningPublicKey = settings.jodsPolicySigningPublicKey;
-    recoveryCommandSigningPublicKey = settings.jodsRecoveryCommandSigningPublicKey;
+    endpoint = settings.management.endpoint;
+    policySigningPublicKey = settings.management.policySigningPublicKey;
+    recoveryCommandSigningPublicKey = settings.management.recoveryCommandSigningPublicKey;
     managedEnrollmentConsent = true;
     ownershipModel = "corporate";
     recoveryCheckpointEnable = settings.recoveryEnable;
-    enrollmentMode = settings.jodsEnrollmentMode;
-    allowInsecureTls = settings.jodsAllowInsecureTls;
-    deviceClass = settings.jodsDeviceClass;
-    desktopProfile = settings.jodsDesktopProfile;
+    enrollmentMode = settings.management.enrollmentMode;
+    allowInsecureTls = settings.management.allowInsecureTls;
+    deviceClass = settings.management.deviceClass;
+    desktopProfile = settings.management.desktopProfile;
   };
   environment.systemPackages = lib.optionals enabled [ statusCommand ];
 
@@ -107,11 +107,11 @@ in
 
   assertions = lib.optionals enabled [
     {
-      assertion = builtins.match "https://.+" settings.jodsEndpoint != null;
+      assertion = builtins.match "https://.+" settings.management.endpoint != null;
       message = "Managed JODS endpoints must use HTTPS.";
     }
     {
-      assertion = builtins.match "[0-9a-fA-F]{64}" settings.jodsPolicySigningPublicKey != null;
+      assertion = builtins.match "[0-9a-fA-F]{64}" settings.management.policySigningPublicKey != null;
       message = "JODS policySigningPublicKey must contain exactly 64 hexadecimal characters.";
     }
   ];

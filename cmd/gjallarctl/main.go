@@ -2031,13 +2031,14 @@ func rebuildCheckout(repo string, opts rebuildOptions, system bool, stdout, stde
 	}
 	legacyWebApplications := config.HasLegacyWebApplications(rawConfig)
 	retiredEntries := config.RetiredEntries(rawConfig)
+	legacyManagement := config.LegacyManagementKeys(rawConfig)
 
 	intentChanged, err := normalizeRebuildUserIntent(&userConfig, repo)
 	if err != nil {
 		fmt.Fprintf(stderr, "[GjallarOS] Error: normalize user configuration: %v\n", err)
 		return 1
 	}
-	if intentChanged || legacyWebApplications || len(retiredEntries) > 0 {
+	if intentChanged || legacyWebApplications || len(retiredEntries) > 0 || len(legacyManagement) > 0 {
 		if err := config.WriteAtomic(configPath, userConfig); err != nil {
 			fmt.Fprintf(stderr, "[GjallarOS] Error: persist normalized user configuration: %v\n", err)
 			return 1
@@ -2048,6 +2049,9 @@ func rebuildCheckout(repo string, opts rebuildOptions, system bool, stdout, stde
 	}
 	if legacyWebApplications {
 		fmt.Fprintln(stdout, "[GjallarOS] Migrated planeEnable/planeHost/drawio* in user.config.json into webApplications (one-time).")
+	}
+	if len(legacyManagement) > 0 {
+		fmt.Fprintf(stdout, "[GjallarOS] Moved %s in user.config.json under management and prebootLock (one-time).\n", strings.Join(legacyManagement, ", "))
 	}
 	if len(retiredEntries) > 0 {
 		fmt.Fprintf(stdout, "[GjallarOS] Removed %s from user.config.json; GjallarOS no longer ships it (one-time).\n", strings.Join(retiredEntries, ", "))
@@ -2129,7 +2133,7 @@ func rebuildCheckout(repo string, opts rebuildOptions, system bool, stdout, stde
 	// Managed JODS endpoints deliberately remove the desktop user from
 	// wheel. Rebuilds on those systems therefore cross the explicit root
 	// authentication boundary instead of attempting sudo.
-	managedDevice := userConfig.EndpointManagedDevice
+	managedDevice := userConfig.Management.Enable
 
 	// JODS moves the pin on managed endpoints; elsewhere the user decides.
 	if !hardwareUpdate && !managedDevice {

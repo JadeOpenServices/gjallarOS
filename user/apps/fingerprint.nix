@@ -68,7 +68,7 @@ let
       -e ${enrollment}
   '';
 in
-lib.mkIf (fingerprintPresent && !(settings.endpointManagedDevice or false)) {
+lib.mkIf (fingerprintPresent && !(settings.management.enable or false)) {
   home.packages = [
     pkgs.fprintd
     pkgs.yad

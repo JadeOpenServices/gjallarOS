@@ -144,13 +144,15 @@ func TestNormalizeExternalServiceEndpointPreservesQuery(t *testing.T) {
 
 func validJODSProjectToolTestUser() User {
 	return User{
-		EndpointManagedDevice:  true,
-		JODSEndpoint:           "https://jods.example.test",
-		JODSPolicySigningKey:   strings.Repeat("a", 64),
-		JODSRecoverySigningKey: strings.Repeat("b", 64),
-		JODSEnrollmentMode:     "auto",
-		JODSDeviceClass:        "workstation",
-		JODSDesktopProfile:     "default",
+		Management: ManagementIntent{
+			Enable:                          true,
+			Endpoint:                        "https://jods.example.test",
+			PolicySigningPublicKey:          strings.Repeat("a", 64),
+			RecoveryCommandSigningPublicKey: strings.Repeat("b", 64),
+			EnrollmentMode:                  "auto",
+			DeviceClass:                     "workstation",
+			DesktopProfile:                  "default",
+		},
 	}
 }
 
@@ -217,13 +219,13 @@ func TestProjectToolsRemainIndependentFromJODS(t *testing.T) {
 
 			if tt.jodsEnable {
 				jods := validJODSProjectToolTestUser()
-				u.EndpointManagedDevice = jods.EndpointManagedDevice
-				u.JODSEndpoint = jods.JODSEndpoint
-				u.JODSPolicySigningKey = jods.JODSPolicySigningKey
-				u.JODSRecoverySigningKey = jods.JODSRecoverySigningKey
-				u.JODSEnrollmentMode = jods.JODSEnrollmentMode
-				u.JODSDeviceClass = jods.JODSDeviceClass
-				u.JODSDesktopProfile = jods.JODSDesktopProfile
+				u.Management.Enable = jods.Management.Enable
+				u.Management.Endpoint = jods.Management.Endpoint
+				u.Management.PolicySigningPublicKey = jods.Management.PolicySigningPublicKey
+				u.Management.RecoveryCommandSigningPublicKey = jods.Management.RecoveryCommandSigningPublicKey
+				u.Management.EnrollmentMode = jods.Management.EnrollmentMode
+				u.Management.DeviceClass = jods.Management.DeviceClass
+				u.Management.DesktopProfile = jods.Management.DesktopProfile
 			}
 
 			projectErr := ValidateProjectTools(u)
@@ -248,13 +250,13 @@ func TestProjectToolsRemainIndependentFromJODS(t *testing.T) {
 				deviceClass string
 				desktop     string
 			}{
-				u.EndpointManagedDevice,
-				u.JODSEndpoint,
-				u.JODSPolicySigningKey,
-				u.JODSRecoverySigningKey,
-				u.JODSEnrollmentMode,
-				u.JODSDeviceClass,
-				u.JODSDesktopProfile,
+				u.Management.Enable,
+				u.Management.Endpoint,
+				u.Management.PolicySigningPublicKey,
+				u.Management.RecoveryCommandSigningPublicKey,
+				u.Management.EnrollmentMode,
+				u.Management.DeviceClass,
+				u.Management.DesktopProfile,
 			}
 
 			normalized := u
@@ -277,13 +279,13 @@ func TestProjectToolsRemainIndependentFromJODS(t *testing.T) {
 				deviceClass string
 				desktop     string
 			}{
-				normalized.EndpointManagedDevice,
-				normalized.JODSEndpoint,
-				normalized.JODSPolicySigningKey,
-				normalized.JODSRecoverySigningKey,
-				normalized.JODSEnrollmentMode,
-				normalized.JODSDeviceClass,
-				normalized.JODSDesktopProfile,
+				normalized.Management.Enable,
+				normalized.Management.Endpoint,
+				normalized.Management.PolicySigningPublicKey,
+				normalized.Management.RecoveryCommandSigningPublicKey,
+				normalized.Management.EnrollmentMode,
+				normalized.Management.DeviceClass,
+				normalized.Management.DesktopProfile,
 			}
 
 			if beforeJODS != afterJODS {

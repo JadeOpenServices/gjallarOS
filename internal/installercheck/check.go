@@ -16,6 +16,7 @@ import (
 
 	"github.com/JadeOpenServices/gjallarOS/apps"
 	"github.com/JadeOpenServices/gjallarOS/internal/hardware/graphics"
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/config"
 )
 
 type Level string
@@ -104,6 +105,8 @@ const (
 	presetInt
 	presetFirefoxAddons
 	presetFirefoxStoreAddons
+	presetManagement
+	presetPrebootLock
 )
 
 var presetSchema = map[string]presetValueType{
@@ -129,15 +132,12 @@ var presetSchema = map[string]presetValueType{
 	"apps": presetStringList, "thunderbirdSmartCard": presetBool, "debugFunctions": presetBool,
 	"overrideAiSelection": presetBool, "overrideModelWith": presetString, "aiAgentMode": presetString,
 	"aiEndpoint": presetString, "aiRemoteModel": presetString, "aiRemoteContextTokens": presetInt,
-	"jodsFingerprintEnrollmentAllowed": presetBool,
-	"luksTpm2Enable":                   presetBool,
-	"luksTpm2Pin":                      presetBool,
-	"recoveryEnable":                   presetBool,
-	"recoveryPartitionEnable":          presetBool, "jodsPrebootLockEnable": presetBool,
-	"secureBootEnable": presetBool, "secureBootPrompt": presetBool, "secureBootShim": presetBool, "firmwarePasswordLock": presetBool, "endpointManagedDevice": presetBool,
-	"jodsEndpoint": presetString, "jodsPolicySigningPublicKey": presetString,
-	"jodsRecoveryCommandSigningPublicKey": presetString, "jodsEnrollmentMode": presetString,
-	"jodsAllowInsecureTls": presetBool, "jodsDeviceClass": presetString, "jodsDesktopProfile": presetString, "releaseChannel": presetString,
+	"luksTpm2Enable":          presetBool,
+	"luksTpm2Pin":             presetBool,
+	"recoveryEnable":          presetBool,
+	"recoveryPartitionEnable": presetBool, "prebootLock": presetPrebootLock,
+	"secureBootEnable": presetBool, "secureBootPrompt": presetBool, "secureBootShim": presetBool, "firmwarePasswordLock": presetBool,
+	"management": presetManagement, "releaseChannel": presetString,
 	"autoReboot": presetBool, "runUpdateChecks": presetBool, "writeConfig": presetBool, "runRebuild": presetBool, "forceRedeploy": presetBool,
 }
 
@@ -145,6 +145,10 @@ func validatePresetSchema(r *Report, user map[string]json.RawMessage) {
 	for key, raw := range user {
 		if installerManagedFields[key] {
 			r.Findings = append(r.Findings, Finding{Warn, fmt.Sprintf("%s is installer-managed and should be removed from user.config.json", key)})
+			continue
+		}
+		if name := config.LegacyManagementName(key); name != "" {
+			r.Findings = append(r.Findings, Finding{Warn, fmt.Sprintf("%s was renamed to %s; the old name is read for one more release", key, name)})
 			continue
 		}
 		expected, known := presetSchema[key]
@@ -173,6 +177,10 @@ func matchesPresetType(raw json.RawMessage, expected presetValueType) bool {
 		return matchesPresetWebApplicationList(raw)
 	case presetTailscale:
 		return matchesPresetTailscale(raw)
+	case presetManagement:
+		return matchesPresetManagement(raw)
+	case presetPrebootLock:
+		return matchesPresetPrebootLock(raw)
 	case presetStringMap:
 		var value map[string]string
 		return json.Unmarshal(raw, &value) == nil

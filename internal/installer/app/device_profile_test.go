@@ -68,7 +68,9 @@ func TestSecureBootSupportGateAllowsDisabledSecureBootOnUnsupportedDevice(t *tes
 
 func TestManagedDeviceCannotBypassUnsupportedFirmwarePolicy(t *testing.T) {
 	user := config.User{
-		EndpointManagedDevice: true,
+		Management: config.ManagementIntent{
+			Enable: true,
+		},
 	}
 
 	normalizeManagementSafety(&user)
