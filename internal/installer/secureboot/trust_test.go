@@ -124,11 +124,12 @@ func findingsText(t FirmwareTrust) string {
 func TestFirmwareTrustLockedLaptop(t *testing.T) {
 	f := newFakeFirmware(t)
 	pk, pkKey := synthCert(t, "SYNTHETIC Maker PK", nil, nil)
-	makerDB, _ := synthCert(t, "SYNTHETIC Maker db key", pk, pkKey)
+	makerKEK, makerKEKKey := synthCert(t, "SYNTHETIC Maker KEK", pk, pkKey)
+	makerDB, _ := synthCert(t, "SYNTHETIC Maker db key", makerKEK, makerKEKKey)
 	f.set("SecureBoot", efiGlobalGUID, []byte{1})
 	f.set("SetupMode", efiGlobalGUID, []byte{0})
 	f.set("PK", efiGlobalGUID, x509SignatureList(pk.Raw))
-	f.set("KEK", efiGlobalGUID, x509SignatureList(microsoftKEK2011(t)))
+	f.set("KEK", efiGlobalGUID, append(x509SignatureList(microsoftKEK2011(t)), x509SignatureList(makerKEK.Raw)...))
 	f.set("db", efiImageSecGUID, append(x509SignatureList(makerDB.Raw), hashSignatureList(2)...))
 	f.set("dbx", efiImageSecGUID, hashSignatureList(5))
 	f.password("Admin", "bios-admin", "1")
@@ -141,7 +142,7 @@ func TestFirmwareTrustLockedLaptop(t *testing.T) {
 	if trust.AdminPassword != PasswordSet || !trust.MayBeLocked() {
 		t.Errorf("password %q", trust.AdminPassword)
 	}
-	if c := trust.KEK.Certs; len(c) != 1 || c[0].Kind != CertMicrosoft || c[0].Name != "Microsoft KEK CA 2011" {
+	if c := trust.KEK.Certs; len(c) != 2 || c[0].Kind != CertMicrosoft || c[0].Name != "Microsoft KEK CA 2011" || c[1].Kind != CertPlatform {
 		t.Errorf("KEK: %+v", c)
 	}
 	if c := trust.DB.Certs; len(c) != 1 || c[0].Kind != CertPlatform || trust.DB.Hashes != 2 {
@@ -164,7 +165,7 @@ func TestFirmwareTrustLockedLaptop(t *testing.T) {
 		t.Errorf("unexpected finding:\n%s", got)
 	}
 	lines := strings.Join(trust.Lines(), "\n")
-	if !strings.Contains(lines, "KEK: Microsoft KEK CA 2011") || !strings.Contains(lines, "SYNTHETIC Maker db key (platform key holder); 2 file hashes") ||
+	if !strings.Contains(lines, "KEK: Microsoft KEK CA 2011; SYNTHETIC Maker KEK (signed by a PK or KEK key)") || !strings.Contains(lines, "SYNTHETIC Maker db key (signed by a PK or KEK key); 2 file hashes") ||
 		!strings.Contains(lines, "Revocation list (dbx): 5 entries") || !strings.Contains(lines, "Firmware setup password: set") {
 		t.Errorf("lines:\n%s", lines)
 	}

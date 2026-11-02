@@ -73,8 +73,9 @@ type CertKind string
 
 const (
 	CertMicrosoft CertKind = "microsoft"
-	// CertPlatform is the Platform Key or a certificate it signed: the
-	// maker's keys, or GjallarOS's own once it owns the firmware.
+	// CertPlatform is the Platform Key, a KEK it signed, or a db key a
+	// PK or KEK key signed: the maker's keys, or GjallarOS's own once it
+	// owns the firmware.
 	CertPlatform CertKind = "platform"
 	CertOther    CertKind = "other"
 )
@@ -190,17 +191,20 @@ func (f firmwareFiles) read() (FirmwareTrust, error) {
 		}
 		*list.dst = parseSignatureList(raw, present)
 	}
+	// The platform chain: PK, what PK signed in KEK, and in db what a
+	// PK or KEK key signed (whoever holds a KEK key may change db anyway).
 	pk := certificates(t.PK)
-	for _, list := range []*SignatureList{&t.PK, &t.KEK, &t.DB} {
-		classify(list, pk)
-	}
+	classify(&t.PK, pk)
+	classify(&t.KEK, pk)
+	signers := append(pk, certificates(t.KEK)...)
+	classify(&t.DB, signers)
 
 	mok, present, err := f.shimVar("MokListRT")
 	if err != nil {
 		return FirmwareTrust{}, err
 	}
 	t.MokList = parseSignatureList(mok, present)
-	classify(&t.MokList, pk)
+	classify(&t.MokList, signers)
 	state, present, err := f.shimVar("MokSBStateRT")
 	if err != nil {
 		return FirmwareTrust{}, err
@@ -327,8 +331,8 @@ func certificates(list SignatureList) []*x509.Certificate {
 	return out
 }
 
-// classify names each certificate of a list: known by fingerprint, the
-// Platform Key or signed by it, else other.
+// classify names each certificate of a list: known by fingerprint, one of
+// the signers or signed by one, else other.
 func classify(list *SignatureList, pk []*x509.Certificate) {
 	for i := range list.Certs {
 		c := &list.Certs[i]
@@ -536,8 +540,8 @@ func (t FirmwareTrust) Lines() []string {
 			var names []string
 			for _, c := range l.list.Certs {
 				name := c.Name
-				if c.Kind == CertPlatform {
-					name += " (platform key holder)"
+				if c.Kind == CertPlatform && l.name != "Platform Key" {
+					name += " (signed by a PK or KEK key)"
 				}
 				names = append(names, name)
 			}
@@ -552,6 +556,9 @@ func (t FirmwareTrust) Lines() []string {
 		dbx = "unreadable"
 	} else if n := t.DBX.Hashes + len(t.DBX.Certs) + t.DBX.Other; n > 0 {
 		dbx = fmt.Sprintf("%d entries", n)
+		if n == 1 {
+			dbx = "1 entry"
+		}
 	}
 	lines = append(lines, "Revocation list (dbx): "+dbx)
 	if t.ShimSBATLevel != "" {
