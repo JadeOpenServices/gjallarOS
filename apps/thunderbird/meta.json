@@ -2,6 +2,7 @@
   "name": "Thunderbird",
   "description": "Mail, calendar and contacts with OpenPGP encryption.",
   "category": "communication",
+  "package": "thunderbird-latest",
   "default": true,
   "installer": "Install Thunderbird for mail, calendar and contacts?"
 }

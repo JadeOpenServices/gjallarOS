@@ -144,6 +144,9 @@ func run(
 		Probe:     mediagate.BSG{Dir: "/dev/bsg"},
 		Event:     func(event map[string]any) { _ = json.NewEncoder(stderr).Encode(event) },
 		Kept:      control.KeptAtArming,
+		// The socket's directory is the broker's runtime directory: root
+		// only, kept across a broker restart, gone at reboot.
+		Record: filepath.Join(filepath.Dir(cfg.socketPath), "media-kept.json"),
 	}
 	control.Media = media
 	loopCtx, stopLoop := context.WithCancel(ctx)

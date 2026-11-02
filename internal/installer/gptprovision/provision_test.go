@@ -57,13 +57,13 @@ func plan() diskplan.Plan {
 	recovery := &diskplan.Partition{
 		Role:      diskplan.RoleRecovery,
 		Number:    3,
-		Label:     "JODS-RECOVERY",
+		Label:     "GJALLAR-RECOVERY",
 		TypeGUID:  recType,
 		PARTUUID:  recUUID,
 		SizeBytes: 12 * 1024 * 1024 * 1024,
 		Filesystem: diskplan.Filesystem{
 			Type:  "vfat",
-			Label: "JODS-RECOVERY",
+			Label: "GJALLAR-REC",
 		},
 		MountPoint: "/recovery",
 	}
@@ -122,7 +122,7 @@ func lsblk(withRecovery bool) []byte {
           "size":12884901888,
           "start":1887441000,
           "partn":3,
-          "partlabel":"JODS-RECOVERY",
+          "partlabel":"GJALLAR-RECOVERY",
           "parttype":"` + recType + `",
           "partuuid":"` + recUUID + `",
           "mountpoints":[null]

@@ -7,23 +7,63 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"os"
 	"os/user"
 	"path/filepath"
 	"slices"
+	"syscall"
 
 	"github.com/JadeOpenServices/gjallarOS/internal/winesandbox"
 )
 
 // gjallarctl wine shows the Wine apps and sets their network switches in
-// the settings service (Plane 272, wiki 746). gjallar-wine reads the same
-// switches when it starts an app.
+// the settings service (Plane 272, wiki 746). The commands that need Wine
+// or the sandbox are in the helper gjallar-wine, which apps/wine brings;
+// gjallarctl hands them over to it, so gjallarctl itself carries neither
+// (Plane 277). The helper reads the same switches when it starts an app.
 
-const wineUsage = `usage: gjallarctl wine list [--ids|--json]       your Wine apps and their switches
+var wineUsage = `usage: gjallarctl wine list [--ids|--json]   your Wine apps and their switches
        gjallarctl wine set ID [--internet on|off] [--home on|off]
-                                                switch app ID's network
+                                             switch app ID's network
+` + winesandbox.CommandsUsage + `
 Internet lets the app reach the internet. Home lets it reach your tailnet,
 and your home network's devices while this device is at home. Turning a
 switch on asks your password; turning it off does not.`
+
+// wineCommands are the commands the helper runs.
+var wineCommands = []string{"add", "install", "program", "run", "remove", "reset", "repair", "undo", "doctor", "check", "fixes", "fix", "import", "menu"}
+
+// wineHelper and wineExec find and start the helper; tests replace them.
+var (
+	wineHelper = func() (string, error) {
+		u, err := user.Current()
+		if err != nil {
+			return "", err
+		}
+		return winesandbox.HelperPath(u.Username), nil
+	}
+	wineExec = syscall.Exec
+)
+
+// wineForward replaces gjallarctl with the helper for one of its commands.
+func wineForward(args []string, stderr io.Writer) int {
+	helper, err := wineHelper()
+	if err != nil {
+		fmt.Fprintf(stderr, "ERROR: %v\n", err)
+		return 1
+	}
+	if _, err := os.Stat(helper); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			fmt.Fprintln(stderr, "ERROR: Wine apps are turned off; turn them on in the settings window's Apps page")
+			return 1
+		}
+		fmt.Fprintf(stderr, "ERROR: %v\n", err)
+		return 1
+	}
+	err = wineExec(helper, append([]string{"gjallar-wine"}, args...), os.Environ())
+	fmt.Fprintf(stderr, "ERROR: start %s: %v\n", helper, err)
+	return 1
+}
 
 // wineHome finds the user's home without symbolic links; tests replace it.
 var wineHome = func() (string, error) {
@@ -46,6 +86,8 @@ func runWine(args []string, stdout, stderr io.Writer) int {
 		return wineList(args[1], stdout, stderr)
 	case args[0] == "set" && len(args) >= 2:
 		return wineSet(args[1], args[2:], stdout, stderr)
+	case slices.Contains(wineCommands, args[0]):
+		return wineForward(args, stderr)
 	}
 	fmt.Fprintln(stderr, wineUsage)
 	return 2

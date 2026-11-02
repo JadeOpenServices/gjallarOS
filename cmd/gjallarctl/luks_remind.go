@@ -32,10 +32,50 @@ type luksRecord struct {
 	// Whether the TPM2 unlock asks for a startup PIN. Records written
 	// before the pin line existed leave PINKnown false.
 	PINKnown, PIN bool
+	// How this boot opened the disk (systemd-cryptsetup's keyslot
+	// measurement) and whether this boot's pcrlock policy locks PCR 4.
+	// Unknown when the line is missing; both stay numeric, so readers from
+	// before they existed skip them.
+	ChipUnlockKnown, ChipUnlock bool
+	PCR4Known, PCR4Locked       bool
+	// The chip keyslot was enrolled or replaced during this boot (first
+	// boot, re-enroll, PIN change), so how this boot opened the disk says
+	// nothing about the next start. The record lives in /run, so this ends
+	// with the boot.
+	BoundThisBoot bool
 }
 
 func newLUKSRecord(s diskcrypto.Keyslots) luksRecord {
 	return luksRecord{Encrypted: true, TPM2: len(s.TPM2), Recovery: len(s.Recovery), Passphrase: len(s.Passphrase), PINKnown: true, PIN: s.TPM2PIN}
+}
+
+func boolDigit(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}
+
+// withBootFacts keeps how this boot unlocked from old while the chip
+// keyslots stay the same. A changed TPM2 token (PIN added or removed,
+// re-enrolled) was bound to this boot's measurements, so this boot's
+// failed chip unlock no longer says anything about the next one.
+func withBootFacts(r, old luksRecord, sameChip bool) luksRecord {
+	if !sameChip || old.BoundThisBoot {
+		return boundThisBoot(r)
+	}
+	r.ChipUnlockKnown, r.ChipUnlock = old.ChipUnlockKnown, old.ChipUnlock
+	r.PCR4Known, r.PCR4Locked = old.PCR4Known, old.PCR4Locked
+	return r
+}
+
+// boundThisBoot marks r as written after the chip keyslot was bound to
+// this boot and drops this boot's unlock facts.
+func boundThisBoot(r luksRecord) luksRecord {
+	r.BoundThisBoot = true
+	r.ChipUnlockKnown, r.ChipUnlock = false, false
+	r.PCR4Known, r.PCR4Locked = false, false
+	return r
 }
 
 func writeLUKSRecord(path string, r luksRecord) error {
@@ -45,11 +85,16 @@ func writeLUKSRecord(path string, r luksRecord) error {
 	}
 	data := fmt.Sprintf("encrypted=%s\ntpm2=%d\nrecovery=%d\npassphrase=%d\n", encrypted, r.TPM2, r.Recovery, r.Passphrase)
 	if r.PINKnown {
-		pin := 0
-		if r.PIN {
-			pin = 1
-		}
-		data += fmt.Sprintf("pin=%d\n", pin)
+		data += fmt.Sprintf("pin=%d\n", boolDigit(r.PIN))
+	}
+	if r.ChipUnlockKnown {
+		data += fmt.Sprintf("chipunlock=%d\n", boolDigit(r.ChipUnlock))
+	}
+	if r.PCR4Known {
+		data += fmt.Sprintf("pcr4=%d\n", boolDigit(r.PCR4Locked))
+	}
+	if r.BoundThisBoot {
+		data += "bound=1\n"
 	}
 	tmp, err := os.CreateTemp(filepath.Dir(path), ".keyslots-*")
 	if err != nil {
@@ -98,11 +143,20 @@ func readLUKSRecord(path string) (luksRecord, error) {
 			r.Recovery = n
 		case "passphrase":
 			r.Passphrase = n
-		case "pin":
+		case "pin", "chipunlock", "pcr4", "bound":
 			if n > 1 {
 				return luksRecord{}, fmt.Errorf("%s: bad %s", path, key)
 			}
-			r.PINKnown, r.PIN = true, n == 1
+			switch key {
+			case "pin":
+				r.PINKnown, r.PIN = true, n == 1
+			case "chipunlock":
+				r.ChipUnlockKnown, r.ChipUnlock = true, n == 1
+			case "bound":
+				r.BoundThisBoot = n == 1
+			default:
+				r.PCR4Known, r.PCR4Locked = true, n == 1
+			}
 			continue
 		default:
 			continue
@@ -125,6 +179,13 @@ const (
 	// only: the bar widget shows no shield for it.
 	diskProtectionPIN         = "pin"
 	diskProtectionUnencrypted = "unencrypted"
+	// This boot needed a typed key although the chip unlock is set up
+	// (Q179): Re-enroll binds the chip to the current start again.
+	diskProtectionReenroll = "reenroll"
+	// As reenroll, but this boot's policy cannot lock PCR 4 because the
+	// firmware tried another boot entry first. Re-enroll refuses until one
+	// clean restart; card only.
+	diskProtectionRestart = "restart"
 )
 
 // diskProtectionState says what is missing. chipPossible reports whether
@@ -137,6 +198,12 @@ func diskProtectionState(r luksRecord, kind diskcrypto.TPMKind, chipPossible fun
 	case r.TPM2 > 0:
 		if r.Recovery == 0 || r.Passphrase > 0 {
 			return diskProtectionSetup
+		}
+		if r.ChipUnlockKnown && !r.ChipUnlock {
+			if r.PCR4Known && !r.PCR4Locked {
+				return diskProtectionRestart
+			}
+			return diskProtectionReenroll
 		}
 		if r.PINKnown && !r.PIN && kind.PINRecommended() {
 			return diskProtectionPIN
@@ -221,6 +288,23 @@ func diskProtectionTexts(state string, r luksRecord) diskProtectionText {
 			risk:    "someone who has this device and special tools can get the disk key out of its security chip",
 			command: []string{"luks", "pin"},
 		}
+	case diskProtectionReenroll:
+		body := "This start needed your recovery key. Re-enroll so the chip unlocks next time."
+		if r.PIN {
+			// After five wrong PINs systemd-cryptsetup asks for the
+			// recovery key too; the chip itself is fine then.
+			body = "This start needed your recovery key. Re-enroll unless you mistyped your PIN."
+		}
+		return diskProtectionText{
+			summary: "Security chip did not unlock your disk",
+			body:    body,
+			command: []string{"tpm2", "reenroll"},
+		}
+	case diskProtectionRestart:
+		return diskProtectionText{
+			summary: "Security chip did not unlock your disk",
+			body:    "The firmware tried another boot entry first. Restart once to fix it.",
+		}
 	case diskProtectionUnencrypted:
 		return diskProtectionText{
 			summary: "System disk not encrypted",
@@ -284,14 +368,20 @@ func runLUKSRemind(args []string, stderr io.Writer) int {
 	actions := []noticeAction{}
 	if text.command != nil {
 		label := "Set up"
-		if state == diskProtectionPIN {
+		switch state {
+		case diskProtectionPIN:
 			label = "Add PIN"
+		case diskProtectionReenroll:
+			label = "Re-enroll"
 		}
 		// A click on the card itself starts setup, like the button.
 		actions = append(actions, noticeAction{"default", label}, noticeAction{"open", label})
 	}
 	actions = append(actions, noticeAction{"later", "Later"})
-	if os.Getenv("GJALLAR_MANAGED_DEVICE") != "1" {
+	// Re-enroll and restart are about this start only; a later failed chip
+	// unlock must still show, so they cannot be silenced.
+	thisStartOnly := state == diskProtectionReenroll || state == diskProtectionRestart
+	if os.Getenv("GJALLAR_MANAGED_DEVICE") != "1" && !thisStartOnly {
 		actions = append(actions, noticeAction{"never", "Don't ask"})
 	}
 

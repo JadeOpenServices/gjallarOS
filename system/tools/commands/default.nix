@@ -42,6 +42,9 @@ let
     ${gjallarctl}/bin/gjallarctl system check >/dev/null
     ctl=${gjallarctl}/bin/gjallarctl
     errors="$(${pkgs.coreutils}/bin/mktemp)"
+    # Its build output goes to $errors, so without this line a changed
+    # gjallarctl leaves the terminal silent for a minute.
+    echo "[GjallarOS] Building gjallarctl from the checkout..." >&2
     if current="$(${pkgs.nix}/bin/nix-build --no-out-link -E \
       '(import ${pkgs.path} { }).callPackage /etc/gjallar/system/pkgs/gjallarctl { }' 2>"$errors")"; then
       ctl="$current/bin/gjallarctl"

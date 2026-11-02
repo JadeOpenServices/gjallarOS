@@ -22,6 +22,7 @@ let
         usbguardEnable = true;
         usbTrustEnforce = false;
         usbTrustTpmHandle = "0x81000042";
+        management.enable = false;
       };
       modules = [
         oddc.nixosModules.default
@@ -71,6 +72,9 @@ let
 
 in
 assert !zbook.services.usbguard.restoreControllerDeviceState;
+# The record of open media must survive a broker restart, or a rebuild
+# closes mounted disks (Plane 299).
+assert zbook.systemd.services.usb-trust-broker.serviceConfig.RuntimeDirectoryPreserve;
 pkgs.runCommand "usbtrust-oddc-devices"
   {
     nativeBuildInputs = [ pkgs.jq ];

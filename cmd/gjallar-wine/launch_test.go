@@ -98,6 +98,29 @@ func TestStay(t *testing.T) {
 	}
 }
 
+func TestStayTool(t *testing.T) {
+	wine, calls := fakeWine(t, "exit 9")
+	out := filepath.Join(t.TempDir(), "tool-args")
+	tool := filepath.Join(t.TempDir(), "tool")
+	if err := os.WriteFile(tool, []byte("#!/bin/sh\necho \"$@\" > "+out+"\nexit 4\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if code := stay([]string{"--tool", tool, wine, "-q", "demo"}, nil, io.Discard); code != 4 {
+		t.Errorf("exit code %d, want the tool's 4", code)
+	}
+	if got, err := os.ReadFile(out); err != nil || string(got) != "-q demo\n" {
+		t.Errorf("tool got %q %v, want -q demo", got, err)
+	}
+	if got, err := os.ReadFile(calls); err != nil || string(got) != "-w\n" {
+		t.Errorf("wineserver called %q %v, want -w", got, err)
+	}
+	for _, args := range [][]string{{"--tool"}, {"--tool", "tool", wine}, {"--tool", tool}} {
+		if code := stay(args, nil, io.Discard); code != 2 {
+			t.Errorf("%q accepted: %d", args, code)
+		}
+	}
+}
+
 func TestStaySignal(t *testing.T) {
 	ready := filepath.Join(t.TempDir(), "ready")
 	if err := syscall.Mkfifo(ready, 0o600); err != nil {

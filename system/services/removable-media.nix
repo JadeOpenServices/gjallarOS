@@ -216,7 +216,10 @@ in
   # A stick written with dd loses partitions and keeps its old label in
   # udev (Plane 185). What the fix does and when to drop it:
   # system/fixes/systemd-partition-reread.
-  imports = [ ../fixes/systemd-partition-reread ];
+  imports = [
+    ../fixes/systemd-partition-reread
+    ./foreign-media-readonly.nix
+  ];
 
   options.services.gjallar-usbtrust = {
     enable = lib.mkOption {
@@ -405,6 +408,10 @@ in
           # review works right after the rebuild that turns usbguard on; a
           # group would only apply at the next login.
           RuntimeDirectoryMode = "0711";
+          # The media gate's record of open media must outlive a broker
+          # restart (a rebuild), or the new broker closes mounted disks
+          # (Plane 299). /run still clears it at reboot.
+          RuntimeDirectoryPreserve = true;
           StateDirectory = "gjallar-usbtrust";
           StateDirectoryMode = "0700";
           UMask = "0077";
@@ -424,7 +431,7 @@ in
         };
       };
       home-manager.users.${settings.username} = { pkgs, ... }: {
-        systemd.user.services = lib.optionalAttrs (!(settings.endpointManagedDevice or false)) {
+        systemd.user.services = lib.optionalAttrs (!settings.management.enable) {
           usb-device-review = {
             Unit = {
               Description = "USB device review";

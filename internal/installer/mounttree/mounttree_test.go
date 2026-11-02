@@ -102,13 +102,13 @@ func plan(withRecovery bool) diskplan.Plan {
 		p.Recovery = &diskplan.Partition{
 			Role:      diskplan.RoleRecovery,
 			Number:    3,
-			Label:     "JODS-RECOVERY",
+			Label:     "GJALLAR-RECOVERY",
 			TypeGUID:  "bc13c2ff-59e6-4262-a352-b275fd6f7172",
 			PARTUUID:  recoveryUUID,
 			SizeBytes: 12 * 1024 * 1024 * 1024,
 			Filesystem: diskplan.Filesystem{
 				Type:  "vfat",
-				Label: "JODS-RECOVERY",
+				Label: "GJALLAR-REC",
 			},
 			MountPoint: "/recovery",
 		}
@@ -242,7 +242,7 @@ func TestPrepareESPAndRecoveryMountTree(t *testing.T) {
 		"sudo mkfs.vfat -F 32 -n EFI /dev/nvme1n1p1",
 		"sudo mkdir -p /mnt/boot",
 		"sudo mount /dev/nvme1n1p1 /mnt/boot",
-		"sudo mkfs.vfat -F 32 -n JODSRECOV /dev/nvme1n1p3",
+		"sudo mkfs.vfat -F 32 -n GJALLAR-REC /dev/nvme1n1p3",
 		"sudo mkdir -p /mnt/recovery",
 		"sudo mount /dev/nvme1n1p3 /mnt/recovery",
 	} {
@@ -398,7 +398,7 @@ func TestMountLayoutDoesNotTouchJODSOrRootCrypto(t *testing.T) {
 		}
 	}
 
-	if !strings.Contains(joined, "mkfs.vfat -F 32 -n JODSRECOV") {
+	if !strings.Contains(joined, "mkfs.vfat -F 32 -n GJALLAR-REC") {
 		t.Fatalf("expected recovery compatibility filesystem label:\n%s", joined)
 	}
 }

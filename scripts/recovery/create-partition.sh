@@ -3,7 +3,7 @@ set -euo pipefail
 
 usage() {
   echo "usage: $0 GPT_DISK [SIZE_GIB]" >&2
-  echo "Creates JODS-RECOVERY only inside existing unallocated space." >&2
+  echo "Creates the GJALLAR-RECOVERY partition only inside existing unallocated space." >&2
   echo "It never shrinks or reformats an existing partition." >&2
   exit 2
 }
@@ -22,12 +22,12 @@ size_gib=${2:-12}
   exit 1
 }
 [ "$size_gib" = 12 ] || {
-  echo "ERROR: JODS-RECOVERY size must be exactly 12 GiB" >&2
+  echo "ERROR: the recovery partition size must be exactly 12 GiB" >&2
   exit 1
 }
 command -v sgdisk >/dev/null || { echo "ERROR: sgdisk is required" >&2; exit 1; }
 
-existing=$(lsblk -pnro PATH,PARTLABEL "$disk" | awk '$2 == "JODS-RECOVERY" { print $1; exit }')
+existing=$(lsblk -pnro PATH,PARTLABEL "$disk" | awk '$2 == "GJALLAR-RECOVERY" { print $1; exit }')
 if [ -n "$existing" ]; then
   echo "Existing recovery partition: $existing"
   exit 0
@@ -46,19 +46,19 @@ available_sectors=$((free_end - free_start + 1))
 
 echo "Disk: $disk"
 echo "Plan: allocate ${size_gib} GiB from unallocated sectors; preserve all existing partitions"
-printf 'Type CREATE-JODS-RECOVERY to modify the GPT: '
+printf 'Type CREATE-GJALLAR-RECOVERY to modify the GPT: '
 read -r answer
-[ "$answer" = CREATE-JODS-RECOVERY ] || { echo "Cancelled." >&2; exit 1; }
+[ "$answer" = CREATE-GJALLAR-RECOVERY ] || { echo "Cancelled." >&2; exit 1; }
 
 # Freedesktop XBOOTLDR: a dedicated boot payload partition, not a generic ESP.
 sgdisk --new="0:${free_start}:+${size_gib}G" \
   --typecode=0:bc13c2ff-59e6-4262-a352-b275fd6f7172 \
-  --change-name=0:JODS-RECOVERY \
+  --change-name=0:GJALLAR-RECOVERY \
   "$disk"
 partprobe "$disk"
 udevadm settle
 
-partition=$(lsblk -pnro PATH,PARTLABEL "$disk" | awk '$2 == "JODS-RECOVERY" { print $1; exit }')
+partition=$(lsblk -pnro PATH,PARTLABEL "$disk" | awk '$2 == "GJALLAR-RECOVERY" { print $1; exit }')
 [ -n "$partition" ] || {
   echo "ERROR: partition was created but its device node was not found" >&2
   exit 1

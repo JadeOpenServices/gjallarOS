@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -9,6 +10,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/JadeOpenServices/gjallarOS/internal/devgate"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/config"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/flakesource"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/systemcheckout"
@@ -31,6 +33,46 @@ type rebuildOptions struct {
 
 // localChangesPath is root's copy of the developer-mode folder.
 var localChangesPath = localchanges.Path
+
+// developerGrantPath is the settings service's record of the startup PIN
+// or recovery key proof (Plane 283); tests replace it.
+var developerGrantPath = devgate.GrantPath
+
+// devproofSocketPath is the proof helper's socket unit; a running system
+// without it was built before the gate. Tests replace it.
+var devproofSocketPath = "/etc/systemd/system/gjallar-devproof.socket"
+
+// checkDeveloperGrant stops a system rebuild of a developer channel or
+// developer mode that nobody confirmed with the startup PIN or the
+// recovery key. A grant that does not load confirms nothing. It then
+// narrows the grant to what cfg needs: a configuration changed outside
+// the settings service, by hand or by gjallarctl system developer-off,
+// would otherwise leave a grant that lets the setting back on without the
+// proof.
+//
+// The check needs a running system that can take the proof. A system
+// built before the gate has no gjallar-devproof and no way to confirm, so
+// refusing there would keep it on the old version for good. Such a system
+// has no gate to keep, so it builds the version that brings the gate,
+// and from then on the check applies.
+func checkDeveloperGrant(system bool, cfg config.User, stderr io.Writer) int {
+	if !system {
+		return 0
+	}
+	if err := devgate.Check(developerGrantPath, cfg.Channel(), cfg.DeveloperMode); err != nil {
+		if _, statErr := os.Stat(devproofSocketPath); errors.Is(statErr, os.ErrNotExist) {
+			fmt.Fprintln(stderr, "[GjallarOS] Notice: the running system cannot check the startup PIN or the recovery key yet; building the version that can. Afterwards run gjallarctl settings confirm-developer once")
+		} else {
+			fmt.Fprintf(stderr, "[GjallarOS] Error: %v; nothing rebuilt\n", err)
+			return 1
+		}
+	}
+	if _, err := devgate.Narrow(developerGrantPath, cfg.Channel(), cfg.DeveloperMode); err != nil {
+		fmt.Fprintf(stderr, "[GjallarOS] Error: %v; nothing rebuilt\n", err)
+		return 1
+	}
+	return 0
+}
 
 // recoveryEntryPath exists only in the trusted recovery boot entry; tests
 // replace it.
@@ -134,7 +176,7 @@ func startSystemRebuild(opts rebuildOptions, stdout, stderr io.Writer) int {
 	}
 
 	userConfig, err := config.Load(filepath.Join(systemcheckout.Path, "user.config.json"))
-	if err == nil && userConfig.EndpointManagedDevice && os.Geteuid() != 0 {
+	if err == nil && userConfig.Management.Enable && os.Geteuid() != 0 {
 		fmt.Fprintln(stdout, "[GjallarOS] Managed endpoint: authenticating as root for rebuild.")
 		return runCommand(context.Background(), stdout, stderr, "su", "-l", "-c", shellJoin(rootArgs), "root")
 	}

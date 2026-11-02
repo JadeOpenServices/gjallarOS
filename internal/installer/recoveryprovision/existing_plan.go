@@ -23,13 +23,13 @@ const (
 // RecoveryPresentError reports that the target disk already carries recovery
 // storage, so no plan (and no root shrink) is needed. Without this check the
 // maintenance entry shrank root by 12 GiB on a disk that already had
-// JODS-RECOVERY (e2e-target, 2026-10-05).
+// a recovery partition (e2e-target, 2026-10-05).
 type RecoveryPresentError struct {
 	Partition string
 }
 
 func (e *RecoveryPresentError) Error() string {
-	return "JODS-RECOVERY already present at " + e.Partition
+	return "recovery partition already present at " + e.Partition
 }
 
 type existingTree struct {
@@ -138,7 +138,7 @@ func BuildExistingPlan(
 
 				if existingRecovery == "" &&
 					(strings.EqualFold(strings.TrimSpace(dev.PartType), xbootldrType) ||
-						strings.EqualFold(strings.TrimSpace(dev.PartLabel), "JODS-RECOVERY")) {
+						strings.TrimSpace(dev.PartLabel) == diskplan.RecoveryPartLabel) {
 					existingRecovery = dev.Path
 				}
 			}
@@ -219,13 +219,13 @@ func BuildExistingPlan(
 		Recovery: &diskplan.Partition{
 			Role:      diskplan.RoleRecovery,
 			Number:    recoveryNumber,
-			Label:     "JODS-RECOVERY",
+			Label:     diskplan.RecoveryPartLabel,
 			TypeGUID:  xbootldrType,
 			PARTUUID:  recoveryUUID,
 			SizeBytes: RecoveryBytes,
 			Filesystem: diskplan.Filesystem{
 				Type:  "vfat",
-				Label: "JODS-RECOVERY",
+				Label: diskplan.RecoveryFSLabel,
 			},
 			MountPoint: "/recovery",
 		},

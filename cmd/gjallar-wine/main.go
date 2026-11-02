@@ -1,7 +1,9 @@
 // Command gjallar-wine starts a Wine app in its own sandbox (Plane 272,
-// wiki 746). Each app has its own Wine prefix and files folder, sees only
-// those and the Nix store, and reaches the network only through its two
-// switches in the settings service.
+// wiki 746). It runs the commands of gjallarctl wine that need Wine, and
+// is not on PATH (internal/winesandbox/helper.go). Each app has its own
+// Wine prefix and files folder, sees only those and the Nix store, and
+// reaches the network only through its two switches in the settings
+// service.
 package main
 
 import (
@@ -11,6 +13,8 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+
+	"github.com/JadeOpenServices/gjallarOS/internal/winesandbox"
 )
 
 // Tool paths, set by the package.
@@ -21,23 +25,14 @@ var (
 	nsenterPath = "nsenter"
 	ipPath      = "ip"
 	winePath    = "wine"
+	// wineBinPath is Wine itself behind its wrapper; winetricks reads its
+	// arch from it (apps/wine/home.nix).
+	wineBinPath    = "wine"
+	winetricksPath = "winetricks"
 )
 
-const usage = `usage:
-  gjallar-wine add NAME [INSTALLER]        add an app with ~/WineApps/NAME as its
-                                           files folder, and run its installer
-  gjallar-wine install ID INSTALLER        run an installer in the app ID
-  gjallar-wine program ID [CHOICE]         show or pick the program the app starts
-  gjallar-wine run ID [ARGS...]            start the app ID in its sandbox
-  gjallar-wine remove ID [--delete-files]  remove the app ID; its files folder
-                                           stays unless --delete-files is given
-  gjallar-wine import NAME PREFIX          make a copy of a Wine prefix set up
-                                           without gjallar-wine into the app NAME
-  gjallar-wine menu                        bring the app menu in line with the
-                                           apps; runs after each rebuild
-ID is the app's id, as gjallarctl wine list shows it. CHOICE is a number from
-the list or a program's path on C: or D:, such as D:\Tool\tool.exe. An
-installer is an .exe or .msi file.`
+// usage is gjallarctl wine's: users reach these commands only through it.
+var usage = "usage:\n" + winesandbox.CommandsUsage
 
 var errUsage = errors.New("wrong arguments")
 
@@ -60,8 +55,22 @@ func run(args []string, stdout, stderr io.Writer) int {
 		err = programCmd(args[1:], stdout)
 	case "remove":
 		err = removeCmd(args[1:], stdout)
+	case "reset":
+		err = resetCmd(args[1:], stdout, stderr)
+	case "repair":
+		err = repairCmd(args[1:], stdout, stderr)
+	case "undo":
+		err = undoCmd(args[1:], stdout, stderr)
+	case "doctor":
+		err = doctorCmd(args[1:], stdout, stderr)
 	case "import":
 		err = importCmd(args[1:], stdout, stderr)
+	case "check":
+		err = checkCmd(args[1:], stdout, stderr)
+	case "fixes":
+		err = fixesCmd(args[1:], stdout)
+	case "fix":
+		err = fixCmd(args[1:], stdout, stderr)
 	// menu brings the app menu in line with the apps, after each rebuild.
 	case "menu":
 		err = menuCmd(args[1:], stderr)
@@ -76,6 +85,12 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return hold()
 	case "lock":
 		return lock(args[1:], stderr)
+	// icon reads an app's icon inside its own sandbox (icon.go).
+	case "icon":
+		return iconCmd(args[1:], stdout, stderr)
+	// scan reads an installer's headers inside its own sandbox (scan.go).
+	case "scan":
+		return scanCmd(args[1:], stdout, stderr)
 	case "stay":
 		signals := make(chan os.Signal, 1)
 		signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)

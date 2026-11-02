@@ -2,5 +2,6 @@
   "name": "VLC",
   "description": "Media player.",
   "category": "media",
+  "package": "vlc",
   "default": true
 }

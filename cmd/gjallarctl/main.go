@@ -143,6 +143,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runSecureBoot(args[1:], stdout, stderr)
 	case "security":
 		return runSecurity(args[1:], stdout, stderr)
+	case "media":
+		return runMedia(args[1:], stderr)
 	default:
 		fmt.Fprintf(stderr, "ERROR: unknown command %q\n", args[0])
 		printUsage(stderr)
@@ -598,10 +600,14 @@ func runSecureBootFirmwareInstructions(args []string, stdout, stderr io.Writer) 
 }
 
 func runSecureBootVerifyOwnership(args []string, stdout, stderr io.Writer) int {
+	viaShim := len(args) > 0 && args[0] == "--shim"
+	if viaShim {
+		args = args[1:]
+	}
 	if len(args) > 1 {
 		fmt.Fprintln(
 			stderr,
-			"Usage: gjallarctl installer secure-boot-verify-ownership [expected-stage]",
+			"Usage: gjallarctl installer secure-boot-verify-ownership [--shim] [expected-stage]",
 		)
 		return 2
 	}
@@ -614,6 +620,7 @@ func runSecureBootVerifyOwnership(args []string, stdout, stderr io.Writer) int {
 	if err := secureboot.VerifyOwnership(
 		context.Background(),
 		expectedStage,
+		viaShim,
 	); err != nil {
 		fmt.Fprintf(
 			stderr,
@@ -1816,10 +1823,11 @@ func printUsage(out io.Writer) {
 	fmt.Fprintln(out, "       gjallarctl apps {list [--json]|add ID|remove ID} [--window]")
 	fmt.Fprintln(out, "       gjallarctl settings {list|get|set|pending|apply|cancel|export|import|pair}")
 	fmt.Fprintln(out, "       gjallarctl snapshots {list|restore PATH}")
-	fmt.Fprintln(out, "       gjallarctl wine {list [--ids|--json]|set ID [--internet on|off] [--home on|off]}")
+	fmt.Fprintln(out, "       gjallarctl wine {list|set|add|install|program|run|remove|reset|repair|undo|import|menu} (gjallarctl wine for more)")
 	fmt.Fprintln(out, "       gjallarctl secure-boot {status|setup|update-dbx} [--repo PATH]")
 	fmt.Fprintln(out, "       gjallarctl security {notice|oddc-notice|status [--json]|scan PATH [--json]|fix ID|switch ID on|off|apply ID|cancel ID}")
 	fmt.Fprintln(out, "       gjallarctl hyprland-render-gpu")
+	fmt.Fprintln(out, "       gjallarctl media notice")
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "Safe GjallarOS maintenance commands. Rebuild invokes sudo explicitly.")
 }
@@ -1942,6 +1950,18 @@ func rebuildCheckout(repo string, opts rebuildOptions, system bool, stdout, stde
 	hardwareUpdate, channel, switchNow := opts.hardwareUpdate, opts.channel, opts.switchNow
 	update, updateInputs, rebuildArgs := opts.update, opts.updateInputs, opts.rebuildArgs
 
+	// The channel pull below follows the configuration, so the grant is
+	// checked before anything is fetched (Plane 283).
+	if system {
+		user, err := config.Load(filepath.Join(repo, "user.config.json"))
+		if err != nil {
+			fmt.Fprintf(stderr, "[GjallarOS] Error: %v; nothing rebuilt\n", err)
+			return 1
+		}
+		if code := checkDeveloperGrant(system, user, stderr); code != 0 {
+			return code
+		}
+	}
 	if update {
 		if code := pullCheckout(repo, stdout, stderr); code != 0 {
 			return code
@@ -2003,6 +2023,11 @@ func rebuildCheckout(repo string, opts rebuildOptions, system bool, stdout, stde
 	if err != nil {
 		fmt.Fprintf(stderr, "[GjallarOS] Error: load user configuration: %v\n", err)
 		return 1
+	}
+	// Checked again on the configuration this build reads, which may have
+	// changed since the check above.
+	if code := checkDeveloperGrant(system, userConfig, stderr); code != 0 {
+		return code
 	}
 	legacyWebApplications := config.HasLegacyWebApplications(rawConfig)
 	retiredEntries := config.RetiredEntries(rawConfig)
@@ -2104,7 +2129,7 @@ func rebuildCheckout(repo string, opts rebuildOptions, system bool, stdout, stde
 	// Managed JODS endpoints deliberately remove the desktop user from
 	// wheel. Rebuilds on those systems therefore cross the explicit root
 	// authentication boundary instead of attempting sudo.
-	managedDevice := userConfig.EndpointManagedDevice
+	managedDevice := userConfig.Management.Enable
 
 	// JODS moves the pin on managed endpoints; elsewhere the user decides.
 	if !hardwareUpdate && !managedDevice {

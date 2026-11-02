@@ -2,5 +2,6 @@
   "name": "KeePassXC",
   "description": "Offline password manager.",
   "category": "security",
+  "package": "keepassxc",
   "default": true
 }

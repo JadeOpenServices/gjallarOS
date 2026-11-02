@@ -18,7 +18,7 @@ let
           usbguardEnable = enabled;
           usbTrustEnforce = enforce;
           usbTrustTpmHandle = if enabled then "0x81000042" else "";
-          endpointManagedDevice = managed;
+          management.enable = managed;
         };
         modules = [
           (oddc + "/nixos/modules")

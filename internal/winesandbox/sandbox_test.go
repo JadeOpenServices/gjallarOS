@@ -33,6 +33,7 @@ func TestSandboxArgs(t *testing.T) {
 		{"--ro-bind", s.ResolvConf, "/etc/resolv.conf"},
 		{"--bind", s.Prefix, s.Prefix},
 		{"--bind", s.Files, s.Files},
+		{"--dev-bind-try", "/dev/ntsync", "/dev/ntsync"},
 	} {
 		if !pairs(want[0], want[1], want[2]) {
 			t.Errorf("missing %v", want)
@@ -42,6 +43,21 @@ func TestSandboxArgs(t *testing.T) {
 		if strings.Contains(joined, sock) {
 			t.Errorf("%s reaches the sandbox", sock)
 		}
+	}
+	// DXVK's libraries come from the prefix's registry, so a fix can
+	// switch them off (dxvk_off); the variable would win over it.
+	ov := args[slices.Index(args, "WINEDLLOVERRIDES")+1]
+	for _, dll := range []string{"d3d8=", "d3d9=", "d3d10core=", "d3d11=", "dxgi="} {
+		if strings.Contains(ov, dll) {
+			t.Errorf("WINEDLLOVERRIDES %q names %s", ov, dll)
+		}
+	}
+	if !strings.Contains(ov, "winemenubuilder.exe=d") {
+		t.Errorf("WINEDLLOVERRIDES %q lets Wine write menu entries", ov)
+	}
+	// A device bound before --dev /dev would be hidden by the new /dev.
+	if dev, nt := slices.Index(args, "--dev"), slices.Index(args, "/dev/ntsync"); dev < 0 || nt < dev {
+		t.Error("/dev/ntsync is bound before the sandbox's /dev")
 	}
 	clear := slices.Index(args, "--clearenv")
 	if clear < 0 || clear > slices.Index(args, "--setenv") {
@@ -54,6 +70,36 @@ func TestSandboxArgs(t *testing.T) {
 	}
 	tail := args[slices.Index(args, "--")+1:]
 	want := []string{"/store/gjallar-wine", "lock", "--sym", s.Prefix, "--sym", "/tmp", "--refer", "/", "--", "/store/gjallar-wine", "stay", "/store/wine", `C:\notepad.exe`, "a b"}
+	if !slices.Equal(tail, want) {
+		t.Errorf("command = %q, want %q", tail, want)
+	}
+}
+
+// SYNTHETIC paths: a tool run without network.
+func TestSandboxArgsOfflineTool(t *testing.T) {
+	s := Sandbox{
+		Bwrap: "/store/bwrap", Self: "/store/gjallar-wine", Wine: "/store/wine",
+		UID: 1000, GID: 100, User: "tester", Home: "/home/tester",
+		RuntimeDir: "/run/user/1000", Wayland: "/run/user/1000/gjallar-wine/notepad.sock",
+		ResolvConf: "/run/user/1000/gjallar-wine/notepad.resolv",
+		Prefix:     "/home/tester/.local/share/gjallar-wine/notepad", Files: "/home/tester/WineApps/Notepad",
+		ID:      "notepad",
+		Offline: true,
+		Tool:    &Tool{Path: "/store/winetricks", Env: []string{"WINE=/store/wine", "W_CACHE=/p/drive_c/x=y"}},
+	}
+	args := s.Args([]string{"-q", "demo"})
+	joined := strings.Join(args, " ")
+	if strings.Contains(joined, "resolv.conf") || !slices.Contains(args, "--unshare-net") {
+		t.Errorf("offline sandbox has a network:\n%s", joined)
+	}
+	if strings.Contains(joined, "WINEDLLOVERRIDES") {
+		t.Error("the tool gets Wine's overrides")
+	}
+	if !strings.Contains(joined, "--setenv WINE /store/wine --setenv W_CACHE /p/drive_c/x=y") {
+		t.Errorf("tool environment missing:\n%s", joined)
+	}
+	tail := args[slices.Index(args, "--")+1:]
+	want := []string{"/store/gjallar-wine", "lock", "--sym", s.Prefix, "--sym", "/tmp", "--refer", "/", "--", "/store/gjallar-wine", "stay", "--tool", "/store/winetricks", "/store/wine", "-q", "demo"}
 	if !slices.Equal(tail, want) {
 		t.Errorf("command = %q, want %q", tail, want)
 	}

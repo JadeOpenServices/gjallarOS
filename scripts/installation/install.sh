@@ -24,6 +24,75 @@ command -v nix >/dev/null 2>&1 || {
     exit 1
 }
 
+git_cmd=(git)
+# Before the checkout is staged there is no flake.lock to take nixpkgs from:
+# use the revision flake.lock pins, checked against its hash
+# (tests/nix/bootstrap-pins.nix keeps them equal).
+command -v git >/dev/null 2>&1 ||
+    git_cmd=(nix shell 'github:nixos/nixpkgs/8ce73368d1efd4d657e9064d29b144a52046b4e8?narHash=sha256-F7meJtbqGttmUoMmYjRRgkVs42sn7bh7vvRvLPlUN98%3D#git' --command git)
+
+# Release channel: --channel dev|staging|stable or GJALLAR_CHANNEL picks the
+# branch the checkout follows, and the installer records the same channel.
+# Without either, a new clone follows the default branch (stable) and an
+# existing checkout stays on the branch it has.
+channel="${GJALLAR_CHANNEL:-}"
+channel_flag=""
+expect_channel=0
+for arg in "$@"; do
+    if (( expect_channel )); then
+        channel_flag="$arg"
+        expect_channel=0
+        continue
+    fi
+    case "$arg" in
+        --channel=*) channel_flag="${arg#--channel=}" ;;
+        --channel) expect_channel=1 ;;
+    esac
+done
+(( ! expect_channel )) || {
+    printf 'ERROR: --channel needs a value: dev, staging or stable.\n' >&2
+    exit 1
+}
+if [[ -n "$channel_flag" ]]; then
+    [[ -z "$channel" || "$channel" == "$channel_flag" ]] || {
+        printf 'ERROR: GJALLAR_CHANNEL=%s and --channel %s disagree. Use one of them.\n' "$channel" "$channel_flag" >&2
+        exit 1
+    }
+    channel="$channel_flag"
+elif [[ -n "$channel" ]]; then
+    set -- "$@" --channel "$channel"
+fi
+case "$channel" in
+    "" | dev | staging | stable) ;;
+    *)
+        printf 'ERROR: unknown release channel %s. Use dev, staging or stable.\n' "$channel" >&2
+        exit 1
+        ;;
+esac
+
+# Moves a checkout onto the channel branch. Only a fast-forward: local
+# commits or edits to tracked files stop the install instead of being lost.
+sync_channel() {
+    local dir="$1"
+    [[ -n "$channel" ]] || return 0
+    if [[ -n "$("${git_cmd[@]}" -C "$dir" status --porcelain --untracked-files=no)" ]]; then
+        printf 'ERROR: %s has uncommitted changes to tracked files. Commit or stash them, then run the installer again.\n' "$dir" >&2
+        exit 1
+    fi
+    printf 'Updating %s to the %s channel...\n' "$dir" "$channel"
+    "${git_cmd[@]}" -C "$dir" fetch origin "+refs/heads/$channel:refs/remotes/origin/$channel"
+    if "${git_cmd[@]}" -C "$dir" rev-parse --verify --quiet "refs/heads/$channel" >/dev/null; then
+        "${git_cmd[@]}" -C "$dir" switch --quiet "$channel"
+        "${git_cmd[@]}" -C "$dir" merge --ff-only --quiet "origin/$channel" || {
+            printf 'ERROR: the local %s branch in %s has commits that origin/%s does not have. Move them to another branch, then run the installer again.\n' "$channel" "$dir" "$channel" >&2
+            exit 1
+        }
+    else
+        "${git_cmd[@]}" -C "$dir" switch --quiet --create "$channel" --track "origin/$channel"
+    fi
+    "${git_cmd[@]}" -C "$dir" submodule update --init --recursive
+}
+
 # Started outside a checkout (curl -fsSL .../install.sh | bash): clone the
 # repository with its submodules and run the installer from the clone. The
 # pipe is the script itself, so the installer reads answers from the terminal.
@@ -31,14 +100,13 @@ script_file="${BASH_SOURCE[0]:-}"
 if [[ ! -f "$script_file" || ! -f "$(dirname "$script_file")/../../flake.nix" ]]; then
     repo_url="${GJALLAR_REPO_URL:-https://github.com/JadeOpenServices/gjallarOS.git}"
     checkout="${GJALLAR_DIR:-$HOME/Documents/gjallarOS}"
-    git_cmd=(git)
-    # No checkout yet to take nixpkgs from: use the revision flake.lock pins,
-    # checked against its hash (tests/nix/bootstrap-pins.nix keeps them equal).
-    command -v git >/dev/null 2>&1 ||
-        git_cmd=(nix shell 'github:nixos/nixpkgs/8ce73368d1efd4d657e9064d29b144a52046b4e8?narHash=sha256-F7meJtbqGttmUoMmYjRRgkVs42sn7bh7vvRvLPlUN98%3D#git' --command git)
     if [[ -e "$checkout/.git" ]]; then
         printf 'Using the existing checkout in %s\n' "$checkout"
-        "${git_cmd[@]}" -C "$checkout" submodule update --init --recursive
+        if [[ -n "$channel" ]]; then
+            sync_channel "$checkout"
+        else
+            "${git_cmd[@]}" -C "$checkout" submodule update --init --recursive
+        fi
     else
         [[ ! -e "$checkout" ]] || {
             printf 'ERROR: %s exists and is not a git checkout. Set GJALLAR_DIR to another directory.\n' "$checkout" >&2
@@ -46,18 +114,28 @@ if [[ ! -f "$script_file" || ! -f "$(dirname "$script_file")/../../flake.nix" ]]
         }
         printf 'Cloning %s into %s...\n' "$repo_url" "$checkout"
         mkdir -p "$(dirname "$checkout")"
-        "${git_cmd[@]}" clone --recurse-submodules "$repo_url" "$checkout"
+        branch_args=()
+        [[ -z "$channel" ]] || branch_args=(--branch "$channel")
+        "${git_cmd[@]}" clone --recurse-submodules "${branch_args[@]}" "$repo_url" "$checkout"
     fi
     [[ "${GJALLAR_CLONE_ONLY:-0}" == 1 ]] && exit 0
     [[ -r /dev/tty ]] || {
         printf 'ERROR: the installer is interactive and needs a terminal.\n' >&2
         exit 1
     }
-    exec bash "$checkout/scripts/installation/install.sh" "$@" </dev/tty
+    GJALLAR_CHANNEL_SYNCED=1 exec bash "$checkout/scripts/installation/install.sh" "$@" </dev/tty
 fi
 
 script_dir="$(cd "$(dirname "$script_file")" && pwd)"
 repo="$(cd "$script_dir/../.." && pwd)"
+
+# Run from a checkout with a channel: move it to that branch first, then run
+# the script from the updated tree, since the branch may change this script
+# and the installer.
+if [[ -n "$channel" && "${GJALLAR_CHANNEL_SYNCED:-0}" != 1 ]]; then
+    sync_channel "$repo"
+    GJALLAR_CHANNEL_SYNCED=1 exec bash "$repo/scripts/installation/install.sh" "$@"
+fi
 
 # Nix evaluates a staged copy of the checkout: a path: reference to the
 # checkout itself copies .git (gigabytes of history) and ignored scratch such
@@ -79,11 +157,6 @@ stage_flake
 # building anything or applying prerequisite changes to the installed system.
 if [[ ! -f "$repo/pkgs/monique/nix/nixos-module.nix" ]]; then
     printf 'Preparing the required Monique submodule...\n'
-    git_cmd=(git)
-    if ! command -v git >/dev/null 2>&1; then
-        git_cmd=(nix --extra-experimental-features 'nix-command flakes' shell
-            --inputs-from "path:$flake_src" nixpkgs#git --command git)
-    fi
     if ! "${git_cmd[@]}" -C "$repo" submodule update --init --recursive -- pkgs/monique ||
         [[ ! -f "$repo/pkgs/monique/nix/nixos-module.nix" ]]; then
         printf 'ERROR: Monique source is missing. Use git clone --recurse-submodules or copy the complete repository including pkgs/monique.\n' >&2

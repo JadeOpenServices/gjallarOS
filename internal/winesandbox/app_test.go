@@ -3,6 +3,8 @@ package winesandbox
 import (
 	"os"
 	"path/filepath"
+	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -131,7 +133,7 @@ func TestApps(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(apps) != 3 || apps[0].ID != "broken" || apps[0].Err == nil ||
-		apps[1].ID != "empty" || apps[1].Err == nil || !strings.Contains(apps[1].Err.Error(), "gjallar-wine program empty") ||
+		apps[1].ID != "empty" || apps[1].Err == nil || !strings.Contains(apps[1].Err.Error(), "gjallarctl wine program empty") ||
 		apps[2].ID != "synthetic" || apps[2].Err != nil || apps[2].App.Name != "Synthetic App" {
 		t.Fatalf("apps %+v", apps)
 	}
@@ -154,12 +156,12 @@ func TestLoadAppWithoutProgram(t *testing.T) {
 func TestWriteRecord(t *testing.T) {
 	home := t.TempDir()
 	paths := PathsFor(home, "synthetic", "Synthetic App")
-	want := App{Name: "Synthetic App", Exe: `C:\Program Files\Synthetic\app.exe`}
+	want := App{Name: "Synthetic App", Exe: `C:\Program Files\Synthetic\app.exe`, Fixes: []string{"vcrun2010", "d3dx9"}}
 	if err := WriteRecord(paths, want); err != nil {
 		t.Fatal(err)
 	}
 	got, err := readRecord(paths.Record)
-	if err != nil || got != want {
+	if err != nil || !reflect.DeepEqual(got, want) {
 		t.Fatalf("read back %+v %v", got, err)
 	}
 	if info, err := os.Stat(paths.Record); err != nil || info.Mode().Perm() != 0o600 {
@@ -207,8 +209,16 @@ func TestRemoveApp(t *testing.T) {
 	if err := os.Symlink(filepath.Dir(outside), filepath.Join(paths.Prefix, "out")); err != nil {
 		t.Fatal(err)
 	}
+	l, err := OpenStartLog(home, "synthetic")
+	if err != nil {
+		t.Fatal(err)
+	}
+	l.Close()
 	if err := RemoveApp(home, "synthetic", false); err != nil {
 		t.Fatal(err)
+	}
+	if exists(filepath.Join(StartLogDir(home), "synthetic.log")) {
+		t.Error("start log kept")
 	}
 	if exists(paths.Record) || exists(paths.Prefix) || !exists(filepath.Join(paths.Files, "kept.txt")) || !exists(outside) {
 		t.Errorf("record %t prefix %t files %t outside %t",
@@ -239,5 +249,29 @@ func TestRemoveApp(t *testing.T) {
 	}
 	if err := RemoveApp(home, "../x", false); err == nil {
 		t.Error("bad id accepted")
+	}
+}
+
+// SYNTHETIC fix lists a record must not hold.
+func TestRecordFixes(t *testing.T) {
+	paths := PathsFor(t.TempDir(), "synthetic", "Synthetic App")
+	many := make([]string, MaxFixes+1)
+	for i := range many {
+		many[i] = "f" + strconv.Itoa(i)
+	}
+	for _, fixes := range [][]string{{"Vcrun2010"}, {"a", "a"}, {""}, {"../x"}, {strings.Repeat("a", 41)}, many} {
+		if err := WriteRecord(paths, App{Name: "Synthetic App", Fixes: fixes}); err == nil {
+			t.Errorf("wrote fixes %q", fixes)
+		}
+		data := `{"name":"Synthetic App","exe":"","fixes":["` + strings.Join(fixes, `","`) + `"]}`
+		if err := os.MkdirAll(filepath.Dir(paths.Record), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(paths.Record, []byte(data), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := readRecord(paths.Record); err == nil {
+			t.Errorf("read fixes %q", fixes)
+		}
 	}
 }

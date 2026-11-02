@@ -152,13 +152,13 @@ func Build(input Input) (diskplan.Plan, error) {
 		plan.Recovery = &diskplan.Partition{
 			Role:      diskplan.RoleRecovery,
 			Number:    3,
-			Label:     "JODS-RECOVERY",
+			Label:     diskplan.RecoveryPartLabel,
 			TypeGUID:  xbootldrType,
 			PARTUUID:  recoveryUUID,
 			SizeBytes: RecoveryBytes,
 			Filesystem: diskplan.Filesystem{
 				Type:  "vfat",
-				Label: "JODS-RECOVERY",
+				Label: diskplan.RecoveryFSLabel,
 			},
 			MountPoint: "/recovery",
 		}

@@ -2,5 +2,6 @@
   "name": "GIMP",
   "description": "Image editor.",
   "category": "graphics",
+  "package": "gimp",
   "default": true
 }

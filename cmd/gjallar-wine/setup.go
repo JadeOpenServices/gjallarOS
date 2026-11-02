@@ -134,6 +134,9 @@ func addApp(args []string, stdout, stderr io.Writer) error {
 		if installer, err = checkInstaller(args[1]); err != nil {
 			return err
 		}
+		if err := preflight(installer, stdout, stderr); err != nil {
+			return err
+		}
 	}
 	userName, home, err := currentUser()
 	if err != nil {
@@ -147,13 +150,17 @@ func addApp(args []string, stdout, stderr io.Writer) error {
 
 	paths := winesandbox.PathsFor(home, id, name)
 	if _, err := os.Lstat(paths.Record); err == nil {
-		return fmt.Errorf("app %s exists already; gjallar-wine install %s INSTALLER adds to it", id, id)
+		return fmt.Errorf("app %s exists already; gjallarctl wine install %s INSTALLER adds to it", id, id)
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
 	// Switches left by an app of the same id that is gone must not carry
 	// over to this one.
 	if err := clearSwitches(id); err != nil {
+		return err
+	}
+	// Nor may its snapshots, which undo would put back.
+	if err := winesandbox.DropSnapshots(home, id); err != nil {
 		return err
 	}
 	// A files folder kept from an earlier app of this name is used again.
@@ -181,7 +188,7 @@ func addApp(args []string, stdout, stderr io.Writer) error {
 	}
 	fmt.Fprintf(stdout, "It has no network: gjallarctl wine set %s --internet on lets it reach the internet.\n", id)
 	if installer == "" {
-		fmt.Fprintf(stdout, "Next: gjallar-wine install %s INSTALLER, or gjallar-wine program %s D:\\PROGRAM.exe for a program in the files folder.\n", id, id)
+		fmt.Fprintf(stdout, "Next: gjallarctl wine install %s INSTALLER, or gjallarctl wine program %s D:\\PROGRAM.exe for a program in the files folder.\n", id, id)
 		return nil
 	}
 	return installApp(id, installer, os.Stdin, stdinIsTerminal(), stdout, stderr)
@@ -246,7 +253,7 @@ func ensureBase(home string, stderr io.Writer) (string, error) {
 		if setupErr != nil {
 			why = setupErr.Error()
 		}
-		return "", fmt.Errorf("Wine's setup is not complete (%s); %s says why, and the next gjallar-wine add tries again", why, setupLog(home))
+		return "", fmt.Errorf("Wine's setup is not complete (%s); %s says why, and the next gjallarctl wine add tries again", why, setupLog(home))
 	}
 	if serverErr != nil {
 		return "", fmt.Errorf("wait for Wine's setup to save: %w", serverErr)
@@ -265,7 +272,7 @@ func copyPrefix(base string, paths winesandbox.Paths, id, userName string, stder
 		return err
 	}
 	if _, err := os.Lstat(paths.Prefix); err == nil {
-		return fmt.Errorf("a prefix for %s is left over; gjallar-wine remove %s clears it", id, id)
+		return fmt.Errorf("a prefix for %s is left over; gjallarctl wine remove %s clears it", id, id)
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
@@ -317,6 +324,9 @@ func installCmd(args []string, stdout, stderr io.Writer) error {
 	}
 	installer, err := checkInstaller(args[1])
 	if err != nil {
+		return err
+	}
+	if err := preflight(installer, stdout, stderr); err != nil {
 		return err
 	}
 	lock, err := lockApp(args[0])
@@ -396,7 +406,7 @@ func installApp(id, installer string, in io.Reader, interactive bool, stdout, st
 		if err := saveApp(paths, id, a, stderr); err != nil {
 			return err
 		}
-		fmt.Fprintf(stdout, "App %s starts %s. It is in the app menu, and gjallar-wine run %s starts it.\n", id, a.Exe, id)
+		fmt.Fprintf(stdout, "App %s starts %s. It is in the app menu, and gjallarctl wine run %s starts it.\n", id, a.Exe, id)
 		return nil
 	}
 	return chooseProgram(id, "", in, interactive, stdout, stderr)
@@ -455,7 +465,7 @@ func chooseProgram(id, choice string, in io.Reader, interactive bool, stdout, st
 	}
 	if choice == "" {
 		if len(found) == 0 {
-			fmt.Fprintf(stdout, "No shortcut in app %s starts a program. gjallar-wine program %s D:\\PROGRAM.exe picks one by its path.\n", id, id)
+			fmt.Fprintf(stdout, "No shortcut in app %s starts a program. gjallarctl wine program %s D:\\PROGRAM.exe picks one by its path.\n", id, id)
 			return nil
 		}
 		fmt.Fprintf(stdout, "Programs in app %s:\n", id)
@@ -467,7 +477,7 @@ func chooseProgram(id, choice string, in io.Reader, interactive bool, stdout, st
 			fmt.Fprintf(stdout, "%s %d  %s\n", mark, i+1, p)
 		}
 		if !interactive {
-			fmt.Fprintf(stdout, "gjallar-wine program %s NUMBER picks one.\n", id)
+			fmt.Fprintf(stdout, "gjallarctl wine program %s NUMBER picks one.\n", id)
 			return nil
 		}
 		fmt.Fprint(stdout, "Number of the program to start, or Enter to keep the current one: ")
@@ -483,7 +493,7 @@ func chooseProgram(id, choice string, in io.Reader, interactive bool, stdout, st
 	var win string
 	if n, err := strconv.Atoi(choice); err == nil {
 		if n < 1 || n > len(found) {
-			return fmt.Errorf("%d is not on the list; gjallar-wine program %s shows it", n, id)
+			return fmt.Errorf("%d is not on the list; gjallarctl wine program %s shows it", n, id)
 		}
 		win = found[n-1]
 	} else if filepath.IsAbs(choice) {
@@ -493,11 +503,24 @@ func chooseProgram(id, choice string, in io.Reader, interactive bool, stdout, st
 	} else {
 		win = choice
 	}
+	if err := checkProgram(paths, win); err != nil {
+		return err
+	}
+	a.Exe = win
+	if err := saveApp(paths, id, a, stderr); err != nil {
+		return err
+	}
+	fmt.Fprintf(stdout, "App %s starts %s. It is in the app menu.\n", id, win)
+	return nil
+}
+
+// checkProgram checks that win is an .exe file in the app's folders,
+// also when reached through links.
+func checkProgram(paths winesandbox.Paths, win string) error {
 	host, err := winesandbox.HostPath(paths, win)
 	if err != nil {
 		return err
 	}
-	// The path must stay in the app's folders, also through links.
 	if back, err := winesandbox.WinPath(paths, host); err != nil || !strings.EqualFold(back, win) {
 		return fmt.Errorf("%s leads out of the app's folders", win)
 	}
@@ -506,11 +529,6 @@ func chooseProgram(id, choice string, in io.Reader, interactive bool, stdout, st
 	} else if !info.Mode().IsRegular() || !strings.EqualFold(filepath.Ext(host), ".exe") {
 		return fmt.Errorf("%s is not an .exe file", win)
 	}
-	a.Exe = win
-	if err := saveApp(paths, id, a, stderr); err != nil {
-		return err
-	}
-	fmt.Fprintf(stdout, "App %s starts %s. It is in the app menu.\n", id, win)
 	return nil
 }
 
@@ -534,8 +552,13 @@ func removeCmd(args []string, stdout io.Writer) error {
 	defer lock.Close()
 	// The files folder, to take out of Places and to tell where the files
 	// stay. Unknown if the record is broken.
+	// The name the user knows it by, the id if the record is broken.
 	var place, kept string
-	if _, paths, err := winesandbox.LoadApp(home, id); err == nil {
+	shown := id
+	if app, paths, err := winesandbox.LoadApp(home, id); err == nil {
+		if app.Name != "" {
+			shown = app.Name
+		}
 		place = paths.Files
 		if !files {
 			kept = paths.Files
@@ -557,11 +580,11 @@ func removeCmd(args []string, stdout io.Writer) error {
 	}
 	switch {
 	case files:
-		fmt.Fprintf(stdout, "Removed app %s and its files folder.\n", id)
+		fmt.Fprintf(stdout, "Removed %s and its files folder.\n", shown)
 	case kept != "":
-		fmt.Fprintf(stdout, "Removed app %s. Its files stay in %s.\n", id, kept)
+		fmt.Fprintf(stdout, "Removed %s. Its files stay in %s.\n", shown, kept)
 	default:
-		fmt.Fprintf(stdout, "Removed app %s.\n", id)
+		fmt.Fprintf(stdout, "Removed %s.\n", shown)
 	}
 	return nil
 }

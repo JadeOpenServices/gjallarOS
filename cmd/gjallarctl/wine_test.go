@@ -104,7 +104,7 @@ func TestWineSetRefuses(t *testing.T) {
 		{"set", "synthetic", "--wifi", "on"},
 		{"set", "../synthetic", "--internet", "on"},
 		{"list", "--yaml"},
-		{"remove", "synthetic"},
+		{"hold"},
 	} {
 		var stdout, stderr bytes.Buffer
 		if code := run(append([]string{"wine"}, args...), &stdout, &stderr); code != 2 {
@@ -145,5 +145,50 @@ func TestWineListJSON(t *testing.T) {
 	want = `{"settings":"missing","apps":[{"id":"synthetic","name":"Synthetic App","program":"app.exe","internet":false,"home":false}]}` + "\n"
 	if stdout.String() != want {
 		t.Errorf("json without service:\n%s", stdout.String())
+	}
+}
+
+// wineFakeHelper points the helper at path and records what would start.
+func wineFakeHelper(t *testing.T, path string) *[]string {
+	t.Helper()
+	var started []string
+	oldHelper, oldExec := wineHelper, wineExec
+	t.Cleanup(func() { wineHelper, wineExec = oldHelper, oldExec })
+	wineHelper = func() (string, error) { return path, nil }
+	wineExec = func(argv0 string, argv []string, _ []string) error {
+		started = append([]string{argv0}, argv...)
+		return os.ErrPermission
+	}
+	return &started
+}
+
+func TestWineForward(t *testing.T) {
+	helper := filepath.Join(t.TempDir(), "gjallar-wine")
+	if err := os.WriteFile(helper, []byte("SYNTHETIC"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	started := wineFakeHelper(t, helper)
+	var stdout, stderr bytes.Buffer
+	run([]string{"wine", "repair", "synthetic"}, &stdout, &stderr)
+	want := []string{helper, "gjallar-wine", "repair", "synthetic"}
+	if strings.Join(*started, "\x00") != strings.Join(want, "\x00") {
+		t.Errorf("started %q", *started)
+	}
+	*started = nil
+	for _, bad := range [][]string{{"wine", "hold"}, {"wine", "icon"}, {"wine", "stay"}, {"wine", "lock"}} {
+		if code := run(bad, &stdout, &stderr); code != 2 || *started != nil {
+			t.Errorf("%q: code %d, started %q", bad, code, *started)
+		}
+	}
+}
+
+func TestWineForwardWithoutHelper(t *testing.T) {
+	started := wineFakeHelper(t, filepath.Join(t.TempDir(), "gjallar-wine"))
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"wine", "add", "Synthetic App"}, &stdout, &stderr); code != 1 || *started != nil {
+		t.Errorf("code %d, started %q", code, *started)
+	}
+	if !strings.Contains(stderr.String(), "turn them on in the settings window's Apps page") {
+		t.Errorf("stderr %q", stderr.String())
 	}
 }

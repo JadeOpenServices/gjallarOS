@@ -40,6 +40,24 @@ interactive installer from that checkout. Re-running it reuses the checkout.
 `GJALLAR_CLONE_ONLY=1` stops after the clone. From an existing checkout,
 run `./scripts/installation/install.sh` directly.
 
+To install from `staging` or `dev` instead of `stable`, add `--channel`
+(or set `GJALLAR_CHANNEL`):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/JadeOpenServices/gjallarOS/staging/scripts/installation/install.sh | bash -s -- --channel staging
+```
+
+The script then checks out that branch. A checkout left by an earlier run
+moves to the newest commit of the channel by fast-forward, so a run that
+stopped halfway picks up the current installer and resumes. Local edits or
+local commits on that branch stop the script, and nothing is changed. The
+installed system follows the same channel. With security chip unlock, the
+first start confirms the channel when you type the disk passphrase or
+recovery key and set the PIN. Without it, run `gjallarctl luks setup` and
+then `gjallarctl settings confirm-developer` once; rebuilds wait until then.
+A preset `user.config.json` with a different `releaseChannel` stops the
+installer.
+
 That checkout only runs the installer. The installed system gets its own
 clone of the official repository in `/etc/gjallar/system`, owned by root,
 at the commit the installer was built from, with this machine's
@@ -278,7 +296,8 @@ that device's (hostname, disk, boot and the like).
 ### App catalogue
 
 Optional applications live in `apps/<id>/`: `meta.json` (name, description,
-category, `default`, optional `installer` question), and a `home.nix` and/or
+category, `default`, optional `installer` question, optional `package`, the
+nixpkgs attribute of its main program), and a `home.nix` and/or
 `nixos.nix` module. Each app owns its whole module, so removing an app removes
 everything it brought in.
 
@@ -298,7 +317,9 @@ and the Home Manager side (`user/apps/default.nix`). The old `aiEnable`,
 
 `gjallarctl apps list` shows the catalogue and what is installed;
 `gjallarctl apps add <id>` and `gjallarctl apps remove <id>` change the list
-and rebuild. The Apps page of the settings window does the same.
+and rebuild. `gjallarctl apps change +<id> -<id> ...` makes several changes
+with one password and one rebuild (`+` installs, `-` removes). The Apps page of
+the settings window does the same.
 
 ### Settings window and gjallarHorn
 
@@ -309,7 +330,21 @@ updates, developer mode) and a fix button where one helps. `gjallarctl security 
 prints the same checks. The window has no rights of its own; every change goes
 through `gjallarctl settings` and asks for the password.
 
-Some protections have an off switch, for people who run their own:
+Each row says its state in words and has one button: Install or Remove, Turn
+on or Turn off. A click only marks the change; the button turns into Undo and
+a bar at the bottom counts the marked changes, with Discard and Apply. Apply
+installs and removes all marked apps with one password and one rebuild, then
+sets the marked Wine networks and protections. Closing the window with marked
+changes asks first.
+
+A click on an app opens its page: what it is, what it can reach, its licence
+and homepage, and the same button as its row. A Wine app's page also picks
+its program and removes it, with or without its files in `~/WineApps`. The
+licence and homepage come from the `package` in `meta.json` when the window
+is built; the window fetches nothing, and Open only goes to an https
+homepage.
+
+Some protections can be turned off, for people who run their own:
 
 | Key | Default | Switch |
 | --- | --- | --- |
@@ -317,7 +352,7 @@ Some protections have an off switch, for people who run their own:
 | `firewallEnable` | `true` | Firewall |
 | `virusScanEnable` | `true` | Virus scan |
 
-The switches change security-tier keys, so turning one off waits an hour away
+These change security-tier keys, so turning one off waits an hour away
 from home, as above. Until then the card says when the change is ready and
 offers Apply now and Keep it on. Turning a protection back on is stricter, so
 it applies at once after the password. A protection that is off shows "Off
@@ -529,6 +564,12 @@ The channel is `releaseChannel` in `user.config.json`: `stable` (the
 default), `staging` or `dev`. Change it with
 `gjallarctl settings set releaseChannel=staging`. A move to `stable` applies
 at once; any other move waits like other critical settings.
+Moving to `staging` or `dev`, or turning on `developerMode`, also asks for
+the startup PIN or the recovery key once, after the password. Without a PIN,
+press Enter and type the recovery key. Moving back to `stable` and turning
+developer mode off ask for neither, and the next move away asks again.
+A device that was on `staging` or `dev` before this check refuses changes
+and rebuilds until you run `gjallarctl settings confirm-developer` once.
 Local commits or uncommitted edits stop the update, and nothing is rebuilt.
 A checkout that is ahead of its channel stays where it is until the channel
 catches up; it never goes back to an older commit.
@@ -588,7 +629,8 @@ machine compiled them itself. For each `v*` release tag,
 them and uploads them as files of the `nix-cache` release. Those files are a
 plain Nix binary cache. Each tag adds to it, so a machine on `main` downloads a
 package whenever it matches one built for any tag. Anything missing still
-builds locally.
+builds locally. The workflow itself downloads from the same cache, so a tag
+builds only the packages that changed since the tags before it.
 
 `deployment/binary-cache.json` names the cache and its public key:
 

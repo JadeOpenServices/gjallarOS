@@ -9,7 +9,7 @@
 let
   winePackage = pkgs._wine;
   sandboxLauncher = pkgs.callPackage ../../pkgs/gjallar-wine {
-    inherit wineInit;
+    inherit wineInit winetricks;
     dolphinPlace = pkgs.callPackage ../../pkgs/dolphin-place { };
   };
 
@@ -33,32 +33,11 @@ let
     }
   '';
 
-  # The setup run's own winetricks (Q74). In unattended mode winetricks keeps
-  # going after a SHA256 mismatch when it has no dialog to ask, and accepts
-  # files with no checksum. Both stop the step here instead. The Wayback
-  # Machine retry stays, since the hash still has to match. aka.ms always
-  # points at the newest VC runtime; the versioned URL it redirects to is
-  # named by the hash winetricks pins. A winetricks update that changes
-  # these lines fails the build until the pins are checked again.
-  winetricks = pkgs.winetricks.overrideAttrs (old: {
-    postPatch = old.postPatch + ''
-      substituteInPlace src/winetricks \
-        --replace-fail 'w_askpermission "SHA256 mismatch!' \
-          'w_die "SHA256 mismatch for ''${_W_url}"; w_askpermission "SHA256 mismatch!' \
-        --replace-fail '    w_get_shatype "''${_W_sum}"' \
-          '    w_get_shatype "''${_W_sum}"; test -n "''${_W_sum}" || w_die "No checksum for ''${_W_url}"' \
-        --replace-fail \
-          'https://aka.ms/vs/17/release/vc_redist.x86.exe 0c09f2611660441084ce0df425c51c11e147e6447963c3690f97e0b25c55ed64' \
-          'https://download.visualstudio.microsoft.com/download/pr/990c720a-46ce-4dc7-87b9-c2eb615d34b9/0C09F2611660441084CE0DF425C51C11E147E6447963C3690F97E0B25C55ED64/VC_redist.x86.exe 0c09f2611660441084ce0df425c51c11e147e6447963c3690f97e0b25c55ed64 vc_redist.x86.exe' \
-        --replace-fail \
-          'https://aka.ms/vs/17/release/vc_redist.x64.exe cc0ff0eb1dc3f5188ae6300faef32bf5beeba4bdd6e8e445a9184072096b713b' \
-          'https://download.visualstudio.microsoft.com/download/pr/990c720a-46ce-4dc7-87b9-c2eb615d34b9/CC0FF0EB1DC3F5188AE6300FAEF32BF5BEEBA4BDD6E8E445A9184072096B713B/VC_redist.x64.exe cc0ff0eb1dc3f5188ae6300faef32bf5beeba4bdd6e8e445a9184072096b713b vc_redist.x64.exe'
-    '';
-  });
+  winetricks = pkgs.callPackage ../../pkgs/gjallar-winetricks { };
 
   # Sets up the base prefix every Wine app is copied from (Plane 272). It runs
   # when the first app is added, not at rebuild (Q38): the runtimes come from
-  # their publishers and stay out of our cache. gjallar-wine add may run
+  # their publishers and stay out of our cache. gjallarctl wine add may run
   # without a terminal, so progress also goes to a window and the full output
   # to a log.
   wineInit = pkgs.writeShellScriptBin "gjallar-wine-init" ''
@@ -134,6 +113,19 @@ let
     if grep -q '^"\*comctl32"="native,builtin"' "$WINEPREFIX/user.reg" 2>/dev/null; then
       wine reg delete 'HKCU\Software\Wine\DllOverrides' /v '*comctl32' /f ||
         failed+=("reg *comctl32")
+    fi
+    # A .NET step run by winetricks before PR #2533 left OnlyUseLatestCLR
+    # out for 32-bit programs, and wineboot -u then never ends (see the
+    # winetricks override above). A value already there stays as it is.
+    if [[ -f "$WINEPREFIX/system.reg" ]] &&
+       ${pkgs.gawk}/bin/awk '
+         /^\[/ { s = tolower($1) }
+         tolower($0) ~ /^"onlyuselatestclr"=/ {
+           if (s == "[software\\\\microsoft\\\\.netframework]") a = (tolower($0) == "\"onlyuselatestclr\"=dword:00000001")
+           if (s == "[software\\\\wow6432node\\\\microsoft\\\\.netframework]") b = 1
+         }
+         END { exit !(a && !b) }' "$WINEPREFIX/system.reg"; then
+      reg_add 'HKLM\Software\Wow6432Node\Microsoft\.NETFramework' OnlyUseLatestCLR REG_DWORD 1
     fi
     wineboot -u || failed+=("wineboot")
     wineserver -w || true
@@ -238,48 +230,6 @@ lib.mkIf config.gjallar.apps.wine.enable {
     [
       sandboxLauncher
       setupDesktop
-      # hold, lock and stay are the launcher's own steps, so they are not offered.
-      (pkgs.writeTextDir "share/zsh/site-functions/_gjallar-wine" ''
-        #compdef gjallar-wine
-        _gjallar_wine_ids() {
-          local -a ids
-          ids=(''${HOME}/.local/share/gjallar-wine/apps/*.json(N:t:r))
-          _describe -t apps 'Wine app' ids
-        }
-        _gjallar_wine_installers() {
-          _files -g '*.(exe|msi|EXE|MSI)'
-        }
-        local -a commands
-        commands=(
-          'add:add an app and run its installer'
-          'import:copy a Wine prefix into a new app'
-          'install:run an installer in an app'
-          'program:show or pick the program an app starts'
-          'run:start a Wine app in its sandbox'
-          'remove:remove an app'
-          'menu:bring the app menu in line with the apps'
-        )
-        if (( CURRENT == 2 )); then
-          _describe -t commands 'gjallar-wine command' commands
-          return
-        fi
-        case $words[2] in
-          add)
-            (( CURRENT == 4 )) && _gjallar_wine_installers ;;
-          import)
-            (( CURRENT == 4 )) && _files -/ ;;
-          install)
-            if (( CURRENT == 3 )); then _gjallar_wine_ids
-            elif (( CURRENT == 4 )); then _gjallar_wine_installers; fi ;;
-          program)
-            (( CURRENT == 3 )) && _gjallar_wine_ids ;;
-          run)
-            if (( CURRENT == 3 )); then _gjallar_wine_ids; else _files; fi ;;
-          remove)
-            if (( CURRENT == 3 )); then _gjallar_wine_ids
-            elif (( CURRENT == 4 )); then compadd -- --delete-files; fi ;;
-        esac
-      '')
     ]
     ++ fexPackages;
 
@@ -296,6 +246,6 @@ lib.mkIf config.gjallar.apps.wine.enable {
   # that are gone go. Wine's own menu builder is off in the sandbox, so these
   # are the only entries Wine apps have.
   home.activation.gjallarWineMenu = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
-    run ${lib.getExe sandboxLauncher} menu
+    run ${sandboxLauncher}/libexec/gjallar-wine menu
   '';
 }

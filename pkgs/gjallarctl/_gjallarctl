@@ -110,6 +110,7 @@ _gjallarctl_apps() {
     'list:show the app catalogue and what is installed'
     'add:install an app from the catalogue'
     'remove:remove an app'
+    'change:install and remove several apps with one rebuild'
   )
   if (( CURRENT == 2 )); then
     _describe -t commands 'apps command' cmds
@@ -123,6 +124,18 @@ _gjallarctl_apps() {
     add|remove)
       local -a ids=(${(f)"$(gjallarctl apps list 2>/dev/null | cut -c3- | awk '{print $1}')"})
       _describe -t apps 'app' ids ;;
+    change)
+      local -a list=(${(f)"$(gjallarctl apps list 2>/dev/null)"}) ids
+      local line
+      for line in $list; do
+        if [[ $line == '*'* ]]; then
+          ids+=("-${${line[3,-1]}%% *}")
+        else
+          ids+=("+${${line[3,-1]}%% *}")
+        fi
+      done
+      ids+=('--window')
+      _describe -t apps 'change (+ installs, - removes)' ids ;;
   esac
 }
 
@@ -271,6 +284,7 @@ _gjallarctl_settings() {
     'export:save the settings in a file signed with your key'
     'import:ask for the change a saved settings file makes'
     'pair:trust settings files of your account on another device'
+    'confirm-developer:confirm a developer channel or developer mode with the startup PIN or recovery key'
   )
   if (( CURRENT == 2 )); then
     _describe -t commands 'settings command' cmds
@@ -325,6 +339,20 @@ _gjallarctl_wine() {
   local -a cmds=(
     'list:show your Wine apps and their network switches'
     'set:switch an app'"'"'s internet or home network'
+    'add:add an app and run its installer'
+    'install:run an installer in an app'
+    'program:show or pick the program an app starts'
+    'run:start an app in its sandbox'
+    'remove:remove an app'
+    'reset:give an app a new Wine setup; files stay'
+    'repair:set an app'"'"'s Wine setup up again; programs stay'
+    'undo:put an app back as it was before the last reset, repair or fix'
+    'doctor:tell where Wine finds the libraries an app'"'"'s program needs and what Wine said at its last start'
+    'check:tell what an installer needs, without running it'
+    'fixes:list the fixes for libraries Wine does not bring'
+    'fix:put a fix into an app'
+    'import:copy a Wine prefix into a new app'
+    'menu:bring the app menu in line with the apps'
   )
   if (( CURRENT == 2 )); then
     _describe -t commands 'wine command' cmds
@@ -333,13 +361,27 @@ _gjallarctl_wine() {
   shift words
   (( CURRENT-- ))
   local -a ids
+  ids=(${(f)"$(gjallarctl wine list --ids 2>/dev/null)"})
+  local installer='_files -g "*.(exe|msi|EXE|MSI)"'
   case $words[1] in
     list) _arguments '(--json)--ids[print only the app ids]' '(--ids)--json[print the list as JSON]' ;;
     set)
-      ids=(${(f)"$(gjallarctl wine list --ids 2>/dev/null)"})
       _arguments "1:app id:(${ids[*]})" \
         '--internet[reach the internet]:state:(on off)' \
         '--home[reach the tailnet and home network]:state:(on off)' ;;
+    add) _arguments '1:app name:' "2:installer:$installer" ;;
+    install) _arguments "1:app id:(${ids[*]})" "2:installer:$installer" ;;
+    check) _arguments "1:installer:$installer" ;;
+    fixes)
+      local -a fixes=(${(f)"$(gjallarctl wine fixes --ids 2>/dev/null)"})
+      _arguments "1:fix or library:(${fixes[*]})" ;;
+    fix)
+      local -a fixes=(${(f)"$(gjallarctl wine fixes --ids 2>/dev/null)"})
+      _arguments "1:app id:(${ids[*]})" "2:fix:(${fixes[*]})" ;;
+    program|reset|repair|undo|doctor) _arguments "1:app id:(${ids[*]})" ;;
+    run) _arguments "1:app id:(${ids[*]})" '*:file:_files' ;;
+    remove) _arguments "1:app id:(${ids[*]})" '--delete-files[also delete the app'"'"'s files folder]' ;;
+    import) _arguments '1:app name:' '2:prefix folder:_files -/' ;;
   esac
 }
 
@@ -429,6 +471,7 @@ _gjallarctl() {
     'device-probe:refresh the hardware probe'
     'hyprland-rotate:turn screens and input with the orientation sensor (session service)'
     'hyprland-render-gpu:offer a new login when a new screen wants another GPU (session service)'
+    'media:disks from another system'
   )
 
   _arguments -C '1:command:->cmd' '*::argument:->args'
@@ -451,6 +494,7 @@ _gjallarctl() {
         tpm2) _arguments '1:tpm2 command:((reenroll\:"enroll the TPM2 key again"))' ;;
         luks) _gjallarctl_luks ;;
         security) _gjallarctl_security ;;
+        media) _arguments '1:media command:((notice\:"offer writing on disks from another system (session service)"))' ;;
         secure-boot)
           _arguments '1:secure-boot command:((status\:"show Secure Boot ownership" setup\:"set up Secure Boot on this installed system" update-dbx\:"install the newest dbx revocation list from LVFS"))' \
             '--repo[GjallarOS checkout]:checkout:_files -/' ;;

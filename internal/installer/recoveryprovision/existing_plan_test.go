@@ -188,7 +188,7 @@ func TestBuildExistingPlanReportsPresentRecovery(t *testing.T) {
             "type":"part",
             "size":8589934592,
             "partn":3,
-            "partlabel":"JODS-RECOVERY",
+            "partlabel":"GJALLAR-RECOVERY",
             "parttype":"bc13c2ff-59e6-4262-a352-b275fd6f7172",
             "partuuid":"33333333-aaaa-4bbb-8ccc-222222222222",
             "fstype":"ext4"

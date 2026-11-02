@@ -146,7 +146,7 @@ func runFreshBareMetal(
 	}
 
 	// Fresh canonical storage has exactly one owner. mounttree prepares the
-	// ESP, encrypted Btrfs root mount, and the exact 12 GiB JODS-RECOVERY
+	// ESP, encrypted Btrfs root mount, and the exact 12 GiB recovery
 	// partition described by the canonical disk plan. Recovery artifact
 	// population is a later trust operation and must not own filesystem layout.
 	fmt.Fprintln(out, "STAGE: preparing fresh target mount tree")

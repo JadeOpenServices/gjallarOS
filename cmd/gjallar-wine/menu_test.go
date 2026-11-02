@@ -31,7 +31,8 @@ func TestMenuFollowsApps(t *testing.T) {
 		t.Fatal(err)
 	}
 	entry, ok := menuOf(t, f, "synthetic-app")
-	if !ok || !strings.Contains(entry, "\nName=Synthetic App\n") || !strings.Contains(entry, "\nExec=gjallar-wine run synthetic-app\n") {
+	if !ok || !strings.Contains(entry, "\nName=Synthetic App\n") || !strings.Contains(entry, "\nExec=gjallarctl wine run synthetic-app\n") ||
+		!strings.Contains(entry, "\nTryExec=/etc/profiles/per-user/tester/libexec/gjallar-wine\n") {
 		t.Fatalf("menu entry %q", entry)
 	}
 	// An app without a program has no entry.
@@ -65,11 +66,11 @@ func TestWindowClass(t *testing.T) {
 			t.Errorf("windowClass(%q) = %q, want %q", exe, got, want)
 		}
 	}
-	entry := menuEntry("x", winesandbox.App{Name: "X", Exe: `C:\X.exe`})
+	entry := menuEntry("x", winesandbox.App{Name: "X", Exe: `C:\X.exe`}, "wine", "/SYNTHETIC/gjallar-wine")
 	if !strings.Contains(entry, "\nStartupWMClass=x.exe\n") {
 		t.Errorf("entry %q has no window class", entry)
 	}
-	if strings.Contains(menuEntry("y", winesandbox.App{Name: "Y"}), "StartupWMClass") {
+	if strings.Contains(menuEntry("y", winesandbox.App{Name: "Y"}, "wine", "/SYNTHETIC/gjallar-wine"), "StartupWMClass") {
 		t.Error("window class without a program")
 	}
 }
@@ -87,7 +88,7 @@ func TestMenuCmd(t *testing.T) {
 	dir := filepath.Join(f.home, ".local/share/applications")
 	stale := filepath.Join(dir, "gjallar-wine-gone.desktop")
 	foreign := filepath.Join(dir, "gjallar-wine-mine.desktop")
-	writeFile(t, stale, []byte(menuEntry("gone", winesandbox.App{Name: "Gone"})))
+	writeFile(t, stale, []byte(menuEntry("gone", winesandbox.App{Name: "Gone"}, "wine", "/SYNTHETIC/gjallar-wine")))
 	writeFile(t, foreign, []byte("[Desktop Entry]\nName=SYNTHETIC own entry\n"))
 	if err := os.Symlink(stale, filepath.Join(dir, "gjallar-wine-link.desktop")); err != nil {
 		t.Fatal(err)
@@ -96,7 +97,7 @@ func TestMenuCmd(t *testing.T) {
 	if err := menuCmd(nil, io.Discard); err != nil {
 		t.Fatal(err)
 	}
-	if entry, ok := menuOf(t, f, "old"); !ok || !strings.Contains(entry, "Exec=gjallar-wine run old\n") {
+	if entry, ok := menuOf(t, f, "old"); !ok || !strings.Contains(entry, "Exec=gjallarctl wine run old\n") {
 		t.Errorf("old app's entry %q", entry)
 	}
 	if _, err := os.Lstat(stale); err == nil {

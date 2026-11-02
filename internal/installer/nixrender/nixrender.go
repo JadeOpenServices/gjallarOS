@@ -99,6 +99,28 @@ func Tailscale(t *config.TailscaleIntent) string {
 	)
 }
 
+// Management renders the JODS management intent as one attrset line, so
+// SyncUserIntent can rewrite it like any other key.
+func Management(m config.ManagementIntent) string {
+	return fmt.Sprintf(
+		"{ enable = %t; endpoint = %s; policySigningPublicKey = %s; recoveryCommandSigningPublicKey = %s; enrollmentMode = %s; allowInsecureTls = %t; deviceClass = %s; desktopProfile = %s; fingerprintEnrollmentAllowed = %t; }",
+		m.Enable,
+		String(m.Endpoint),
+		String(m.PolicySigningPublicKey),
+		String(m.RecoveryCommandSigningPublicKey),
+		String(m.EnrollmentMode),
+		m.AllowInsecureTLS,
+		String(m.DeviceClass),
+		String(m.DesktopProfile),
+		m.FingerprintEnrollmentAllowed,
+	)
+}
+
+// PrebootLock renders the preboot lock intent as one attrset line.
+func PrebootLock(p config.PrebootLockIntent) string {
+	return fmt.Sprintf("{ enable = %t; }", p.Enable)
+}
+
 // Settings contains only values written to generated/state.nix. Values are rendered
 // as literals; none are evaluated as Nix source.
 type Settings struct {
@@ -137,15 +159,10 @@ type Settings struct {
 	AIEndpoint, AIRemoteModel                                                               string
 	AIRemoteContextTokens                                                                   int
 	LUKSTPM2Enable, LUKSTPM2PIN                                                             bool
-	RecoveryEnable, RecoveryPartitionEnable, JODSPrebootLockEnable                          bool
-	SecureBootEnable                                                                        bool
-	EndpointManagedDevice                                                                   bool
-	JODSEndpoint, JODSPolicySigningPublicKey                                                string
-	JODSRecoveryCommandSigningPublicKey                                                     string
-	JODSEnrollmentMode                                                                      string
-	JODSAllowInsecureTLS                                                                    bool
-	JODSDeviceClass, JODSDesktopProfile                                                     string
-	JODSFingerprintEnrollmentAllowed                                                        bool
+	RecoveryEnable, RecoveryPartitionEnable                                                 bool
+	PrebootLock                                                                             config.PrebootLockIntent
+	SecureBootEnable, SecureBootShim                                                        bool
+	Management                                                                              config.ManagementIntent
 	WMs                                                                                     []string
 	Theme                                                                                   string
 }
@@ -156,75 +173,79 @@ type Settings struct {
 // installation one owner for the user -> generated/state.nix contract.
 func FromUser(user config.User) Settings {
 	return Settings{
-		Hostname:                            user.Hostname,
-		Username:                            user.Username,
-		Timezone:                            user.Timezone,
-		Locale:                              user.Locale,
-		KeyboardLayout:                      user.KeyboardLayout,
-		KeyboardVariant:                     user.KeyboardVariant,
-		WeatherCity:                         user.WeatherCity,
-		WeatherCountry:                      user.WeatherCountry,
-		TouchpadWorkspaceSwipe:              user.TouchpadWorkspaceSwipe,
-		ClamshellEnable:                     user.ClamshellEnable,
-		ConsoleLoginEnable:                  user.ConsoleLoginEnable,
-		USBGuardEnable:                      user.USBGuardEnable,
-		USBTrustEnforce:                     user.USBTrustEnforce,
-		USBTrustTPMHandle:                   user.USBTrustTPMHandle,
-		USBTrustLapseDays:                   user.USBTrustLapseDays,
-		SnapshotsEnable:                     user.SnapshotsEnable,
-		FirewallEnable:                      user.FirewallEnable,
-		VirusScanEnable:                     user.VirusScanEnable,
-		SnapshotsKeepHours:                  user.SnapshotsKeepHours,
-		SnapshotsKeepDays:                   user.SnapshotsKeepDays,
-		USBReviewTechnical:                  user.USBReviewTechnical,
-		PrintingEnable:                      user.PrintingEnable,
-		NetworkPrintingEnable:               user.NetworkPrintingEnable,
-		DolphinDriveUsage:                   user.DolphinDriveUsage,
-		AArch64Emulation:                    user.AArch64Emulation,
-		FirmwareFlashReadEntry:              user.FirmwareFlashReadEntry,
-		Name:                                user.Name,
-		Email:                               user.Email,
-		GitHubUsername:                      user.GitHubUsername,
-		DotfilesDir:                         user.DotfilesDir,
-		DebugFunctions:                      user.DebugFunctions,
-		DeveloperMode:                       user.DeveloperMode,
-		Shell:                               user.Shell,
-		Editors:                             user.Editors,
-		Browsers:                            user.Browsers,
-		PreferredEditor:                     user.PreferredEditor,
-		PreferredBrowser:                    user.PreferredBrowser,
-		WebApplications:                     user.WebApplications,
-		Tailscale:                           user.Tailscale,
-		Apps:                                user.Apps,
-		FirefoxAddons:                       apps.ActiveFirefoxAddons(user.FirefoxAddons),
-		FirefoxStoreAddons:                  apps.ActiveStoreAddons(user.FirefoxStoreAddons),
-		ThunderbirdSmartCard:                user.ThunderbirdSmartCard,
-		NextcloudEnable:                     user.NextcloudEnable,
-		NextcloudHost:                       user.NextcloudHost,
-		AIAgentMode:                         user.AIAgentMode,
-		AIEndpoint:                          user.AIEndpoint,
-		AIRemoteModel:                       user.AIRemoteModel,
-		AIRemoteContextTokens:               user.AIRemoteContextTokens,
-		LUKSTPM2Enable:                      user.LUKSTPM2Enable,
-		LUKSTPM2PIN:                         user.LUKSTPM2PIN,
-		RecoveryEnable:                      user.RecoveryEnable,
-		RecoveryPartitionEnable:             user.RecoveryPartitionEnable,
-		JODSPrebootLockEnable:               user.JODSPrebootLockEnable,
-		SecureBootEnable:                    user.SecureBootEnable,
-		EndpointManagedDevice:               user.EndpointManagedDevice,
-		JODSEndpoint:                        user.JODSEndpoint,
-		JODSPolicySigningPublicKey:          user.JODSPolicySigningKey,
-		JODSRecoveryCommandSigningPublicKey: user.JODSRecoverySigningKey,
-		JODSEnrollmentMode:                  user.JODSEnrollmentMode,
-		JODSAllowInsecureTLS:                user.JODSAllowInsecureTLS,
-		JODSDeviceClass:                     user.JODSDeviceClass,
-		JODSDesktopProfile:                  user.JODSDesktopProfile,
-		JODSFingerprintEnrollmentAllowed:    user.JODSFingerprintEnroll,
-		Theme:                               user.Theme,
+		Hostname:                user.Hostname,
+		Username:                user.Username,
+		Timezone:                user.Timezone,
+		Locale:                  user.Locale,
+		KeyboardLayout:          user.KeyboardLayout,
+		KeyboardVariant:         user.KeyboardVariant,
+		WeatherCity:             user.WeatherCity,
+		WeatherCountry:          user.WeatherCountry,
+		TouchpadWorkspaceSwipe:  user.TouchpadWorkspaceSwipe,
+		ClamshellEnable:         user.ClamshellEnable,
+		ConsoleLoginEnable:      user.ConsoleLoginEnable,
+		USBGuardEnable:          user.USBGuardEnable,
+		USBTrustEnforce:         user.USBTrustEnforce,
+		USBTrustTPMHandle:       user.USBTrustTPMHandle,
+		USBTrustLapseDays:       user.USBTrustLapseDays,
+		SnapshotsEnable:         user.SnapshotsEnable,
+		FirewallEnable:          user.FirewallEnable,
+		VirusScanEnable:         user.VirusScanEnable,
+		SnapshotsKeepHours:      user.SnapshotsKeepHours,
+		SnapshotsKeepDays:       user.SnapshotsKeepDays,
+		USBReviewTechnical:      user.USBReviewTechnical,
+		PrintingEnable:          user.PrintingEnable,
+		NetworkPrintingEnable:   user.NetworkPrintingEnable,
+		DolphinDriveUsage:       user.DolphinDriveUsage,
+		AArch64Emulation:        user.AArch64Emulation,
+		FirmwareFlashReadEntry:  user.FirmwareFlashReadEntry,
+		Name:                    user.Name,
+		Email:                   user.Email,
+		GitHubUsername:          user.GitHubUsername,
+		DotfilesDir:             user.DotfilesDir,
+		DebugFunctions:          user.DebugFunctions,
+		DeveloperMode:           user.DeveloperMode,
+		Shell:                   user.Shell,
+		Editors:                 user.Editors,
+		Browsers:                user.Browsers,
+		PreferredEditor:         user.PreferredEditor,
+		PreferredBrowser:        user.PreferredBrowser,
+		WebApplications:         user.WebApplications,
+		Tailscale:               user.Tailscale,
+		Apps:                    user.Apps,
+		FirefoxAddons:           apps.ActiveFirefoxAddons(user.FirefoxAddons),
+		FirefoxStoreAddons:      apps.ActiveStoreAddons(user.FirefoxStoreAddons),
+		ThunderbirdSmartCard:    user.ThunderbirdSmartCard,
+		NextcloudEnable:         user.NextcloudEnable,
+		NextcloudHost:           user.NextcloudHost,
+		AIAgentMode:             user.AIAgentMode,
+		AIEndpoint:              user.AIEndpoint,
+		AIRemoteModel:           user.AIRemoteModel,
+		AIRemoteContextTokens:   user.AIRemoteContextTokens,
+		LUKSTPM2Enable:          user.LUKSTPM2Enable,
+		LUKSTPM2PIN:             user.LUKSTPM2PIN,
+		RecoveryEnable:          user.RecoveryEnable,
+		RecoveryPartitionEnable: user.RecoveryPartitionEnable,
+		PrebootLock:             user.PrebootLock,
+		SecureBootEnable:        user.SecureBootEnable,
+		SecureBootShim:          user.SecureBootShim,
+		Management:              user.Management,
+		Theme:                   user.Theme,
 	}
 }
 
 var retiredGeneratedKeys = map[string]bool{
+	// Moved under management and prebootLock by JODS-565.
+	"endpointManagedDevice":               true,
+	"jodsEndpoint":                        true,
+	"jodsPolicySigningPublicKey":          true,
+	"jodsRecoveryCommandSigningPublicKey": true,
+	"jodsEnrollmentMode":                  true,
+	"jodsAllowInsecureTls":                true,
+	"jodsDeviceClass":                     true,
+	"jodsDesktopProfile":                  true,
+	"jodsFingerprintEnrollmentAllowed":    true,
+	"jodsPrebootLockEnable":               true,
 	// Selected by apps since the app catalogue.
 	"aiEnable":             true,
 	"containersEnable":     true,
@@ -304,17 +325,10 @@ var userIntentKeys = []string{
 	"luksTpm2Pin",
 	"recoveryEnable",
 	"recoveryPartitionEnable",
-	"jodsPrebootLockEnable",
+	"prebootLock",
 	"secureBootEnable",
-	"endpointManagedDevice",
-	"jodsEndpoint",
-	"jodsPolicySigningPublicKey",
-	"jodsRecoveryCommandSigningPublicKey",
-	"jodsEnrollmentMode",
-	"jodsAllowInsecureTls",
-	"jodsDeviceClass",
-	"jodsDesktopProfile",
-	"jodsFingerprintEnrollmentAllowed",
+	"secureBootShim",
+	"management",
 	"theme",
 	"apps",
 	"firefoxAddons",
@@ -606,17 +620,10 @@ func Render(s Settings) []byte {
 	boolean("luksTpm2Pin", s.LUKSTPM2Enable && s.LUKSTPM2PIN)
 	boolean("recoveryEnable", s.RecoveryEnable)
 	boolean("recoveryPartitionEnable", s.RecoveryPartitionEnable)
-	boolean("jodsPrebootLockEnable", s.JODSPrebootLockEnable)
+	fmt.Fprintf(&b, "    prebootLock = %s;\n", PrebootLock(s.PrebootLock))
 	boolean("secureBootEnable", s.SecureBootEnable)
-	boolean("endpointManagedDevice", s.EndpointManagedDevice)
-	str("jodsEndpoint", s.JODSEndpoint)
-	str("jodsPolicySigningPublicKey", s.JODSPolicySigningPublicKey)
-	str("jodsRecoveryCommandSigningPublicKey", s.JODSRecoveryCommandSigningPublicKey)
-	str("jodsEnrollmentMode", s.JODSEnrollmentMode)
-	boolean("jodsAllowInsecureTls", s.JODSAllowInsecureTLS)
-	str("jodsDeviceClass", s.JODSDeviceClass)
-	str("jodsDesktopProfile", s.JODSDesktopProfile)
-	boolean("jodsFingerprintEnrollmentAllowed", s.JODSFingerprintEnrollmentAllowed)
+	boolean("secureBootShim", s.SecureBootEnable && s.SecureBootShim)
+	fmt.Fprintf(&b, "    management = %s;\n", Management(s.Management))
 	list("wms", s.WMs)
 	str("theme", s.Theme)
 	fmt.Fprintln(&b, "    themeDetails = import (./. + \"/../themes/${theme}.nix\") {inherit pkgs;};")

@@ -69,3 +69,16 @@ func TestIconName(t *testing.T) {
 		}
 	}
 }
+
+func TestPackagePath(t *testing.T) {
+	for _, name := range []string{"vlc", "kdePackages.dolphin", "_wine", "libreoffice-fresh"} {
+		if !packagePath.MatchString(name) {
+			t.Errorf("%q refused", name)
+		}
+	}
+	for _, name := range []string{"", "../x", "a..b", ".a", "a.", "a b", "pkgs/vlc", "${x}", "a.b.c.d.e"} {
+		if packagePath.MatchString(name) {
+			t.Errorf("%q accepted", name)
+		}
+	}
+}

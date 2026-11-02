@@ -108,7 +108,7 @@ func (s *service) ImportSigned(ctx context.Context, sender string, data, sig []b
 		}
 	}
 	log.Printf("uid %d imports a file signed with its own key %s, made on device %s %s", who.UID, key.Fingerprint(), file.Device, file.Created.Format(time.RFC3339))
-	return s.request(ctx, sender, who, file.Settings, []string{note})
+	return s.request(ctx, sender, who, file.Settings, []string{note}, nil)
 }
 
 // signingKeyNotes says what a change of settingsSigningKey does to export,

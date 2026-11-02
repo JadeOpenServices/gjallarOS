@@ -17,6 +17,13 @@ func TestMain(m *testing.M) {
 		panic(err)
 	}
 	installercheck.SystemRepositoryFile = filepath.Join(dir, "repository")
+	// Nor the machine's developer grant.
+	developerGrantPath = filepath.Join(dir, "developer-grant.json")
+	// The running system of a test has the proof helper.
+	devproofSocketPath = filepath.Join(dir, "gjallar-devproof.socket")
+	if err := os.WriteFile(devproofSocketPath, nil, 0o600); err != nil {
+		panic(err)
+	}
 	status := m.Run()
 	os.RemoveAll(dir)
 	os.Exit(status)

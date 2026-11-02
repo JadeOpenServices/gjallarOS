@@ -2,5 +2,6 @@
   "name": "Nextcloud",
   "description": "Nextcloud desktop client with on-demand files.",
   "category": "files",
+  "package": "nextcloud-client",
   "default": true
 }

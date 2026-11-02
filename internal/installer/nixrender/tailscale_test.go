@@ -40,12 +40,14 @@ rec {
 		t.Fatal(err)
 	}
 	user := config.User{
-		Hostname:           "gjallarOS",
-		Theme:              "noctalia",
-		AIAgentMode:        "workspace",
-		JODSEnrollmentMode: "manual",
-		Tailscale:          &config.TailscaleIntent{ExitNode: "home-router"},
-		Apps:               []string{"tailscale"},
+		Hostname:    "gjallarOS",
+		Theme:       "noctalia",
+		AIAgentMode: "workspace",
+		Management: config.ManagementIntent{
+			EnrollmentMode: "manual",
+		},
+		Tailscale: &config.TailscaleIntent{ExitNode: "home-router"},
+		Apps:      []string{"tailscale"},
 	}
 	if err := SyncUserIntent(path, user); err != nil {
 		t.Fatal(err)

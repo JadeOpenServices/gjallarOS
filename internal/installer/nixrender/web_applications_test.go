@@ -158,9 +158,11 @@ rec {
 				ID: config.WebApplicationTeams,
 			},
 		},
-		Theme:              "noctalia",
-		AIAgentMode:        "workspace",
-		JODSEnrollmentMode: "manual",
+		Theme:       "noctalia",
+		AIAgentMode: "workspace",
+		Management: config.ManagementIntent{
+			EnrollmentMode: "manual",
+		},
 	}
 
 	if err := SyncUserIntent(path, user); err != nil {

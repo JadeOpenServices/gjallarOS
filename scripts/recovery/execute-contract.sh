@@ -20,7 +20,7 @@ artifact="${2:-}"
 [ -e /etc/gjallar/recovery ] || [ -e /etc/gjallar/recovery-image ] || \
   fail 'not running inside a GjallarOS recovery environment'
 
-for command in jq sha256sum lsblk blkid sgdisk realpath findmnt; do
+for command in jq sha256sum lsblk realpath awk grep; do
   command -v "$command" >/dev/null || fail "required command missing: $command"
 done
 
@@ -68,54 +68,73 @@ expected_serial="$(jq -r \
   '.command.payload.artifact_digests.target_disk.serial // empty' \
   "$contract")"
 
-partition_type='bc13c2ff-59e6-4262-a352-b275fd6f7172'
+# Find the recovery partition the way the Boot Loader Specification does:
+# the ESP the loader ran from (LoaderDevicePartUUID), its disk, and the one
+# XBOOTLDR partition on that disk. A label search across all disks could pick
+# up a second disk that carries a copy of the layout.
+loader_partuuid_var=/sys/firmware/efi/efivars/LoaderDevicePartUUID-4a67b082-0a4c-41cf-b6c7-440b29bb8c4f
+esp_type='c12a7328-f81f-11d2-ba4b-00a0c93ec93b'
+xbootldr_type='bc13c2ff-59e6-4262-a352-b275fd6f7172'
+uuid_pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+identity_pattern='^[A-Za-z0-9._:-]{4,256}$'
 
-mapfile -t recovery_partitions < <(
-  lsblk -pnro PATH,PARTLABEL,PARTTYPE |
-    awk -v type="$partition_type" \
-      '$2 == "JODS-RECOVERY" && tolower($3) == type { print $1 }'
+[ -r "$loader_partuuid_var" ] || \
+  fail 'boot loader did not report its partition (LoaderDevicePartUUID)'
+# efivars start with 4 attribute bytes; the value is UTF-16.
+loader_uuid="$(tail -c +5 "$loader_partuuid_var" | tr -d '\000' | tr '[:upper:]' '[:lower:]')"
+printf '%s' "$loader_uuid" | grep -Eq "$uuid_pattern" || \
+  fail 'LoaderDevicePartUUID is not a UUID'
+
+mapfile -t esps < <(
+  lsblk -pnro PATH,PARTUUID |
+    awk -v uuid="$loader_uuid" 'tolower($2) == uuid { print $1 }'
 )
+[ "${#esps[@]}" -eq 1 ] || fail 'boot partition is missing or not unique'
+esp="${esps[0]}"
+[ "$(lsblk -dnro PARTTYPE "$esp" | tr '[:upper:]' '[:lower:]')" = "$esp_type" ] || \
+  fail 'boot partition is not an ESP'
 
-[ "${#recovery_partitions[@]}" -eq 1 ] || \
-  fail 'expected exactly one JODS-RECOVERY partition'
-
-recovery_partition="${recovery_partitions[0]}"
-
-actual_recovery_uuid="$(
-  blkid -s PARTUUID -o value "$recovery_partition" |
-    tr '[:upper:]' '[:lower:]'
-)"
-
-[ "$actual_recovery_uuid" = "$expected_recovery_uuid" ] || \
-  fail 'recovery partition UUID mismatch'
-
-parent_name="$(lsblk -dnro PKNAME "$recovery_partition")"
-[ -n "$parent_name" ] || fail 'cannot resolve recovery parent disk'
-
+parent_name="$(lsblk -dnro PKNAME "$esp")"
+[ -n "$parent_name" ] || fail 'cannot resolve the boot disk'
 target_disk="$(realpath "/dev/$parent_name")"
 [ "$(lsblk -dnro TYPE "$target_disk")" = disk ] || \
   fail 'target is not a whole disk'
 
-actual_disk_guid="$(
-  sgdisk -p "$target_disk" |
-    awk -F: '/Disk identifier \(GUID\)/ {
-      gsub(/[[:space:]]/, "", $2)
-      print tolower($2)
-    }'
-)"
+mapfile -t recovery_partitions < <(
+  lsblk -pnro PATH,PARTTYPE "$target_disk" |
+    awk -v type="$xbootldr_type" 'tolower($2) == type { print $1 }'
+)
+[ "${#recovery_partitions[@]}" -eq 1 ] || \
+  fail 'expected exactly one XBOOTLDR partition on the boot disk'
+recovery_partition="${recovery_partitions[0]}"
 
+[ "$(lsblk -dnro TYPE "$recovery_partition")" = part ] &&
+  [ "$(lsblk -dnro PARTLABEL "$recovery_partition")" = GJALLAR-RECOVERY ] &&
+  [ "$(lsblk -dnro LABEL "$recovery_partition")" = GJALLAR-REC ] || \
+  fail 'XBOOTLDR partition is not the gjallarOS recovery partition'
+
+actual_recovery_uuid="$(lsblk -dnro PARTUUID "$recovery_partition" | tr '[:upper:]' '[:lower:]')"
+[ "$actual_recovery_uuid" = "$expected_recovery_uuid" ] || \
+  fail 'recovery partition UUID mismatch'
+
+actual_disk_guid="$(lsblk -dnro PTUUID "$target_disk" | tr '[:upper:]' '[:lower:]')"
 [ "$actual_disk_guid" = "$expected_disk_guid" ] || \
   fail 'GPT disk GUID mismatch'
 
+# Every identity the signed command names must match, and it must name at
+# least one. Values that are not plain identifiers count as absent, the same
+# rule the agent uses when it reports the disk.
 actual_wwn="$(lsblk -dnro WWN "$target_disk" | xargs)"
 actual_serial="$(lsblk -dnro SERIAL "$target_disk" | xargs)"
+printf '%s' "$actual_wwn" | grep -Eq "$identity_pattern" || actual_wwn=''
+printf '%s' "$actual_serial" | grep -Eq "$identity_pattern" || actual_serial=''
 
-if [ -n "$expected_wwn" ]; then
-  [ "$actual_wwn" = "$expected_wwn" ] || fail 'disk WWN mismatch'
-else
-  [ -n "$expected_serial" ] || fail 'signed contract contains no disk identity'
-  [ "$actual_serial" = "$expected_serial" ] || fail 'disk serial mismatch'
-fi
+[ -n "$expected_wwn" ] || [ -n "$expected_serial" ] || \
+  fail 'signed contract contains no disk identity'
+[ -z "$expected_wwn" ] || [ "$actual_wwn" = "$expected_wwn" ] || \
+  fail 'disk WWN mismatch'
+[ -z "$expected_serial" ] || [ "$actual_serial" = "$expected_serial" ] || \
+  fail 'disk serial mismatch'
 
 # Do not allow an artifact to change which physical disk the signed
 # authorization refers to.

@@ -7,11 +7,14 @@
   util-linux,
   iproute2,
   coreutils,
+  vulkan-tools,
   _wine,
-  # Wine's setup for the base prefix; without it gjallar-wine add refuses.
+  # Wine's setup for the base prefix; without it gjallarctl wine add refuses.
   wineInit ? null,
   # Adds each app's files folder to the file manager's Places.
   dolphinPlace ? null,
+  # pkgs/gjallar-winetricks: the build checks the fix table against it.
+  winetricks,
 }:
 
 buildGoModule {
@@ -32,7 +35,10 @@ buildGoModule {
       ../../internal/nettrust
       ../../internal/settings
       ../../internal/sshsig
+      ../../internal/winefix
       ../../internal/winesandbox
+      ../../internal/winicon
+      ../../internal/winpe
     ];
   };
 
@@ -49,17 +55,32 @@ buildGoModule {
     "-X main.nsenterPath=${util-linux}/bin/nsenter"
     "-X main.ipPath=${iproute2}/bin/ip"
     "-X main.winePath=${_wine}/bin/wine"
+    # bin/wine is a shell wrapper; winetricks reads Wine's arch from this.
+    "-X main.wineBinPath=${_wine}/bin/.wine"
+    # gjallarctl wine fix runs it in the app's sandbox, offline.
+    "-X main.winetricksPath=${winetricks}/bin/winetricks"
     "-X main.cpPath=${coreutils}/bin/cp"
+    "-X main.vulkaninfoPath=${vulkan-tools}/bin/vulkaninfo"
   ]
   ++ lib.optional (wineInit != null) "-X main.initPath=${wineInit}/bin/gjallar-wine-init"
   ++ lib.optional (dolphinPlace != null) "-X main.placePath=${lib.getExe dolphinPlace}";
 
   env.CGO_ENABLED = "0";
+  # internal/winefix checks that each verb in the fix table downloads
+  # exactly the files the table pins (Plane 277).
+  env.WINETRICKS_SCRIPT = "${winetricks}/bin/.winetricks-wrapped";
+
+  # Users reach it only through gjallarctl wine (Plane 277), so it is not
+  # on PATH.
+  postInstall = ''
+    mkdir -p $out/libexec
+    mv $out/bin/gjallar-wine $out/libexec/gjallar-wine
+    rmdir $out/bin
+  '';
 
   meta = {
     description = "Starts a Wine app in its own sandbox";
     license = lib.licenses.agpl3Plus;
-    mainProgram = "gjallar-wine";
     platforms = lib.platforms.linux;
   };
 }

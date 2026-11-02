@@ -143,8 +143,10 @@ func TestDeviceValidationGateRejectsUnvalidatedManagedUnattendedProfile(t *testi
 		context.Background(),
 		ui,
 		config.User{
-			EndpointManagedDevice: true,
-			UnattendedInstall:     true,
+			Management: config.ManagementIntent{
+				Enable: true,
+			},
+			UnattendedInstall: true,
 		},
 		resolved,
 		"26.05",
@@ -169,7 +171,9 @@ func TestDeviceValidationGateAllowsExplicitManagedOverride(t *testing.T) {
 		context.Background(),
 		ui,
 		config.User{
-			EndpointManagedDevice:     true,
+			Management: config.ManagementIntent{
+				Enable: true,
+			},
 			UnattendedInstall:         true,
 			AllowUnvalidatedODDCModel: true,
 		},
