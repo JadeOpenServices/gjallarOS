@@ -5,7 +5,7 @@
   ...
 }:
 let
-  managed = settings.management.enable or false;
+  managed = settings.management.enable;
   gjallarctl = pkgs.callPackage ../../pkgs/gjallarctl { };
 
   # zenity --password has no --text option, see removable-media.nix.

@@ -7,7 +7,7 @@
 }:
 
 let
-  managed = settings.management.enable or false;
+  managed = settings.management.enable;
 
   gjallarctlPackage = pkgs.callPackage ../../pkgs/gjallarctl { };
   gjallarSudoAuth = "${gjallarctlPackage}/bin/gjallar-sudo-auth";

@@ -55,7 +55,7 @@ lib.mkMerge [
     };
 
     systemd.user.services.removable-media-review =
-      lib.mkIf (!(settings.management.enable or false))
+      lib.mkIf (!settings.management.enable)
         {
           Unit = {
             Description = "Review unformatted USB disks";

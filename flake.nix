@@ -45,7 +45,7 @@
     };
 
     jods = {
-      url = "git+https://github.com/JadeOpenServices/jods.git?rev=762d016f36f60225e592c0961a38a4d8352997f3&shallow=1";
+      url = "git+https://github.com/JadeOpenServices/jods.git?ref=feature/jods-278-edit-locks&rev=cb6e86d4a1c1dd6bca1656fbe0c4a899b1b81c5f&shallow=1";
       flake = false;
     };
   };
@@ -99,7 +99,11 @@
         pkgs = basePkgs;
         inherit inputs;
       };
+      # Modules read management.enable and prebootLock.enable directly, so a
+      # state.nix without them stops here, not as an unmanaged build.
       settings =
+        assert lib.assertMsg (stateSettings ? management.enable && stateSettings ? prebootLock.enable)
+          "generated/state.nix has no management.enable or prebootLock.enable; rebuild with gjallarctl so it writes them from user.config.json";
         stateSettings
         // lib.optionalAttrs (builtins.elem "librewolf" stateSettings.browsers) {
           browsers = [ "firefox" ] ++ builtins.filter (b: b != "firefox") stateSettings.browsers;
@@ -431,8 +435,8 @@
 
             ./system/default.nix
           ]
-          ++ nixpkgs.lib.optionals (settings.management.enable or false) [
-            ./system/management/jods
+          ++ nixpkgs.lib.optionals settings.management.enable [
+            ./system/management
             "${inputs.jods}/nix/modules/mdm-agent.nix"
           ];
 

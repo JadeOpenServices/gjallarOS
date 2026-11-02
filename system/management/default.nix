@@ -8,7 +8,6 @@
 }:
 let
   cfg = config.services.mdm-agent;
-  enabled = settings.management.enable or false;
   # Device contract versions this gjallarOS implements (JODS-567). A JODS
   # pin with another version stops the build instead of running an agent
   # whose names or recovery steps no longer match.
@@ -64,9 +63,7 @@ let
   };
 in
 {
-  imports = [ ];
-
-  services.mdm-agent = lib.mkIf enabled {
+  services.mdm-agent = {
     enable = true;
     endpoint = settings.management.endpoint;
     policySigningPublicKey = settings.management.policySigningPublicKey;
@@ -80,9 +77,9 @@ in
     desktopProfile = settings.management.desktopProfile;
     inherit osRelease;
   };
-  environment.systemPackages = lib.optionals enabled [ statusCommand ];
+  environment.systemPackages = [ statusCommand ];
 
-  systemd.services.mdm-agent-enroll = lib.mkIf enabled {
+  systemd.services.mdm-agent-enroll = {
     wantedBy = lib.mkForce [ ];
     unitConfig = {
       ConditionPathExists = "/var/lib/gjallarOS/installation-complete";
@@ -109,17 +106,19 @@ in
 
     };
   };
-  systemd.timers.mdm-agent-enroll.wantedBy = lib.mkIf enabled (lib.mkForce [ ]);
+  systemd.timers.mdm-agent-enroll.wantedBy = lib.mkForce [ ];
 
-  systemd.tmpfiles.rules = lib.optionals enabled [
+  systemd.tmpfiles.rules = [
     "d /var/lib/mdm-agent 0700 root root - -"
     "d /var/lib/gjallarOS 0700 root root - -"
   ];
 
-  assertions = lib.optionals enabled [
+  assertions = [
     {
       assertion = lib.elem cfg.contract.version supportedContractVersions;
-      message = "The pinned JODS agent implements device contract version ${toString cfg.contract.version}; this gjallarOS supports ${lib.concatMapStringsSep ", " toString supportedContractVersions}. Pin a JODS commit with a supported contract, or update gjallarOS.";
+      message = "The pinned JODS agent implements device contract version ${toString cfg.contract.version}; this gjallarOS supports ${
+        lib.concatMapStringsSep ", " toString supportedContractVersions
+      }. Pin a JODS commit with a supported contract, or update gjallarOS.";
     }
     {
       assertion = builtins.match "https://.+" settings.management.endpoint != null;

@@ -431,7 +431,7 @@ in
         };
       };
       home-manager.users.${settings.username} = { pkgs, ... }: {
-        systemd.user.services = lib.optionalAttrs (!(settings.management.enable or false)) {
+        systemd.user.services = lib.optionalAttrs (!settings.management.enable) {
           usb-device-review = {
             Unit = {
               Description = "USB device review";
