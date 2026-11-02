@@ -76,6 +76,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return hold()
 	case "lock":
 		return lock(args[1:], stderr)
+	// icon reads an app's icon inside its own sandbox (icon.go).
+	case "icon":
+		return iconCmd(args[1:], stdout, stderr)
 	case "stay":
 		signals := make(chan os.Signal, 1)
 		signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)

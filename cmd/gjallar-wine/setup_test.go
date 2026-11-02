@@ -58,11 +58,13 @@ echo >> "`+f.places+`"
 `)
 
 	oldInit, oldCp, oldWine, oldPlace := initPath, cpPath, winePath, placePath
-	oldUser, oldLaunch, oldSet := currentUser, launchApp, setWine
+	oldUser, oldLaunch, oldSet, oldIcon := currentUser, launchApp, setWine, readIcon
 	t.Cleanup(func() {
 		initPath, cpPath, winePath, placePath = oldInit, oldCp, oldWine, oldPlace
-		currentUser, launchApp, setWine = oldUser, oldLaunch, oldSet
+		currentUser, launchApp, setWine, readIcon = oldUser, oldLaunch, oldSet, oldIcon
 	})
+	// The tests have no bubblewrap; the icon is read in the test itself.
+	readIcon = decodeIcon
 	initPath, cpPath, winePath, placePath = init, cp, filepath.Join(tools, "wine"), place
 	currentUser = func() (string, string, error) { return "tester", f.home, nil }
 	setWine = func(id string, internet, home bool) error {
