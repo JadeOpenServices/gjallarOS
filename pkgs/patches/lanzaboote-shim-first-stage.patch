@@ -1,0 +1,597 @@
+lzbt: install shim as the first stage (GjallarOS Plane 293 step 3)
+
+Firmware with fixed Secure Boot keys trusts only the Microsoft UEFI CA, so
+our own key cannot go into db. With --shim-directory, lzbt installs the
+distribution shim (signed by that CA) in EFI/nixos and in the removable
+fallback path, puts systemd-boot next to each copy as grub<arch>.efi, which
+is the name shim loads, and installs MokManager next to both. Our key goes
+into shim's MOK list; shim then checks systemd-boot and every lanzaboote UKI
+against db + MOK. lzbt keeps the shim files out of its garbage collection
+of EFI/nixos and writes a pcrlock component for shim (620-shim), which the
+firmware measures into PCR 4 before systemd-boot. Without the option nothing
+changes, and a former shim install is replaced by systemd-boot again.
+
+Upstream: lanzaboote v1.1.0 (rust/tool). Queued for upstream in the
+GjallarOS patch book (753).
+
+diff --git a/systemd/src/cli.rs b/systemd/src/cli.rs
+index 3c85632..623932f 100644
+--- a/systemd/src/cli.rs
++++ b/systemd/src/cli.rs
+@@ -68,6 +68,11 @@ struct InstallCommand {
+     #[arg(long)]
+     pcrlock_directory: Option<PathBuf>,
+ 
++    /// Directory with shim<arch>.efi and mm<arch>.efi. When set, shim is installed as the first
++    /// stage and loads systemd-boot, for firmware that only trusts the CA that signed shim.
++    #[arg(long)]
++    shim_directory: Option<PathBuf>,
++
+     /// EFI system partition mountpoint (e.g. efiSysMountPoint)
+     esp: PathBuf,
+ 
+@@ -107,14 +112,21 @@ fn install(args: InstallCommand) -> Result<()> {
+     let public_key = &args.public_key.expect("Failed to obtain public key");
+     let private_key = &args.private_key.expect("Failed to obtain private key");
+ 
++    let arch = Architecture::from_nixos_system(&args.system)?;
++    let shim = args
++        .shim_directory
++        .map(|dir| install::ShimFiles::from_directory(&dir, arch))
++        .transpose()?;
++
+     let installer_builder = install::InstallerBuilder::new(
+         lanzaboote_stub,
+-        Architecture::from_nixos_system(&args.system)?,
++        arch,
+         args.systemd,
+         args.systemd_boot_loader_config,
+         args.configuration_limit,
+         args.bootcounting_initial_tries,
+         args.pcrlock_directory,
++        shim,
+         args.esp,
+         args.generations,
+     );
+diff --git a/systemd/src/esp.rs b/systemd/src/esp.rs
+index 7227367..ba5c148 100644
+--- a/systemd/src/esp.rs
++++ b/systemd/src/esp.rs
+@@ -4,6 +4,46 @@ use crate::architecture::SystemdArchitectureExt;
+ use lanzaboote_tool::architecture::Architecture;
+ use lanzaboote_tool::esp::EspPaths;
+ 
++/// Where shim and systemd-boot go when the firmware trusts shim only.
++///
++/// shim loads `grub<arch>.efi` and `mm<arch>.efi` from its own directory, so each shim copy gets
++/// both next to it: one in `EFI/nixos`, where the boot entry and fwupd look for it, and one in the
++/// removable fallback path `EFI/BOOT`, which takes the place of systemd-boot there.
++pub struct ShimEspPaths {
++    pub nixos_shim: PathBuf,
++    pub nixos_mok_manager: PathBuf,
++    pub nixos_loader: PathBuf,
++    pub fallback_shim: PathBuf,
++    pub fallback_mok_manager: PathBuf,
++    pub fallback_loader: PathBuf,
++}
++
++impl ShimEspPaths {
++    pub fn new(esp_paths: &SystemdEspPaths, architecture: Architecture) -> Self {
++        let arch = architecture.efi_representation();
++        let shim = format!("shim{arch}.efi");
++        let mok_manager = format!("mm{arch}.efi");
++        let loader = format!("grub{arch}.efi");
++        Self {
++            nixos_shim: esp_paths.nixos.join(&shim),
++            nixos_mok_manager: esp_paths.nixos.join(&mok_manager),
++            nixos_loader: esp_paths.nixos.join(&loader),
++            fallback_shim: esp_paths.efi_fallback.clone(),
++            fallback_mok_manager: esp_paths.efi_fallback_dir.join(&mok_manager),
++            fallback_loader: esp_paths.efi_fallback_dir.join(&loader),
++        }
++    }
++
++    /// The files in `EFI/nixos`, which lzbt's garbage collection would otherwise delete.
++    pub fn nixos_files(&self) -> [&PathBuf; 3] {
++        [
++            &self.nixos_shim,
++            &self.nixos_mok_manager,
++            &self.nixos_loader,
++        ]
++    }
++}
++
+ /// Paths to the boot files that are not specific to a generation.
+ /// Systemd variant
+ pub struct SystemdEspPaths {
+diff --git a/systemd/src/install.rs b/systemd/src/install.rs
+index 0c5b72e..f2e95a4 100644
+--- a/systemd/src/install.rs
++++ b/systemd/src/install.rs
+@@ -5,7 +5,7 @@ use std::os::unix::prelude::{OsStrExt, PermissionsExt};
+ use std::path::{Path, PathBuf};
+ use std::string::ToString;
+ 
+-use anyhow::{Context, Result, anyhow};
++use anyhow::{Context, Result, anyhow, bail};
+ use base32ct::{Base32Unpadded, Encoding};
+ use nix::unistd::syncfs;
+ use regex::Regex;
+@@ -13,7 +13,7 @@ use sha2::{Digest, Sha256};
+ use tempfile::TempDir;
+ 
+ use crate::architecture::SystemdArchitectureExt;
+-use crate::esp::SystemdEspPaths;
++use crate::esp::{ShimEspPaths, SystemdEspPaths};
+ use crate::pcrlock::{PcrlockPaths, lock_pe};
+ use crate::version::SystemdVersion;
+ use lanzaboote_tool::architecture::Architecture;
+@@ -33,10 +33,34 @@ pub struct InstallerBuilder {
+     configuration_limit: usize,
+     bootcounting_initial_tries: u32,
+     pcrlock_directory: Option<PathBuf>,
++    shim: Option<ShimFiles>,
+     esp: PathBuf,
+     generation_links: Vec<PathBuf>,
+ }
+ 
++/// shim and MokManager as shipped by a distribution, already signed by the CA the firmware trusts.
++///
++/// They are copied to the ESP as they are. Signing them again would break the signature the
++/// firmware checks.
++pub struct ShimFiles {
++    shim: PathBuf,
++    mok_manager: PathBuf,
++}
++
++impl ShimFiles {
++    pub fn from_directory(directory: &Path, arch: Architecture) -> Result<Self> {
++        let repr = arch.efi_representation();
++        let shim = directory.join(format!("shim{repr}.efi"));
++        let mok_manager = directory.join(format!("mm{repr}.efi"));
++        for file in [&shim, &mok_manager] {
++            if !file.is_file() {
++                bail!("Shim directory has no {}", file.display());
++            }
++        }
++        Ok(Self { shim, mok_manager })
++    }
++}
++
+ impl InstallerBuilder {
+     #![allow(clippy::too_many_arguments)]
+     pub fn new(
+@@ -47,6 +71,7 @@ impl InstallerBuilder {
+         configuration_limit: usize,
+         bootcounting_initial_tries: u32,
+         pcrlock_directory: Option<PathBuf>,
++        shim: Option<ShimFiles>,
+         esp: PathBuf,
+         generation_links: Vec<PathBuf>,
+     ) -> Self {
+@@ -58,6 +83,7 @@ impl InstallerBuilder {
+             configuration_limit,
+             bootcounting_initial_tries,
+             pcrlock_directory,
++            shim,
+             esp,
+             generation_links,
+         }
+@@ -73,6 +99,12 @@ impl InstallerBuilder {
+             gc_roots.extend(pcrlock_paths.iter());
+         };
+ 
++        let shim = self.shim.map(|files| {
++            let paths = ShimEspPaths::new(&esp_paths, self.arch);
++            gc_roots.extend(paths.nixos_files());
++            (files, paths)
++        });
++
+         Installer {
+             broken_gens: BTreeSet::new(),
+             gc_roots,
+@@ -83,6 +115,7 @@ impl InstallerBuilder {
+             configuration_limit: self.configuration_limit,
+             bootcounting_initial_tries: self.bootcounting_initial_tries,
+             pcrlock_paths,
++            shim,
+             esp_paths,
+             generation_links: self.generation_links,
+             arch: self.arch,
+@@ -100,6 +133,7 @@ pub struct Installer<S: Signer> {
+     configuration_limit: usize,
+     bootcounting_initial_tries: u32,
+     pcrlock_paths: Option<PcrlockPaths>,
++    shim: Option<(ShimFiles, ShimEspPaths)>,
+     esp_paths: SystemdEspPaths,
+     generation_links: Vec<PathBuf>,
+     arch: Architecture,
+@@ -134,6 +168,7 @@ impl<S: Signer> Installer<S> {
+         self.install_generations_from_links(&links)?;
+ 
+         self.install_systemd_boot()?;
++        self.install_shim()?;
+ 
+         if self.broken_gens.is_empty() {
+             log::info!("Collecting garbage...");
+@@ -440,15 +475,29 @@ impl<S: Signer> Installer<S> {
+             .join("lib/systemd/boot/efi")
+             .join(self.arch.systemd_filename());
+ 
+-        let newer_systemd_boot_available =
+-            newer_systemd_boot(&systemd_boot, &self.esp_paths.efi_fallback)?
+-                || newer_systemd_boot(&systemd_boot, &self.esp_paths.systemd_boot)?;
++        // With shim, shim takes the fallback path and loads systemd-boot under the name it
++        // expects, next to each shim copy.
++        let targets = match &self.shim {
++            Some((_, shim_paths)) => vec![
++                &shim_paths.nixos_loader,
++                &shim_paths.fallback_loader,
++                &self.esp_paths.systemd_boot,
++            ],
++            None => vec![&self.esp_paths.efi_fallback, &self.esp_paths.systemd_boot],
++        };
++
++        let mut newer_systemd_boot_available = false;
++        for to in &targets {
++            newer_systemd_boot_available |= newer_systemd_boot(&systemd_boot, to)?;
++        }
+         if newer_systemd_boot_available {
+             log::info!("Updating systemd-boot...")
+         };
+ 
+-        let systemd_boot_is_signed = self.signer.verify_path(&self.esp_paths.efi_fallback)?
+-            && self.signer.verify_path(&self.esp_paths.systemd_boot)?;
++        let mut systemd_boot_is_signed = true;
++        for to in &targets {
++            systemd_boot_is_signed &= self.signer.verify_path(to)?;
++        }
+         if !systemd_boot_is_signed {
+             log::warn!("systemd-boot is not signed. Replacing it with a signed binary...")
+         };
+@@ -478,7 +527,7 @@ impl<S: Signer> Installer<S> {
+                     .context("Failed to lock Lanzaboote image with systemd-pcrlock")?;
+             }
+ 
+-            for to in [&self.esp_paths.efi_fallback, &self.esp_paths.systemd_boot] {
++            for to in &targets {
+                 log::info!("Installing {}", to.display());
+                 install_signed(&self.signer, &systemd_boot, to)
+                     .with_context(|| format!("Failed to install systemd-boot binary to: {to:?}"))?;
+@@ -517,6 +566,70 @@ impl<S: Signer> Installer<S> {
+ 
+         Ok(())
+     }
++
++    /// Install shim and MokManager, or remove the shim measurement when shim is not used.
++    ///
++    /// Runs after systemd-boot is in place, so every shim copy finds its second stage. The copy
++    /// in the fallback path is written last: until then the firmware still starts what was there.
++    fn install_shim(&self) -> Result<()> {
++        let Some((files, paths)) = &self.shim else {
++            // Without shim, a measurement left from an earlier shim install would make the TPM
++            // policy expect a boot component that never runs.
++            if let Some(pcrlock_paths) = &self.pcrlock_paths {
++                let current = pcrlock_paths.shim_measurement("current");
++                if current.exists() {
++                    log::info!("Removing shim measurement {}", current.display());
++                    fs::remove_file(&current)
++                        .with_context(|| format!("Failed to remove {}", current.display()))?;
++                }
++            }
++            return Ok(());
++        };
++
++        for to in [&paths.nixos_mok_manager, &paths.fallback_mok_manager] {
++            install(&files.mok_manager, to)
++                .with_context(|| format!("Failed to install MokManager to: {to:?}"))?;
++        }
++
++        let shim_targets = [&paths.nixos_shim, &paths.fallback_shim];
++        let shim_hash = file_hash(&files.shim)?;
++        let mut shim_changed = false;
++        for to in shim_targets {
++            shim_changed |= !to.exists() || file_hash(to)? != shim_hash;
++        }
++
++        let measurement_exists = self
++            .pcrlock_paths
++            .as_ref()
++            .is_none_or(|p| p.shim_measurement("current").exists());
++
++        if shim_changed || !measurement_exists {
++            if let Some(pcrlock_paths) = &self.pcrlock_paths {
++                lock_pe(&files.shim, pcrlock_paths.shim_measurement("next"))
++                    .context("Failed to lock shim with systemd-pcrlock")?;
++            }
++
++            for to in shim_targets {
++                log::info!("Installing {}", to.display());
++                force_install(&files.shim, to)
++                    .with_context(|| format!("Failed to install shim to: {to:?}"))?;
++            }
++
++            if let Some(pcrlock_paths) = &self.pcrlock_paths {
++                let next = pcrlock_paths.shim_measurement("next");
++                let current = pcrlock_paths.shim_measurement("current");
++                fs::rename(&next, &current).with_context(|| {
++                    format!(
++                        "Failed to rename {} to {}",
++                        next.display(),
++                        current.display()
++                    )
++                })?;
++            }
++        }
++
++        Ok(())
++    }
+ }
+ 
+ /// Translate an EFI path to an absolute path on the mounted ESP.
+diff --git a/systemd/src/pcrlock.rs b/systemd/src/pcrlock.rs
+index a70db46..fe3f02b 100644
+--- a/systemd/src/pcrlock.rs
++++ b/systemd/src/pcrlock.rs
+@@ -8,6 +8,9 @@ pub struct PcrlockPaths {
+     pcrlock: PathBuf,
+     lanzaboote: PathBuf,
+     bootloader: PathBuf,
++    /// The first stage that loads systemd-boot when the firmware trusts shim only. The firmware
++    /// measures it into PCR 4 before systemd-boot, hence the lower number.
++    shim: PathBuf,
+ }
+ 
+ impl PcrlockPaths {
+@@ -17,9 +20,15 @@ impl PcrlockPaths {
+             pcrlock: pcrlock.clone(),
+             lanzaboote: pcrlock.join("635-lanzaboote.pcrlock.d"),
+             bootloader: pcrlock.join("630-bootloader.pcrlock.d"),
++            shim: pcrlock.join("620-shim.pcrlock.d"),
+         }
+     }
+ 
++    /// Return the path to a pcrlock measurement file for shim.
++    pub fn shim_measurement(&self, name: impl AsRef<str>) -> PathBuf {
++        self.shim.join(format!("{}.pcrlock", name.as_ref()))
++    }
++
+     pub fn lanzaboote(&self) -> &Path {
+         &self.lanzaboote
+     }
+diff --git a/systemd/tests/integration/common.rs b/systemd/tests/integration/common.rs
+index 76c21ab..8774109 100644
+--- a/systemd/tests/integration/common.rs
++++ b/systemd/tests/integration/common.rs
+@@ -167,6 +167,16 @@ pub fn lanzaboote_install(
+     config_limit: u64,
+     esp_mountpoint: &Path,
+     generation_links: impl IntoIterator<Item = impl AsRef<OsStr>>,
++) -> Result<Output> {
++    lanzaboote_install_with_args(config_limit, esp_mountpoint, generation_links, [""; 0])
++}
++
++/// Call the `lanzaboote install` command with extra options.
++pub fn lanzaboote_install_with_args(
++    config_limit: u64,
++    esp_mountpoint: &Path,
++    generation_links: impl IntoIterator<Item = impl AsRef<OsStr>>,
++    extra_args: impl IntoIterator<Item = impl AsRef<OsStr>>,
+ ) -> Result<Output> {
+     // To simplify the test setup, we use the systemd stub here instead of the lanzaboote stub. See
+     // the comment in setup_toplevel for details.
+@@ -199,6 +209,7 @@ pub fn lanzaboote_install(
+         .arg("tests/fixtures/uefi-keys/db.key")
+         .arg("--configuration-limit")
+         .arg(config_limit.to_string())
++        .args(extra_args)
+         .arg(esp_mountpoint)
+         .args(generation_links)
+         .output()?;
+diff --git a/systemd/tests/integration/main.rs b/systemd/tests/integration/main.rs
+index 659a208..6f254c0 100644
+--- a/systemd/tests/integration/main.rs
++++ b/systemd/tests/integration/main.rs
+@@ -2,4 +2,5 @@ mod common;
+ mod gc;
+ mod install;
+ mod os_release;
++mod shim;
+ mod systemd_boot;
+diff --git a/systemd/tests/integration/shim.rs b/systemd/tests/integration/shim.rs
+new file mode 100644
+index 0000000..7c36e58
+--- /dev/null
++++ b/systemd/tests/integration/shim.rs
+@@ -0,0 +1,191 @@
++use std::fs;
++use std::path::{Path, PathBuf};
++
++use anyhow::Result;
++use lanzaboote_tool::architecture::Architecture;
++use tempfile::{TempDir, tempdir};
++
++use crate::common::{self, SYSTEM, hash_file, mtime, verify_signature};
++
++// Stand-ins for the distribution's shim and MokManager. lzbt copies them as they are, so their
++// content does not matter here.
++const FAKE_SHIM: &[u8] = b"test stand-in for shim";
++const FAKE_MOK_MANAGER: &[u8] = b"test stand-in for MokManager";
++
++#[test]
++fn install_shim_as_first_stage() -> Result<()> {
++    let esp = tempdir()?;
++    let tmpdir = tempdir()?;
++    let profiles = tempdir()?;
++    let shim_dir = fake_shim_directory()?;
++    let generation_link = common::setup_generation_link(tmpdir.path(), profiles.path(), 1)
++        .expect("Failed to setup generation link");
++
++    let output = install_with_shim(&esp, &shim_dir, &generation_link)?;
++    assert!(output.status.success());
++
++    let p = Paths::new(esp.path());
++    for shim in [&p.nixos_shim, &p.fallback] {
++        assert_eq!(fs::read(shim)?, FAKE_SHIM, "{shim:?} is not shim");
++    }
++    for mok_manager in [&p.nixos_mok_manager, &p.fallback_mok_manager] {
++        assert_eq!(fs::read(mok_manager)?, FAKE_MOK_MANAGER, "{mok_manager:?} is not MokManager");
++    }
++    for loader in [&p.nixos_loader, &p.fallback_loader, &p.systemd_boot] {
++        assert!(verify_signature(loader)?, "{loader:?} is not a signed systemd-boot");
++    }
++
++    Ok(())
++}
++
++#[test]
++fn keep_shim_on_second_install() -> Result<()> {
++    let esp = tempdir()?;
++    let tmpdir = tempdir()?;
++    let profiles = tempdir()?;
++    let shim_dir = fake_shim_directory()?;
++    let generation_link = common::setup_generation_link(tmpdir.path(), profiles.path(), 1)
++        .expect("Failed to setup generation link");
++    let p = Paths::new(esp.path());
++
++    assert!(install_with_shim(&esp, &shim_dir, &generation_link)?.status.success());
++    let mtimes0 = p.all().map(|f| mtime(f));
++
++    // The garbage collection of EFI/nixos must keep the shim files.
++    assert!(install_with_shim(&esp, &shim_dir, &generation_link)?.status.success());
++    let mtimes1 = p.all().map(|f| mtime(f));
++
++    assert_eq!(mtimes0, mtimes1, "A boot file was rewritten on the second install.");
++
++    Ok(())
++}
++
++#[test]
++fn replace_changed_shim() -> Result<()> {
++    let esp = tempdir()?;
++    let tmpdir = tempdir()?;
++    let profiles = tempdir()?;
++    let shim_dir = fake_shim_directory()?;
++    let generation_link = common::setup_generation_link(tmpdir.path(), profiles.path(), 1)
++        .expect("Failed to setup generation link");
++    let p = Paths::new(esp.path());
++
++    assert!(install_with_shim(&esp, &shim_dir, &generation_link)?.status.success());
++    fs::write(&p.fallback, b"something else")?;
++    assert!(install_with_shim(&esp, &shim_dir, &generation_link)?.status.success());
++
++    assert_eq!(fs::read(&p.fallback)?, FAKE_SHIM);
++
++    Ok(())
++}
++
++#[test]
++fn switch_back_to_systemd_boot() -> Result<()> {
++    let esp = tempdir()?;
++    let tmpdir = tempdir()?;
++    let profiles = tempdir()?;
++    let shim_dir = fake_shim_directory()?;
++    let generation_link = common::setup_generation_link(tmpdir.path(), profiles.path(), 1)
++        .expect("Failed to setup generation link");
++    let p = Paths::new(esp.path());
++
++    assert!(install_with_shim(&esp, &shim_dir, &generation_link)?.status.success());
++    let shim_hash = hash_file(&p.fallback);
++
++    let output = common::lanzaboote_install(0, esp.path(), vec![&generation_link])?;
++    assert!(output.status.success());
++
++    assert_ne!(hash_file(&p.fallback), shim_hash, "shim is still the fallback loader");
++    assert!(verify_signature(&p.fallback)?);
++    for gone in [&p.nixos_shim, &p.nixos_mok_manager, &p.nixos_loader] {
++        assert!(!gone.exists(), "{gone:?} was not collected");
++    }
++
++    Ok(())
++}
++
++#[test]
++fn refuse_shim_directory_without_mok_manager() -> Result<()> {
++    let esp = tempdir()?;
++    let tmpdir = tempdir()?;
++    let profiles = tempdir()?;
++    let shim_dir = fake_shim_directory()?;
++    let generation_link = common::setup_generation_link(tmpdir.path(), profiles.path(), 1)
++        .expect("Failed to setup generation link");
++    fs::remove_file(shim_dir.path().join(format!("mm{}.efi", arch())))?;
++
++    let output = install_with_shim(&esp, &shim_dir, &generation_link)?;
++    assert!(!output.status.success());
++    assert!(!Paths::new(esp.path()).fallback.exists());
++
++    Ok(())
++}
++
++fn install_with_shim(
++    esp: &TempDir,
++    shim_dir: &TempDir,
++    generation_link: &Path,
++) -> Result<std::process::Output> {
++    common::lanzaboote_install_with_args(
++        0,
++        esp.path(),
++        vec![generation_link],
++        [
++            "--shim-directory".into(),
++            shim_dir.path().as_os_str().to_os_string(),
++        ],
++    )
++}
++
++fn fake_shim_directory() -> Result<TempDir> {
++    let dir = tempdir()?;
++    fs::write(dir.path().join(format!("shim{}.efi", arch())), FAKE_SHIM)?;
++    fs::write(dir.path().join(format!("mm{}.efi", arch())), FAKE_MOK_MANAGER)?;
++    Ok(dir)
++}
++
++fn arch() -> String {
++    Architecture::from_nixos_system(SYSTEM)
++        .unwrap()
++        .efi_representation()
++        .to_string()
++}
++
++struct Paths {
++    nixos_shim: PathBuf,
++    nixos_mok_manager: PathBuf,
++    nixos_loader: PathBuf,
++    fallback: PathBuf,
++    fallback_mok_manager: PathBuf,
++    fallback_loader: PathBuf,
++    systemd_boot: PathBuf,
++}
++
++impl Paths {
++    fn new(esp: &Path) -> Self {
++        let a = arch();
++        let nixos = esp.join("EFI/nixos");
++        let boot = esp.join("EFI/BOOT");
++        Self {
++            nixos_shim: nixos.join(format!("shim{a}.efi")),
++            nixos_mok_manager: nixos.join(format!("mm{a}.efi")),
++            nixos_loader: nixos.join(format!("grub{a}.efi")),
++            fallback: boot.join(format!("BOOT{}.EFI", a.to_ascii_uppercase())),
++            fallback_mok_manager: boot.join(format!("mm{a}.efi")),
++            fallback_loader: boot.join(format!("grub{a}.efi")),
++            systemd_boot: esp.join(format!("EFI/systemd/systemd-boot{a}.efi")),
++        }
++    }
++
++    fn all(&self) -> [&PathBuf; 7] {
++        [
++            &self.nixos_shim,
++            &self.nixos_mok_manager,
++            &self.nixos_loader,
++            &self.fallback,
++            &self.fallback_mok_manager,
++            &self.fallback_loader,
++            &self.systemd_boot,
++        ]
++    }
++}

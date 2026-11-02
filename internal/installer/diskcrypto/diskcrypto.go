@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -263,14 +264,29 @@ func CheckPCRLockPolicy(path string, pcrs []int) error {
 		}
 	}
 	if len(pcrs) == 0 || len(missing) != 0 {
+		hint := ""
+		if slices.Contains(missing, "4") {
+			hint = pcr4RestartHint
+		}
 		return fmt.Errorf(
-			"pcrlock policy %s does not lock PCR %s; refusing TPM2 enrollment",
+			"pcrlock policy %s does not lock PCR %s; refusing TPM2 enrollment%s",
 			path,
 			strings.Join(missing, ","),
+			hint,
 		)
 	}
 	return nil
 }
+
+// pcr4RestartHint explains the one PCR 4 gap a user can fix alone. When the
+// firmware first tried a boot entry that failed (the old direct systemd-boot
+// entry right after switching the shim on, Plane 293, e2e-fw13 2026-11-02),
+// the event log holds "Returning from EFI Application" plus a second start
+// that no pcrlock component predicts, so make-policy cannot lock PCR 4 for
+// this boot. The next boot starts the right entry and the log is clean.
+const pcr4RestartHint = ". PCR 4 covers the boot programs this boot ran. " +
+	"If the firmware tried another boot entry first (right after switching " +
+	"the shim on, or after a firmware update), restart once and run this again"
 
 func WriteTPM2KeyslotRecord(
 	metadataPath string,

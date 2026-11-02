@@ -114,6 +114,7 @@
   "runUpdateChecks": false,
   "secureBootEnable": false,
   "secureBootPrompt": true,
+  "secureBootShim": false,
   "shell": "zsh",
   "snapshotsEnable": true,
   "snapshotsKeepDays": 7,

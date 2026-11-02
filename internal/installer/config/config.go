@@ -89,6 +89,7 @@ type User struct {
 	JODSPrebootLockEnable     bool   `json:"jodsPrebootLockEnable" tier:"critical" scope:"device"`
 	SecureBootEnable          bool   `json:"secureBootEnable" tier:"critical" scope:"device"`
 	SecureBootPrompt          bool   `json:"secureBootPrompt" tier:"critical" scope:"device"`
+	SecureBootShim            bool   `json:"secureBootShim" tier:"critical" scope:"device"` // shim first, for firmware with fixed keys
 	FirmwarePasswordLock      bool   `json:"firmwarePasswordLock" tier:"critical" scope:"device"`
 	EndpointManagedDevice     bool   `json:"endpointManagedDevice" tier:"critical" scope:"device"`
 	JODSEndpoint              string `json:"jodsEndpoint" tier:"critical" scope:"device"`

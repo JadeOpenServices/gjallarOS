@@ -66,3 +66,25 @@ func TestVerifyOwnershipRecordRejectsCertificateMismatch(t *testing.T) {
 		t.Fatal("accepted mismatched Secure Boot certificate hash")
 	}
 }
+
+func TestAcceptBootShimOnlyWhenBuiltForShim(t *testing.T) {
+	for _, tc := range []struct {
+		state   State
+		viaShim bool
+		ok      bool
+	}{
+		{StateGjallarManaged, false, true},
+		{StateGjallarManaged, true, true},
+		{StateGjallarShim, true, true},
+		{StateGjallarShim, false, false},
+		{StateOEMFactoryDerived, true, false},
+		{StatePendingEnrollment, true, false},
+		{StateForeignManaged, true, false},
+		{StateInconsistent, true, false},
+	} {
+		err := acceptBoot(Inspection{State: tc.state}, tc.viaShim)
+		if (err == nil) != tc.ok {
+			t.Errorf("acceptBoot(%s, shim=%v) = %v, want ok=%v", tc.state, tc.viaShim, err, tc.ok)
+		}
+	}
+}

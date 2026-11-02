@@ -275,3 +275,46 @@ func TestParseSignatureListBounds(t *testing.T) {
 		t.Errorf("good list: %+v", l)
 	}
 }
+
+// EMULATED shim boot: the kernel's copy of shim's key list and check state.
+func TestShimTrustsKey(t *testing.T) {
+	ours, _ := synthCert(t, "SYNTHETIC GjallarOS db", nil, nil)
+	other, _ := synthCert(t, "SYNTHETIC distro CA", nil, nil)
+	write := func(f fakeFirmware, name string, data []byte) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(f.root.mokvars, name), data, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, tc := range []struct {
+		name    string
+		mok     []byte
+		sbState []byte
+		want    bool
+	}{
+		{"no shim this boot", nil, nil, false},
+		{"our key in MOK", append(x509SignatureList(other.Raw), x509SignatureList(ours.Raw)...), nil, true},
+		{"shim check on", x509SignatureList(ours.Raw), []byte{0}, true},
+		{"only another key", x509SignatureList(other.Raw), nil, false},
+		{"shim check off in MokManager", x509SignatureList(ours.Raw), []byte{1}, false},
+		{"odd check state", x509SignatureList(ours.Raw), []byte{0, 0}, false},
+		{"malformed list", append(x509SignatureList(ours.Raw), 1, 2, 3), nil, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFakeFirmware(t)
+			if tc.mok != nil {
+				write(f, "MokListRT", tc.mok)
+			}
+			if tc.sbState != nil {
+				write(f, "MokSBStateRT", tc.sbState)
+			}
+			got, err := f.root.shimTrustsKey(ours.Raw)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != tc.want {
+				t.Fatalf("shimTrustsKey = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
