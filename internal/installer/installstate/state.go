@@ -5,11 +5,13 @@ package installstate
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strings"
 
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/nixrender"
 )
@@ -39,13 +41,34 @@ in {
 		out, err := exec.CommandContext(ctx, "nix-instantiate", "--eval", "--strict", "--json",
 			"-I", "nixos-config="+configPath, "--expr", expr).Output()
 		if err != nil {
-			return Versions{}, fmt.Errorf("read existing compatibility versions from %s: %w", configPath, err)
+			return Versions{}, fmt.Errorf("read existing compatibility versions from %s: %w%s", configPath, err, nixMessage(err))
 		}
 		if err := json.Unmarshal(out, &versions); err != nil {
 			return Versions{}, fmt.Errorf("decode existing compatibility versions: %w", err)
 		}
 		return versions, nil
 	})
+}
+
+// nixMessageMax is how much of Nix's own error text a failure shows; the
+// reason is at the end, after the trace.
+const nixMessageMax = 2048
+
+// nixMessage gives what nix-instantiate printed on a failed run, so the
+// installer shows why the configuration could not be read.
+func nixMessage(err error) string {
+	var exit *exec.ExitError
+	if !errors.As(err, &exit) {
+		return ""
+	}
+	msg := strings.TrimSpace(string(exit.Stderr))
+	if msg == "" {
+		return ""
+	}
+	if len(msg) > nixMessageMax {
+		msg = "..." + msg[len(msg)-nixMessageMax:]
+	}
+	return "\n" + msg
 }
 
 func ensure(repo string, discover func() (Versions, error)) error {

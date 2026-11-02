@@ -67,3 +67,21 @@ func TestFailedDiscoveryDoesNotPublishState(t *testing.T) {
 		})
 	}
 }
+
+func TestFailedEvaluationShowsNixMessage(t *testing.T) {
+	bin := t.TempDir()
+	// SYNTHETIC stand-in for nix-instantiate failing with its own message.
+	script := "#!/bin/sh\nprintf 'error:\\n       SYNTHETIC trace line\\n\\n       error: SYNTHETIC reason\\n' >&2\nexit 1\n"
+	if err := os.WriteFile(filepath.Join(bin, "nix-instantiate"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin)
+	repo := t.TempDir()
+	err := Ensure(context.Background(), repo, "/etc/nixos/configuration.nix", "tester", "26.05")
+	if err == nil || !strings.Contains(err.Error(), "exit status 1\nerror:") || !strings.HasSuffix(err.Error(), "error: SYNTHETIC reason") {
+		t.Fatalf("error without Nix's message: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(repo, "generated", "install-state.nix")); !os.IsNotExist(err) {
+		t.Fatal("published state after a failed evaluation")
+	}
+}
