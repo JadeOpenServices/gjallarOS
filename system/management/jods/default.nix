@@ -7,12 +7,22 @@
   ...
 }:
 let
-  cfg = config.services.jods-mdm-agent;
+  cfg = config.services.mdm-agent;
   enabled = settings.management.enable or false;
-  statusWriter = pkgs.writeShellScript "gjallar-jods-status" ''
+  # Device contract versions this gjallarOS implements (JODS-567). A JODS
+  # pin with another version stops the build instead of running an agent
+  # whose names or recovery steps no longer match.
+  supportedContractVersions = [ 2 ];
+  # What the agent reports as the gjallarOS release: the NixOS release and
+  # the commit the generation was built from, when there is one.
+  revision = builtins.match "(git:)?([0-9a-f]{40}(-dirty)?)" config.system.configurationRevision;
+  osRelease =
+    config.system.nixos.release
+    + lib.optionalString (revision != null) "+${builtins.elemAt revision 1}";
+  statusWriter = pkgs.writeShellScript "gjallar-management-status" ''
     set -eu
     install -d -m 0700 /var/lib/gjallarOS
-    response=/var/lib/jods-mdm-agent/bootstrap-response.json
+    response=/var/lib/mdm-agent/bootstrap-response.json
     state='enrollment submitted'
     result="''${SERVICE_RESULT:-success}"
     code="''${EXIT_STATUS:-0}"
@@ -31,16 +41,16 @@ let
         blocked) state='enrollment blocked' ;;
       esac
     fi
-    printf '%s\n' "$state" > /var/lib/gjallarOS/jods-status.txt
-    chmod 0644 /var/lib/gjallarOS/jods-status.txt
+    printf '%s\n' "$state" > /var/lib/gjallarOS/management-status.txt
+    chmod 0644 /var/lib/gjallarOS/management-status.txt
   '';
   statusCommand = pkgs.writeShellApplication {
-    name = "gjallar-jods-status";
+    name = "gjallar-management-status";
     runtimeInputs = [ pkgs.jq ];
     text = ''
       set -euo pipefail
-      status=/var/lib/gjallarOS/jods-status.txt
-      response=/var/lib/jods-mdm-agent/bootstrap-response.json
+      status=/var/lib/gjallarOS/management-status.txt
+      response=/var/lib/mdm-agent/bootstrap-response.json
       if [ -r "$status" ]; then
         printf 'JODS: '
         cat "$status"
@@ -56,7 +66,7 @@ in
 {
   imports = [ ];
 
-  services.jods-mdm-agent = lib.mkIf enabled {
+  services.mdm-agent = lib.mkIf enabled {
     enable = true;
     endpoint = settings.management.endpoint;
     policySigningPublicKey = settings.management.policySigningPublicKey;
@@ -68,21 +78,22 @@ in
     allowInsecureTls = settings.management.allowInsecureTls;
     deviceClass = settings.management.deviceClass;
     desktopProfile = settings.management.desktopProfile;
+    inherit osRelease;
   };
   environment.systemPackages = lib.optionals enabled [ statusCommand ];
 
-  systemd.services.jods-mdm-agent-enroll = lib.mkIf enabled {
+  systemd.services.mdm-agent-enroll = lib.mkIf enabled {
     wantedBy = lib.mkForce [ ];
     unitConfig = {
       ConditionPathExists = "/var/lib/gjallarOS/installation-complete";
-      ConditionPathExistsGlob = "!/var/lib/gjallarOS/jods-enrollment-complete";
+      ConditionPathExistsGlob = "!/var/lib/gjallarOS/management-enrollment-complete";
     };
     serviceConfig = {
       UMask = "0077";
       ExecStopPost = statusWriter;
-      ExecStartPost = pkgs.writeShellScript "gjallar-jods-mark-enrolled" ''
-        response=/var/lib/jods-mdm-agent/bootstrap-response.json
-        marker=/var/lib/gjallarOS/jods-enrollment-complete
+      ExecStartPost = pkgs.writeShellScript "gjallar-management-mark-enrolled" ''
+        response=/var/lib/mdm-agent/bootstrap-response.json
+        marker=/var/lib/gjallarOS/management-enrollment-complete
 
         if [ -s "$response" ]; then
           status="$(${pkgs.jq}/bin/jq -r '.data.status // empty' "$response" 2>/dev/null || true)"
@@ -98,14 +109,18 @@ in
 
     };
   };
-  systemd.timers.jods-mdm-agent-enroll.wantedBy = lib.mkIf enabled (lib.mkForce [ ]);
+  systemd.timers.mdm-agent-enroll.wantedBy = lib.mkIf enabled (lib.mkForce [ ]);
 
   systemd.tmpfiles.rules = lib.optionals enabled [
-    "d /var/lib/jods-mdm-agent 0700 root root - -"
+    "d /var/lib/mdm-agent 0700 root root - -"
     "d /var/lib/gjallarOS 0700 root root - -"
   ];
 
   assertions = lib.optionals enabled [
+    {
+      assertion = lib.elem cfg.contract.version supportedContractVersions;
+      message = "The pinned JODS agent implements device contract version ${toString cfg.contract.version}; this gjallarOS supports ${lib.concatMapStringsSep ", " toString supportedContractVersions}. Pin a JODS commit with a supported contract, or update gjallarOS.";
+    }
     {
       assertion = builtins.match "https://.+" settings.management.endpoint != null;
       message = "Managed JODS endpoints must use HTTPS.";

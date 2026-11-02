@@ -46,7 +46,7 @@ func TestJODSEnrollmentStartsOnlyAfterSuccessfulInstallation(t *testing.T) {
 		t.Fatal(err)
 	}
 	joined := fmt.Sprint(calls)
-	if !strings.Contains(joined, "jods-mdm-agent-enroll.service") || !strings.Contains(joined, "jods-mdm-agent-enroll.timer") {
+	if !strings.Contains(joined, "mdm-agent-enroll.service") || !strings.Contains(joined, "mdm-agent-enroll.timer") {
 		t.Fatalf("successful installation did not activate enrollment lifecycle: %v", calls)
 	}
 }
@@ -391,7 +391,7 @@ func TestCollectRecoverySkipsPartitionWithoutSecureBoot(t *testing.T) {
 	}
 }
 
-// A fresh disk without GjallarOS Secure Boot got JODS-RECOVERY anyway: the
+// A fresh disk without GjallarOS Secure Boot got a recovery partition anyway: the
 // plan followed the boot entry answer, not the partition answer.
 func TestFreshDiskGetsRecoveryPartitionOnlyWhenChosen(t *testing.T) {
 	var output bytes.Buffer

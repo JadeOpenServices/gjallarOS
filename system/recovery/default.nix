@@ -136,7 +136,7 @@ lib.mkMerge [
       '';
     }
     // lib.optionalAttrs settings.management.enable {
-      services.jods-mdm-agent.recoveryExecutorEnable = true;
+      services.mdm-agent.recoveryExecutorEnable = true;
     };
   })
 
@@ -336,7 +336,7 @@ lib.mkMerge [
           sync
 
           printf '%s\n' \
-            "PASS: exact 12 GiB JODS-RECOVERY provisioned" \
+            "PASS: exact 12 GiB recovery partition provisioned" \
             "PASS: installed root was serviced only at /mnt" \
             "PASS: maintenance credential removed" \
             "Rebooting to the normal GjallarOS boot path..."

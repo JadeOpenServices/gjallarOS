@@ -73,13 +73,13 @@ func testPlan(withRecovery bool) diskplan.Plan {
 		plan.Recovery = &diskplan.Partition{
 			Role:      diskplan.RoleRecovery,
 			Number:    3,
-			Label:     "JODS-RECOVERY",
+			Label:     "GJALLAR-RECOVERY",
 			TypeGUID:  xbootldrType,
 			PARTUUID:  testRecPARTUUID,
 			SizeBytes: 12 * 1024 * 1024 * 1024,
 			Filesystem: diskplan.Filesystem{
 				Type:  "vfat",
-				Label: "JODS-RECOVERY",
+				Label: "GJALLAR-REC",
 			},
 			MountPoint: "/recovery",
 		}

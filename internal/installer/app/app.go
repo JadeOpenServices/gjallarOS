@@ -34,6 +34,7 @@ import (
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/deviceprofilecache"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/discovery"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/diskcrypto"
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/diskplan"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/firefoxstore"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/firmware"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/flakesource"
@@ -1329,11 +1330,11 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 
 			if maintenanceRequired {
 				// The maintenance boot already ran for this transaction and
-				// still left no JODS-RECOVERY; another one would loop.
+				// still left no recovery partition; another one would loop.
 				if os.Getenv("GJALLAR_INSTALLER_RESUME_STATE") == installerresume.StateMaintenanceReboot {
 					return fail(
 						errOut,
-						errors.New("recovery-storage maintenance did not provision JODS-RECOVERY; automatic retry disabled"),
+						errors.New("recovery-storage maintenance did not provision the recovery partition; automatic retry disabled"),
 					)
 				}
 
@@ -1342,7 +1343,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 					"PASS: one-shot recovery-storage maintenance environment installed",
 				)
 
-				// The rerun after maintenance formats and fills JODS-RECOVERY
+				// The rerun after maintenance formats and fills the recovery partition
 				// and finishes Secure Boot; it stopped here before (e2e-target,
 				// 2026-10-05). It runs without a terminal, so only presets
 				// continue on their own.
@@ -1636,10 +1637,10 @@ func activateJODSEnrollment(ctx context.Context, installationSucceeded bool) err
 	if err := runJODSCommand(ctx, "sudo", "install", "-m", "0600", "/dev/null", "/var/lib/gjallarOS/installation-complete"); err != nil {
 		return fmt.Errorf("mark installation complete: %w", err)
 	}
-	if err := runJODSCommand(ctx, "sudo", "systemctl", "start", "jods-mdm-agent-enroll.service"); err != nil {
+	if err := runJODSCommand(ctx, "sudo", "systemctl", "start", "mdm-agent-enroll.service"); err != nil {
 		return fmt.Errorf("submit JODS enrollment: %w", err)
 	}
-	if err := runJODSCommand(ctx, "sudo", "systemctl", "enable", "--now", "jods-mdm-agent-enroll.timer"); err != nil {
+	if err := runJODSCommand(ctx, "sudo", "systemctl", "enable", "--now", "mdm-agent-enroll.timer"); err != nil {
 		return fmt.Errorf("enable JODS enrollment retry timer: %w", err)
 	}
 	return nil
@@ -2022,7 +2023,7 @@ func collectInteractive(ctx context.Context, ui prompt.UI, root string, partitio
 // nothing checks it before it starts.
 const noRecoveryPartitionNotice = "No recovery partition: it needs GjallarOS Secure Boot, which is off for this install. The disk is not shrunk."
 
-// freshRecoveryPartition says whether a fresh disk gets JODS-RECOVERY. The
+// freshRecoveryPartition says whether a fresh disk gets a recovery partition. The
 // boot entry alone needs no partition; the partition comes only with
 // GjallarOS Secure Boot (collectRecovery).
 func freshRecoveryPartition(u config.User) bool {
@@ -3105,7 +3106,7 @@ func prepareInstalledRecoveryStorage(
 		s.recoveryPartition = present.Partition
 		fmt.Fprintf(
 			out,
-			"PASS: JODS-RECOVERY already present at %s; no storage changes were made\n",
+			"PASS: recovery partition already present at %s; no storage changes were made\n",
 			present.Partition,
 		)
 		return false, nil
@@ -3139,7 +3140,7 @@ func prepareInstalledRecoveryStorage(
 		s.recoveryPartition = result.RecoveryPartition
 		fmt.Fprintf(
 			out,
-			"PASS: existing encrypted-Btrfs layout has exact 12 GiB JODS-RECOVERY at %s\n",
+			"PASS: existing encrypted-Btrfs layout has an exact 12 GiB recovery partition at %s\n",
 			result.RecoveryPartition,
 		)
 		return false, nil
@@ -3181,16 +3182,13 @@ func prepareInstalledRecoveryStorage(
 }
 
 var findRecoveryPartition = func(ctx context.Context) string {
-	out, err := exec.CommandContext(ctx, "lsblk", "-pnro", "PATH,PARTLABEL,LABEL").Output()
+	out, err := exec.CommandContext(ctx, "lsblk", "-pnro", "PATH,PARTLABEL").Output()
 	if err != nil {
 		return ""
 	}
 	for _, line := range strings.Split(string(out), "\n") {
 		fields := strings.Fields(line)
-		if len(fields) >= 2 && (fields[1] == "JODS-RECOVERY" || fields[1] == "JODSRECOV") {
-			return fields[0]
-		}
-		if len(fields) >= 3 && fields[2] == "JODSRECOV" {
+		if len(fields) >= 2 && fields[1] == diskplan.RecoveryPartLabel {
 			return fields[0]
 		}
 	}
@@ -3220,7 +3218,7 @@ func provisionRecoveryPartition(ctx context.Context, root string, s state) error
 		}
 		s.recoveryPartition = findRecoveryPartition(ctx)
 		if s.recoveryPartition == "" {
-			return errors.New("recovery partition creation completed but JODS-RECOVERY was not detected")
+			return errors.New("recovery partition creation completed but the partition was not detected")
 		}
 	}
 	// The recovery configuration imports untracked generated/state.nix, so a

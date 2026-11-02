@@ -256,7 +256,7 @@ func run(
 	if errors.As(err, &present) {
 		fmt.Fprintf(
 			out,
-			"PASS: JODS-RECOVERY already present at %s; no storage changes were made\n",
+			"PASS: recovery partition already present at %s; no storage changes were made\n",
 			present.Partition,
 		)
 	} else if err := provision(ctx, runner, out, topology, plan, secret); err != nil {
@@ -280,7 +280,7 @@ func run(
 			stateDir,
 			"recovery-maintenance-complete",
 		),
-		[]byte("JODS-RECOVERY ready\n"),
+		[]byte("recovery partition ready\n"),
 		0600,
 	); err != nil {
 		return fmt.Errorf(
@@ -333,7 +333,7 @@ func provision(
 	case recoveryprovision.StatusReady:
 		fmt.Fprintf(
 			out,
-			"PASS: exact 12 GiB JODS-RECOVERY ready at %s\n",
+			"PASS: exact 12 GiB recovery partition ready at %s\n",
 			prepared.RecoveryPartition,
 		)
 

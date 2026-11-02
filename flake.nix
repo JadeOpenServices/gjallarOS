@@ -468,7 +468,7 @@
           ]
           ++ nixpkgs.lib.optionals (settings.management.enable or false) [
             ./system/management/jods
-            "${inputs.jods}/nix/modules/jods-mdm-agent.nix"
+            "${inputs.jods}/nix/modules/mdm-agent.nix"
           ];
 
           specialArgs = {

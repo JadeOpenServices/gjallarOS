@@ -137,7 +137,7 @@ func ExecuteMaintenance(
 
 	fmt.Fprintf(
 		input.Out,
-		"PASS: exact 12 GiB JODS-RECOVERY ready at %s\n",
+		"PASS: exact 12 GiB recovery partition ready at %s\n",
 		gpt.PartitionPath,
 	)
 
