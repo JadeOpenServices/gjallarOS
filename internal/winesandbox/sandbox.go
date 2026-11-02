@@ -51,9 +51,12 @@ type Tool struct {
 	Env []string
 }
 
-// wineDLLOverrides matches apps/wine/home.nix, and stops Wine from writing
-// menu entries.
-const wineDLLOverrides = "winhttp=n,b;d3dcompiler_47=n,b;d3dcompiler_43=n,b;dxgi=n,b;d3d11=n,b;d3d10core=n,b;d3d9=n,b;winemenubuilder.exe=d"
+// wineDLLOverrides prefers the publisher's winhttp and shader compilers,
+// and stops Wine from writing menu entries. DXVK's libraries are not in
+// it: Wine takes this variable over the prefix's registry, so naming them
+// here would keep a fix (dxvk_off) from switching DXVK off. The base
+// prefix sets them to native in the registry (apps/wine/home.nix).
+const wineDLLOverrides = "winhttp=n,b;d3dcompiler_47=n,b;d3dcompiler_43=n,b;winemenubuilder.exe=d"
 
 // wineDebug keeps Wine's err lines for libraries (module) and .NET
 // (mscoree), and drops every other channel.

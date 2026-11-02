@@ -3,6 +3,21 @@
   "source": "winetricks 20260125 with the pkgs/gjallar-winetricks changes",
   "fixes": [
     {
+      "id": "dxvk_off",
+      "title": "Direct3D 8-11 without DXVK",
+      "kind": "safe",
+      "why": "sets d3d8, d3d9, d3d10core, d3d11 and dxgi to Wine's own, which draw with OpenGL, for a GPU without Vulkan 1.3; Direct3D 12 still needs Vulkan",
+      "dlls": [],
+      "actions": [
+        { "do": "dll_override", "dll": "d3d8", "mode": "builtin" },
+        { "do": "dll_override", "dll": "d3d9", "mode": "builtin" },
+        { "do": "dll_override", "dll": "d3d10core", "mode": "builtin" },
+        { "do": "dll_override", "dll": "d3d11", "mode": "builtin" },
+        { "do": "dll_override", "dll": "dxgi", "mode": "builtin" }
+      ],
+      "files": []
+    },
+    {
       "id": "vcrun2005",
       "title": "Visual C++ 2005 runtime",
       "kind": "offer",

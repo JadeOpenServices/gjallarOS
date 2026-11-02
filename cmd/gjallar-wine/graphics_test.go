@@ -4,8 +4,11 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
+
+	"github.com/JadeOpenServices/gjallarOS/internal/winefix"
 )
 
 // vulkaninfo 1.4.341 --summary on a Framework 13 with an AMD 780M,
@@ -115,6 +118,7 @@ func TestGPUs(t *testing.T) {
 	}
 }
 
+// SYNTHETIC devices, apart from the fw13 vulkaninfo sample.
 func TestGraphicsLines(t *testing.T) {
 	amd := gpu{card: "card1", vendor: "0x1002", driver: "amdgpu", bootVGA: true}
 	nv := gpu{card: "card0", vendor: "0x10de", driver: "nvidia"}
@@ -126,27 +130,34 @@ func TestGraphicsLines(t *testing.T) {
 		devs  []vkDevice
 		verr  error
 		nt    ntsync
+		off   bool
 		has   []string
 		not   []string
 	}{
-		{"fw13", []gpu{amd}, devs, nil, ntsyncNotLoaded,
+		{"fw13", []gpu{amd}, devs, nil, ntsyncNotLoaded, false,
 			[]string{"GPU card1: AMD, driver amdgpu, shows the start screen", "Vulkan 1.3: AMD Radeon 780M Graphics (RADV PHOENIX) has it", "module that is not loaded"},
-			[]string{"shows no Vulkan", "GPUs;"}},
-		{"nvidia not in sandbox", []gpu{amd, nv}, devs, nil, ntsyncOn,
+			[]string{"shows no Vulkan", "GPUs;", "dxvk_off"}},
+		{"fw13 with dxvk_off", []gpu{amd}, devs, nil, ntsyncNotLoaded, true,
+			[]string{"The app has dxvk_off", "gjallarctl wine undo demo takes it back"},
+			[]string{"wine fix demo dxvk_off"}},
+		{"nvidia not in sandbox", []gpu{amd, nv}, devs, nil, ntsyncOn, false,
 			[]string{"This device has 2 GPUs", "GPU card0 (NVIDIA, driver nvidia) shows no Vulkan", "does not pass it in yet"},
 			nil},
-		{"software only", []gpu{{card: "card0", vendor: "0x1af4", driver: "virtio-pci"}}, soft, nil, ntsyncNone,
+		{"software only", []gpu{{card: "card0", vendor: "0x1af4", driver: "virtio-pci"}}, soft, nil, ntsyncNone, false,
 			[]string{"Only software Vulkan", "GPU card0 (virtio, driver virtio-pci) shows no Vulkan", "not in this kernel"},
-			[]string{"has it."}},
-		{"no vulkan", []gpu{amd}, nil, errors.New("vulkaninfo ended with code 1"), ntsyncNone,
-			[]string{"none seen (vulkaninfo ended with code 1)", "No GPU with Vulkan 1.3"},
-			nil},
-		{"old driver", []gpu{amd}, []vkDevice{{name: "old", api: "1.2.199", kind: "INTEGRATED_GPU", vendor: "0x1002"}}, nil, ntsyncNone,
-			[]string{"No GPU with Vulkan 1.3"},
+			[]string{"has it.", "dxvk_off"}},
+		{"no vulkan", []gpu{amd}, nil, errors.New("vulkaninfo ended with code 1"), ntsyncNone, false,
+			[]string{"none seen (vulkaninfo ended with code 1)", "No GPU with Vulkan 1.3", "gjallarctl wine fix demo dxvk_off makes"},
+			[]string{"The app has"}},
+		{"old driver", []gpu{amd}, []vkDevice{{name: "old", api: "1.2.199", kind: "INTEGRATED_GPU", vendor: "0x1002"}}, nil, ntsyncNone, false,
+			[]string{"No GPU with Vulkan 1.3", "wine fix demo dxvk_off"},
 			[]string{"shows no Vulkan"}},
+		{"old driver with dxvk_off", []gpu{amd}, []vkDevice{{name: "old", api: "1.2.199", kind: "INTEGRATED_GPU", vendor: "0x1002"}}, nil, ntsyncNone, true,
+			[]string{"No GPU with Vulkan 1.3", "The app has dxvk_off"},
+			[]string{"wine fix demo dxvk_off"}},
 	}
 	for _, c := range cases {
-		text := strings.Join(graphicsLines(c.cards, c.devs, c.verr, c.nt), "\n")
+		text := strings.Join(graphicsLines("demo", c.off, c.cards, c.devs, c.verr, c.nt), "\n")
 		for _, s := range c.has {
 			if !strings.Contains(text, s) {
 				t.Errorf("%s: missing %q in\n%s", c.name, s, text)
@@ -157,5 +168,31 @@ func TestGraphicsLines(t *testing.T) {
 				t.Errorf("%s: has %q in\n%s", c.name, s, text)
 			}
 		}
+	}
+}
+
+// dxvkOff is a row of the shipped table that only sets Direct3D 8 to 11
+// to Wine's own libraries and downloads nothing.
+func TestDXVKOffRow(t *testing.T) {
+	tab, err := winefix.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, _ := tab.Find(dxvkOff)
+	if f == nil {
+		t.Fatalf("no %s row", dxvkOff)
+	}
+	if f.Kind != winefix.KindSafe || len(f.Files) != 0 || len(f.DLLs) != 0 {
+		t.Errorf("%s = %+v, want a safe row without downloads or libraries", dxvkOff, f)
+	}
+	var dlls []string
+	for _, a := range f.Actions {
+		if a.Do != winefix.DoDLLOverride || a.Mode != "builtin" {
+			t.Errorf("action %+v is not a builtin override", a)
+		}
+		dlls = append(dlls, a.DLL)
+	}
+	if want := []string{"d3d8", "d3d9", "d3d10core", "d3d11", "dxgi"}; !slices.Equal(dlls, want) {
+		t.Errorf("libraries %q, want %q", dlls, want)
 	}
 }

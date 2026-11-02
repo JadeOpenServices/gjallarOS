@@ -202,7 +202,7 @@ func doctorCmd(args []string, stdout, stderr io.Writer) error {
 	if err := reportStart(paths, id, a, tab, stdout); err != nil {
 		return err
 	}
-	reportGraphics(id, stdout)
+	reportGraphics(id, a, stdout)
 	return nil
 }
 
