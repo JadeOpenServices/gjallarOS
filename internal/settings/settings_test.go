@@ -156,6 +156,19 @@ func TestPlanDeveloperModeWaitsOnlyWhenTurnedOn(t *testing.T) {
 	}
 }
 
+func TestPlanAArch64EmulationWaitsOnlyWhenTurnedOn(t *testing.T) {
+	user := defaults(t)
+	change, err := Plan(configText(t, user), raw(map[string]string{"aarch64Emulation": `true`}))
+	if err != nil || change.Tier != config.TierSecurity {
+		t.Fatalf("emulation on: %s %v", change.Tier, err)
+	}
+	user.AArch64Emulation = true
+	change, err = Plan(configText(t, user), raw(map[string]string{"aarch64Emulation": `false`}))
+	if err != nil || change.Tier != config.TierEveryday {
+		t.Fatalf("emulation off: %s %v", change.Tier, err)
+	}
+}
+
 func TestPlanReadsDefaultsOfKeysAnOlderFileLacks(t *testing.T) {
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(configText(t, defaults(t)), &fields); err != nil {

@@ -110,6 +110,7 @@ type Settings struct {
 	PenTabletEnable, OrientationSensorEnable                                                bool
 	ClamshellEnable, USBGuardEnable, USBTrustEnforce, PrintingEnable, NetworkPrintingEnable bool
 	ConsoleLoginEnable, USBReviewTechnical, DolphinDriveUsage, FirmwareFlashReadEntry       bool
+	AArch64Emulation                                                                        bool
 	USBTrustTPMHandle                                                                       string
 	USBTrustLapseDays                                                                       int
 	SnapshotsEnable, FirewallEnable, VirusScanEnable                                        bool
@@ -179,6 +180,7 @@ func FromUser(user config.User) Settings {
 		PrintingEnable:                      user.PrintingEnable,
 		NetworkPrintingEnable:               user.NetworkPrintingEnable,
 		DolphinDriveUsage:                   user.DolphinDriveUsage,
+		AArch64Emulation:                    user.AArch64Emulation,
 		FirmwareFlashReadEntry:              user.FirmwareFlashReadEntry,
 		Name:                                user.Name,
 		Email:                               user.Email,
@@ -274,6 +276,7 @@ var userIntentKeys = []string{
 	"firewallEnable",
 	"virusScanEnable",
 	"dolphinDriveUsage",
+	"aarch64Emulation",
 	"firmwareFlashReadEntry",
 	"snapshotsEnable",
 	"snapshotsKeepHours",
@@ -562,6 +565,7 @@ func Render(s Settings) []byte {
 	boolean("firewallEnable", s.FirewallEnable)
 	boolean("virusScanEnable", s.VirusScanEnable)
 	boolean("dolphinDriveUsage", s.DolphinDriveUsage)
+	boolean("aarch64Emulation", s.AArch64Emulation)
 	boolean("firmwareFlashReadEntry", s.FirmwareFlashReadEntry)
 	boolean("snapshotsEnable", s.SnapshotsEnable)
 	integer("snapshotsKeepHours", s.SnapshotsKeepHours)

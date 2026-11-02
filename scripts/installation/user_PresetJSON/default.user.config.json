@@ -99,6 +99,7 @@
   "firewallEnable": true,
   "virusScanEnable": true,
   "dolphinDriveUsage": false,
+  "aarch64Emulation": false,
   "firmwareFlashReadEntry": false,
   "nextcloudEnable": false,
   "nextcloudHost": "",

@@ -111,6 +111,7 @@ var presetSchema = map[string]presetValueType{
 	"timezone": presetString, "locale": presetString, "keyboardLayout": presetString, "keyboardVariant": presetString,
 	"touchpadWorkspaceSwipe": presetBool, "clamshellEnable": presetBool, "consoleLoginEnable": presetBool, "usbguardEnable": presetBool, "usbTrustEnforce": presetBool, "usbTrustTpmHandle": presetString, "usbTrustLapseDays": presetInt, "snapshotsEnable": presetBool, "snapshotsKeepHours": presetInt, "snapshotsKeepDays": presetInt, "usbReviewTechnicalView": presetBool, "printingEnable": presetBool, "networkPrintingEnable": presetBool, "firewallEnable": presetBool, "virusScanEnable": presetBool,
 	"dolphinDriveUsage":         presetBool,
+	"aarch64Emulation":          presetBool,
 	"firmwareFlashReadEntry":    presetBool,
 	"allowUnvalidatedODDCModel": presetBool,
 	"developerMode":             presetBool,

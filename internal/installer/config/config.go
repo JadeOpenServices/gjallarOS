@@ -45,6 +45,7 @@ type User struct {
 	FirewallEnable         bool                   `json:"firewallEnable" tier:"security" scope:"device"`
 	VirusScanEnable        bool                   `json:"virusScanEnable" tier:"security" scope:"device"`
 	DolphinDriveUsage      bool                   `json:"dolphinDriveUsage" tier:"everyday"`
+	AArch64Emulation       bool                   `json:"aarch64Emulation" tier:"security" scope:"device"` // qemu-user runs aarch64 programs; one device only
 	FirmwareFlashReadEntry bool                   `json:"firmwareFlashReadEntry" tier:"critical" scope:"device"`
 	SnapshotsEnable        bool                   `json:"snapshotsEnable" tier:"security" scope:"device"`
 	SnapshotsKeepHours     int                    `json:"snapshotsKeepHours" tier:"security" scope:"device"`
