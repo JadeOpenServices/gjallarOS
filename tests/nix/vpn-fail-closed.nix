@@ -253,8 +253,15 @@ pkgs.testers.runNixOSTest {
         client.succeed(
             "mkdir -p /run/systemd/system/tailscaled.service.d"
             " && printf '[Service]\\nExecStartPre=/run/current-system/sw/bin/false\\nRestart=no\\n' > /run/systemd/system/tailscaled.service.d/down.conf"
-            " && systemctl daemon-reload && systemctl stop tailscaled.service"
+            " && systemctl daemon-reload"
         )
+        # Restart, not stop: tailscaled writes its state file on the way
+        # down, the path unit starts gjallar-vpn-trust, and the start job
+        # it pulls in for tailscaled replaces a stop job ("canceled"). It
+        # merges into a restart job, which then fails on the drop-in. The
+        # trust unit may try again; with the drop-in it never gets active.
+        client.fail("systemctl restart tailscaled.service")
+        client.fail("systemctl is-active --quiet tailscaled.service")
         v = apply()
         assert v["blocked"] == "tailscale-down", v
         client.fail(internet)
