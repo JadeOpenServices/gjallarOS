@@ -48,6 +48,7 @@ type LUN struct {
 	Port      string // USB device name, e.g. 1-1
 	DevNum    string // changes on every replug
 	VIDPID    string
+	Serial    string // USB serial number, empty when the device has none
 	Product   string
 	Vendor    string // SCSI vendor string, e.g. "SAMSUNG" for a disk in a dock
 	Model     string // SCSI model string, e.g. "SD/MMC" on a card reader
@@ -121,10 +122,15 @@ type Gate struct {
 	Probe     Probe
 	// Event receives audit events; it may be nil.
 	Event func(map[string]any)
-	// Kept returns the USB ports whose mounted medium the first arming kept
-	// open. Nil, or a nil result, keeps nothing: a boot or a broker restart
-	// closes every medium.
+	// Kept returns the USB ports whose mounted medium the first arming, or
+	// the record after a broker restart (see Reclaim), kept open. Nil, or a
+	// nil result, keeps nothing: a boot closes every medium.
 	Kept func() map[string]bool
+	// Record is the file that lists the open media, so a broker restart
+	// keeps the ones still mounted (see Reclaim). It must sit in a root-only
+	// directory that survives a broker restart but not a reboot. Empty keeps
+	// no record.
+	Record string
 
 	// writeFile replaces sysfs writes in tests.
 	writeFile func(path, value string) error
@@ -136,6 +142,11 @@ type Gate struct {
 	// succeeded, so luns holds every medium in a gated reader.
 	listed bool
 	luns   map[string]*state
+	// reclaimed holds the media Reclaim found unchanged since the record
+	// was written; the first enforcing poll keeps only those open.
+	reclaimed map[string]openMedium
+	// saved is the record content last written.
+	saved []byte
 }
 
 // Sync applies one poll. While enforcing, every gated LUN stays unbound unless
@@ -149,13 +160,17 @@ func (g *Gate) Sync(enforcing bool) error {
 		g.luns = map[string]*state{}
 	}
 	var kept map[string]bool
-	if enforcing && (!g.started || !g.enforcing) && g.Kept != nil {
-		kept = g.Kept()
-	}
+	var reclaimed map[string]openMedium
 	if !g.started || enforcing != g.enforcing {
+		if enforcing && g.Kept != nil {
+			kept = g.Kept()
+		}
 		if err := g.write("bus/scsi/drivers_autoprobe", boolText(!enforcing)); err != nil {
 			return err
 		}
+		// Reclaim answers for the first poll only: a later arming keeps
+		// what is mounted then.
+		reclaimed, g.reclaimed = g.reclaimed, nil
 		g.started, g.enforcing, g.listed = true, enforcing, false
 		clear(g.luns)
 	}
@@ -165,7 +180,8 @@ func (g *Gate) Sync(enforcing bool) error {
 	}
 	g.listed = true
 	if !enforcing {
-		var errs []error
+		// Nothing is gated, so nothing is open by the owner's choice.
+		errs := []error{g.save()}
 		for _, lun := range luns {
 			if lun.Driver == "" {
 				errs = append(errs, g.bind(lun.ID))
@@ -191,13 +207,21 @@ func (g *Gate) Sync(enforcing bool) error {
 			g.luns[lun.ID] = st
 		}
 		st.lun = lun
-		errs = append(errs, g.step(st, kept[lun.Port] && lun.Driver != "" && lun.InUse))
+		keepOpen := kept[lun.Port] && lun.Driver != "" && lun.InUse
+		if keepOpen && reclaimed != nil {
+			// After a broker restart only the media the record still
+			// matches stay open, not everything mounted on the port.
+			medium, ok := reclaimed[lun.ID]
+			keepOpen = ok && medium.matches(lun)
+		}
+		errs = append(errs, g.step(st, keepOpen))
 	}
 	for id := range g.luns {
 		if !seen[id] {
 			delete(g.luns, id)
 		}
 	}
+	errs = append(errs, g.save())
 	return errors.Join(errs...)
 }
 
@@ -497,6 +521,7 @@ func (g *Gate) scan() ([]LUN, error) {
 			Port:    filepath.Base(usbDev),
 			DevNum:  readTrim(filepath.Join(usbDev, "devnum")),
 			VIDPID:  readTrim(filepath.Join(usbDev, "idVendor")) + ":" + readTrim(filepath.Join(usbDev, "idProduct")),
+			Serial:  readTrim(filepath.Join(usbDev, "serial")),
 			Product: readTrim(filepath.Join(usbDev, "product")),
 			Vendor:  readTrim(filepath.Join(real, "vendor")),
 			Model:   readTrim(filepath.Join(real, "model")),

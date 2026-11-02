@@ -546,3 +546,136 @@ func TestCardKind(t *testing.T) {
 		}
 	}
 }
+
+// openedCard makes a mounted card in USB device 1-1 that the owner allowed,
+// on a gate that keeps a record. It returns the LUN's sysfs directory.
+func openedCard(t *testing.T) (*Gate, *fakeKernel, fakeProbe, string) {
+	t.Helper()
+	g, k, probe := newGate(t)
+	g.Record = filepath.Join(t.TempDir(), "media-kept.json")
+	real := k.add("6:0:0:0", true, true, 0, "5")
+	mustWrite(t, filepath.Join(real, "../../../../serial"), "EXAMPLE-SERIAL-1")
+	mustWrite(t, filepath.Join(real, "block/sdb/dev"), "8:16")
+	mustWrite(t, filepath.Join(real, "block/sdb/diskseq"), "9")
+	mustWrite(t, filepath.Join(real, "block/sdb/sdb1/dev"), "8:17")
+	probe["6:0:0:0"] = MediumPresent
+	if err := g.Sync(true); err != nil {
+		t.Fatal(err)
+	}
+	id, token, _ := only(t, g)
+	if err := g.AllowMedia(id, token); err != nil {
+		t.Fatal(err)
+	}
+	mustWrite(t, g.MountInfo, "40 1 8:17 / /run/media/user/card rw - vfat /dev/sdb1 rw")
+	if err := g.Sync(true); err != nil {
+		t.Fatal(err)
+	}
+	return g, k, probe, real
+}
+
+// restartedGate is the gate of a new broker process on the same machine.
+// keep stands in for the controller: it keeps whatever port it is told.
+func restartedGate(old *Gate, keep map[string]bool) *Gate {
+	return &Gate{Sysfs: old.Sysfs, MountInfo: old.MountInfo, Probe: old.Probe, Record: old.Record,
+		writeFile: old.writeFile, Kept: func() map[string]bool { return keep }}
+}
+
+// Plane 299: a broker restart keeps a medium the owner opened when it is
+// still mounted and unchanged.
+func TestRestartKeepsRecordedMedium(t *testing.T) {
+	g, k, _, _ := openedCard(t)
+	info, err := os.Stat(g.Record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Fatalf("record mode %v", info.Mode().Perm())
+	}
+	media, err := readRecord(g.Record)
+	if err != nil || len(media) != 1 || media["6:0:0:0"].DiskSeq != "9" || media["6:0:0:0"].Serial != "EXAMPLE-SERIAL-1" {
+		t.Fatalf("record = %+v, %v", media, err)
+	}
+
+	next := restartedGate(g, nil)
+	ports := next.Reclaim()
+	if len(ports) != 1 || !ports["1-1"] {
+		t.Fatalf("reclaimed ports: %v", ports)
+	}
+	next.Kept = func() map[string]bool { return ports }
+	if err := next.Sync(true); err != nil {
+		t.Fatal(err)
+	}
+	if !k.bound("6:0:0:0") {
+		t.Fatal("restart pulled a recorded, mounted card")
+	}
+	if _, _, allowed := only(t, next); !allowed {
+		t.Fatal("kept card is not listed as open")
+	}
+}
+
+func TestRestartClosesChangedMedium(t *testing.T) {
+	for name, change := range map[string]func(t *testing.T, g *Gate, k *fakeKernel, real string){
+		"other medium": func(t *testing.T, g *Gate, k *fakeKernel, real string) {
+			mustWrite(t, filepath.Join(real, "block/sdb/diskseq"), "10")
+		},
+		"other serial": func(t *testing.T, g *Gate, k *fakeKernel, real string) {
+			mustWrite(t, filepath.Join(real, "../../../../serial"), "EXAMPLE-SERIAL-2")
+		},
+		"replugged": func(t *testing.T, g *Gate, k *fakeKernel, real string) {
+			mustWrite(t, filepath.Join(real, "../../../../devnum"), "6")
+		},
+		"unmounted": func(t *testing.T, g *Gate, k *fakeKernel, real string) {
+			mustWrite(t, g.MountInfo, "")
+		},
+		"record readable by others": func(t *testing.T, g *Gate, k *fakeKernel, real string) {
+			if err := os.Chmod(g.Record, 0o644); err != nil {
+				t.Fatal(err)
+			}
+		},
+		"record is a link": func(t *testing.T, g *Gate, k *fakeKernel, real string) {
+			moved := g.Record + ".real"
+			if err := os.Rename(g.Record, moved); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(moved, g.Record); err != nil {
+				t.Fatal(err)
+			}
+		},
+		"record has extra fields": func(t *testing.T, g *Gate, k *fakeKernel, real string) {
+			data, _ := os.ReadFile(g.Record)
+			data = []byte(strings.Replace(string(data), `"version":1`, `"version":1,"keepAll":true`, 1))
+			if err := os.WriteFile(g.Record, data, 0o600); err != nil {
+				t.Fatal(err)
+			}
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			g, k, _, real := openedCard(t)
+			change(t, g, k, real)
+			// The controller keeps the port anyway: the gate must still
+			// close a medium the record does not match.
+			next := restartedGate(g, map[string]bool{"1-1": true})
+			if ports := next.Reclaim(); len(ports) != 0 {
+				t.Fatalf("reclaimed ports: %v", ports)
+			}
+			next.Sync(true)
+			if k.bound("6:0:0:0") {
+				t.Fatal("restart kept a changed medium open")
+			}
+		})
+	}
+}
+
+func TestRecordEmptiedWhenClosed(t *testing.T) {
+	g, _, probe, _ := openedCard(t)
+	probe["6:0:0:0"] = MediumAbsent
+	g.Sync(true)
+	if media, err := readRecord(g.Record); err != nil || len(media) != 0 {
+		t.Fatalf("record after removal = %+v, %v", media, err)
+	}
+	g, _, _, _ = openedCard(t)
+	g.Sync(false)
+	if media, err := readRecord(g.Record); err != nil || len(media) != 0 {
+		t.Fatalf("record without enforcement = %+v, %v", media, err)
+	}
+}
