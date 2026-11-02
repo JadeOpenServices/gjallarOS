@@ -250,6 +250,18 @@ func launch(id string, program, args []string, stderr io.Writer) (int, error) {
 
 	prog := exec.CommandContext(ctx, nsenterPath, append(ns, box.Args(append(slices.Clone(program), args...))...)...)
 	prog.Stdout, prog.Stderr = os.Stdout, os.Stderr
+	// gjallarctl wine doctor reads Wine's own lines from this log. The app
+	// starts without it when it cannot be made.
+	if log, err := winesandbox.OpenStartLog(box.Home, id); err != nil {
+		fmt.Fprintf(stderr, "NOTE: no start log this time, so gjallarctl wine doctor %s will not see this start: %v\n", id, err)
+	} else {
+		defer func() {
+			if err := log.Close(); err != nil {
+				fmt.Fprintf(stderr, "NOTE: the start log stopped early: %v\n", err)
+			}
+		}()
+		prog.Stdout, prog.Stderr = log.Stream(os.Stdout), log.Stream(os.Stderr)
+	}
 	prog.Cancel = func() error { return prog.Process.Signal(syscall.SIGTERM) }
 	prog.WaitDelay = 10 * time.Second
 	if err := prog.Start(); err != nil {

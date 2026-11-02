@@ -209,8 +209,16 @@ func TestRemoveApp(t *testing.T) {
 	if err := os.Symlink(filepath.Dir(outside), filepath.Join(paths.Prefix, "out")); err != nil {
 		t.Fatal(err)
 	}
+	l, err := OpenStartLog(home, "synthetic")
+	if err != nil {
+		t.Fatal(err)
+	}
+	l.Close()
 	if err := RemoveApp(home, "synthetic", false); err != nil {
 		t.Fatal(err)
+	}
+	if exists(filepath.Join(StartLogDir(home), "synthetic.log")) {
+		t.Error("start log kept")
 	}
 	if exists(paths.Record) || exists(paths.Prefix) || !exists(filepath.Join(paths.Files, "kept.txt")) || !exists(outside) {
 		t.Errorf("record %t prefix %t files %t outside %t",

@@ -199,7 +199,7 @@ func doctorCmd(args []string, stdout, stderr io.Writer) error {
 		fmt.Fprintln(stdout, "  a .NET program (from its .NET header): its import table names only mscoree.dll, and .NET loads the rest itself, so this walk sees little of what it needs")
 	}
 	w.report(id, a, tab, stdout)
-	return nil
+	return reportStart(paths, id, a, tab, stdout)
 }
 
 // run walks from the program's tables: libraries needed at start first,
@@ -350,7 +350,7 @@ func (w *walk) report(id string, a winesandbox.App, tab *winefix.Table, stdout i
 			fmt.Fprintf(stdout, "  %s, system sets (api-ms-, ext-ms-) that Wine maps to its own\n", libraries(n))
 		}
 		for _, f := range missing {
-			fmt.Fprintf(stdout, "  MISSING %s, named by %s: %s\n", f.name, f.by, w.missingHint(id, a, tab, f.name))
+			fmt.Fprintf(stdout, "  MISSING %s, named by %s: %s\n", f.name, f.by, missingHint(id, a, tab, f.name))
 		}
 	}
 	if len(w.wrongArch) > 0 {
@@ -395,7 +395,7 @@ func (w *walk) report(id string, a winesandbox.App, tab *winefix.Table, stdout i
 }
 
 // missingHint tells what brings a missing library.
-func (w *walk) missingHint(id string, a winesandbox.App, tab *winefix.Table, name string) string {
+func missingHint(id string, a winesandbox.App, tab *winefix.Table, name string) string {
 	fixes := tab.ByDLL(name)
 	var ids []string
 	for _, fix := range fixes {

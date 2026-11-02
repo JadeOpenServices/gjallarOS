@@ -55,6 +55,10 @@ type Tool struct {
 // menu entries.
 const wineDLLOverrides = "winhttp=n,b;d3dcompiler_47=n,b;d3dcompiler_43=n,b;dxgi=n,b;d3d11=n,b;d3d10core=n,b;d3d9=n,b;winemenubuilder.exe=d"
 
+// wineDebug keeps Wine's err lines for libraries (module) and .NET
+// (mscoree), and drops every other channel.
+const wineDebug = "-all,err+module,err+mscoree"
+
 // Args is the bwrap command line that starts args (a Windows program and
 // its arguments) under Wine, or the tool with args. The root holds only
 // the Nix store, the system's shared files, the prefix and the files
@@ -127,7 +131,10 @@ func (s Sandbox) Args(args []string) []string {
 		"--setenv", "WINE_LARGE_ADDRESS_AWARE", "1",
 		"--setenv", "VKD3D_FEATURE_LEVEL", "12_1",
 		"--setenv", "WPF_DISABLE_HARDWARE_ACCELERATION", "1",
-		"--setenv", "WINEDEBUG", "-fixme",
+		// Only what gjallarctl wine doctor reads from the start log:
+		// libraries and .NET that fail to load. Wine's own "wine:" notes,
+		// such as a crash, come whatever this says.
+		"--setenv", "WINEDEBUG", wineDebug,
 	)
 	out = append(out, env...)
 	out = append(out,
