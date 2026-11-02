@@ -375,6 +375,9 @@
 
               home-manager.useGlobalPkgs = true;
               home-manager.useUserPackages = true;
+              # The user's profile gets libexec too: gjallarctl wine finds
+              # its helper there, where only root writes (Plane 277).
+              environment.pathsToLink = [ "/libexec" ];
               home-manager.backupFileExtension = "hm-bak";
 
               home-manager.extraSpecialArgs = {

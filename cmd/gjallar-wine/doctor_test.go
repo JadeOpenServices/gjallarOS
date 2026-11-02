@@ -66,7 +66,7 @@ func TestResetAndUndo(t *testing.T) {
 	if err != nil || a.Exe != "" {
 		t.Errorf("program kept after reset: %+v %v", a, err)
 	}
-	if !strings.Contains(out.String(), "gjallar-wine undo synthetic-app") {
+	if !strings.Contains(out.String(), "gjallarctl wine undo synthetic-app") {
 		t.Errorf("no undo hint: %q", out.String())
 	}
 	if len(snapshots(t, f)) != 1 {
@@ -135,7 +135,7 @@ func TestRepair(t *testing.T) {
 
 	f.launch = func(string, []string) int { return 3 }
 	err := repairCmd([]string{"synthetic-app"}, io.Discard, io.Discard)
-	if err == nil || !strings.Contains(err.Error(), "gjallar-wine undo synthetic-app") {
+	if err == nil || !strings.Contains(err.Error(), "gjallarctl wine undo synthetic-app") {
 		t.Errorf("failed update: %v", err)
 	}
 	f.launch = nil
@@ -175,7 +175,7 @@ func TestRepairSetsCLR32(t *testing.T) {
 		return 0
 	}
 	err := repairCmd([]string{"synthetic-app"}, io.Discard, io.Discard)
-	if err == nil || !strings.Contains(err.Error(), "gjallar-wine undo synthetic-app") || len(f.launched) != 1 {
+	if err == nil || !strings.Contains(err.Error(), "gjallarctl wine undo synthetic-app") || len(f.launched) != 1 {
 		t.Errorf("failed .NET setting: %v, ran %q", err, f.launched)
 	}
 }

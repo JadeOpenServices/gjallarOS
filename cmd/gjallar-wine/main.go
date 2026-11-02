@@ -1,7 +1,9 @@
 // Command gjallar-wine starts a Wine app in its own sandbox (Plane 272,
-// wiki 746). Each app has its own Wine prefix and files folder, sees only
-// those and the Nix store, and reaches the network only through its two
-// switches in the settings service.
+// wiki 746). It runs the commands of gjallarctl wine that need Wine, and
+// is not on PATH (internal/winesandbox/helper.go). Each app has its own
+// Wine prefix and files folder, sees only those and the Nix store, and
+// reaches the network only through its two switches in the settings
+// service.
 package main
 
 import (
@@ -11,6 +13,8 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+
+	"github.com/JadeOpenServices/gjallarOS/internal/winesandbox"
 )
 
 // Tool paths, set by the package.
@@ -23,27 +27,8 @@ var (
 	winePath    = "wine"
 )
 
-const usage = `usage:
-  gjallar-wine add NAME [INSTALLER]        add an app with ~/WineApps/NAME as its
-                                           files folder, and run its installer
-  gjallar-wine install ID INSTALLER        run an installer in the app ID
-  gjallar-wine program ID [CHOICE]         show or pick the program the app starts
-  gjallar-wine run ID [ARGS...]            start the app ID in its sandbox
-  gjallar-wine remove ID [--delete-files]  remove the app ID; its files folder
-                                           stays unless --delete-files is given
-  gjallar-wine reset ID                    give the app ID a new Wine setup;
-                                           installed programs go, files stay
-  gjallar-wine repair ID                   set the app ID's Wine setup up again;
-                                           installed programs stay
-  gjallar-wine undo ID                     put back the app ID as it was before
-                                           the last reset or repair
-  gjallar-wine import NAME PREFIX          make a copy of a Wine prefix set up
-                                           without gjallar-wine into the app NAME
-  gjallar-wine menu                        bring the app menu in line with the
-                                           apps; runs after each rebuild
-ID is the app's id, as gjallarctl wine list shows it. CHOICE is a number from
-the list or a program's path on C: or D:, such as D:\Tool\tool.exe. An
-installer is an .exe or .msi file.`
+// usage is gjallarctl wine's: users reach these commands only through it.
+var usage = "usage:\n" + winesandbox.CommandsUsage
 
 var errUsage = errors.New("wrong arguments")
 

@@ -102,7 +102,7 @@ func importCmd(args []string, stdout, stderr io.Writer) error {
 		if err := saveApp(paths, id, a, stderr); err != nil {
 			return err
 		}
-		fmt.Fprintf(stdout, "App %s starts %s. It is in the app menu, and gjallar-wine run %s starts it.\n", id, a.Exe, id)
+		fmt.Fprintf(stdout, "App %s starts %s. It is in the app menu, and gjallarctl wine run %s starts it.\n", id, a.Exe, id)
 		return nil
 	}
 	return chooseProgram(id, "", os.Stdin, stdinIsTerminal(), stdout, stderr)
@@ -137,7 +137,7 @@ func checkPrefix(home, path string) (string, error) {
 	}
 	data := filepath.Dir(winesandbox.BasePrefix(home))
 	if rel, err := filepath.Rel(data, source); err == nil && rel != ".." && !strings.HasPrefix(rel, "../") {
-		return "", fmt.Errorf("%s belongs to gjallar-wine already", path)
+		return "", fmt.Errorf("%s is the prefix of a Wine app already", path)
 	}
 	return source, nil
 }
@@ -153,7 +153,7 @@ func importPrefix(source string, paths winesandbox.Paths, id, userName string, s
 		return err
 	}
 	if _, err := os.Lstat(paths.Prefix); err == nil {
-		return fmt.Errorf("a prefix for %s is left over; gjallar-wine remove %s clears it", id, id)
+		return fmt.Errorf("a prefix for %s is left over; gjallarctl wine remove %s clears it", id, id)
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
 	}

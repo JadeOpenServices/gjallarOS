@@ -15,7 +15,7 @@ import (
 )
 
 // Each app with a program has an entry in the app menu that starts it
-// through gjallar-wine run. Wine's own menu builder is off in the sandbox
+// through gjallarctl wine run. Wine's own menu builder is off in the sandbox
 // (WINEDLLOVERRIDES winemenubuilder.exe=d): its entries would start the
 // program outside it. The entries carry menuMarker, so the sync below only
 // ever removes files it wrote.
@@ -44,15 +44,16 @@ func menuFile(home, id string) string {
 }
 
 // menuEntry is app id's menu entry, with icon from the icon theme. TryExec
-// hides it once Wine is turned off and gjallar-wine is gone. The name has
-// no control characters or backslashes (ValidName), so it needs no escapes.
-func menuEntry(id string, a winesandbox.App, icon string) string {
+// hides it once Wine is turned off and helper, the user's gjallar-wine, is
+// gone. The name has no control characters or backslashes (ValidName), so
+// it needs no escapes.
+func menuEntry(id string, a winesandbox.App, icon, helper string) string {
 	entry := "[Desktop Entry]\n" +
 		"Type=Application\n" +
 		"Name=" + a.Name + "\n" +
 		"Comment=Wine app\n" +
-		"Exec=gjallar-wine run " + id + "\n" +
-		"TryExec=gjallar-wine\n" +
+		"Exec=gjallarctl wine run " + id + "\n" +
+		"TryExec=" + helper + "\n" +
 		"Icon=" + icon + "\n" +
 		"Terminal=false\n"
 	if class := windowClass(a.Exe); class != "" {
@@ -88,6 +89,10 @@ func setMenu(paths winesandbox.Paths, id string, a winesandbox.App, stderr io.Wr
 	if a.Exe == "" {
 		return removeMenu(home, id)
 	}
+	userName, _, err := currentUser()
+	if err != nil {
+		return err
+	}
 	icon, err := setIcon(paths, id, a)
 	if err != nil {
 		fmt.Fprintf(stderr, "WARNING: app %s shows Wine's icon in the app menu: %v\n", id, err)
@@ -101,7 +106,7 @@ func setMenu(paths winesandbox.Paths, id string, a winesandbox.App, stderr io.Wr
 		return err
 	}
 	defer os.Remove(tmp.Name())
-	if _, err := tmp.WriteString(menuEntry(id, a, icon)); err != nil {
+	if _, err := tmp.WriteString(menuEntry(id, a, icon, winesandbox.HelperPath(userName))); err != nil {
 		tmp.Close()
 		return err
 	}
@@ -156,7 +161,7 @@ func isMenuEntry(path string) (bool, error) {
 
 // saveApp writes app id's record and then its menu entry. A menu entry
 // that cannot be written is only a warning: the app still starts with
-// gjallar-wine run.
+// gjallarctl wine run.
 func saveApp(paths winesandbox.Paths, id string, a winesandbox.App, stderr io.Writer) error {
 	if err := winesandbox.WriteRecord(paths, a); err != nil {
 		return err

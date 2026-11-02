@@ -8,7 +8,7 @@
   iproute2,
   coreutils,
   _wine,
-  # Wine's setup for the base prefix; without it gjallar-wine add refuses.
+  # Wine's setup for the base prefix; without it gjallarctl wine add refuses.
   wineInit ? null,
   # Adds each app's files folder to the file manager's Places.
   dolphinPlace ? null,
@@ -57,10 +57,17 @@ buildGoModule {
 
   env.CGO_ENABLED = "0";
 
+  # Users reach it only through gjallarctl wine (Plane 277), so it is not
+  # on PATH.
+  postInstall = ''
+    mkdir -p $out/libexec
+    mv $out/bin/gjallar-wine $out/libexec/gjallar-wine
+    rmdir $out/bin
+  '';
+
   meta = {
     description = "Starts a Wine app in its own sandbox";
     license = lib.licenses.agpl3Plus;
-    mainProgram = "gjallar-wine";
     platforms = lib.platforms.linux;
   };
 }

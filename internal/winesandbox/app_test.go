@@ -131,7 +131,7 @@ func TestApps(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(apps) != 3 || apps[0].ID != "broken" || apps[0].Err == nil ||
-		apps[1].ID != "empty" || apps[1].Err == nil || !strings.Contains(apps[1].Err.Error(), "gjallar-wine program empty") ||
+		apps[1].ID != "empty" || apps[1].Err == nil || !strings.Contains(apps[1].Err.Error(), "gjallarctl wine program empty") ||
 		apps[2].ID != "synthetic" || apps[2].Err != nil || apps[2].App.Name != "Synthetic App" {
 		t.Fatalf("apps %+v", apps)
 	}
