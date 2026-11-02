@@ -13,7 +13,7 @@ import (
 	"github.com/JadeOpenServices/gjallarOS/apps"
 )
 
-const appsUsage = "Usage: gjallarctl apps list [--json] | add ID [--window] | remove ID [--window]"
+const appsUsage = "Usage: gjallarctl apps list [--json] | add ID [--window] | remove ID [--window] | change +ID|-ID... [--window]"
 
 // catalogueEntry is one app as the app window shows it (Plane 220).
 // Installed is the saved choice and is null when the settings service does
@@ -47,6 +47,9 @@ func runApps(args []string, stdout, stderr io.Writer) int {
 	// shows the password prompt and the build output.
 	if len(args) == 3 && args[2] == "--window" && (args[0] == "add" || args[0] == "remove") {
 		return runInTerminal("GjallarOS apps", []string{"apps", args[0], args[1]}, stderr)
+	}
+	if len(args) >= 1 && args[0] == "change" {
+		return runAppsBatch(args[1:], stdout, stderr)
 	}
 	switch {
 	case len(args) >= 1 && args[0] == "list" && len(args) <= 2:
@@ -170,7 +173,86 @@ func selectedApps(stderr io.Writer) (selected []string, state string, rebuilding
 // runAppsChange asks the settings service for the apps list with one app
 // added or removed and applies it, as `settings set` does.
 func runAppsChange(id string, add bool, stdout, stderr io.Writer) int {
-	if err := apps.Validate([]string{id}); err != nil {
+	var c appChanges
+	if add {
+		c.add = []string{id}
+	} else {
+		c.remove = []string{id}
+	}
+	return runAppsChanges(c, stdout, stderr)
+}
+
+// appChanges is what `apps change` asks for.
+type appChanges struct {
+	add, remove []string
+}
+
+// parseAppChanges reads `apps change` arguments: +ID installs, -ID removes,
+// and a last --window runs the change in a terminal. Every ID must be in the
+// catalogue and may come only once.
+func parseAppChanges(args []string) (c appChanges, window bool, err error) {
+	if n := len(args); n > 0 && args[n-1] == "--window" {
+		window, args = true, args[:n-1]
+	}
+	if len(args) == 0 {
+		return c, false, errors.New("apps change: name at least one +ID or -ID")
+	}
+	ids := make([]string, 0, len(args))
+	for _, arg := range args {
+		switch {
+		case len(arg) > 1 && arg[0] == '+':
+			c.add = append(c.add, arg[1:])
+		case len(arg) > 1 && arg[0] == '-':
+			c.remove = append(c.remove, arg[1:])
+		default:
+			return appChanges{}, false, fmt.Errorf("apps change: %q is not +ID or -ID", arg)
+		}
+		ids = append(ids, arg[1:])
+	}
+	if err := apps.Validate(ids); err != nil {
+		return appChanges{}, false, err
+	}
+	return c, window, nil
+}
+
+// apply returns selected with the changes made and says which changes had
+// nothing to do.
+func (c appChanges) apply(selected []string, stdout io.Writer) []string {
+	out := slices.Clone(selected)
+	for _, id := range c.add {
+		if slices.Contains(out, id) {
+			fmt.Fprintf(stdout, "%s is already installed.\n", id)
+			continue
+		}
+		out = append(out, id)
+	}
+	for _, id := range c.remove {
+		if !slices.Contains(out, id) {
+			fmt.Fprintf(stdout, "%s is not installed.\n", id)
+			continue
+		}
+		out = slices.DeleteFunc(out, func(s string) bool { return s == id })
+	}
+	return out
+}
+
+// runAppsBatch is `apps change`: all changes go to the settings service in
+// one request, so the window asks for the password once and builds once
+// (Plane 276).
+func runAppsBatch(args []string, stdout, stderr io.Writer) int {
+	c, window, err := parseAppChanges(args)
+	if err != nil {
+		fmt.Fprintf(stderr, "ERROR: %v\n%s\n", err, appsUsage)
+		return 2
+	}
+	if window {
+		return runInTerminal("GjallarOS apps", append([]string{"apps", "change"}, args[:len(args)-1]...), stderr)
+	}
+	return runAppsChanges(c, stdout, stderr)
+}
+
+func runAppsChanges(c appChanges, stdout, stderr io.Writer) int {
+	if err := apps.Validate(append(slices.Clone(c.add), c.remove...)); err != nil {
 		fmt.Fprintf(stderr, "ERROR: %v\n", err)
 		return 2
 	}
@@ -181,32 +263,42 @@ func runAppsChange(id string, add bool, stdout, stderr io.Writer) int {
 	defer bus.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), settingsCallTimeout)
 	defer cancel()
-	key, err := settingsKey(ctx, bus, "apps")
 	var selected []string
-	if err == nil {
-		err = json.Unmarshal(key.Value, &selected)
-	}
-	if err != nil {
-		fmt.Fprintf(stderr, "ERROR: read apps: %v\n", err)
+	if !readSetting(ctx, bus, "apps", &selected, stderr) {
 		return 1
 	}
-	has := slices.Contains(selected, id)
-	switch {
-	case add && has:
-		fmt.Fprintf(stdout, "%s is already installed.\n", id)
+	changed := c.apply(selected, stdout)
+	if slices.Equal(changed, selected) {
 		return 0
-	case !add && !has:
-		fmt.Fprintf(stdout, "%s is not installed.\n", id)
-		return 0
-	case add:
-		selected = append(selected, id)
-	default:
-		selected = slices.DeleteFunc(selected, func(s string) bool { return s == id })
 	}
-	request, err := json.Marshal(selected)
+	if slices.Contains(changed, "ai") && !slices.Contains(selected, "ai") {
+		// Local AI checks the memory first, as `apps add ai` does.
+		var endpoint string
+		var override bool
+		if !readSetting(ctx, bus, "aiEndpoint", &endpoint, stderr) || !readSetting(ctx, bus, "overrideAiSelection", &override, stderr) {
+			return 1
+		}
+		if !localAIFits(endpoint, override, stderr) {
+			return 1
+		}
+	}
+	request, err := json.Marshal(changed)
 	if err != nil {
 		fmt.Fprintf(stderr, "ERROR: %v\n", err)
 		return 1
 	}
 	return settingsRequest(ctx, bus, map[string]json.RawMessage{"apps": request}, stdout, stderr)
+}
+
+// readSetting reads one settings key into value.
+func readSetting(ctx context.Context, bus settingsBus, name string, value any, stderr io.Writer) bool {
+	key, err := settingsKey(ctx, bus, name)
+	if err == nil {
+		err = json.Unmarshal(key.Value, value)
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "ERROR: read %s: %v\n", name, err)
+		return false
+	}
+	return true
 }

@@ -292,7 +292,9 @@ and the Home Manager side (`user/apps/default.nix`). The old `aiEnable`,
 
 `gjallarctl apps list` shows the catalogue and what is installed;
 `gjallarctl apps add <id>` and `gjallarctl apps remove <id>` change the list
-and rebuild. The Apps page of the settings window does the same.
+and rebuild. `gjallarctl apps change +<id> -<id> ...` makes several changes
+with one password and one rebuild (`+` installs, `-` removes). The Apps page of
+the settings window does the same.
 
 ### Settings window and gjallarHorn
 

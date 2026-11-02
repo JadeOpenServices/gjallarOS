@@ -70,6 +70,24 @@ func syncLocalAIModel(statePath string, user config.User, stdout, stderr io.Writ
 	return true
 }
 
+// localAIFits says whether local AI may be turned on: with no AI server and
+// no override the memory must hold a local model.
+func localAIFits(endpoint string, override bool, stderr io.Writer) bool {
+	if endpoint != "" || override {
+		return true
+	}
+	ramGB, err := aiMemoryGB()
+	if err != nil {
+		fmt.Fprintf(stderr, "ERROR: %v\n", err)
+		return false
+	}
+	if !profile.LocalFits(ramGB) {
+		fmt.Fprintf(stderr, "ERROR: "+noLocalModel+"\n", ramGB)
+		return false
+	}
+	return true
+}
+
 // runAIEnable turns the ai app on through the settings service. The
 // rebuild that follows picks the model for this machine.
 func runAIEnable(args []string, stdout, stderr io.Writer) int {
@@ -85,17 +103,7 @@ func runAIEnable(args []string, stdout, stderr io.Writer) int {
 	ctx, cancel := context.WithTimeout(context.Background(), settingsCallTimeout)
 	defer cancel()
 
-	read := func(name string, value any) bool {
-		key, err := settingsKey(ctx, bus, name)
-		if err == nil {
-			err = json.Unmarshal(key.Value, value)
-		}
-		if err != nil {
-			fmt.Fprintf(stderr, "ERROR: read %s: %v\n", name, err)
-			return false
-		}
-		return true
-	}
+	read := func(name string, value any) bool { return readSetting(ctx, bus, name, value, stderr) }
 	var apps []string
 	var endpoint string
 	var override bool
@@ -106,16 +114,8 @@ func runAIEnable(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stdout, "Local AI is already on. A rebuild picks its model if it has none yet.")
 		return 0
 	}
-	if endpoint == "" && !override {
-		ramGB, err := aiMemoryGB()
-		if err != nil {
-			fmt.Fprintf(stderr, "ERROR: %v\n", err)
-			return 1
-		}
-		if !profile.LocalFits(ramGB) {
-			fmt.Fprintf(stderr, "ERROR: "+noLocalModel+"\n", ramGB)
-			return 1
-		}
+	if !localAIFits(endpoint, override, stderr) {
+		return 1
 	}
 	request, err := json.Marshal(append(apps, "ai"))
 	if err != nil {
