@@ -35,10 +35,17 @@ type App struct {
 	// Icon is the icon theme name; empty means the app ID. A repo icon
 	// (apps/<id>/icon.svg) comes first when the app has one (Plane 273).
 	Icon string `json:"icon"`
+	// Package is the nixpkgs attribute path of the app's main program;
+	// the settings window reads its licence and homepage at build time.
+	// Empty means the app has no single main package.
+	Package string `json:"package"`
 }
 
 // iconName keeps icon names to plain theme names: no paths, no URLs.
 var iconName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$`)
+
+// packagePath keeps package names to plain attribute paths.
+var packagePath = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_-]{0,99}(\.[A-Za-z_][A-Za-z0-9_-]{0,99}){0,3}$`)
 
 // Catalogue returns every app, sorted by ID.
 func Catalogue() ([]App, error) {
@@ -63,6 +70,9 @@ func Catalogue() ([]App, error) {
 		}
 		if !iconName.MatchString(app.Icon) {
 			return nil, fmt.Errorf("%s: icon %q is not an icon theme name", file, app.Icon)
+		}
+		if app.Package != "" && !packagePath.MatchString(app.Package) {
+			return nil, fmt.Errorf("%s: package %q is not an attribute path", file, app.Package)
 		}
 		out = append(out, app)
 	}

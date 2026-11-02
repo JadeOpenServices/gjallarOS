@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -62,5 +63,63 @@ func TestAppWaits(t *testing.T) {
 		if got := appWaits(catalogueEntry{Installed: c.installed, Built: c.built}, c.rebuilding); got != c.want {
 			t.Errorf("appWaits(%v, %v, %v) = %q, want %q", c.installed, c.built, c.rebuilding, got, c.want)
 		}
+	}
+}
+
+func TestParseAppChanges(t *testing.T) {
+	c, window, err := parseAppChanges([]string{"+vlc", "-teams", "+gimp", "--window"})
+	if err != nil || !window {
+		t.Fatalf("parse: %v, window %v", err, window)
+	}
+	if !reflect.DeepEqual(c.add, []string{"vlc", "gimp"}) || !reflect.DeepEqual(c.remove, []string{"teams"}) {
+		t.Fatalf("parse = %+v", c)
+	}
+	for _, bad := range [][]string{
+		nil,
+		{"--window"},
+		{"vlc"},
+		{"+"},
+		{"+vlc", "-vlc"},
+		{"+vlc", "+vlc"},
+		{"+no-such-app"},
+		{"--window", "+vlc"},
+	} {
+		if _, _, err := parseAppChanges(bad); err == nil {
+			t.Errorf("parseAppChanges(%q) took it", bad)
+		}
+	}
+}
+
+func TestAppChangesApply(t *testing.T) {
+	c := appChanges{add: []string{"vlc", "git"}, remove: []string{"teams", "gimp"}}
+	var out strings.Builder
+	got := c.apply([]string{"git", "teams"}, &out)
+	if !reflect.DeepEqual(got, []string{"git", "vlc"}) {
+		t.Fatalf("apply = %q", got)
+	}
+	if out.String() != "git is already installed.\ngimp is not installed.\n" {
+		t.Fatalf("apply said %q", out.String())
+	}
+}
+
+func TestAppsChangeWindowRunsOneCommand(t *testing.T) {
+	var got []string
+	calls := 0
+	old := runInTerminal
+	runInTerminal = func(title string, command []string, stderr io.Writer) int {
+		calls++
+		got = command
+		return 0
+	}
+	defer func() { runInTerminal = old }()
+	if code := runApps([]string{"change", "+vlc", "-teams", "--window"}, io.Discard, io.Discard); code != 0 {
+		t.Fatalf("change --window: exit %d", code)
+	}
+	want := []string{"apps", "change", "+vlc", "-teams"}
+	if calls != 1 || !reflect.DeepEqual(got, want) {
+		t.Fatalf("change --window ran %d terminals, last %q, want one %q", calls, got, want)
+	}
+	if code := runApps([]string{"change", "+vlc", "-vlc", "--window"}, io.Discard, io.Discard); code != 2 || calls != 1 {
+		t.Fatalf("a bad change must fail before the terminal opens: exit %d, %d terminals", code, calls)
 	}
 }

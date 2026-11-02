@@ -2,5 +2,6 @@
   "name": "Wine",
   "description": "Runs Wine apps, each in its own sandbox.",
   "category": "compatibility",
+  "package": "_wine",
   "default": true
 }

@@ -110,6 +110,7 @@ _gjallarctl_apps() {
     'list:show the app catalogue and what is installed'
     'add:install an app from the catalogue'
     'remove:remove an app'
+    'change:install and remove several apps with one rebuild'
   )
   if (( CURRENT == 2 )); then
     _describe -t commands 'apps command' cmds
@@ -123,6 +124,18 @@ _gjallarctl_apps() {
     add|remove)
       local -a ids=(${(f)"$(gjallarctl apps list 2>/dev/null | cut -c3- | awk '{print $1}')"})
       _describe -t apps 'app' ids ;;
+    change)
+      local -a list=(${(f)"$(gjallarctl apps list 2>/dev/null)"}) ids
+      local line
+      for line in $list; do
+        if [[ $line == '*'* ]]; then
+          ids+=("-${${line[3,-1]}%% *}")
+        else
+          ids+=("+${${line[3,-1]}%% *}")
+        fi
+      done
+      ids+=('--window')
+      _describe -t apps 'change (+ installs, - removes)' ids ;;
   esac
 }
 

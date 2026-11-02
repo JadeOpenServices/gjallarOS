@@ -2,5 +2,6 @@
   "name": "fastfetch",
   "description": "System summary in the terminal.",
   "category": "system",
+  "package": "fastfetch",
   "default": true
 }
