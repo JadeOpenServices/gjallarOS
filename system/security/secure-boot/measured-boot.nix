@@ -241,6 +241,11 @@ in
         --tpm2-pcrlock=/var/lib/systemd/pcrlock.json "$pin_arg" "$device"
 
       ${recordEnrollment}
+      # The disk secret and the new PIN typed above also confirm a dev or
+      # staging channel the installer recorded (Plane 297, Q192). Only
+      # possible before the marker below exists.
+      gjallarctl luks grant-developer ${if pinEnabled then "pin" else "recovery"} ||
+        printf '%s\n' 'Developer channel not confirmed; run gjallarctl settings confirm-developer once.' >&2
       install -m 0600 /dev/null "$state/tpm2-enrollment-complete"
       printf '%s\n' 'GjallarOS measured-boot TPM2 enrollment completed; human recovery keyslots were preserved.'
 

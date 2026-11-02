@@ -21,6 +21,7 @@ import (
 	"github.com/JadeOpenServices/gjallarOS/apps"
 	"github.com/JadeOpenServices/gjallarOS/internal/ai/aitoken"
 	"github.com/JadeOpenServices/gjallarOS/internal/ai/profile"
+	"github.com/JadeOpenServices/gjallarOS/internal/devgate"
 	"github.com/JadeOpenServices/gjallarOS/internal/hardware/graphics"
 	"github.com/JadeOpenServices/gjallarOS/internal/input/xkb"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/baremetalinstall"
@@ -64,6 +65,7 @@ type options struct {
 	targetDisk                                               string
 	recoveryDisk, recoveryPartition, recoverySigningKey      string
 	recoverySigningPublicKey                                 string
+	channel                                                  string
 }
 type state struct {
 	user                     config.User
@@ -251,6 +253,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 	f.StringVar(&opt.recoveryPartition, "recovery-partition", "", "existing dedicated recovery partition")
 	f.StringVar(&opt.recoverySigningKey, "recovery-signing-key", "", "runtime path to offline Ed25519 recovery release private key")
 	f.StringVar(&opt.recoverySigningPublicKey, "recovery-signing-public-key", "", "runtime path to separately pinned Ed25519 recovery release public key")
+	f.StringVar(&opt.channel, "channel", "", "release channel the install follows: "+strings.Join(config.ReleaseChannels, ", "))
 	if err := f.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
@@ -302,6 +305,9 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 		if s.user, err = config.Defaults(); err != nil {
 			return fail(errOut, err)
 		}
+	}
+	if err := applyChannelFlag(&s.user, opt.channel, s.preset, presetPath); err != nil {
+		return fail(errOut, err)
 	}
 	if opt.recovery {
 		if opt.acceptExisting {
@@ -1116,6 +1122,9 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 	}
 	if s.render.JODSPrebootLockEnable && !s.render.LUKSTPM2Enable {
 		return fail(errOut, errors.New("JODS preboot locking requires verified TPM2 LUKS enrollment; configuration was left unactivated"))
+	}
+	if notice := developerConfirmNotice(s.user, s.existing, s.render.LUKSTPM2Enable); notice != "" {
+		fmt.Fprintln(out, notice)
 	}
 
 	if opt.recovery {
@@ -3509,4 +3518,40 @@ func fail(out io.Writer, err error) int {
 	}
 	fmt.Fprintln(out, "ERROR:", err)
 	return 1
+}
+
+// applyChannelFlag sets the release channel --channel names (Plane 297).
+// A preset already says which channel it follows; a different flag is a
+// mistake to show, not a choice to make silently.
+func applyChannelFlag(user *config.User, channel string, preset bool, presetPath string) error {
+	if channel == "" {
+		return nil
+	}
+	if !slices.Contains(config.ReleaseChannels, channel) {
+		return fmt.Errorf("unknown release channel %q; use %s", channel, strings.Join(config.ReleaseChannels, ", "))
+	}
+	if preset && user.Channel() != channel {
+		return fmt.Errorf("%s follows the %s channel; change releaseChannel there or leave out --channel %s", presetPath, user.Channel(), channel)
+	}
+	user.ReleaseChannel = channel
+	return nil
+}
+
+// developerConfirmNotice says how a fresh install of a dev or staging
+// channel or with developer mode gets its developer confirmation (Plane
+// 283, Q192). With chip unlock the first start records it while the
+// person sets up the chip; without it the person confirms once by hand,
+// and system rebuilds wait until then.
+func developerConfirmNotice(user config.User, existing, tpm2 bool) string {
+	if existing || devgate.Needs(user.Channel(), user.DeveloperMode).Empty() {
+		return ""
+	}
+	what := "the " + user.Channel() + " channel"
+	if !devgate.Needs(user.Channel(), false).Channels {
+		what = "developer mode"
+	}
+	if tpm2 {
+		return "The first start confirms " + what + " when you set up the security chip unlock."
+	}
+	return "To keep " + what + ", run gjallarctl luks setup after the first start and then gjallarctl settings confirm-developer once with the recovery key; system rebuilds wait until then."
 }

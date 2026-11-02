@@ -30,6 +30,11 @@ func runLUKSLifecycle(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 1 && args[0] == "new-pin" {
 		return runLUKSNewPIN(stdout, stderr)
 	}
+	// grant-developer is for the first-boot enrollment and not offered to
+	// people.
+	if len(args) > 0 && args[0] == "grant-developer" {
+		return runLUKSGrantDeveloper(args[1:], stdout, stderr)
+	}
 	// record is for gjallar-luks-record.service and not offered to people.
 	if !luksArgsValid(args) {
 		fmt.Fprintln(stderr, luksUsage)

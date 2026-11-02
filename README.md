@@ -40,6 +40,24 @@ interactive installer from that checkout. Re-running it reuses the checkout.
 `GJALLAR_CLONE_ONLY=1` stops after the clone. From an existing checkout,
 run `./scripts/installation/install.sh` directly.
 
+To install from `staging` or `dev` instead of `stable`, add `--channel`
+(or set `GJALLAR_CHANNEL`):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/JadeOpenServices/gjallarOS/staging/scripts/installation/install.sh | bash -s -- --channel staging
+```
+
+The script then checks out that branch. A checkout left by an earlier run
+moves to the newest commit of the channel by fast-forward, so a run that
+stopped halfway picks up the current installer and resumes. Local edits or
+local commits on that branch stop the script, and nothing is changed. The
+installed system follows the same channel. With security chip unlock, the
+first start confirms the channel when you type the disk passphrase or
+recovery key and set the PIN. Without it, run `gjallarctl luks setup` and
+then `gjallarctl settings confirm-developer` once; rebuilds wait until then.
+A preset `user.config.json` with a different `releaseChannel` stops the
+installer.
+
 That checkout only runs the installer. The installed system gets its own
 clone of the official repository in `/etc/gjallar/system`, owned by root,
 at the commit the installer was built from, with this machine's
