@@ -4,6 +4,12 @@
 # takes 11.1.0 and asks to download it, so swap in the 11.1.0 installer.
 # Test: fw13 VM, offline gjallar-wine-init ends without a prompt. Remove once
 # nixpkgs release-26.05 ships wine-mono 11.1.0 next to 11.8.
+#
+# Wine's data files in the store are read-only, and the prefix copies keep
+# that, so every later wineboot -u failed to update them (copy error 5 for
+# each nls and winmd file). pkgs/patches/wine-setupapi-readonly-target.patch
+# clears the read-only attribute of a target setupapi is about to replace
+# (Plane 277, book 753). Drop it once Wine's setupapi does that itself.
 final: prev:
 
 let
@@ -19,6 +25,7 @@ in
     assert lib.assertMsg (stagingFull.version == "11.8")
       "GjallarOS Wine overlay was written for Wine 11.8 with wine-mono 11.0.0; check which wine-mono ${stagingFull.version} asks for and update or remove pkgs/overlays/wine.nix.";
     stagingFull.overrideAttrs (old: {
+      patches = (old.patches or [ ]) ++ [ ../patches/wine-setupapi-readonly-target.patch ];
       postInstall = old.postInstall + ''
         rm $out/share/wine/mono/wine-mono-11.0.0-x86.msi
         ln -s ${wineMono} $out/share/wine/mono/wine-mono-11.1.0-x86.msi
