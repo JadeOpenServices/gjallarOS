@@ -41,7 +41,7 @@ func runLUKSPIN(ctx context.Context, device string, before diskcrypto.Keyslots, 
 		return 1
 	}
 	if _, err := os.Stat(pcrlockPolicyPath); err != nil {
-		fmt.Fprintf(stderr, "ERROR: no security chip policy at %s. Run sudo gjallarctl tpm2 reenroll first.\n", pcrlockPolicyPath)
+		fmt.Fprintf(stderr, "ERROR: no security chip policy at %s. The startup PIN needs Secure Boot with the GjallarOS chip unlock.\n", pcrlockPolicyPath)
 		return 1
 	}
 	tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)

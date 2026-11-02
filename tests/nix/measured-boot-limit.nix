@@ -85,6 +85,10 @@ assert shim.system.build.installBootLoader.drvPath != noShim.system.build.instal
 assert shim.boot.lanzaboote.configurationLimit == noShim.boot.lanzaboote.configurationLimit;
 # The wrapped hook also drops systemd-boot's stale entries.
 assert nixpkgs.lib.hasInfix "install-lanzaboote" "${recovery.system.build.installBootLoader}";
+# Without measured boot there is no make-policy unit at all; a bare
+# .after left an empty unit without ExecStart= (fw13, 2026-11-03).
+assert !((evaluate false false).systemd.services ? systemd-pcrlock-make-policy);
+assert builtins.elem "systemd-tmpfiles-setup.service" noShim.systemd.services.systemd-pcrlock-make-policy.after;
 nixpkgs.legacyPackages.${system}.runCommand "gjallar-measured-boot-limit-check" { } ''
   touch "$out"
 ''

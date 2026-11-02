@@ -10,6 +10,7 @@ local tooltips = {
   ["secure-boot"] = "Disk protection not set up: Secure Boot is off. Click to set it up.",
   ["recovery-key"] = "No recovery key for your disk. Click to create one.",
   ["reenroll"] = "The security chip did not unlock your disk. Click to re-enroll.",
+  ["chip-no-policy"] = "Disk not protected at startup: the security chip opens it for any start. Click for details.",
 }
 
 local shown = false
