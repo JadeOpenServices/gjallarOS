@@ -9,7 +9,7 @@
 # that, so every later wineboot -u failed to update them (copy error 5 for
 # each nls and winmd file). pkgs/patches/wine-setupapi-readonly-target.patch
 # clears the read-only attribute of a target setupapi is about to replace
-# (Plane 277, book 753). Drop it once Wine's setupapi does that itself.
+# (Plane 277, book 753 page 934). Drop it once Wine's setupapi does that itself.
 final: prev:
 
 let
