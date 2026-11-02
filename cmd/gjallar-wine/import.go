@@ -52,6 +52,9 @@ func importCmd(args []string, stdout, stderr io.Writer) error {
 	if err := clearSwitches(id); err != nil {
 		return err
 	}
+	if err := winesandbox.DropSnapshots(home, id); err != nil {
+		return err
+	}
 	for _, dir := range []string{filepath.Dir(paths.Files), paths.Files} {
 		if err := os.Mkdir(dir, 0o700); err != nil && !errors.Is(err, os.ErrExist) {
 			return err

@@ -156,6 +156,10 @@ func addApp(args []string, stdout, stderr io.Writer) error {
 	if err := clearSwitches(id); err != nil {
 		return err
 	}
+	// Nor may its snapshots, which undo would put back.
+	if err := winesandbox.DropSnapshots(home, id); err != nil {
+		return err
+	}
 	// A files folder kept from an earlier app of this name is used again.
 	for _, dir := range []string{filepath.Dir(paths.Files), paths.Files} {
 		if err := os.Mkdir(dir, 0o700); err != nil && !errors.Is(err, os.ErrExist) {
@@ -493,11 +497,24 @@ func chooseProgram(id, choice string, in io.Reader, interactive bool, stdout, st
 	} else {
 		win = choice
 	}
+	if err := checkProgram(paths, win); err != nil {
+		return err
+	}
+	a.Exe = win
+	if err := saveApp(paths, id, a, stderr); err != nil {
+		return err
+	}
+	fmt.Fprintf(stdout, "App %s starts %s. It is in the app menu.\n", id, win)
+	return nil
+}
+
+// checkProgram checks that win is an .exe file in the app's folders,
+// also when reached through links.
+func checkProgram(paths winesandbox.Paths, win string) error {
 	host, err := winesandbox.HostPath(paths, win)
 	if err != nil {
 		return err
 	}
-	// The path must stay in the app's folders, also through links.
 	if back, err := winesandbox.WinPath(paths, host); err != nil || !strings.EqualFold(back, win) {
 		return fmt.Errorf("%s leads out of the app's folders", win)
 	}
@@ -506,11 +523,6 @@ func chooseProgram(id, choice string, in io.Reader, interactive bool, stdout, st
 	} else if !info.Mode().IsRegular() || !strings.EqualFold(filepath.Ext(host), ".exe") {
 		return fmt.Errorf("%s is not an .exe file", win)
 	}
-	a.Exe = win
-	if err := saveApp(paths, id, a, stderr); err != nil {
-		return err
-	}
-	fmt.Fprintf(stdout, "App %s starts %s. It is in the app menu.\n", id, win)
 	return nil
 }
 
