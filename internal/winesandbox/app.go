@@ -33,7 +33,7 @@ type App struct {
 // Ready says whether app id has a program to start.
 func (a App) Ready(id string) error {
 	if a.Exe == "" {
-		return fmt.Errorf("no program chosen yet; gjallar-wine program %s shows the choices", id)
+		return fmt.Errorf("no program chosen yet; gjallarctl wine program %s shows the choices", id)
 	}
 	return nil
 }

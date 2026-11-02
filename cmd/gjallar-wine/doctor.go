@@ -76,7 +76,7 @@ func resetCmd(args []string, stdout, stderr io.Writer) error {
 		return err
 	}
 	fmt.Fprintf(stdout, "Reset app %s. Its files folder %s stays as it was.\n", id, paths.Files)
-	fmt.Fprintf(stdout, "gjallar-wine undo %s puts the old state back.\n", id)
+	fmt.Fprintf(stdout, "gjallarctl wine undo %s puts the old state back.\n", id)
 	return nil
 }
 
@@ -103,7 +103,7 @@ func repairCmd(args []string, stdout, stderr io.Writer) error {
 	}); err != nil {
 		return fmt.Errorf("keep the app's state: %w", err)
 	}
-	undo := fmt.Sprintf("gjallar-wine undo %s puts the state from before the repair back", id)
+	undo := fmt.Sprintf("gjallarctl wine undo %s puts the state from before the repair back", id)
 	if err := dropOutwardLinks(paths.Prefix); err != nil {
 		return fmt.Errorf("repair the app's prefix: %w; %s", err, undo)
 	}

@@ -147,7 +147,7 @@ func addApp(args []string, stdout, stderr io.Writer) error {
 
 	paths := winesandbox.PathsFor(home, id, name)
 	if _, err := os.Lstat(paths.Record); err == nil {
-		return fmt.Errorf("app %s exists already; gjallar-wine install %s INSTALLER adds to it", id, id)
+		return fmt.Errorf("app %s exists already; gjallarctl wine install %s INSTALLER adds to it", id, id)
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
@@ -185,7 +185,7 @@ func addApp(args []string, stdout, stderr io.Writer) error {
 	}
 	fmt.Fprintf(stdout, "It has no network: gjallarctl wine set %s --internet on lets it reach the internet.\n", id)
 	if installer == "" {
-		fmt.Fprintf(stdout, "Next: gjallar-wine install %s INSTALLER, or gjallar-wine program %s D:\\PROGRAM.exe for a program in the files folder.\n", id, id)
+		fmt.Fprintf(stdout, "Next: gjallarctl wine install %s INSTALLER, or gjallarctl wine program %s D:\\PROGRAM.exe for a program in the files folder.\n", id, id)
 		return nil
 	}
 	return installApp(id, installer, os.Stdin, stdinIsTerminal(), stdout, stderr)
@@ -250,7 +250,7 @@ func ensureBase(home string, stderr io.Writer) (string, error) {
 		if setupErr != nil {
 			why = setupErr.Error()
 		}
-		return "", fmt.Errorf("Wine's setup is not complete (%s); %s says why, and the next gjallar-wine add tries again", why, setupLog(home))
+		return "", fmt.Errorf("Wine's setup is not complete (%s); %s says why, and the next gjallarctl wine add tries again", why, setupLog(home))
 	}
 	if serverErr != nil {
 		return "", fmt.Errorf("wait for Wine's setup to save: %w", serverErr)
@@ -269,7 +269,7 @@ func copyPrefix(base string, paths winesandbox.Paths, id, userName string, stder
 		return err
 	}
 	if _, err := os.Lstat(paths.Prefix); err == nil {
-		return fmt.Errorf("a prefix for %s is left over; gjallar-wine remove %s clears it", id, id)
+		return fmt.Errorf("a prefix for %s is left over; gjallarctl wine remove %s clears it", id, id)
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
@@ -400,7 +400,7 @@ func installApp(id, installer string, in io.Reader, interactive bool, stdout, st
 		if err := saveApp(paths, id, a, stderr); err != nil {
 			return err
 		}
-		fmt.Fprintf(stdout, "App %s starts %s. It is in the app menu, and gjallar-wine run %s starts it.\n", id, a.Exe, id)
+		fmt.Fprintf(stdout, "App %s starts %s. It is in the app menu, and gjallarctl wine run %s starts it.\n", id, a.Exe, id)
 		return nil
 	}
 	return chooseProgram(id, "", in, interactive, stdout, stderr)
@@ -459,7 +459,7 @@ func chooseProgram(id, choice string, in io.Reader, interactive bool, stdout, st
 	}
 	if choice == "" {
 		if len(found) == 0 {
-			fmt.Fprintf(stdout, "No shortcut in app %s starts a program. gjallar-wine program %s D:\\PROGRAM.exe picks one by its path.\n", id, id)
+			fmt.Fprintf(stdout, "No shortcut in app %s starts a program. gjallarctl wine program %s D:\\PROGRAM.exe picks one by its path.\n", id, id)
 			return nil
 		}
 		fmt.Fprintf(stdout, "Programs in app %s:\n", id)
@@ -471,7 +471,7 @@ func chooseProgram(id, choice string, in io.Reader, interactive bool, stdout, st
 			fmt.Fprintf(stdout, "%s %d  %s\n", mark, i+1, p)
 		}
 		if !interactive {
-			fmt.Fprintf(stdout, "gjallar-wine program %s NUMBER picks one.\n", id)
+			fmt.Fprintf(stdout, "gjallarctl wine program %s NUMBER picks one.\n", id)
 			return nil
 		}
 		fmt.Fprint(stdout, "Number of the program to start, or Enter to keep the current one: ")
@@ -487,7 +487,7 @@ func chooseProgram(id, choice string, in io.Reader, interactive bool, stdout, st
 	var win string
 	if n, err := strconv.Atoi(choice); err == nil {
 		if n < 1 || n > len(found) {
-			return fmt.Errorf("%d is not on the list; gjallar-wine program %s shows it", n, id)
+			return fmt.Errorf("%d is not on the list; gjallarctl wine program %s shows it", n, id)
 		}
 		win = found[n-1]
 	} else if filepath.IsAbs(choice) {

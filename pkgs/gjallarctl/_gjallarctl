@@ -339,6 +339,16 @@ _gjallarctl_wine() {
   local -a cmds=(
     'list:show your Wine apps and their network switches'
     'set:switch an app'"'"'s internet or home network'
+    'add:add an app and run its installer'
+    'install:run an installer in an app'
+    'program:show or pick the program an app starts'
+    'run:start an app in its sandbox'
+    'remove:remove an app'
+    'reset:give an app a new Wine setup; files stay'
+    'repair:set an app'"'"'s Wine setup up again; programs stay'
+    'undo:put an app back as it was before the last reset or repair'
+    'import:copy a Wine prefix into a new app'
+    'menu:bring the app menu in line with the apps'
   )
   if (( CURRENT == 2 )); then
     _describe -t commands 'wine command' cmds
@@ -347,13 +357,20 @@ _gjallarctl_wine() {
   shift words
   (( CURRENT-- ))
   local -a ids
+  ids=(${(f)"$(gjallarctl wine list --ids 2>/dev/null)"})
+  local installer='_files -g "*.(exe|msi|EXE|MSI)"'
   case $words[1] in
     list) _arguments '(--json)--ids[print only the app ids]' '(--ids)--json[print the list as JSON]' ;;
     set)
-      ids=(${(f)"$(gjallarctl wine list --ids 2>/dev/null)"})
       _arguments "1:app id:(${ids[*]})" \
         '--internet[reach the internet]:state:(on off)' \
         '--home[reach the tailnet and home network]:state:(on off)' ;;
+    add) _arguments '1:app name:' "2:installer:$installer" ;;
+    install) _arguments "1:app id:(${ids[*]})" "2:installer:$installer" ;;
+    program|reset|repair|undo) _arguments "1:app id:(${ids[*]})" ;;
+    run) _arguments "1:app id:(${ids[*]})" '*:file:_files' ;;
+    remove) _arguments "1:app id:(${ids[*]})" '--delete-files[also delete the app'"'"'s files folder]' ;;
+    import) _arguments '1:app name:' '2:prefix folder:_files -/' ;;
   esac
 }
 

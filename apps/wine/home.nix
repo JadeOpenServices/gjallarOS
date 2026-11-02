@@ -65,7 +65,7 @@ let
 
   # Sets up the base prefix every Wine app is copied from (Plane 272). It runs
   # when the first app is added, not at rebuild (Q38): the runtimes come from
-  # their publishers and stay out of our cache. gjallar-wine add may run
+  # their publishers and stay out of our cache. gjallarctl wine add may run
   # without a terminal, so progress also goes to a window and the full output
   # to a log.
   wineInit = pkgs.writeShellScriptBin "gjallar-wine-init" ''
@@ -258,48 +258,6 @@ lib.mkIf config.gjallar.apps.wine.enable {
     [
       sandboxLauncher
       setupDesktop
-      # hold, lock, stay and icon are the launcher's own steps, so they are not offered.
-      (pkgs.writeTextDir "share/zsh/site-functions/_gjallar-wine" ''
-        #compdef gjallar-wine
-        _gjallar_wine_ids() {
-          local -a ids
-          ids=(''${HOME}/.local/share/gjallar-wine/apps/*.json(N:t:r))
-          _describe -t apps 'Wine app' ids
-        }
-        _gjallar_wine_installers() {
-          _files -g '*.(exe|msi|EXE|MSI)'
-        }
-        local -a commands
-        commands=(
-          'add:add an app and run its installer'
-          'import:copy a Wine prefix into a new app'
-          'install:run an installer in an app'
-          'program:show or pick the program an app starts'
-          'run:start a Wine app in its sandbox'
-          'remove:remove an app'
-          'menu:bring the app menu in line with the apps'
-        )
-        if (( CURRENT == 2 )); then
-          _describe -t commands 'gjallar-wine command' commands
-          return
-        fi
-        case $words[2] in
-          add)
-            (( CURRENT == 4 )) && _gjallar_wine_installers ;;
-          import)
-            (( CURRENT == 4 )) && _files -/ ;;
-          install)
-            if (( CURRENT == 3 )); then _gjallar_wine_ids
-            elif (( CURRENT == 4 )); then _gjallar_wine_installers; fi ;;
-          program)
-            (( CURRENT == 3 )) && _gjallar_wine_ids ;;
-          run)
-            if (( CURRENT == 3 )); then _gjallar_wine_ids; else _files; fi ;;
-          remove)
-            if (( CURRENT == 3 )); then _gjallar_wine_ids
-            elif (( CURRENT == 4 )); then compadd -- --delete-files; fi ;;
-        esac
-      '')
     ]
     ++ fexPackages;
 
@@ -316,6 +274,6 @@ lib.mkIf config.gjallar.apps.wine.enable {
   # that are gone go. Wine's own menu builder is off in the sandbox, so these
   # are the only entries Wine apps have.
   home.activation.gjallarWineMenu = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
-    run ${lib.getExe sandboxLauncher} menu
+    run ${sandboxLauncher}/libexec/gjallar-wine menu
   '';
 }

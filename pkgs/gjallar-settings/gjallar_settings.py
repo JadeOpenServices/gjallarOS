@@ -6,14 +6,14 @@ holds no rights of its own: it reads `gjallarctl security status --json`,
 272), and every change goes through
 gjallarctl, which asks the settings service and with it for the password.
 A click only marks a change; Apply runs them all at once (Plane 276).
-New Wine apps are set up with gjallar-wine in a terminal, as the user.
+New Wine apps are set up with gjallarctl wine in a terminal, as the user.
 """
 
 import configparser
 import json
 import os
+import pwd
 import re
-import shutil
 import signal
 import sys
 
@@ -42,11 +42,14 @@ CATEGORY_ICONS = {
     "system": "applications-system",
 }
 APP_ID = re.compile(r"[a-z0-9][a-z0-9-]*")
-# Wine app ids as gjallar-wine makes them.
+# Wine app ids as gjallarctl wine makes them.
 WINE_ID = re.compile(r"[a-z][a-z0-9-]*")
 # Setup and program choice run in a terminal, as gjallarctl's own --window
 # commands do: the output and questions stay readable until Enter.
 TERMINAL_SCRIPT = """"$@"; printf '\\nPress Enter to close. '; read -r _"""
+# gjallarctl wine's helper, there while Wine apps are on
+# (internal/winesandbox/helper.go).
+WINE_HELPER = "/etc/profiles/per-user/{}/libexec/gjallar-wine"
 # What a marked change can be: an app installed, a Wine app's network, a
 # gjallarHorn protection. Each is "kind:id" in Backend.changes.
 CHANGE_KINDS = {"app": APP_ID, "internet": WINE_ID, "home": WINE_ID, "security": APP_ID}
@@ -147,7 +150,7 @@ class Backend(QObject):
         self._running = set()
         self._scan = {}
         self._scanning = ""
-        self._wineTool = ""
+        self._wineTool = False
         self._changes = {}
         self._applying = False
         self._details = load_details(DETAILS)
@@ -227,11 +230,11 @@ class Backend(QObject):
     def scanning(self):
         return self._scanning
 
-    # gjallar-wine comes with the Wine app (apps/wine); without it there is
-    # nothing to set up.
+    # gjallarctl wine's helper comes with the Wine app (apps/wine); without
+    # it there is nothing to set up.
     @Property(bool, notify=appsChanged)
     def wineTool(self):
-        return self._wineTool != ""
+        return self._wineTool
 
     # Marked changes, "kind:id" -> the state asked for; nothing runs before
     # apply().
@@ -289,7 +292,7 @@ class Backend(QObject):
             self._appsSettings = state if isinstance(state, str) else ""
             self._appsRebuilding = answer.get("rebuilding") is True
             # Turning Wine on or off in this window adds or removes it.
-            self._wineTool = shutil.which("gjallar-wine") or ""
+            self._wineTool = os.path.exists(WINE_HELPER.format(pwd.getpwuid(os.getuid()).pw_name))
             self.appsChanged.emit()
             self._prune()
 
@@ -311,7 +314,7 @@ class Backend(QObject):
         self._run(["wine", "list", "--json"], done)
 
     def _wineTerminal(self, title, args):
-        self._run(["--title=" + title, "-e", "sh", "-c", TERMINAL_SCRIPT, "sh", self._wineTool, *args],
+        self._run(["--title=" + title, "-e", "sh", "-c", TERMINAL_SCRIPT, "sh", GJALLARCTL, "wine", *args],
                   lambda *_: self.refreshWine(), program="ghostty")
 
     @Slot(str, str)
@@ -320,7 +323,7 @@ class Backend(QObject):
         name = name.strip()
         if installer.startswith("file:"):
             installer = QUrl(installer).toLocalFile()
-        # gjallar-wine checks both again; these only keep a wrong pick out.
+        # gjallarctl wine checks both again; these only keep a wrong pick out.
         if not self._wineTool or not name or not os.path.isabs(installer) or not os.path.isfile(installer):
             return
         self._wineTerminal("GjallarOS Wine app", ["add", name, installer])
@@ -343,8 +346,8 @@ class Backend(QObject):
             self.noticeChanged.emit()
             self.refreshWine()
 
-        self._run(["remove", app_id, *(["--delete-files"] if delete_files else [])], done,
-                  program=self._wineTool, merged=True)
+        self._run(["wine", "remove", app_id, *(["--delete-files"] if delete_files else [])], done,
+                  merged=True)
 
     @Slot(str)
     def openHomepage(self, app_id):
