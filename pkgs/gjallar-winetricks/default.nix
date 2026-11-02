@@ -14,9 +14,14 @@
 # programs under a key that misses Microsoft\, so a later wineboot -u stops
 # at a .NET dialog in its 32-bit pass and never ends (Plane 277). Same
 # change as winetricks PR #2533, carried until it is merged (book 753).
+#
+# w_download_to checks the cache folder name with grep '\/-'; GNU grep 3.8
+# and later warn "stray \ before /" on every download. '/-' matches the
+# same (book 753).
 winetricks.overrideAttrs (old: {
   postPatch = old.postPatch + ''
     substituteInPlace src/winetricks \
+      --replace-fail "grep -q -e '\/-' -e '^-'" "grep -q -e '/-' -e '^-'" \
       --replace-fail 'HKLM\\Software\\Wow6432Node\\.NETFramework' \
         'HKLM\\Software\\Wow6432Node\\Microsoft\\.NETFramework' \
       --replace-fail 'w_askpermission "SHA256 mismatch!' \
