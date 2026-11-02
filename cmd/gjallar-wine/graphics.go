@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -259,8 +260,13 @@ func ntsyncState() ntsync {
 	return ntsyncNone
 }
 
-// reportGraphics prints the graphics part of the doctor's report.
-func reportGraphics(id string, stdout io.Writer) {
+// dxvkOff is the fix (internal/winefix/fixes.json) that sets Direct3D 8
+// to 11 back to Wine's own libraries, for a GPU without Vulkan 1.3.
+const dxvkOff = "dxvk_off"
+
+// reportGraphics prints the graphics part of the doctor's report for app
+// id, whose record is a.
+func reportGraphics(id string, a winesandbox.App, stdout io.Writer) {
 	fmt.Fprintln(stdout, "Graphics:")
 	cards, err := gpus()
 	if err != nil {
@@ -268,13 +274,14 @@ func reportGraphics(id string, stdout io.Writer) {
 	}
 	out, verr := probeVulkan(id)
 	devs := parseVulkan(out)
-	for _, line := range graphicsLines(cards, devs, verr, ntsyncState()) {
+	for _, line := range graphicsLines(id, slices.Contains(a.Fixes, dxvkOff), cards, devs, verr, ntsyncState()) {
 		fmt.Fprintln(stdout, "  "+line)
 	}
 }
 
-// graphicsLines turns the facts into the report's lines.
-func graphicsLines(cards []gpu, devs []vkDevice, verr error, nt ntsync) []string {
+// graphicsLines turns the facts into the report's lines. off tells
+// whether app id has the dxvk_off fix.
+func graphicsLines(id string, off bool, cards []gpu, devs []vkDevice, verr error, nt ntsync) []string {
 	var lines []string
 	for _, g := range cards {
 		l := fmt.Sprintf("GPU %s: %s", g.card, vendorName(g.vendor))
@@ -327,6 +334,12 @@ func graphicsLines(cards []gpu, devs []vkDevice, verr error, nt ntsync) []string
 		lines = append(lines, "Only software Vulkan: Direct3D programs run, but slowly, on the processor.")
 	default:
 		lines = append(lines, fmt.Sprintf("No GPU with Vulkan %s in the app's sandbox: Direct3D programs through DXVK and VKD3D-Proton fail or run on the processor.", vulkanNeed))
+		if !off {
+			lines = append(lines, fmt.Sprintf("gjallarctl wine fix %s %s makes Direct3D 8 to 11 use Wine's own libraries, which draw with OpenGL; Direct3D 12 still needs Vulkan.", id, dxvkOff))
+		}
+	}
+	if off {
+		lines = append(lines, fmt.Sprintf("The app has %s: Direct3D 8 to 11 go through Wine's own libraries with OpenGL, not DXVK. gjallarctl wine undo %s takes it back while it is the newest change.", dxvkOff, id))
 	}
 
 	switch nt {

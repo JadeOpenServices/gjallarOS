@@ -43,6 +43,17 @@ func TestSandboxArgs(t *testing.T) {
 			t.Errorf("%s reaches the sandbox", sock)
 		}
 	}
+	// DXVK's libraries come from the prefix's registry, so a fix can
+	// switch them off (dxvk_off); the variable would win over it.
+	ov := args[slices.Index(args, "WINEDLLOVERRIDES")+1]
+	for _, dll := range []string{"d3d8=", "d3d9=", "d3d10core=", "d3d11=", "dxgi="} {
+		if strings.Contains(ov, dll) {
+			t.Errorf("WINEDLLOVERRIDES %q names %s", ov, dll)
+		}
+	}
+	if !strings.Contains(ov, "winemenubuilder.exe=d") {
+		t.Errorf("WINEDLLOVERRIDES %q lets Wine write menu entries", ov)
+	}
 	clear := slices.Index(args, "--clearenv")
 	if clear < 0 || clear > slices.Index(args, "--setenv") {
 		t.Error("environment not cleared before it is set")
