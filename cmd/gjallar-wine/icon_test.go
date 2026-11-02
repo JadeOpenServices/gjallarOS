@@ -8,17 +8,25 @@ import (
 	"image/png"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/JadeOpenServices/gjallarOS/internal/winesandbox"
+	"github.com/JadeOpenServices/gjallarOS/internal/winicon"
 )
 
 // synthIco is a SYNTHETIC .ico file with one PNG icon of side 32.
 func synthIco(t *testing.T, c color.NRGBA) []byte {
 	t.Helper()
-	img := image.NewNRGBA(image.Rect(0, 0, 32, 32))
+	return synthIcoSide(t, c, 32)
+}
+
+// synthIcoSide is a SYNTHETIC .ico file with one PNG icon of side n.
+func synthIcoSide(t *testing.T, c color.NRGBA, n int) []byte {
+	t.Helper()
+	img := image.NewNRGBA(image.Rect(0, 0, n, n))
 	for i := 0; i < len(img.Pix); i += 4 {
 		img.Pix[i], img.Pix[i+1], img.Pix[i+2], img.Pix[i+3] = c.R, c.G, c.B, c.A
 	}
@@ -26,7 +34,7 @@ func synthIco(t *testing.T, c color.NRGBA) []byte {
 	if err := png.Encode(&p, img); err != nil {
 		t.Fatal(err)
 	}
-	d := []byte{0, 0, 1, 0, 1, 0, 32, 32, 0, 0, 1, 0, 32, 0}
+	d := []byte{0, 0, 1, 0, 1, 0, byte(n), byte(n), 0, 0, 1, 0, 32, 0}
 	d = binary.LittleEndian.AppendUint32(d, uint32(p.Len()))
 	d = binary.LittleEndian.AppendUint32(d, 22)
 	return append(d, p.Bytes()...)
@@ -209,5 +217,44 @@ func TestMenuCmdIcons(t *testing.T) {
 	}
 	if _, err := os.Lstat(other); err != nil {
 		t.Errorf("other icon removed: %v", err)
+	}
+}
+
+// TestMain lets TestIconReaderLimit run the icon reader as a child of the
+// test binary, the way the sandbox runs it.
+func TestMain(m *testing.M) {
+	if os.Getenv("GJALLAR_WINE_ICON_CHILD") == "1" {
+		os.Exit(iconCmd(os.Args[1:], os.Stdout, os.Stderr))
+	}
+	os.Exit(m.Run())
+}
+
+// TestIconReaderLimit runs the icon reader under its memory limit on a
+// 256 pixel icon, which it scales to every smaller size, so the Go runtime
+// has to grow its heap below the limit.
+func TestIconReaderLimit(t *testing.T) {
+	src := filepath.Join(t.TempDir(), "big.ico")
+	if err := os.WriteFile(src, synthIcoSide(t, color.NRGBA{R: 200, A: 255}, 256), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.Open(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	cmd := exec.Command(os.Args[0], "ico")
+	cmd.Env = []string{"GJALLAR_WINE_ICON_CHILD=1"}
+	cmd.ExtraFiles = []*os.File{f}
+	var out, errOut bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &out, &errOut
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("icon reader: %v: %s", err, errOut.String())
+	}
+	imgs, err := parseIconOut(out.Bytes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(imgs) != len(winicon.Sizes) {
+		t.Fatalf("got %d sizes, want %d", len(imgs), len(winicon.Sizes))
 	}
 }

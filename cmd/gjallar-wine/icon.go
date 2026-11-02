@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime/debug"
 	"slices"
 	"strings"
 	"time"
@@ -251,6 +252,9 @@ func parseIconOut(data []byte) (map[int]*image.NRGBA, error) {
 	return imgs, nil
 }
 
+// iconMem is the icon reader's memory limit.
+const iconMem = 512 << 20
+
 // iconNone is the icon reader's exit code for a file without an icon.
 const iconNone = 3
 
@@ -261,12 +265,16 @@ func iconCmd(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "usage: gjallar-wine icon ico|exe, with the file as fd 3")
 		return 2
 	}
-	// Address space for the decoder, well above what the limits allow.
-	limit := &unix.Rlimit{Cur: 1 << 30, Max: 1 << 30}
-	if err := unix.Setrlimit(unix.RLIMIT_AS, limit); err != nil {
+	// Memory for the decoder, well above what the limits in winicon allow.
+	// RLIMIT_DATA counts the memory the Go runtime maps for use; it leaves
+	// out the address space the runtime only reserves, which RLIMIT_AS
+	// counts, so that limit stopped the runtime growing its heap at all.
+	limit := &unix.Rlimit{Cur: iconMem, Max: iconMem}
+	if err := unix.Setrlimit(unix.RLIMIT_DATA, limit); err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
+	debug.SetMemoryLimit(iconMem / 2)
 	imgs, err := decodeIcon(args[0], os.NewFile(3, "icon source"))
 	if errors.Is(err, winicon.ErrNoIcon) {
 		return iconNone
