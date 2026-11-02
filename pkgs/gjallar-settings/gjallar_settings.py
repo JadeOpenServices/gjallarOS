@@ -402,12 +402,20 @@ class Backend(QObject):
             value = None if entry.get("waiting") else {"on": True, "off": False}.get(entry.get("switch"))
         return value if isinstance(value, bool) else None
 
+    def _removedOn(self, kind, item_id, value):
+        """A removed Wine app's networks can only go off."""
+        if kind not in ("internet", "home") or not value:
+            return False
+        entry = next((w for w in self._wine if w.get("id") == item_id), {})
+        return entry.get("removed") is True
+
     def _prune(self):
         """Drop marks that the system now matches or that can no longer apply."""
         if self._applying:
             return
         kept = {key: value for key, value in self._changes.items()
-                if self._current(*key.split(":", 1)) not in (None, value)}
+                if self._current(*key.split(":", 1)) not in (None, value)
+                and not self._removedOn(*key.split(":", 1), value)}
         if kept != self._changes:
             self._changes = kept
             self.changesChanged.emit()
@@ -419,7 +427,7 @@ class Backend(QObject):
         if self._applying or not pattern or not pattern.fullmatch(item_id):
             return
         current = self._current(kind, item_id)
-        if current is None:
+        if current is None or self._removedOn(kind, item_id, value):
             return
         key = kind + ":" + item_id
         changes = dict(self._changes)

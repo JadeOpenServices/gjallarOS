@@ -160,7 +160,7 @@ Page {
                 Label {
                     visible: !page.wine && page.details.system === true
                     textFormat: Text.PlainText
-                    text: "It also changes the system outside your account, for example with a background service."
+                    text: "It also sets up parts of the system outside your account, such as background services or locked settings."
                     wrapMode: Label.Wrap
                     Layout.fillWidth: true
                 }

@@ -534,8 +534,13 @@ func removeCmd(args []string, stdout io.Writer) error {
 	defer lock.Close()
 	// The files folder, to take out of Places and to tell where the files
 	// stay. Unknown if the record is broken.
+	// The name the user knows it by, the id if the record is broken.
 	var place, kept string
-	if _, paths, err := winesandbox.LoadApp(home, id); err == nil {
+	shown := id
+	if app, paths, err := winesandbox.LoadApp(home, id); err == nil {
+		if app.Name != "" {
+			shown = app.Name
+		}
 		place = paths.Files
 		if !files {
 			kept = paths.Files
@@ -557,11 +562,11 @@ func removeCmd(args []string, stdout io.Writer) error {
 	}
 	switch {
 	case files:
-		fmt.Fprintf(stdout, "Removed app %s and its files folder.\n", id)
+		fmt.Fprintf(stdout, "Removed %s and its files folder.\n", shown)
 	case kept != "":
-		fmt.Fprintf(stdout, "Removed app %s. Its files stay in %s.\n", id, kept)
+		fmt.Fprintf(stdout, "Removed %s. Its files stay in %s.\n", shown, kept)
 	default:
-		fmt.Fprintf(stdout, "Removed app %s.\n", id)
+		fmt.Fprintf(stdout, "Removed %s.\n", shown)
 	}
 	return nil
 }
