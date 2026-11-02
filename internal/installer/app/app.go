@@ -709,6 +709,25 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 		}
 	}
 
+	// Read before any Secure Boot question: every path below either turns
+	// Secure Boot off or installs own keys, and both need the firmware
+	// setup. On locked firmware neither works, so stop before asking.
+	if trust, trustErr := secureboot.ReadFirmwareTrust(); trustErr != nil {
+		fmt.Fprintf(out, "What the firmware trusts could not be read (%v).\n", trustErr)
+	} else {
+		fmt.Fprint(out, firmwareTrustReport(trust))
+		if !s.user.UnattendedInstall {
+			locked, err := askFirmwareLocked(ctx, ui, trust)
+			if err != nil {
+				return fail(errOut, err)
+			}
+			if locked {
+				fmt.Fprint(out, lockedFirmwareNotice)
+				return 0
+			}
+		}
+	}
+
 	if tpmAvailable &&
 		s.user.SecureBootPrompt &&
 		!s.user.EndpointManagedDevice &&
