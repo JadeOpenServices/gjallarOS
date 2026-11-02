@@ -61,6 +61,9 @@ let
       /var/lib/systemd/pcrlock.json
     rm -f -- "$state/luks/metadata.json.tmp"
     chmod 0600 "$state/luks/keyslots.json"
+    # This boot was not opened by the new token; the login card must not
+    # read the boot's unlock record as "the chip failed" (Plane 298).
+    gjallarctl luks record --reenrolled
   '';
 
   # Rebinds TPM2 unlock after the measured state changed on purpose
@@ -126,20 +129,36 @@ in
   # also asks for a startup PIN forever and never falls back to the recovery
   # key (e2e-fw13, 2026-10-09). systemd skips it when it measures the volume
   # key into PCR 15, which also tells later boot stages which disk was
-  # opened. PCR 15 is not in the pcrlock policy. Extending the submodule sets
-  # both on every device without reading the attrset back.
+  # opened. PCR 15 is not in the pcrlock policy. tpm2-measure-keyslot-nvpcr
+  # logs which keyslot and kind of key opened the disk (tpm2, or none for a
+  # typed key), so the login card can tell a recovery-key start from a chip
+  # start (Plane 298). systemd ignores a failed measurement, so unlock never
+  # depends on it; the option also makes systemd-cryptsetup use its own TPM2
+  # code instead of the token plugin. Extending the submodule sets these on
+  # every device without reading the attrset back.
   options.boot.initrd.luks.devices = lib.mkOption {
     type = lib.types.attrsOf (
       lib.types.submodule {
         config.crypttabExtraOpts = lib.mkIf tpm2Enabled [
           "tpm2-device=auto"
           "tpm2-measure-pcr=yes"
+          "tpm2-measure-keyslot-nvpcr=yes"
         ];
       }
     );
   };
 
   config.environment.systemPackages = lib.mkIf tpm2Enabled [ tpm2Reenroll ];
+
+  # systemd-cryptsetup looks the "cryptsetup" NvPCR up in /etc/nvpcr and
+  # friends; the NixOS initrd ships no NvPCR definitions (its tpm2 module
+  # leaves them out). The NV index and anchor are the ones
+  # systemd-tpm2-setup already keeps on every measured boot. The anchor
+  # event extends PCR 9, which is not in the pcrlock policy.
+  config.boot.initrd.systemd.contents = lib.mkIf tpm2Enabled {
+    "/etc/nvpcr/cryptsetup.nvpcr".source =
+      "${config.boot.initrd.systemd.package}/lib/nvpcr/cryptsetup.nvpcr";
+  };
 
   # make-policy rewrites the credential on the ESP here too (boot, enrollment,
   # re-enroll); its own fsyncs do not make that durable on vfat, see

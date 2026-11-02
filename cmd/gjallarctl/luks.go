@@ -7,9 +7,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -80,7 +83,24 @@ func runLUKSLifecycle(args []string, stdout, stderr io.Writer) int {
 		printLUKSStatus(stdout, device, slots, diskcrypto.ModelTPMKind())
 		return 0
 	case "record":
-		return recordOrFail(newLUKSRecord(slots), stderr)
+		r := newLUKSRecord(slots)
+		// --reenrolled: the first-boot enrollment or gjallar-tpm2-reenroll
+		// just bound the chip to this start, so how this start unlocked no
+		// longer matters. The boot-time record (and a restart of its
+		// service by a rebuild) keeps that for the rest of the boot.
+		old, err := readLUKSRecord(luksRecordPath)
+		if len(args) == 2 || err == nil && old.BoundThisBoot {
+			r = boundThisBoot(r)
+			// The enrollment runs before gjallar-luks-record, which
+			// creates the directory.
+			if err := os.MkdirAll(filepath.Dir(luksRecordPath), 0o755); err != nil {
+				fmt.Fprintf(stderr, "ERROR: %v\n", err)
+				return 1
+			}
+		} else {
+			r = withBootUnlock(ctx, r, device, stderr)
+		}
+		return recordOrFail(r, stderr)
 	case "setup":
 		code = runLUKSSetup(ctx, device, slots, stderr)
 	case "pin":
@@ -91,7 +111,11 @@ func runLUKSLifecycle(args []string, stdout, stderr io.Writer) int {
 	// The bar and the login reminder follow the keyslots, also when the
 	// change stopped halfway.
 	if after, err := diskcrypto.ReadKeyslots(ctx, device); err == nil {
-		if err := writeLUKSRecord(luksRecordPath, newLUKSRecord(after)); err != nil && !errors.Is(err, os.ErrNotExist) {
+		r := newLUKSRecord(after)
+		if old, err := readLUKSRecord(luksRecordPath); err == nil {
+			r = withBootFacts(r, old, sameChipKeyslots(slots, after))
+		}
+		if err := writeLUKSRecord(luksRecordPath, r); err != nil && !errors.Is(err, os.ErrNotExist) {
 			fmt.Fprintf(stderr, "WARNING: %v\n", err)
 		}
 	}
@@ -106,9 +130,45 @@ func luksArgsValid(args []string) bool {
 			return true
 		}
 	case len(args) == 2:
-		return args[0] == "pin" && args[1] == "--remove"
+		return args[0] == "pin" && args[1] == "--remove" ||
+			args[0] == "record" && args[1] == "--reenrolled"
 	}
 	return false
+}
+
+// withBootUnlock adds how this boot opened the disk and whether this boot's
+// pcrlock policy locks PCR 4, for the re-enroll card (Plane 298). Without
+// the chip unlock both stay unknown. A fact that cannot be read stays
+// unknown too and the warning lands in the journal: the keyslot counts
+// still get written, and the card never shows on a guess.
+func withBootUnlock(ctx context.Context, r luksRecord, device string, stderr io.Writer) luksRecord {
+	if r.TPM2 == 0 {
+		return r
+	}
+	uuid, err := diskcrypto.LUKSUUID(ctx, device)
+	if err == nil {
+		var method string
+		method, err = diskcrypto.BootUnlockMethod(ctx, uuid)
+		if err == nil && method != diskcrypto.UnlockUnknown {
+			r.ChipUnlockKnown, r.ChipUnlock = true, method == diskcrypto.UnlockChip
+		}
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "WARNING: how this start unlocked the disk: %v\n", err)
+	}
+	locked, err := diskcrypto.PCRLockPolicyLocks(pcrlockPolicyPath, 4)
+	switch {
+	case err == nil:
+		r.PCR4Known, r.PCR4Locked = true, locked
+	case !errors.Is(err, os.ErrNotExist):
+		fmt.Fprintf(stderr, "WARNING: %v\n", err)
+	}
+	return r
+}
+
+// sameChipKeyslots: the TPM2 keyslots and their tokens did not change.
+func sameChipKeyslots(a, b diskcrypto.Keyslots) bool {
+	return slices.Equal(a.TPM2, b.TPM2) && maps.Equal(a.TPM2Token, b.TPM2Token) && a.TPM2PIN == b.TPM2PIN
 }
 
 func recordOrFail(r luksRecord, stderr io.Writer) int {

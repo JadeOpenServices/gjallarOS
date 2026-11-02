@@ -241,21 +241,9 @@ func ReadTPM2TokenID(metadataPath string) (string, error) {
 // a firmware event log it wrote "pcrValues":[] and the TPM then released
 // the disk key to any boot chain (e2e-target, 2026-09-29).
 func CheckPCRLockPolicy(path string, pcrs []int) error {
-	raw, err := os.ReadFile(path)
+	locked, err := pcrLockPolicyPCRs(path)
 	if err != nil {
-		return fmt.Errorf("read pcrlock policy: %w", err)
-	}
-	var policy struct {
-		PCRValues []struct {
-			PCR int `json:"pcr"`
-		} `json:"pcrValues"`
-	}
-	if err := json.Unmarshal(raw, &policy); err != nil {
-		return fmt.Errorf("parse pcrlock policy: %w", err)
-	}
-	locked := make(map[int]bool, len(policy.PCRValues))
-	for _, value := range policy.PCRValues {
-		locked[value.PCR] = true
+		return err
 	}
 	var missing []string
 	for _, pcr := range pcrs {
@@ -276,6 +264,33 @@ func CheckPCRLockPolicy(path string, pcrs []int) error {
 		)
 	}
 	return nil
+}
+
+// PCRLockPolicyLocks reports whether the systemd-pcrlock policy at path
+// locks pcr.
+func PCRLockPolicyLocks(path string, pcr int) (bool, error) {
+	locked, err := pcrLockPolicyPCRs(path)
+	return locked[pcr], err
+}
+
+func pcrLockPolicyPCRs(path string) (map[int]bool, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read pcrlock policy: %w", err)
+	}
+	var policy struct {
+		PCRValues []struct {
+			PCR int `json:"pcr"`
+		} `json:"pcrValues"`
+	}
+	if err := json.Unmarshal(raw, &policy); err != nil {
+		return nil, fmt.Errorf("parse pcrlock policy: %w", err)
+	}
+	locked := make(map[int]bool, len(policy.PCRValues))
+	for _, value := range policy.PCRValues {
+		locked[value.PCR] = true
+	}
+	return locked, nil
 }
 
 // pcr4RestartHint explains the one PCR 4 gap a user can fix alone. When the

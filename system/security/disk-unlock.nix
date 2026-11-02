@@ -46,8 +46,12 @@ in
   config.systemd.services.gjallar-luks-record = {
     description = "Record which disk unlock methods are set up";
     wantedBy = [ "multi-user.target" ];
-    # After the first-boot chip enrollment and its recovery key.
-    after = [ "measured-boot-tpm2-enrollment.service" ];
+    # After the first-boot chip enrollment and its recovery key, and after
+    # make-policy, whose policy says whether PCR 4 is locked (Plane 298).
+    after = [
+      "measured-boot-tpm2-enrollment.service"
+      "systemd-pcrlock-make-policy.service"
+    ];
     path = [
       pkgs.cryptsetup
       pkgs.util-linux
