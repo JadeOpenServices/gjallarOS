@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/diskcrypto"
@@ -83,6 +84,10 @@ func TestBootFactTexts(t *testing.T) {
 	re := diskProtectionTexts(diskProtectionReenroll, luksRecord{})
 	if re.summary == "" || len(re.body) > 80 || len(re.command) != 2 || re.command[0] != "tpm2" || re.command[1] != "reenroll" {
 		t.Errorf("reenroll: %+v", re)
+	}
+	rp := diskProtectionTexts(diskProtectionReenroll, luksRecord{PINKnown: true, PIN: true})
+	if rp.body == re.body || len(rp.body) > 80 || !strings.Contains(rp.body, "PIN") {
+		t.Errorf("reenroll with PIN: %+v", rp)
 	}
 	rs := diskProtectionTexts(diskProtectionRestart, luksRecord{})
 	if rs.summary == "" || rs.body == "" || len(rs.body) > 80 || rs.command != nil {

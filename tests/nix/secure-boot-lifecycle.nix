@@ -84,7 +84,14 @@ assert
   evaluated.config.boot.initrd.luks.devices.cryptroot.crypttabExtraOpts == [
     "tpm2-device=auto"
     "tpm2-measure-pcr=yes"
+    "tpm2-measure-keyslot-nvpcr=yes"
   ];
+# The keyslot record tells the login card whether the chip or a typed key
+# opened the disk. The NixOS initrd ships no NvPCR definitions; without
+# this file systemd-cryptsetup logs nothing (Plane 298).
+assert
+  evaluated.config.boot.initrd.systemd.contents."/etc/nvpcr/cryptsetup.nvpcr".source
+  == "${evaluated.config.boot.initrd.systemd.package}/lib/nvpcr/cryptsetup.nvpcr";
 # A PCRLock policy that no longer matches the TPM had no way back to TPM2
 # unlock (e2e-target, 2026-10-05).
 assert builtins.any (

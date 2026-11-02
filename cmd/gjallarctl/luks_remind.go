@@ -289,9 +289,15 @@ func diskProtectionTexts(state string, r luksRecord) diskProtectionText {
 			command: []string{"luks", "pin"},
 		}
 	case diskProtectionReenroll:
+		body := "This start needed your recovery key. Re-enroll so the chip unlocks next time."
+		if r.PIN {
+			// After five wrong PINs systemd-cryptsetup asks for the
+			// recovery key too; the chip itself is fine then.
+			body = "This start needed your recovery key. Re-enroll unless you mistyped your PIN."
+		}
 		return diskProtectionText{
 			summary: "Security chip did not unlock your disk",
-			body:    "This start needed your recovery key. Re-enroll so the chip unlocks next time.",
+			body:    body,
 			command: []string{"tpm2", "reenroll"},
 		}
 	case diskProtectionRestart:
