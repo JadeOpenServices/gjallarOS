@@ -16,7 +16,6 @@ import (
 
 	"github.com/JadeOpenServices/gjallarOS/apps"
 	"github.com/JadeOpenServices/gjallarOS/internal/hardware/graphics"
-	"github.com/JadeOpenServices/gjallarOS/internal/installer/config"
 )
 
 type Level string
@@ -145,10 +144,6 @@ func validatePresetSchema(r *Report, user map[string]json.RawMessage) {
 	for key, raw := range user {
 		if installerManagedFields[key] {
 			r.Findings = append(r.Findings, Finding{Warn, fmt.Sprintf("%s is installer-managed and should be removed from user.config.json", key)})
-			continue
-		}
-		if name := config.LegacyManagementName(key); name != "" {
-			r.Findings = append(r.Findings, Finding{Warn, fmt.Sprintf("%s was renamed to %s; the old name is read for one more release", key, name)})
 			continue
 		}
 		expected, known := presetSchema[key]

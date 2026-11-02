@@ -299,14 +299,7 @@ func Parse(contents []byte) (User, error) {
 				return User{}, fmt.Errorf("user configuration: %w", err)
 			}
 		}
-		// JODS-565 moved the flat jods* keys under management and prebootLock.
-		oldManagement := len(legacyManagementPresent(fields)) > 0
-		if oldManagement {
-			if err := migrateLegacyManagement(fields); err != nil {
-				return User{}, fmt.Errorf("user configuration: %w", err)
-			}
-		}
-		if oldBackground || oldWebApplications || oldManagement {
+		if oldBackground || oldWebApplications {
 			if contents, err = json.Marshal(fields); err != nil {
 				return User{}, fmt.Errorf("parse user configuration: %w", err)
 			}
@@ -504,7 +497,7 @@ func ValidateProjectTools(user User) error {
 }
 
 var jodsPublicKeyPattern = regexp.MustCompile(`^[0-9a-fA-F]{64}$`)
-var jodsDesktopProfilePattern = regexp.MustCompile(`^[A-Za-z0-9._+:-]{1,64}$`)
+var desktopProfilePattern = regexp.MustCompile(`^[A-Za-z0-9._+:-]{1,64}$`)
 
 func ValidateJODS(user User) error {
 	if !user.Management.Enable {
@@ -541,7 +534,7 @@ func ValidateJODS(user User) error {
 	if !oneOf(user.Management.DeviceClass, "pc", "vm", "laptop", "kiosk", "workstation") {
 		return fmt.Errorf("invalid JODS device class: %q", user.Management.DeviceClass)
 	}
-	if !jodsDesktopProfilePattern.MatchString(strings.TrimSpace(user.Management.DesktopProfile)) {
+	if !desktopProfilePattern.MatchString(strings.TrimSpace(user.Management.DesktopProfile)) {
 		return fmt.Errorf("invalid JODS desktop profile: %q", user.Management.DesktopProfile)
 	}
 	host := parsed.Hostname()

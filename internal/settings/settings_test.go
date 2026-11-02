@@ -360,33 +360,3 @@ func TestLocalMessageCapsFiles(t *testing.T) {
 		t.Fatalf("message %q", message)
 	}
 }
-
-func TestEffectiveShowsOldManagementKeysUnderTheirNewNames(t *testing.T) {
-	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(configText(t, defaults(t)), &fields); err != nil {
-		t.Fatal(err)
-	}
-	delete(fields, "management")
-	delete(fields, "prebootLock")
-	fields["endpointManagedDevice"] = json.RawMessage(`false`)
-	fields["jodsPrebootLockEnable"] = json.RawMessage(`false`)
-	data, err := json.Marshal(fields)
-	if err != nil {
-		t.Fatal(err)
-	}
-	effective, err := Effective(data)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, key := range []string{"endpointManagedDevice", "jodsPrebootLockEnable"} {
-		if _, ok := effective[key]; ok {
-			t.Fatalf("Effective still shows %s", key)
-		}
-	}
-	if _, ok := effective["management"]; !ok {
-		t.Fatal("Effective has no management")
-	}
-	if !strings.Contains(string(effective["prebootLock"]), `"enable":false`) {
-		t.Fatalf("prebootLock = %s", effective["prebootLock"])
-	}
-}

@@ -99,43 +99,8 @@
         pkgs = basePkgs;
         inherit inputs;
       };
-      # JODS-565 moved the flat jods* keys under management and prebootLock.
-      # A state.nix from before that still builds for one release, with a
-      # warning; gjallarctl rebuild writes the new names. State with both
-      # forms is refused: these keys decide who controls the device.
-      legacyManagementNames = {
-        endpointManagedDevice = "enable";
-        jodsEndpoint = "endpoint";
-        jodsPolicySigningPublicKey = "policySigningPublicKey";
-        jodsRecoveryCommandSigningPublicKey = "recoveryCommandSigningPublicKey";
-        jodsEnrollmentMode = "enrollmentMode";
-        jodsAllowInsecureTls = "allowInsecureTls";
-        jodsDeviceClass = "deviceClass";
-        jodsDesktopProfile = "desktopProfile";
-        jodsFingerprintEnrollmentAllowed = "fingerprintEnrollmentAllowed";
-      };
-      legacyStateKeys = builtins.filter (key: stateSettings ? ${key}) (
-        builtins.attrNames legacyManagementNames ++ [ "jodsPrebootLockEnable" ]
-      );
-      managementState =
-        if legacyStateKeys == [ ] then
-          { }
-        else if stateSettings ? management || stateSettings ? prebootLock then
-          throw "generated/state.nix holds management or prebootLock and the old ${lib.concatStringsSep ", " legacyStateKeys}; run gjallarctl rebuild to write it again"
-        else
-          lib.warn
-            "generated/state.nix uses the old names ${lib.concatStringsSep ", " legacyStateKeys}; gjallarctl rebuild writes management and prebootLock instead"
-            {
-              management = lib.mapAttrs' (old: new: lib.nameValuePair new stateSettings.${old}) (
-                lib.filterAttrs (old: _: stateSettings ? ${old}) legacyManagementNames
-              );
-              prebootLock = lib.optionalAttrs (stateSettings ? jodsPrebootLockEnable) {
-                enable = stateSettings.jodsPrebootLockEnable;
-              };
-            };
       settings =
-        builtins.removeAttrs stateSettings legacyStateKeys
-        // managementState
+        stateSettings
         // lib.optionalAttrs (builtins.elem "librewolf" stateSettings.browsers) {
           browsers = [ "firefox" ] ++ builtins.filter (b: b != "firefox") stateSettings.browsers;
           preferredBrowser =

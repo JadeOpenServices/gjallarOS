@@ -453,11 +453,6 @@ func Effective(data []byte) (map[string]json.RawMessage, error) {
 	if err := json.Unmarshal(parsed, &defaults); err != nil {
 		return nil, err
 	}
-	// Parse moved the old jods* keys under management and prebootLock; only
-	// the new names count from here.
-	for _, key := range config.LegacyManagementKeys(data) {
-		delete(fields, key)
-	}
 	for key, value := range defaults {
 		if _, ok := fields[key]; !ok {
 			fields[key] = value
