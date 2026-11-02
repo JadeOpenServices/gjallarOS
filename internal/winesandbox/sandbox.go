@@ -100,6 +100,11 @@ func (s Sandbox) Args(args []string) []string {
 	out = append(out,
 		"--dev", "/dev",
 		"--dev-bind-try", "/dev/dri", "/dev/dri",
+		// Wine 11's wineserver uses ntsync for thread sync when the node
+		// is there (apps/wine/nixos.nix loads the module, Q194). Each open
+		// is its own instance with no names, so apps cannot reach each
+		// other's objects through it.
+		"--dev-bind-try", "/dev/ntsync", "/dev/ntsync",
 		// Mesa finds the GPU through these, as in Flatpak.
 		"--ro-bind-try", "/sys/dev/char", "/sys/dev/char",
 		"--ro-bind-try", "/sys/devices", "/sys/devices",
