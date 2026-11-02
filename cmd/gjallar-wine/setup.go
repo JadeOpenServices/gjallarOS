@@ -134,6 +134,9 @@ func addApp(args []string, stdout, stderr io.Writer) error {
 		if installer, err = checkInstaller(args[1]); err != nil {
 			return err
 		}
+		if err := preflight(installer, stdout, stderr); err != nil {
+			return err
+		}
 	}
 	userName, home, err := currentUser()
 	if err != nil {
@@ -321,6 +324,9 @@ func installCmd(args []string, stdout, stderr io.Writer) error {
 	}
 	installer, err := checkInstaller(args[1])
 	if err != nil {
+		return err
+	}
+	if err := preflight(installer, stdout, stderr); err != nil {
 		return err
 	}
 	lock, err := lockApp(args[0])

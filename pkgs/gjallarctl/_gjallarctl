@@ -347,6 +347,7 @@ _gjallarctl_wine() {
     'reset:give an app a new Wine setup; files stay'
     'repair:set an app'"'"'s Wine setup up again; programs stay'
     'undo:put an app back as it was before the last reset or repair'
+    'check:tell what an installer needs, without running it'
     'import:copy a Wine prefix into a new app'
     'menu:bring the app menu in line with the apps'
   )
@@ -367,6 +368,7 @@ _gjallarctl_wine() {
         '--home[reach the tailnet and home network]:state:(on off)' ;;
     add) _arguments '1:app name:' "2:installer:$installer" ;;
     install) _arguments "1:app id:(${ids[*]})" "2:installer:$installer" ;;
+    check) _arguments "1:installer:$installer" ;;
     program|reset|repair|undo) _arguments "1:app id:(${ids[*]})" ;;
     run) _arguments "1:app id:(${ids[*]})" '*:file:_files' ;;
     remove) _arguments "1:app id:(${ids[*]})" '--delete-files[also delete the app'"'"'s files folder]' ;;
