@@ -262,6 +262,11 @@
           stockTools = nixpkgs.legacyPackages.${system}.android-tools;
         };
 
+        fprintd-claim-after-close = import ./tests/nix/fprintd-claim-after-close.nix {
+          inherit pkgs;
+          stockFprintd = nixpkgs.legacyPackages.${system}.fprintd;
+        };
+
         udiskie-new-media-only = import ./tests/nix/udiskie-new-media-only.nix {
           inherit pkgs;
           stockUdiskie = nixpkgs.legacyPackages.${system}.udiskie;
