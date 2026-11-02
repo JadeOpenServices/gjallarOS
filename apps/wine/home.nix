@@ -40,9 +40,16 @@ let
   # points at the newest VC runtime; the versioned URL it redirects to is
   # named by the hash winetricks pins. A winetricks update that changes
   # these lines fails the build until the pins are checked again.
+  #
+  # dotnet40/dotnet45 (and so dotnet48) set OnlyUseLatestCLR for 32-bit
+  # programs under a key that misses Microsoft\, so a later wineboot -u stops
+  # at a .NET dialog in its 32-bit pass and never ends (Plane 277). Same
+  # change as winetricks PR #2533, carried until it is merged (book 753).
   winetricks = pkgs.winetricks.overrideAttrs (old: {
     postPatch = old.postPatch + ''
       substituteInPlace src/winetricks \
+        --replace-fail 'HKLM\\Software\\Wow6432Node\\.NETFramework' \
+          'HKLM\\Software\\Wow6432Node\\Microsoft\\.NETFramework' \
         --replace-fail 'w_askpermission "SHA256 mismatch!' \
           'w_die "SHA256 mismatch for ''${_W_url}"; w_askpermission "SHA256 mismatch!' \
         --replace-fail '    w_get_shatype "''${_W_sum}"' \
@@ -134,6 +141,19 @@ let
     if grep -q '^"\*comctl32"="native,builtin"' "$WINEPREFIX/user.reg" 2>/dev/null; then
       wine reg delete 'HKCU\Software\Wine\DllOverrides' /v '*comctl32' /f ||
         failed+=("reg *comctl32")
+    fi
+    # A .NET step run by winetricks before PR #2533 left OnlyUseLatestCLR
+    # out for 32-bit programs, and wineboot -u then never ends (see the
+    # winetricks override above). A value already there stays as it is.
+    if [[ -f "$WINEPREFIX/system.reg" ]] &&
+       ${pkgs.gawk}/bin/awk '
+         /^\[/ { s = tolower($1) }
+         tolower($0) ~ /^"onlyuselatestclr"=/ {
+           if (s == "[software\\\\microsoft\\\\.netframework]") a = (tolower($0) == "\"onlyuselatestclr\"=dword:00000001")
+           if (s == "[software\\\\wow6432node\\\\microsoft\\\\.netframework]") b = 1
+         }
+         END { exit !(a && !b) }' "$WINEPREFIX/system.reg"; then
+      reg_add 'HKLM\Software\Wow6432Node\Microsoft\.NETFramework' OnlyUseLatestCLR REG_DWORD 1
     fi
     wineboot -u || failed+=("wineboot")
     wineserver -w || true

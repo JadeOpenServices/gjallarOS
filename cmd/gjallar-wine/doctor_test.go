@@ -149,6 +149,37 @@ func TestRepair(t *testing.T) {
 	}
 }
 
+func TestRepairSetsCLR32(t *testing.T) {
+	f, paths := doctorSetup(t)
+	// SYNTHETIC: what winetricks' .NET step left before PR #2533.
+	writeFile(t, filepath.Join(paths.Prefix, "system.reg"), []byte("WINE REGISTRY Version 2\n\n"+
+		"[Software\\\\Microsoft\\\\.NETFramework] 1793326395\n\"OnlyUseLatestCLR\"=dword:00000001\n\n"+
+		"[Software\\\\Wow6432Node\\\\.NETFramework] 1793326159\n\"OnlyUseLatestCLR\"=dword:00000001\n\n"))
+	f.launched = nil
+	if err := repairCmd([]string{"synthetic-app"}, io.Discard, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	want := [][]string{
+		{"reg", "add", winesandbox.CLRKey32, "/v", "OnlyUseLatestCLR", "/t", "REG_DWORD", "/d", "1", "/f"},
+		{"wineboot", "-u"},
+	}
+	if !slices.EqualFunc(f.launched, want, slices.Equal) {
+		t.Errorf("ran %q", f.launched)
+	}
+
+	f.launched = nil
+	f.launch = func(_ string, program []string) int {
+		if program[0] == "reg" {
+			return 1
+		}
+		return 0
+	}
+	err := repairCmd([]string{"synthetic-app"}, io.Discard, io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "gjallar-wine undo synthetic-app") || len(f.launched) != 1 {
+		t.Errorf("failed .NET setting: %v, ran %q", err, f.launched)
+	}
+}
+
 func TestUndoRefusesOtherApp(t *testing.T) {
 	f, paths := doctorSetup(t)
 	if err := repairCmd([]string{"synthetic-app"}, io.Discard, io.Discard); err != nil {

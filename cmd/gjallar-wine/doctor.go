@@ -110,6 +110,22 @@ func repairCmd(args []string, stdout, stderr io.Writer) error {
 	if err := winesandbox.FixPrefix(paths.Prefix, paths.Files, userName); err != nil {
 		return fmt.Errorf("repair the app's prefix: %w; %s", err, undo)
 	}
+	// Without this setting from winetricks' .NET step, the update below
+	// never ends (see winesandbox.MissingLatestCLR32).
+	missing, err := winesandbox.MissingLatestCLR32(paths.Prefix)
+	if err != nil {
+		return fmt.Errorf("read the app's .NET settings: %w; %s", err, undo)
+	}
+	if missing {
+		fmt.Fprintf(stdout, "Setting .NET in app %s to use its newest runtime for 32-bit programs too.\n", id)
+		code, err := launchApp(id, []string{"reg", "add", winesandbox.CLRKey32, "/v", "OnlyUseLatestCLR", "/t", "REG_DWORD", "/d", "1", "/f"}, nil, stderr)
+		if err != nil {
+			return fmt.Errorf("set the app's .NET setting: %w; %s", err, undo)
+		}
+		if code != 0 {
+			return fmt.Errorf("setting the app's .NET setting ended with code %d; %s", code, undo)
+		}
+	}
 	fmt.Fprintf(stdout, "Bringing app %s's Wine setup up to date.\n", id)
 	code, err := launchApp(id, []string{"wineboot", "-u"}, nil, stderr)
 	if err != nil {
