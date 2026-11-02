@@ -12,6 +12,8 @@
   wineInit ? null,
   # Adds each app's files folder to the file manager's Places.
   dolphinPlace ? null,
+  # pkgs/gjallar-winetricks: the build checks the fix table against it.
+  winetricks,
 }:
 
 buildGoModule {
@@ -32,6 +34,7 @@ buildGoModule {
       ../../internal/nettrust
       ../../internal/settings
       ../../internal/sshsig
+      ../../internal/winefix
       ../../internal/winesandbox
       ../../internal/winicon
       ../../internal/winpe
@@ -57,6 +60,9 @@ buildGoModule {
   ++ lib.optional (dolphinPlace != null) "-X main.placePath=${lib.getExe dolphinPlace}";
 
   env.CGO_ENABLED = "0";
+  # internal/winefix checks that each verb in the fix table downloads
+  # exactly the files the table pins (Plane 277).
+  env.WINETRICKS_SCRIPT = "${winetricks}/bin/.winetricks-wrapped";
 
   # Users reach it only through gjallarctl wine (Plane 277), so it is not
   # on PATH.

@@ -61,6 +61,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		err = importCmd(args[1:], stdout, stderr)
 	case "check":
 		err = checkCmd(args[1:], stdout, stderr)
+	case "fixes":
+		err = fixesCmd(args[1:], stdout)
 	// menu brings the app menu in line with the apps, after each rebuild.
 	case "menu":
 		err = menuCmd(args[1:], stderr)
