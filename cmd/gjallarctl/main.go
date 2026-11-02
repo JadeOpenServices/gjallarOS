@@ -143,6 +143,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runSecureBoot(args[1:], stdout, stderr)
 	case "security":
 		return runSecurity(args[1:], stdout, stderr)
+	case "media":
+		return runMedia(args[1:], stderr)
 	default:
 		fmt.Fprintf(stderr, "ERROR: unknown command %q\n", args[0])
 		printUsage(stderr)
@@ -1825,6 +1827,7 @@ func printUsage(out io.Writer) {
 	fmt.Fprintln(out, "       gjallarctl secure-boot {status|setup|update-dbx} [--repo PATH]")
 	fmt.Fprintln(out, "       gjallarctl security {notice|oddc-notice|status [--json]|scan PATH [--json]|fix ID|switch ID on|off|apply ID|cancel ID}")
 	fmt.Fprintln(out, "       gjallarctl hyprland-render-gpu")
+	fmt.Fprintln(out, "       gjallarctl media notice")
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "Safe GjallarOS maintenance commands. Rebuild invokes sudo explicitly.")
 }

@@ -67,7 +67,10 @@ def setup(disk, token):
         1, 'label', 's', 'External')[0]
     revalidate(disk, token, blank=False)
     try:
-        call(partition, 'Filesystem', 'Mount', 'a{sv}', 0)
+        # Disks from another system open read-only by default (Plane 286).
+        # This one was just formatted here on the user's request, so it
+        # opens writable.
+        call(partition, 'Filesystem', 'Mount', 'a{sv}', 1, 'options', 's', 'rw')
     except subprocess.CalledProcessError as error:
         # udiskie may have mounted the new filesystem first.
         if 'org.freedesktop.UDisks2.Error.AlreadyMounted' not in (error.stderr or ''):
