@@ -344,9 +344,9 @@ func graphicsLines(id string, off bool, cards []gpu, devs []vkDevice, verr error
 
 	switch nt {
 	case ntsyncOn:
-		lines = append(lines, "ntsync (fast thread sync): the kernel has it on, but the app's sandbox does not pass it in yet.")
+		lines = append(lines, "ntsync (fast thread sync): on; the app's sandbox gets it and Wine uses it.")
 	case ntsyncNotLoaded:
-		lines = append(lines, "ntsync (fast thread sync): this kernel has it as a module that is not loaded; the app does not get it.")
+		lines = append(lines, "ntsync (fast thread sync): this kernel has it as a module that is not loaded yet; the app gets it once the system is rebuilt with the Wine app on and restarted.")
 	default:
 		lines = append(lines, "ntsync (fast thread sync): not in this kernel; the app does not get it.")
 	}

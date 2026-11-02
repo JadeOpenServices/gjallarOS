@@ -141,7 +141,7 @@ func TestGraphicsLines(t *testing.T) {
 			[]string{"The app has dxvk_off", "gjallarctl wine undo demo takes it back"},
 			[]string{"wine fix demo dxvk_off"}},
 		{"nvidia not in sandbox", []gpu{amd, nv}, devs, nil, ntsyncOn, false,
-			[]string{"This device has 2 GPUs", "GPU card0 (NVIDIA, driver nvidia) shows no Vulkan", "does not pass it in yet"},
+			[]string{"This device has 2 GPUs", "GPU card0 (NVIDIA, driver nvidia) shows no Vulkan", "the app's sandbox gets it"},
 			nil},
 		{"software only", []gpu{{card: "card0", vendor: "0x1af4", driver: "virtio-pci"}}, soft, nil, ntsyncNone, false,
 			[]string{"Only software Vulkan", "GPU card0 (virtio, driver virtio-pci) shows no Vulkan", "not in this kernel"},

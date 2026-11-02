@@ -33,6 +33,7 @@ func TestSandboxArgs(t *testing.T) {
 		{"--ro-bind", s.ResolvConf, "/etc/resolv.conf"},
 		{"--bind", s.Prefix, s.Prefix},
 		{"--bind", s.Files, s.Files},
+		{"--dev-bind-try", "/dev/ntsync", "/dev/ntsync"},
 	} {
 		if !pairs(want[0], want[1], want[2]) {
 			t.Errorf("missing %v", want)
@@ -53,6 +54,10 @@ func TestSandboxArgs(t *testing.T) {
 	}
 	if !strings.Contains(ov, "winemenubuilder.exe=d") {
 		t.Errorf("WINEDLLOVERRIDES %q lets Wine write menu entries", ov)
+	}
+	// A device bound before --dev /dev would be hidden by the new /dev.
+	if dev, nt := slices.Index(args, "--dev"), slices.Index(args, "/dev/ntsync"); dev < 0 || nt < dev {
+		t.Error("/dev/ntsync is bound before the sandbox's /dev")
 	}
 	clear := slices.Index(args, "--clearenv")
 	if clear < 0 || clear > slices.Index(args, "--setenv") {
