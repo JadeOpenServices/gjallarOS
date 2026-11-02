@@ -202,6 +202,13 @@ func printLUKSStatus(out io.Writer, device string, slots diskcrypto.Keyslots, ki
 	case len(slots.TPM2) > 0 && len(slots.Passphrase) > 0:
 		fmt.Fprintln(out, "\nRemove the install passphrase: gjallarctl luks setup")
 	}
+	if len(slots.TPM2) > 0 && slots.TPM2NoPolicy {
+		fmt.Fprintln(out, "\nGjallarOS did not set up this security chip unlock. It is not tied to")
+		fmt.Fprintln(out, "how this device starts, so the chip opens the disk for any start.")
+		fmt.Fprintln(out, "Secure Boot with the chip unlock replaces it. Removing it instead means")
+		fmt.Fprintln(out, "typing the recovery key at every start.")
+		return
+	}
 	if len(slots.TPM2) > 0 && slots.TPM2NoSRK {
 		fmt.Fprintln(out, "\nThe security chip unlock was set up by an older version and does not")
 		fmt.Fprintln(out, "check that it talks to the right chip. Set it up again:")
