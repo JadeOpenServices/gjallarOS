@@ -246,6 +246,9 @@ func RemoveApp(home, id string, files bool) error {
 			return err
 		}
 	}
+	if err := DropSnapshots(home, id); err != nil {
+		return err
+	}
 	if files {
 		paths = PathsFor(home, id, a.Name)
 		if err := RealDir(filepath.Dir(paths.Files)); err != nil {

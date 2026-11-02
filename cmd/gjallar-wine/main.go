@@ -31,6 +31,12 @@ const usage = `usage:
   gjallar-wine run ID [ARGS...]            start the app ID in its sandbox
   gjallar-wine remove ID [--delete-files]  remove the app ID; its files folder
                                            stays unless --delete-files is given
+  gjallar-wine reset ID                    give the app ID a new Wine setup;
+                                           installed programs go, files stay
+  gjallar-wine repair ID                   set the app ID's Wine setup up again;
+                                           installed programs stay
+  gjallar-wine undo ID                     put back the app ID as it was before
+                                           the last reset or repair
   gjallar-wine import NAME PREFIX          make a copy of a Wine prefix set up
                                            without gjallar-wine into the app NAME
   gjallar-wine menu                        bring the app menu in line with the
@@ -60,6 +66,12 @@ func run(args []string, stdout, stderr io.Writer) int {
 		err = programCmd(args[1:], stdout)
 	case "remove":
 		err = removeCmd(args[1:], stdout)
+	case "reset":
+		err = resetCmd(args[1:], stdout, stderr)
+	case "repair":
+		err = repairCmd(args[1:], stdout, stderr)
+	case "undo":
+		err = undoCmd(args[1:], stdout, stderr)
 	case "import":
 		err = importCmd(args[1:], stdout, stderr)
 	// menu brings the app menu in line with the apps, after each rebuild.
