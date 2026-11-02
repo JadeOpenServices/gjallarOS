@@ -598,10 +598,14 @@ func runSecureBootFirmwareInstructions(args []string, stdout, stderr io.Writer) 
 }
 
 func runSecureBootVerifyOwnership(args []string, stdout, stderr io.Writer) int {
+	viaShim := len(args) > 0 && args[0] == "--shim"
+	if viaShim {
+		args = args[1:]
+	}
 	if len(args) > 1 {
 		fmt.Fprintln(
 			stderr,
-			"Usage: gjallarctl installer secure-boot-verify-ownership [expected-stage]",
+			"Usage: gjallarctl installer secure-boot-verify-ownership [--shim] [expected-stage]",
 		)
 		return 2
 	}
@@ -614,6 +618,7 @@ func runSecureBootVerifyOwnership(args []string, stdout, stderr io.Writer) int {
 	if err := secureboot.VerifyOwnership(
 		context.Background(),
 		expectedStage,
+		viaShim,
 	); err != nil {
 		fmt.Fprintf(
 			stderr,

@@ -1,9 +1,14 @@
 {
+  lib,
   pkgs,
+  settings,
   gjallarctlPackage,
   ...
 }:
 let
+  # A system set to boot through shim (Plane 293) counts a shim boot as
+  # verified; any other system fails when it comes up through shim.
+  shim = settings.secureBootEnable && (settings.secureBootShim or false);
   secureBootArtifactVerifier = pkgs.writeShellApplication {
     name = "gjallar-verify-secure-boot-artifacts";
     runtimeInputs = [
@@ -65,7 +70,7 @@ let
 
     text = ''
       set -euo pipefail
-      exec gjallarctl installer secure-boot-verify-ownership "''${1:-}"
+      exec gjallarctl installer secure-boot-verify-ownership ${lib.optionalString shim "--shim "}"''${1:-}"
     '';
   };
 
