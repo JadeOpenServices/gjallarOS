@@ -170,7 +170,15 @@ let
       if [ -n "$has_tpm2" ]; then
         ${lib.optionalString keepBooted restoreBooted}
         echo "Predicting the PCR state for future boots..."
-        ${lib.last config.systemd.services.systemd-pcrlock-make-policy.serviceConfig.ExecStart}
+        # The rebuild still fails; the message names the way out. A policy
+        # made for another Secure Boot path (shim switched on or off since the
+        # TPM was enrolled) can't authorize its own update (e2e-fw13,
+        # 2026-11-02, "Failed to submit AuthorizeNV policy").
+        ${lib.last config.systemd.services.systemd-pcrlock-make-policy.serviceConfig.ExecStart} || {
+          echo "error: the TPM policy could not be updated (see above)." >&2
+          echo "error: if Secure Boot now starts through another path than when the TPM was enrolled (shim switched on or off), boot with the recovery key and run: gjallarctl tpm2 reenroll" >&2
+          exit 1
+        }
       elif [ -n "$recovery" ]; then
         # The old policy still covers the boot files it knew, so the same
         # system unlocks as before (e2e-fw13, 2026-10-28).
