@@ -238,7 +238,7 @@ lib.mkIf config.gjallar.apps.wine.enable {
     [
       sandboxLauncher
       setupDesktop
-      # hold, lock and stay are the launcher's own steps, so they are not offered.
+      # hold, lock, stay and icon are the launcher's own steps, so they are not offered.
       (pkgs.writeTextDir "share/zsh/site-functions/_gjallar-wine" ''
         #compdef gjallar-wine
         _gjallar_wine_ids() {

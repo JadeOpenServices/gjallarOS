@@ -65,11 +65,11 @@ func TestWindowClass(t *testing.T) {
 			t.Errorf("windowClass(%q) = %q, want %q", exe, got, want)
 		}
 	}
-	entry := menuEntry("x", winesandbox.App{Name: "X", Exe: `C:\X.exe`})
+	entry := menuEntry("x", winesandbox.App{Name: "X", Exe: `C:\X.exe`}, "wine")
 	if !strings.Contains(entry, "\nStartupWMClass=x.exe\n") {
 		t.Errorf("entry %q has no window class", entry)
 	}
-	if strings.Contains(menuEntry("y", winesandbox.App{Name: "Y"}), "StartupWMClass") {
+	if strings.Contains(menuEntry("y", winesandbox.App{Name: "Y"}, "wine"), "StartupWMClass") {
 		t.Error("window class without a program")
 	}
 }
@@ -87,7 +87,7 @@ func TestMenuCmd(t *testing.T) {
 	dir := filepath.Join(f.home, ".local/share/applications")
 	stale := filepath.Join(dir, "gjallar-wine-gone.desktop")
 	foreign := filepath.Join(dir, "gjallar-wine-mine.desktop")
-	writeFile(t, stale, []byte(menuEntry("gone", winesandbox.App{Name: "Gone"})))
+	writeFile(t, stale, []byte(menuEntry("gone", winesandbox.App{Name: "Gone"}, "wine")))
 	writeFile(t, foreign, []byte("[Desktop Entry]\nName=SYNTHETIC own entry\n"))
 	if err := os.Symlink(stale, filepath.Join(dir, "gjallar-wine-link.desktop")); err != nil {
 		t.Fatal(err)
