@@ -32,6 +32,7 @@ let
   # (pkgs/lzbt-shim) installs it; without --shim-directory it removes it.
   shim = settings.secureBootEnable && (settings.secureBootShim or false);
   shimFiles = "${pkgs.callPackage ../../../pkgs/gjallar-shim { }}/share/shim";
+  bootFirst = "${pkgs.callPackage ../../../pkgs/gjallar-recovery-install { }}/bin/gjallar-boot-first";
 
   # lzbt keeps the pcrlock variants of installed boot files only. With one
   # generation (recovery) the UKI that is running loses its variant at every
@@ -239,6 +240,11 @@ in
       pkgs.writeShellScript "install-lanzaboote" ''
         set -euo pipefail
         ${installHook}
+        # Switching secureBootShim is a rebuild, so the firmware entry follows
+        # here: under fixed keys the firmware refuses systemd-boot and has to
+        # start shim (e2e-fw13, 2026-11-02). Writes nothing when the entry
+        # already starts the right file.
+        ${bootFirst} --keep-order ${esp}
         ${pkgs.coreutils}/bin/rm -f ${esp}/loader/entries/nixos*-generation-*.conf
         ${pkgs.coreutils}/bin/sync --file-system ${esp}
       ''
