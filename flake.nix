@@ -118,6 +118,7 @@
         "gjallar-settingsd" = pkgs.callPackage ./pkgs/gjallar-settingsd { };
         "gjallar-settings" = pkgs.callPackage ./pkgs/gjallar-settings { inherit gjallarctl; };
         "gjallar-recovery-install" = pkgs.callPackage ./pkgs/gjallar-recovery-install { };
+        "gjallar-shim" = pkgs.callPackage ./pkgs/gjallar-shim { };
         "gjallar-installer" = pkgs.callPackage ./pkgs/gjallar-installer { inherit (inputs) oddc; };
         "gjallar-recovery-iso" = self.nixosConfigurations.gjallar-recovery.config.system.build.isoImage;
         "gjallar-installer-lab-iso" =
