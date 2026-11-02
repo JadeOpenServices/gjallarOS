@@ -3,11 +3,12 @@ import QtQuick.Controls
 import QtQuick.Dialogs
 import QtQuick.Layouts
 
-// The app catalogue (Plane 220): `gjallarctl apps list --json`, one switch
-// per app. Installing or removing runs in a terminal with the password
-// prompt and the build output. Wine apps (Plane 272) follow in their own
-// section with their two network switches, and new ones are set up from
-// the end of the list.
+// The app catalogue (Plane 220): `gjallarctl apps list --json`, one row
+// per app with its state and one button. A click marks the change; Apply
+// in the bar at the bottom installs and removes all marked apps in one
+// terminal with the password prompt and the build output (Plane 276).
+// Wine apps (Plane 272) follow in their own section with their two
+// networks, and new ones are set up from the end of the list.
 Page {
     id: page
 
@@ -81,6 +82,7 @@ Page {
                 maximumLength: 64
             }
             Label {
+                textFormat: Text.PlainText
                 text: "Its files go in WineApps/" + (appName.text.trim() || "…")
                 color: palette.placeholderText
                 wrapMode: Label.WrapAnywhere
@@ -94,6 +96,7 @@ Page {
                     onClicked: installerDialog.open()
                 }
                 Label {
+                    textFormat: Text.PlainText
                     text: setUp.installerName || "None chosen"
                     color: palette.placeholderText
                     elide: Label.ElideMiddle
@@ -191,6 +194,7 @@ Page {
                 // a model with roles.
                 Label {
                     readonly property string category: row.entry.category || ""
+                    textFormat: Text.PlainText
                     visible: row.index === 0 || (page.shown[row.index - 1] || {}).category !== category
                     Layout.fillWidth: true
                     leftPadding: page.gap
@@ -225,6 +229,7 @@ Page {
                                 Layout.fillWidth: true
                                 spacing: 2
                                 Label {
+                                    textFormat: Text.PlainText
                                     text: row.entry.name
                                     font.pixelSize: 15
                                     font.weight: Font.DemiBold
@@ -232,34 +237,43 @@ Page {
                                     elide: Label.ElideRight
                                 }
                                 Label {
+                                    textFormat: Text.PlainText
                                     text: row.entry.description
                                     color: palette.placeholderText
                                     wrapMode: Label.Wrap
                                     Layout.fillWidth: true
                                 }
-                                // The saved choice differs from the running system.
+                                // The state in words: a marked change, a saved
+                                // choice the running system does not have yet,
+                                // or what is installed.
                                 Label {
-                                    readonly property bool waits: typeof row.entry.installed === "boolean"
-                                        && typeof row.entry.built === "boolean"
+                                    readonly property bool known: typeof row.entry.installed === "boolean"
+                                    readonly property bool waits: known && typeof row.entry.built === "boolean"
                                         && row.entry.installed !== row.entry.built
-                                    visible: waits
-                                    text: row.entry.installed
-                                        ? (page.backend.appsRebuilding ? "Installing now" : "Installed with the next rebuild")
-                                        : (page.backend.appsRebuilding ? "Removing now" : "Removed with the next rebuild")
-                                    color: page.colours.neutral
+                                    readonly property bool marked: appButton.marked
+                                    visible: known
+                                    text: marked ? (row.entry.installed ? "Will be removed" : "Will be installed")
+                                        : waits ? (row.entry.installed
+                                            ? (page.backend.appsRebuilding ? "Installing now" : "Installed with the next rebuild")
+                                            : (page.backend.appsRebuilding ? "Removing now" : "Removed with the next rebuild"))
+                                        : row.entry.installed ? "Installed" : "Not installed"
+                                    color: marked ? palette.highlight : waits ? page.colours.neutral : palette.placeholderText
+                                    font.weight: marked ? Font.DemiBold : Font.Normal
                                     wrapMode: Label.Wrap
                                     Layout.fillWidth: true
                                 }
                             }
-                            Switch {
-                                enabled: typeof row.entry.installed === "boolean" && !page.backend.busy
-                                checked: row.entry.installed === true
-                                Accessible.name: (checked ? "Remove " : "Install ") + row.entry.name
-                                // The switch follows the catalogue once the change is in.
-                                onToggled: {
-                                    page.backend.setApp(row.entry.id, checked)
-                                    checked = Qt.binding(() => row.entry.installed === true)
-                                }
+                            MarkButton {
+                                id: appButton
+                                backend: page.backend
+                                kind: "app"
+                                itemId: row.entry.id || ""
+                                value: row.entry.installed === true
+                                allowed: typeof row.entry.installed === "boolean"
+                                onText: "Install"
+                                offText: "Remove"
+                                label: row.entry.name || ""
+                                Layout.alignment: Qt.AlignTop
                             }
                         }
                     }
@@ -269,6 +283,7 @@ Page {
                         ColumnLayout {
                             spacing: 2
                             Label {
+                                textFormat: Text.PlainText
                                 text: row.entry.name || row.entry.id
                                 font.pixelSize: 15
                                 font.weight: Font.DemiBold
@@ -276,6 +291,7 @@ Page {
                                 elide: Label.ElideRight
                             }
                             Label {
+                                textFormat: Text.PlainText
                                 text: row.entry.removed ? "Removed"
                                     : row.entry.error ? row.entry.error
                                     : row.entry.program || "No program picked"
@@ -298,28 +314,29 @@ Page {
                                 ]
                                 RowLayout {
                                     required property var modelData
+                                    id: net
                                     readonly property bool value: row.entry[modelData.key] === true
                                     spacing: page.gap
                                     Layout.fillWidth: true
                                     Label {
-                                        text: parent.modelData.label
+                                        text: net.modelData.label
                                         Layout.fillWidth: true
                                     }
                                     Label {
-                                        text: parent.value ? parent.modelData.on : "Off"
-                                        color: palette.placeholderText
+                                        text: netButton.marked ? (net.value ? "Will turn off" : "Will turn on")
+                                            : net.value ? net.modelData.on : "Off"
+                                        color: netButton.marked ? palette.highlight : palette.placeholderText
+                                        font.weight: netButton.marked ? Font.DemiBold : Font.Normal
                                     }
-                                    Switch {
-                                        id: netSwitch
-                                        // A removed app's switches can only go off.
-                                        enabled: page.backend.wineSettings === "ok" && !page.backend.busy
-                                            && (!row.entry.removed || checked)
-                                        checked: parent.value
-                                        Accessible.name: parent.modelData.label + " for " + (row.entry.name || row.entry.id)
-                                        onToggled: {
-                                            page.backend.setWine(row.entry.id, parent.modelData.key, checked)
-                                            checked = Qt.binding(() => parent.value)
-                                        }
+                                    MarkButton {
+                                        id: netButton
+                                        backend: page.backend
+                                        kind: net.modelData.key
+                                        itemId: row.entry.id || ""
+                                        value: net.value
+                                        // A removed app's networks can only go off.
+                                        allowed: page.backend.wineSettings === "ok" && (!row.entry.removed || net.value)
+                                        label: net.modelData.label + " for " + (row.entry.name || row.entry.id)
                                     }
                                 }
                             }

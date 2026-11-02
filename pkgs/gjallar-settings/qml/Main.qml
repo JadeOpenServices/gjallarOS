@@ -4,6 +4,8 @@ import QtQuick.Controls.impl
 import QtQuick.Layouts
 
 // One column, a back arrow, swipe right to go back (Plane 218, Q91).
+// Changes are marked on the pages and run together from the bar at the
+// bottom (Plane 276).
 ApplicationWindow {
     id: window
 
@@ -48,6 +50,7 @@ ApplicationWindow {
                 Accessible.name: "Back"
             }
             Label {
+                textFormat: Text.PlainText
                 text: window.title
                 font.pixelSize: 20
                 font.weight: Font.DemiBold
@@ -62,6 +65,82 @@ ApplicationWindow {
                 implicitHeight: 28
             }
         }
+    }
+
+    footer: ToolBar {
+        visible: window.backend.changeCount > 0 || window.backend.applying
+        background: Rectangle { color: palette.alternateBase }
+        RowLayout {
+            anchors.fill: parent
+            anchors.leftMargin: window.gap
+            anchors.rightMargin: window.gap
+            spacing: window.gap / 2
+            Label {
+                text: window.backend.applying ? "Applying changes…"
+                    : window.backend.changeCount === 1 ? "1 change" : window.backend.changeCount + " changes"
+                Layout.fillWidth: true
+                elide: Label.ElideRight
+            }
+            Button {
+                text: "Discard"
+                flat: true
+                enabled: !window.backend.applying
+                onClicked: window.backend.discard()
+            }
+            Button {
+                text: "Apply"
+                highlighted: true
+                enabled: !window.backend.applying
+                onClicked: window.backend.apply()
+            }
+        }
+    }
+
+    // Marked changes are not dropped by closing the window by accident.
+    onClosing: close => {
+        if (backend.changeCount > 0 && !backend.applying && !leave.discarded) {
+            close.accepted = false
+            leave.open()
+        }
+    }
+
+    Dialog {
+        id: leave
+        property bool discarded: false
+        title: "Apply your changes?"
+        modal: true
+        anchors.centerIn: parent
+        width: Math.min(window.width - window.gap * 2, 420)
+        Label {
+            anchors.fill: parent
+            wrapMode: Label.Wrap
+            text: window.backend.changeCount === 1
+                ? "1 change is marked but not applied yet."
+                : window.backend.changeCount + " changes are marked but not applied yet."
+        }
+        footer: DialogButtonBox {
+            Button {
+                text: "Apply"
+                highlighted: true
+                DialogButtonBox.buttonRole: DialogButtonBox.AcceptRole
+            }
+            Button {
+                text: "Close without them"
+                DialogButtonBox.buttonRole: DialogButtonBox.DestructiveRole
+            }
+            Button {
+                text: "Cancel"
+                DialogButtonBox.buttonRole: DialogButtonBox.RejectRole
+            }
+            onClicked: button => {
+                if (button.DialogButtonBox.buttonRole === DialogButtonBox.DestructiveRole) {
+                    leave.discarded = true
+                    leave.close()
+                    window.close()
+                }
+            }
+        }
+        onAccepted: window.backend.apply()
     }
 
     StackView {
@@ -157,8 +236,8 @@ ApplicationWindow {
             ColumnLayout {
                 Layout.fillWidth: true
                 spacing: 2
-                Label { text: row.title; font.pixelSize: 16; font.weight: Font.DemiBold }
-                Label { text: row.detail; color: palette.placeholderText; wrapMode: Label.Wrap; Layout.fillWidth: true }
+                Label { text: row.title; textFormat: Text.PlainText; font.pixelSize: 16; font.weight: Font.DemiBold }
+                Label { text: row.detail; textFormat: Text.PlainText; color: palette.placeholderText; wrapMode: Label.Wrap; Layout.fillWidth: true }
             }
             Label { text: "›"; font.pixelSize: 22; color: palette.placeholderText }
         }

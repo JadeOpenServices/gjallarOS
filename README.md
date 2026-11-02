@@ -305,7 +305,14 @@ updates, developer mode) and a fix button where one helps. `gjallarctl security 
 prints the same checks. The window has no rights of its own; every change goes
 through `gjallarctl settings` and asks for the password.
 
-Some protections have an off switch, for people who run their own:
+Each row says its state in words and has one button: Install or Remove, Turn
+on or Turn off. A click only marks the change; the button turns into Undo and
+a bar at the bottom counts the marked changes, with Discard and Apply. Apply
+installs and removes all marked apps with one password and one rebuild, then
+sets the marked Wine networks and protections. Closing the window with marked
+changes asks first.
+
+Some protections can be turned off, for people who run their own:
 
 | Key | Default | Switch |
 | --- | --- | --- |
@@ -313,7 +320,7 @@ Some protections have an off switch, for people who run their own:
 | `firewallEnable` | `true` | Firewall |
 | `virusScanEnable` | `true` | Virus scan |
 
-The switches change security-tier keys, so turning one off waits an hour away
+These change security-tier keys, so turning one off waits an hour away
 from home, as above. Until then the card says when the change is ready and
 offers Apply now and Keep it on. Turning a protection back on is stricter, so
 it applies at once after the password. A protection that is off shows "Off

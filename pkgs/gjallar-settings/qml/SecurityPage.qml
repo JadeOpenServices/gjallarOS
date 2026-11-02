@@ -5,6 +5,7 @@ import QtQuick.Layouts
 
 // gjallarHorn (Plane 216): every check of `gjallarctl security status`.
 // A protection the user turned off is grey and says so; it never warns.
+// Turning one on or off is marked first and runs with Apply (Plane 276).
 Page {
     id: page
 
@@ -103,6 +104,7 @@ Page {
                             RowLayout {
                                 Layout.fillWidth: true
                                 Label {
+                                    textFormat: Text.PlainText
                                     text: row.modelData.title
                                     font.pixelSize: 15
                                     font.weight: Font.DemiBold
@@ -111,11 +113,16 @@ Page {
                                     elide: Label.ElideRight
                                 }
                                 Label {
-                                    text: page.stateText(row.modelData.state)
-                                    color: page.stateColour(row.modelData.state)
+                                    textFormat: Text.PlainText
+                                    text: protectionButton.marked
+                                        ? (row.modelData.switch === "on" ? "Will turn off" : "Will turn on")
+                                        : page.stateText(row.modelData.state)
+                                    color: protectionButton.marked ? palette.highlight : page.stateColour(row.modelData.state)
+                                    font.weight: protectionButton.marked ? Font.DemiBold : Font.Normal
                                 }
                             }
                             Label {
+                                textFormat: Text.PlainText
                                 text: row.modelData.detail
                                 color: palette.placeholderText
                                 wrapMode: Label.Wrap
@@ -151,6 +158,8 @@ Page {
                                 readonly property var result: page.backend.scanResult
                                 readonly property var found: result.found || []
                                 visible: row.modelData.id === "scan" && text !== ""
+                                // File names come from the disk: never markup.
+                                textFormat: Text.PlainText
                                 Layout.fillWidth: true
                                 wrapMode: Label.Wrap
                                 color: found.length > 0 ? page.colours.negative
@@ -179,7 +188,7 @@ Page {
                                 }
                             }
                             RowLayout {
-                                visible: fixButton.visible || protectionSwitch.visible || row.waiting !== null
+                                visible: fixButton.visible || protectionButton.visible || row.waiting !== null
                                 Layout.fillWidth: true
                                 Layout.topMargin: page.gap / 2
                                 Button {
@@ -205,18 +214,17 @@ Page {
                                     onClicked: page.backend.cancelWaiting(row.modelData.id)
                                 }
                                 Item { Layout.fillWidth: true }
-                                Switch {
-                                    id: protectionSwitch
+                                // The settings service asks for the password
+                                // when the change is applied.
+                                MarkButton {
+                                    id: protectionButton
                                     visible: (row.modelData.switch || "") !== ""
-                                    enabled: row.waiting === null
-                                    text: checked ? "On" : "Off"
-                                    checked: row.modelData.switch === "on"
-                                    // The settings service asks for the password;
-                                    // the switch follows once the change is in.
-                                    onToggled: {
-                                        page.backend.switchProtection(row.modelData.id, checked)
-                                        checked = Qt.binding(() => row.modelData.switch === "on")
-                                    }
+                                    backend: page.backend
+                                    kind: "security"
+                                    itemId: row.modelData.id || ""
+                                    value: row.modelData.switch === "on"
+                                    allowed: row.waiting === null
+                                    label: row.modelData.title || ""
                                 }
                             }
                         }

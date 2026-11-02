@@ -5,6 +5,7 @@ holds no rights of its own: it reads `gjallarctl security status --json`,
 `gjallarctl apps list --json` and `gjallarctl wine list --json` (Plane
 272), and every change goes through
 gjallarctl, which asks the settings service and with it for the password.
+A click only marks a change; Apply runs them all at once (Plane 276).
 New Wine apps are set up with gjallar-wine in a terminal, as the user.
 """
 
@@ -45,6 +46,9 @@ WINE_ID = re.compile(r"[a-z][a-z0-9-]*")
 # Setup and program choice run in a terminal, as gjallarctl's own --window
 # commands do: the output and questions stay readable until Enter.
 TERMINAL_SCRIPT = """"$@"; printf '\\nPress Enter to close. '; read -r _"""
+# What a marked change can be: an app installed, a Wine app's network, a
+# gjallarHorn protection. Each is "kind:id" in Backend.changes.
+CHANGE_KINDS = {"app": APP_ID, "internet": WINE_ID, "home": WINE_ID, "security": APP_ID}
 
 # Obsidian (themes/palettes/openjade.nix) for the colours Qt's palette has
 # no role for, until Noctalia has written its colour scheme.
@@ -102,6 +106,7 @@ class Backend(QObject):
     wineChanged = Signal()
     busyChanged = Signal()
     scanChanged = Signal()
+    changesChanged = Signal()
 
     def __init__(self):
         super().__init__()
@@ -116,6 +121,8 @@ class Backend(QObject):
         self._scan = {}
         self._scanning = ""
         self._wineTool = ""
+        self._changes = {}
+        self._applying = False
 
     def _run(self, args, done=None, busy=True, program=GJALLARCTL):
         process = QProcess(self)
@@ -137,6 +144,9 @@ class Backend(QObject):
                 done(code, output)
 
         process.finished.connect(finished)
+        # A program that cannot start never sends finished.
+        process.errorOccurred.connect(
+            lambda error: finished(-1, None) if error == QProcess.ProcessError.FailedToStart else None)
         process.start()
 
     @staticmethod
@@ -192,6 +202,20 @@ class Backend(QObject):
     def wineTool(self):
         return self._wineTool != ""
 
+    # Marked changes, "kind:id" -> the state asked for; nothing runs before
+    # apply().
+    @Property("QVariantMap", notify=changesChanged)
+    def changes(self):
+        return self._changes
+
+    @Property(int, notify=changesChanged)
+    def changeCount(self):
+        return len(self._changes)
+
+    @Property(bool, notify=changesChanged)
+    def applying(self):
+        return self._applying
+
     @Property(str, constant=True)
     def downloads(self):
         return QStandardPaths.writableLocation(QStandardPaths.DownloadLocation)
@@ -202,6 +226,7 @@ class Backend(QObject):
             checks = self._parse(output, "checks")
             self._checks = checks if checks is not None else []
             self.checksChanged.emit()
+            self._prune()
 
         self._run(["security", "status", "--json"], done)
 
@@ -222,6 +247,7 @@ class Backend(QObject):
             # Turning Wine on or off in this window adds or removes it.
             self._wineTool = shutil.which("gjallar-wine") or ""
             self.appsChanged.emit()
+            self._prune()
 
         self._run(["apps", "list", "--json"], done)
 
@@ -236,15 +262,9 @@ class Backend(QObject):
                 state = ""
             self._wineSettings = state if isinstance(state, str) else ""
             self.wineChanged.emit()
+            self._prune()
 
         self._run(["wine", "list", "--json"], done)
-
-    @Slot(str, str, bool)
-    def setWine(self, app_id, switch, on):
-        """Switch a Wine app's "internet" or "home" network on or off."""
-        if not WINE_ID.fullmatch(app_id) or switch not in ("internet", "home"):
-            return
-        self._run(["wine", "set", app_id, "--" + switch, "on" if on else "off"], lambda *_: self.refreshWine())
 
     def _wineTerminal(self, title, args):
         self._run(["--title=" + title, "-e", "sh", "-c", TERMINAL_SCRIPT, "sh", self._wineTool, *args],
@@ -270,10 +290,6 @@ class Backend(QObject):
     @Slot(str)
     def fix(self, check_id):
         self._run(["security", "fix", check_id], lambda *_: self.refreshSecurity())
-
-    @Slot(str, bool)
-    def switchProtection(self, check_id, on):
-        self._run(["security", "switch", check_id, "on" if on else "off"], lambda *_: self.refreshSecurity())
 
     @Slot(str)
     def applyWaiting(self, check_id):
@@ -306,9 +322,101 @@ class Backend(QObject):
         # A scan can take minutes; it does not hold the rest of the page.
         self._run(["security", "scan", target, "--json"], done, busy=False)
 
-    @Slot(str, bool)
-    def setApp(self, app_id, installed):
-        self._run(["apps", "add" if installed else "remove", app_id, "--window"], lambda *_: self.refreshApps())
+    def _current(self, kind, item_id):
+        """The state a change is measured against, or None when it is not known."""
+        if kind == "app":
+            entry = next((a for a in self._apps if isinstance(a, dict) and a.get("id") == item_id), {})
+            value = entry.get("installed")
+        elif kind in ("internet", "home"):
+            entry = next((w for w in self._wine if w.get("id") == item_id), {})
+            value = entry.get(kind) is True if entry else None
+        else:
+            entry = next((c for c in self._checks if isinstance(c, dict) and c.get("id") == item_id), {})
+            # A change already waiting has its own card.
+            value = None if entry.get("waiting") else {"on": True, "off": False}.get(entry.get("switch"))
+        return value if isinstance(value, bool) else None
+
+    def _prune(self):
+        """Drop marks that the system now matches or that can no longer apply."""
+        if self._applying:
+            return
+        kept = {key: value for key, value in self._changes.items()
+                if self._current(*key.split(":", 1)) not in (None, value)}
+        if kept != self._changes:
+            self._changes = kept
+            self.changesChanged.emit()
+
+    @Slot(str, str, bool)
+    def mark(self, kind, item_id, value):
+        """Mark a change; marking the state the system already has takes the mark away."""
+        pattern = CHANGE_KINDS.get(kind)
+        if self._applying or not pattern or not pattern.fullmatch(item_id):
+            return
+        current = self._current(kind, item_id)
+        if current is None:
+            return
+        key = kind + ":" + item_id
+        changes = dict(self._changes)
+        if value == current:
+            changes.pop(key, None)
+        else:
+            changes[key] = value
+        self._changes = changes
+        self.changesChanged.emit()
+
+    @Slot(str, str)
+    def undo(self, kind, item_id):
+        key = kind + ":" + item_id
+        if not self._applying and key in self._changes:
+            changes = dict(self._changes)
+            del changes[key]
+            self._changes = changes
+            self.changesChanged.emit()
+
+    @Slot()
+    def discard(self):
+        if not self._applying and self._changes:
+            self._changes = {}
+            self.changesChanged.emit()
+
+    def _steps(self):
+        """The commands for the marked changes: all apps in one rebuild, one call per Wine app and protection."""
+        apps, wine, security = [], {}, []
+        for key, value in sorted(self._changes.items()):
+            kind, item_id = key.split(":", 1)
+            if kind == "app":
+                apps.append(("+" if value else "-") + item_id)
+            elif kind in ("internet", "home"):
+                wine.setdefault(item_id, []).extend(["--" + kind, "on" if value else "off"])
+            else:
+                security.append(["security", "switch", item_id, "on" if value else "off"])
+        steps = [["apps", "change", *apps, "--window"]] if apps else []
+        steps += [["wine", "set", item_id, *flags] for item_id, flags in wine.items()]
+        return steps + security
+
+    @Slot()
+    def apply(self):
+        """Run the marked changes one after the other; a step that fails stops the rest."""
+        steps = self._steps()
+        if self._applying or not steps:
+            return
+        self._applying = True
+        self.changesChanged.emit()
+
+        def finish():
+            self._applying = False
+            self.changesChanged.emit()
+            self.refreshApps()
+            self.refreshWine()
+            self.refreshSecurity()
+
+        def next_step(code=0, _output=""):
+            if code != 0 or not steps:
+                finish()
+                return
+            self._run(steps.pop(0), next_step)
+
+        next_step()
 
 
 def wine_installer(arg):
