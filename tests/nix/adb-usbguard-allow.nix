@@ -63,6 +63,10 @@ pkgs.testers.runNixOSTest {
     start_all()
     for m in both:
         m.wait_for_unit("usbguard.service")
+        # The unit is Type=simple; the daemon opens its IPC only after the
+        # present-device scan, and presentDevicePolicy here allows what that
+        # scan finds. A stick plugged before then would be let in.
+        m.wait_until_succeeds("usbguard list-devices")
         m.succeed(
             "systemd-run --unit=uevents -p StandardOutput=file:/tmp/uevents.log"
             " udevadm monitor --kernel --udev --subsystem-match=usb",
