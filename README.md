@@ -221,6 +221,12 @@ the Dolphin places panel. It patches KIO, so KIO, Dolphin and the file dialogs
 are compiled on the machine instead of downloaded. That adds a lot of time to
 a rebuild, so it is off by default.
 
+`"aarch64Emulation": true` lets this device build NixOS for ARM devices such as
+phones. The kernel then hands every aarch64 program to qemu-user, which runs it
+as the user who started it; set-user-ID bits on such programs are ignored.
+Nix also lists `aarch64-linux` (and `i686-linux`) in `extra-platforms`. It is a
+setting for one device and is off by default; turning it off applies at once.
+
 ### Changing settings
 
 On a system that builds from `/etc/gjallar/system`, root owns

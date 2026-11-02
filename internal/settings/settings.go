@@ -229,6 +229,9 @@ func tightens(key string, oldValue, newValue json.RawMessage) bool {
 		// gjallarHorn switches: turning a protection back on applies at
 		// once; turning it off waits.
 		return string(newValue) == "true"
+	case "aarch64Emulation":
+		// Turning emulation off removes the qemu-user handler.
+		return string(newValue) == "false"
 	case "releaseChannel":
 		// stable takes new code last, and update never goes back to an
 		// older commit, so moving to it only slows what arrives.
