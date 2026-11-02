@@ -30,8 +30,9 @@ const CommandsUsage = `       gjallarctl wine add NAME [INSTALLER]  add an app w
                                              the last reset, repair or fix
        gjallarctl wine doctor ID             tell where Wine finds each library the
                                              app ID's program needs, what Wine said
-                                             at its last start, and what brings a
-                                             missing one
+                                             at its last start, what brings a
+                                             missing one, and which GPUs and Vulkan
+                                             the app gets
        gjallarctl wine check INSTALLER       tell what an installer or program is
                                              built for and needs, without running it
        gjallarctl wine fixes [NAME|LIBRARY]  list the fixes for libraries Wine does

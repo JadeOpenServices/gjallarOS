@@ -7,6 +7,7 @@
   util-linux,
   iproute2,
   coreutils,
+  vulkan-tools,
   _wine,
   # Wine's setup for the base prefix; without it gjallarctl wine add refuses.
   wineInit ? null,
@@ -59,6 +60,7 @@ buildGoModule {
     # gjallarctl wine fix runs it in the app's sandbox, offline.
     "-X main.winetricksPath=${winetricks}/bin/winetricks"
     "-X main.cpPath=${coreutils}/bin/cp"
+    "-X main.vulkaninfoPath=${vulkan-tools}/bin/vulkaninfo"
   ]
   ++ lib.optional (wineInit != null) "-X main.initPath=${wineInit}/bin/gjallar-wine-init"
   ++ lib.optional (dolphinPlace != null) "-X main.placePath=${lib.getExe dolphinPlace}";

@@ -147,6 +147,11 @@ func (s *session) Close() {
 // they install comes checked from the host, so nothing in the sandbox
 // needs to reach out. The caller holds the app's lock.
 func launchOffline(id string, tool *winesandbox.Tool, args []string, stderr io.Writer) (int, error) {
+	return runOffline(context.Background(), id, tool, args, stderr)
+}
+
+// runOffline is launchOffline that also stops when ctx ends.
+func runOffline(ctx context.Context, id string, tool *winesandbox.Tool, args []string, stderr io.Writer) (int, error) {
 	s, err := openSession(id)
 	if err != nil {
 		return 0, err
@@ -155,7 +160,7 @@ func launchOffline(id string, tool *winesandbox.Tool, args []string, stderr io.W
 	box := s.box
 	box.Offline = true
 	box.Tool = tool
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
+	ctx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
 	defer stop()
 	line := box.Args(args)
 	prog := exec.CommandContext(ctx, line[0], line[1:]...)
