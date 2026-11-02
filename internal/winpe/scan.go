@@ -42,6 +42,9 @@ type Report struct {
 	// Packer names the packer or installer maker that a section name
 	// points to.
 	Packer string `json:"packer,omitempty"`
+	// WineBuiltin is a library Wine made: its DOS stub carries Wine's
+	// mark instead of a program of its own.
+	WineBuiltin bool `json:"wineBuiltin,omitempty"`
 }
 
 // DotNet is a .NET program's runtime header.
@@ -76,6 +79,28 @@ var (
 )
 
 var errTooMuch = errors.New("scan read too much of the file")
+
+// wineMarks are what Wine writes at offset 0x40 of the libraries it makes
+// in a prefix: its own builtin ones, and placeholders from older setups.
+// Both have the same length.
+var wineMarks = [][]byte{[]byte("Wine builtin DLL"), []byte("Wine placeholder")}
+
+// WineMarkAt is where a Wine library carries its mark, and WineMarkLen how
+// long the mark is.
+const (
+	WineMarkAt  = 0x40
+	WineMarkLen = 16
+)
+
+// IsWineMark tells whether b, read at WineMarkAt, is Wine's mark.
+func IsWineMark(b []byte) bool {
+	for _, m := range wineMarks {
+		if bytes.HasPrefix(b, m) {
+			return true
+		}
+	}
+	return false
+}
 
 // counted fails once more than MaxRead bytes were read through it.
 type counted struct {
@@ -113,6 +138,12 @@ func Scan(r io.ReaderAt, size int64) (Report, error) {
 		return Report{}, err
 	}
 	rep := Report{Kind: "pe", Machine: machine(f.Machine), Subsystem: subsystem(f.Subsystem)}
+	switch stub, err := readAt(c, size, WineMarkAt, WineMarkLen); {
+	case err == nil:
+		rep.WineBuiltin = IsWineMark(stub)
+	case !errors.Is(err, ErrNotFound):
+		return Report{}, err
+	}
 	rep.LargeAddress = !f.PE32Plus && f.Characteristics&0x20 != 0
 	for _, s := range f.Sections {
 		if p, ok := packers[s.Name]; ok {
@@ -383,7 +414,7 @@ func (r Report) Check() error {
 	case !in(r.Kind, "pe", "ne", "dos", "msi", "other"):
 		return fmt.Errorf("kind %q", r.Kind)
 	case r.Kind != "pe" && (r.Machine != "" || r.Subsystem != "" || r.LargeAddress || r.DotNet != nil ||
-		r.Imports != nil || r.DelayImports != nil || r.Skipped != 0 || r.Elevation != "" || r.DPI != "" || r.Packer != ""):
+		r.Imports != nil || r.DelayImports != nil || r.Skipped != 0 || r.Elevation != "" || r.DPI != "" || r.Packer != "" || r.WineBuiltin):
 		return fmt.Errorf("details for a %s file", r.Kind)
 	case r.Kind == "pe" && !in(r.Machine, "x86", "x64", "arm64", "arm", "other"):
 		return fmt.Errorf("machine %q", r.Machine)
