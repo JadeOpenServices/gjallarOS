@@ -54,6 +54,10 @@ buildGoModule {
     "-X main.nsenterPath=${util-linux}/bin/nsenter"
     "-X main.ipPath=${iproute2}/bin/ip"
     "-X main.winePath=${_wine}/bin/wine"
+    # bin/wine is a shell wrapper; winetricks reads Wine's arch from this.
+    "-X main.wineBinPath=${_wine}/bin/.wine"
+    # gjallarctl wine fix runs it in the app's sandbox, offline.
+    "-X main.winetricksPath=${winetricks}/bin/winetricks"
     "-X main.cpPath=${coreutils}/bin/cp"
   ]
   ++ lib.optional (wineInit != null) "-X main.initPath=${wineInit}/bin/gjallar-wine-init"

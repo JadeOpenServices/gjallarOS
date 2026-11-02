@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
+	"strings"
 
 	"github.com/JadeOpenServices/gjallarOS/internal/winesandbox"
 )
@@ -72,6 +72,10 @@ func resetCmd(args []string, stdout, stderr io.Writer) error {
 			a.Exe = ""
 		}
 	}
+	if len(a.Fixes) > 0 {
+		fmt.Fprintf(stdout, "The new prefix has none of the fixes %s; gjallarctl wine fix %s FIX puts one in again.\n", strings.Join(a.Fixes, ", "), id)
+		a.Fixes = nil
+	}
 	if err := saveApp(paths, id, a, stderr); err != nil {
 		return err
 	}
@@ -96,11 +100,12 @@ func repairCmd(args []string, stdout, stderr io.Writer) error {
 	if err := winesandbox.RealDir(paths.Prefix); err != nil {
 		return err
 	}
-	if _, err := winesandbox.TakeSnapshot(paths, id, a, func(dst string) error {
-		cp := exec.Command(cpPath, "-a", "--reflink=auto", "--", paths.Prefix, dst)
-		cp.Stderr = stderr
-		return cp.Run()
-	}); err != nil {
+	// The fixes' downloads come first: if one fails, nothing has changed.
+	fixes, local, err := recordedFixes(id, a, stdout)
+	if err != nil {
+		return err
+	}
+	if _, err := winesandbox.TakeSnapshot(paths, id, a, copyFill(paths, stderr)); err != nil {
 		return fmt.Errorf("keep the app's state: %w", err)
 	}
 	undo := fmt.Sprintf("gjallarctl wine undo %s puts the state from before the repair back", id)
@@ -133,6 +138,12 @@ func repairCmd(args []string, stdout, stderr io.Writer) error {
 	}
 	if code != 0 {
 		return fmt.Errorf("Wine's update ended with code %d; %s", code, undo)
+	}
+	if len(fixes) > 0 {
+		fmt.Fprintf(stdout, "Putting app %s's fixes in again.\n", id)
+		if err := runFixes(id, paths, fixes, local, true, stderr); err != nil {
+			return fmt.Errorf("%w; %s", err, undo)
+		}
 	}
 	if err := saveApp(paths, id, a, stderr); err != nil {
 		return err

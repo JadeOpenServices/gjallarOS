@@ -60,43 +60,46 @@ func runApp(id string, args []string, stderr io.Writer) int {
 	return code
 }
 
-// launch starts program with args in app id's sandbox, or the app's own
-// program when program is nil. The caller holds the app's lock.
-func launch(id string, program, args []string, stderr io.Writer) (int, error) {
+// session is what every start of an app's sandbox needs: the app, its
+// folders, a private run folder and the app's own Wayland socket.
+type session struct {
+	app    winesandbox.App
+	box    winesandbox.Sandbox
+	runDir string
+	sc     *winesandbox.SecurityContext
+}
+
+// openSession sets up one start of app id's sandbox. The caller holds the
+// app's lock and closes the session when the sandbox has ended.
+func openSession(id string) (*session, error) {
 	u, err := user.Current()
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 	uid, gid := os.Getuid(), os.Getgid()
 	home, err := filepath.EvalSymlinks(u.HomeDir)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 	a, paths, err := winesandbox.LoadApp(home, id)
 	if err != nil {
-		return 0, err
-	}
-	if program == nil {
-		if err := a.Ready(id); err != nil {
-			return 0, err
-		}
-		program = []string{a.Exe}
+		return nil, err
 	}
 	self, err := os.Executable()
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 	// The sandbox sees only the store, so the lock step must come from it.
 	if !strings.HasPrefix(self, "/nix/store/") {
-		return 0, fmt.Errorf("%s is not in the Nix store; start the installed gjallar-wine", self)
+		return nil, fmt.Errorf("%s is not in the Nix store; start the installed gjallar-wine", self)
 	}
 	runtimeDir := os.Getenv("XDG_RUNTIME_DIR")
 	if !filepath.IsAbs(runtimeDir) {
-		return 0, errors.New("XDG_RUNTIME_DIR is not set; start the app from your desktop session")
+		return nil, errors.New("XDG_RUNTIME_DIR is not set; start the app from your desktop session")
 	}
 	display := os.Getenv("WAYLAND_DISPLAY")
 	if display == "" {
-		return 0, errors.New("WAYLAND_DISPLAY is not set; start the app from your desktop session")
+		return nil, errors.New("WAYLAND_DISPLAY is not set; start the app from your desktop session")
 	}
 	if !filepath.IsAbs(display) {
 		display = filepath.Join(runtimeDir, display)
@@ -105,19 +108,84 @@ func launch(id string, program, args []string, stderr io.Writer) (int, error) {
 	instance := id + "-" + strconv.Itoa(os.Getpid())
 	runDir, err := makeRunDir(runtimeDir, instance, uid)
 	if err != nil {
-		return 0, err
-	}
-	defer os.RemoveAll(runDir)
-	resolvConf := filepath.Join(runDir, "resolv.conf")
-	if err := os.WriteFile(resolvConf, []byte("nameserver "+winesandbox.DNSAddr+"\n"), 0o644); err != nil {
-		return 0, err
+		return nil, err
 	}
 	wayland := filepath.Join(runDir, "wayland.sock")
 	sc, err := winesandbox.NewSecurityContext(display, wayland, "org.gjallaros.wine."+id, instance)
 	if err != nil {
+		os.RemoveAll(runDir)
+		return nil, err
+	}
+	return &session{
+		app:    a,
+		runDir: runDir,
+		sc:     sc,
+		box: winesandbox.Sandbox{
+			Bwrap:      bwrapPath,
+			Self:       self,
+			Wine:       winePath,
+			UID:        uid,
+			GID:        gid,
+			User:       u.Username,
+			Home:       home,
+			RuntimeDir: runtimeDir,
+			Wayland:    wayland,
+			Prefix:     paths.Prefix,
+			Files:      paths.Files,
+			ID:         id,
+		},
+	}, nil
+}
+
+func (s *session) Close() {
+	s.sc.Close()
+	os.RemoveAll(s.runDir)
+}
+
+// launchOffline runs tool with args in app id's sandbox, or Wine with args
+// when tool is nil, without any network. The fixes use it (fix.go): what
+// they install comes checked from the host, so nothing in the sandbox
+// needs to reach out. The caller holds the app's lock.
+func launchOffline(id string, tool *winesandbox.Tool, args []string, stderr io.Writer) (int, error) {
+	s, err := openSession(id)
+	if err != nil {
 		return 0, err
 	}
-	defer sc.Close()
+	defer s.Close()
+	box := s.box
+	box.Offline = true
+	box.Tool = tool
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
+	defer stop()
+	line := box.Args(args)
+	prog := exec.CommandContext(ctx, line[0], line[1:]...)
+	prog.Stdout, prog.Stderr = stderr, stderr
+	prog.Cancel = func() error { return prog.Process.Signal(syscall.SIGTERM) }
+	prog.WaitDelay = 10 * time.Second
+	return exitCode(prog.Run())
+}
+
+// launch starts program with args in app id's sandbox, or the app's own
+// program when program is nil. The caller holds the app's lock.
+func launch(id string, program, args []string, stderr io.Writer) (int, error) {
+	s, err := openSession(id)
+	if err != nil {
+		return 0, err
+	}
+	defer s.Close()
+	if program == nil {
+		if err := s.app.Ready(id); err != nil {
+			return 0, err
+		}
+		program = []string{s.app.Exe}
+	}
+	uid, gid := s.box.UID, s.box.GID
+	resolvConf := filepath.Join(s.runDir, "resolv.conf")
+	if err := os.WriteFile(resolvConf, []byte("nameserver "+winesandbox.DNSAddr+"\n"), 0o644); err != nil {
+		return 0, err
+	}
+	box := s.box
+	box.ResolvConf = resolvConf
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
 	defer stop()
@@ -127,7 +195,7 @@ func launch(id string, program, args []string, stderr io.Writer) (int, error) {
 	sw := openSwitches(ctx, id, stderr)
 	defer sw.Close()
 
-	holder := exec.Command(self, "hold")
+	holder := exec.Command(box.Self, "hold")
 	holder.SysProcAttr = &syscall.SysProcAttr{
 		Cloneflags:                 syscall.CLONE_NEWUSER | syscall.CLONE_NEWNET,
 		UidMappings:                []syscall.SysProcIDMap{{ContainerID: 0, HostID: uid, Size: 1}},
@@ -180,21 +248,7 @@ func launch(id string, program, args []string, stderr io.Writer) (int, error) {
 		}
 	}
 
-	prog := exec.CommandContext(ctx, nsenterPath, append(ns, winesandbox.Sandbox{
-		Bwrap:      bwrapPath,
-		Self:       self,
-		Wine:       winePath,
-		UID:        uid,
-		GID:        gid,
-		User:       u.Username,
-		Home:       home,
-		RuntimeDir: runtimeDir,
-		Wayland:    wayland,
-		ResolvConf: resolvConf,
-		Prefix:     paths.Prefix,
-		Files:      paths.Files,
-		ID:         id,
-	}.Args(append(slices.Clone(program), args...))...)...)
+	prog := exec.CommandContext(ctx, nsenterPath, append(ns, box.Args(append(slices.Clone(program), args...))...)...)
 	prog.Stdout, prog.Stderr = os.Stdout, os.Stderr
 	prog.Cancel = func() error { return prog.Process.Signal(syscall.SIGTERM) }
 	prog.WaitDelay = 10 * time.Second
@@ -461,12 +515,26 @@ func lock(args []string, stderr io.Writer) int {
 // then other programs of the app (an installer's children, a launcher's
 // game) still run, and wineserver has not yet saved the registry. A
 // signal goes on to Wine, and then stops the app's other programs too.
+// With --tool TOOL, stay runs TOOL with the arguments after Wine instead
+// (a fix's winetricks, fix.go); wineserver still comes from Wine.
 func stay(args []string, signals <-chan os.Signal, stderr io.Writer) int {
+	tool := ""
+	if len(args) > 0 && args[0] == "--tool" {
+		if len(args) < 2 || !filepath.IsAbs(args[1]) {
+			fmt.Fprintln(stderr, "ERROR: --tool needs a full path")
+			return 2
+		}
+		tool, args = args[1], args[2:]
+	}
 	if len(args) == 0 || !filepath.IsAbs(args[0]) {
 		fmt.Fprintln(stderr, "ERROR: stay needs Wine, as a full path")
 		return 2
 	}
-	wine := exec.Command(args[0], args[1:]...)
+	argv := args
+	if tool != "" {
+		argv = append([]string{tool}, args[1:]...)
+	}
+	wine := exec.Command(argv[0], argv[1:]...)
 	wine.Stdin, wine.Stdout, wine.Stderr = os.Stdin, os.Stdout, os.Stderr
 	if err := wine.Start(); err != nil {
 		fmt.Fprintf(stderr, "ERROR: start Wine: %v\n", err)

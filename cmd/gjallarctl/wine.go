@@ -31,7 +31,7 @@ and your home network's devices while this device is at home. Turning a
 switch on asks your password; turning it off does not.`
 
 // wineCommands are the commands the helper runs.
-var wineCommands = []string{"add", "install", "program", "run", "remove", "reset", "repair", "undo", "check", "fixes", "import", "menu"}
+var wineCommands = []string{"add", "install", "program", "run", "remove", "reset", "repair", "undo", "check", "fixes", "fix", "import", "menu"}
 
 // wineHelper and wineExec find and start the helper; tests replace them.
 var (

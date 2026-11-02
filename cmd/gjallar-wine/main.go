@@ -25,6 +25,10 @@ var (
 	nsenterPath = "nsenter"
 	ipPath      = "ip"
 	winePath    = "wine"
+	// wineBinPath is Wine itself behind its wrapper; winetricks reads its
+	// arch from it (apps/wine/home.nix).
+	wineBinPath    = "wine"
+	winetricksPath = "winetricks"
 )
 
 // usage is gjallarctl wine's: users reach these commands only through it.
@@ -63,6 +67,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		err = checkCmd(args[1:], stdout, stderr)
 	case "fixes":
 		err = fixesCmd(args[1:], stdout)
+	case "fix":
+		err = fixCmd(args[1:], stdout, stderr)
 	// menu brings the app menu in line with the apps, after each rebuild.
 	case "menu":
 		err = menuCmd(args[1:], stderr)

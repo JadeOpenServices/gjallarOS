@@ -27,12 +27,14 @@ const CommandsUsage = `       gjallarctl wine add NAME [INSTALLER]  add an app w
        gjallarctl wine repair ID             set the app ID's Wine setup up again;
                                              installed programs stay
        gjallarctl wine undo ID               put back the app ID as it was before
-                                             the last reset or repair
+                                             the last reset, repair or fix
        gjallarctl wine check INSTALLER       tell what an installer or program is
                                              built for and needs, without running it
        gjallarctl wine fixes [NAME|LIBRARY]  list the fixes for libraries Wine does
                                              not bring, or tell one, or the fixes
                                              that bring a library such as msvcp100
+       gjallarctl wine fix ID FIX            put the fix FIX into the app ID; its
+                                             files are checked before they are used
        gjallarctl wine import NAME PREFIX    make a copy of a Wine prefix set up
                                              elsewhere into the app NAME
        gjallarctl wine menu                  bring the app menu in line with the
