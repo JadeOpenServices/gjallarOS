@@ -8,7 +8,8 @@ import QtQuick.Layouts
 // in the bar at the bottom installs and removes all marked apps in one
 // terminal with the password prompt and the build output (Plane 276).
 // Wine apps (Plane 272) follow in their own section with their two
-// networks, and new ones are set up from the end of the list.
+// networks, and new ones are set up from the end of the list. A click on
+// a row opens the app's detail page (AppDetailPage.qml).
 Page {
     id: page
 
@@ -44,6 +45,17 @@ Page {
         if (installer !== "") {
             setUp.openWith(installer)
         }
+    }
+
+    function openDetails(entry) {
+        if (entry.id) {
+            StackView.view.push(detailPage, { appId: entry.id, wine: entry.wine === true })
+        }
+    }
+
+    Component {
+        id: detailPage
+        AppDetailPage { backend: page.backend; colours: page.colours; gap: page.gap }
     }
 
     FileDialog {
@@ -147,6 +159,28 @@ Page {
                 : "The settings service did not answer, so this list cannot show what is installed or change it."
         }
 
+        // What the last Wine removal did.
+        RowLayout {
+            visible: page.backend.notice !== ""
+            Layout.fillWidth: true
+            Layout.leftMargin: page.gap
+            Layout.rightMargin: page.gap
+            spacing: page.gap / 2
+            Label {
+                textFormat: Text.PlainText
+                text: page.backend.notice
+                wrapMode: Label.WrapAnywhere
+                Layout.fillWidth: true
+            }
+            ToolButton {
+                icon.name: "window-close"
+                display: AbstractButton.IconOnly
+                text: "Dismiss"
+                Accessible.name: "Dismiss"
+                onClicked: page.backend.clearNotice()
+            }
+        }
+
         Label {
             visible: page.backend.apps.length === 0
             Layout.fillWidth: true
@@ -208,9 +242,33 @@ Page {
                 Pane {
                     Layout.fillWidth: true
                     padding: page.gap
-                    background: Rectangle { radius: 12; color: palette.alternateBase }
-                    contentItem: Loader {
-                        sourceComponent: row.entry.wine ? wineRow : appRow
+                    // Buttons take their own clicks; the rest of the row
+                    // opens the detail page.
+                    background: Rectangle {
+                        radius: 12
+                        color: open.containsMouse ? Qt.lighter(palette.alternateBase, 1.2) : palette.alternateBase
+                        MouseArea {
+                            id: open
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: page.openDetails(row.entry)
+                        }
+                    }
+                    contentItem: RowLayout {
+                        spacing: page.gap / 2
+                        Loader {
+                            Layout.fillWidth: true
+                            sourceComponent: row.entry.wine ? wineRow : appRow
+                        }
+                        ToolButton {
+                            icon.name: "go-next"
+                            text: "Details"
+                            display: AbstractButton.IconOnly
+                            Accessible.name: "Details for " + (row.entry.name || row.entry.id || "")
+                            Layout.alignment: Qt.AlignTop
+                            onClicked: page.openDetails(row.entry)
+                        }
                     }
 
                     Component {

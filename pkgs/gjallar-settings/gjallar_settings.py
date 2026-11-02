@@ -18,11 +18,12 @@ import signal
 import sys
 
 from PySide6.QtCore import Property, QObject, QProcess, QSize, QStandardPaths, QUrl, Signal, Slot
-from PySide6.QtGui import QFont, QGuiApplication, QIcon
+from PySide6.QtGui import QDesktopServices, QFont, QGuiApplication, QIcon
 from PySide6.QtQml import QQmlApplicationEngine
 from PySide6.QtQuick import QQuickImageProvider
 from PySide6.QtQuickControls2 import QQuickStyle
 
+DETAILS = "@details@"
 GJALLARCTL = "@gjallarctl@"
 ICON_DIR = "@icons@"
 QML_DIR = "@qml@"
@@ -49,6 +50,8 @@ TERMINAL_SCRIPT = """"$@"; printf '\\nPress Enter to close. '; read -r _"""
 # What a marked change can be: an app installed, a Wine app's network, a
 # gjallarHorn protection. Each is "kind:id" in Backend.changes.
 CHANGE_KINDS = {"app": APP_ID, "internet": WINE_ID, "home": WINE_ID, "security": APP_ID}
+# Homepages the detail pages may open: https, a host, a plain path.
+HOMEPAGE = re.compile(r"https://[A-Za-z0-9.-]+(?::[0-9]{1,5})?(?:/[A-Za-z0-9._~/%+-]*)?")
 
 # Obsidian (themes/palettes/openjade.nix) for the colours Qt's palette has
 # no role for, until Noctalia has written its colour scheme.
@@ -72,6 +75,29 @@ def theme_colours():
         if len(value) == 7 and value.startswith("#"):
             colours[name] = value
     return colours
+
+
+def load_details(path):
+    """Licence, homepage and system flag per app, built from package meta (default.nix)."""
+    try:
+        with open(path, encoding="utf-8") as file:
+            data = json.load(file)
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    details = {}
+    for app_id, entry in data.items():
+        if not APP_ID.fullmatch(app_id) or not isinstance(entry, dict):
+            continue
+        licences = entry.get("licences")
+        homepage = entry.get("homepage")
+        details[app_id] = {
+            "licences": [l for l in licences if isinstance(l, str)] if isinstance(licences, list) else [],
+            "homepage": homepage if isinstance(homepage, str) and HOMEPAGE.fullmatch(homepage) else "",
+            "system": entry.get("system") is True,
+        }
+    return details
 
 
 class AppIconProvider(QQuickImageProvider):
@@ -107,6 +133,7 @@ class Backend(QObject):
     busyChanged = Signal()
     scanChanged = Signal()
     changesChanged = Signal()
+    noticeChanged = Signal()
 
     def __init__(self):
         super().__init__()
@@ -123,10 +150,14 @@ class Backend(QObject):
         self._wineTool = ""
         self._changes = {}
         self._applying = False
+        self._details = load_details(DETAILS)
+        self._notice = ""
 
-    def _run(self, args, done=None, busy=True, program=GJALLARCTL):
+    def _run(self, args, done=None, busy=True, program=GJALLARCTL, merged=False):
         process = QProcess(self)
         process.setProgram(program)
+        if merged:
+            process.setProcessChannelMode(QProcess.ProcessChannelMode.MergedChannels)
         process.setArguments(args)
         self._running.add(process)
         if busy:
@@ -216,6 +247,19 @@ class Backend(QObject):
     def applying(self):
         return self._applying
 
+    @Property("QVariantMap", constant=True)
+    def appDetails(self):
+        return self._details
+
+    @Property(str, notify=noticeChanged)
+    def notice(self):
+        return self._notice
+
+    @Slot()
+    def clearNotice(self):
+        self._notice = ""
+        self.noticeChanged.emit()
+
     @Property(str, constant=True)
     def downloads(self):
         return QStandardPaths.writableLocation(QStandardPaths.DownloadLocation)
@@ -286,6 +330,28 @@ class Backend(QObject):
         """Choose the program a Wine app starts, from the programs its shortcuts start."""
         if self._wineTool and WINE_ID.fullmatch(app_id):
             self._wineTerminal("GjallarOS Wine app", ["program", app_id])
+
+    @Slot(str, bool)
+    def removeWine(self, app_id, delete_files):
+        """Remove a Wine app; its files folder stays unless delete_files."""
+        if not self._wineTool or not WINE_ID.fullmatch(app_id) or self._applying:
+            return
+
+        def done(_code, output):
+            lines = (output or "").strip().splitlines()
+            self._notice = lines[-1][:300] if lines else "The Wine tool did not start."
+            self.noticeChanged.emit()
+            self.refreshWine()
+
+        self._run(["remove", app_id, *(["--delete-files"] if delete_files else [])], done,
+                  program=self._wineTool, merged=True)
+
+    @Slot(str)
+    def openHomepage(self, app_id):
+        """Open an app's homepage from the built-in details; QML never passes a URL."""
+        url = self._details.get(app_id, {}).get("homepage", "")
+        if url:
+            QDesktopServices.openUrl(QUrl(url, QUrl.ParsingMode.StrictMode))
 
     @Slot(str)
     def fix(self, check_id):

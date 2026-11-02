@@ -4,6 +4,7 @@
   lib,
   makeDesktopItem,
   makeWrapper,
+  pkgs,
   python3,
   qt6,
   stdenv,
@@ -16,6 +17,24 @@ let
     root = ../../apps;
     fileset = lib.fileset.fileFilter (file: file.name == "icon.svg") ../../apps;
   };
+  # What the detail pages show besides the catalogue text (Plane 276):
+  # licence and homepage from the app's package meta, and whether the app
+  # changes the system (apps/<id>/nixos.nix). Built here so the window
+  # never fetches anything; only https homepages are kept.
+  licenceNames =
+    l: if l ? licenses then lib.concatMap licenceNames l.licenses else [ (l.spdxId or l.fullName or "unknown") ];
+  appDetails = lib.mapAttrs (
+    _: app:
+    let
+      meta = if app ? package then (lib.getAttrFromPath (lib.splitString "." app.package) pkgs).meta or { } else { };
+    in
+    {
+      licences = lib.unique (lib.concatMap licenceNames (lib.toList (meta.license or [ ])));
+      homepage = lib.findFirst (lib.hasPrefix "https://") "" (lib.toList (meta.homepage or [ ]));
+      system = builtins.pathExists (app.path + "/nixos.nix");
+    }
+  ) (import ../../apps);
+  detailsFile = builtins.toFile "app-details.json" (builtins.toJSON appDetails);
 in
 stdenv.mkDerivation {
   pname = "gjallar-settings";
@@ -61,7 +80,9 @@ stdenv.mkDerivation {
       id=$(basename "$(dirname "$icon")")
       install -Dm444 "$icon" "$out/${share}/icons/$id.svg"
     done
+    install -Dm444 ${detailsFile} "$out/${share}/app-details.json"
     substitute gjallar_settings.py "$out/${share}/gjallar_settings.py" \
+      --subst-var-by details "$out/${share}/app-details.json" \
       --subst-var-by gjallarctl ${lib.getExe gjallarctl} \
       --subst-var-by icons "$out/${share}/icons" \
       --subst-var-by qml "$out/${share}/qml"

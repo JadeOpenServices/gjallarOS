@@ -272,7 +272,8 @@ that device's (hostname, disk, boot and the like).
 ### App catalogue
 
 Optional applications live in `apps/<id>/`: `meta.json` (name, description,
-category, `default`, optional `installer` question), and a `home.nix` and/or
+category, `default`, optional `installer` question, optional `package`, the
+nixpkgs attribute of its main program), and a `home.nix` and/or
 `nixos.nix` module. Each app owns its whole module, so removing an app removes
 everything it brought in.
 
@@ -311,6 +312,13 @@ a bar at the bottom counts the marked changes, with Discard and Apply. Apply
 installs and removes all marked apps with one password and one rebuild, then
 sets the marked Wine networks and protections. Closing the window with marked
 changes asks first.
+
+A click on an app opens its page: what it is, what it can reach, its licence
+and homepage, and the same button as its row. A Wine app's page also picks
+its program and removes it, with or without its files in `~/WineApps`. The
+licence and homepage come from the `package` in `meta.json` when the window
+is built; the window fetches nothing, and Open only goes to an https
+homepage.
 
 Some protections can be turned off, for people who run their own:
 
