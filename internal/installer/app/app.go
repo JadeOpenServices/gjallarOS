@@ -947,11 +947,17 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 		fmt.Fprintln(out, "Nothing changed: the answers were not written and nothing was installed. Run the installer again and answer y to write them.")
 		return 0
 	}
-	compatibilityConfig := ""
+	var compatibilitySource *installstate.Existing
 	if persistentInstalledHost {
-		compatibilityConfig = filepath.Join(installedRoot, "etc/nixos/configuration.nix")
+		// The host name the running system has, not the one chosen above:
+		// nixos-rebuild picks the flake configuration by it.
+		host, err := os.Hostname()
+		if err != nil {
+			return fail(errOut, err)
+		}
+		compatibilitySource = &installstate.Existing{Dir: filepath.Join(installedRoot, "etc/nixos"), Host: host}
 	}
-	if err := installstate.Ensure(ctx, root, compatibilityConfig, s.user.Username, pinnedRelease); err != nil {
+	if err := installstate.Ensure(ctx, root, compatibilitySource, s.user.Username, pinnedRelease); err != nil {
 		return fail(errOut, fmt.Errorf("initialize installation compatibility state: %w", err))
 	}
 	if !s.preset {
