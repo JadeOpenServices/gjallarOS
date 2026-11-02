@@ -180,6 +180,10 @@ pkgs.testers.runNixOSTest {
     server.wait_for_unit("network.target")
     server.succeed("ip addr add ${internetAddress}/32 dev lo")
     server.wait_for_unit("headscale.service")
+    # headscale tells systemd nothing about being ready and opens its
+    # database first, so the unit is active before the CLI socket is.
+    # It listens on 8080 only after the socket.
+    server.wait_for_open_port(8080)
     server.wait_for_open_port(443)
     for m in (router, server):
         m.wait_for_open_port(8000)
