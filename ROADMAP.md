@@ -2979,3 +2979,29 @@ bugs.mageia.org/show_bug.cgi?id=28072, isaacfreund.com/software/waylock,
 gitlab.gnome.org/GNOME/gnome-shell/-/issues/5966,
 bugs.kde.org/show_bug.cgi?id=306596,
 liliputing.com/plasma-mobile-ui-for-linux-phones-gets-new-lockscreen-keyboard-and-apps.
+
+## 24. Human phase (last, after all tickets)
+
+Decided with Jade (wiki 752 Q5, 2026-10-20, and Q83, 2026-11-02): work that
+needs Jade in person waits until every ticket is done, then runs as one
+phase. Nothing here blocks a ticket; a ticket that needs a hardware check
+ships with its VM test and gets its line here.
+
+- **Contributors (Q5).** Reach out to the AlfheimOS contributors. The
+  README credits are already done (6e70f98d).
+- **Upstream reports.** Every upstream patch and bug report is queued on
+  wiki book 753. Jade reviews each one, learns the change and sends it.
+  No session sends upstream PRs or issues on its own.
+- **Touch keyboard on the ZBook (Q83, Plane 164).** Boot with the keyboard
+  detached and check which input devices count as a keyboard, so the lock
+  shows its touch keyboard.
+- **Hyprland signal for the touch keyboard (Q6, W10).** Find a real
+  compositor signal; the current fix stays until then.
+- **Hardware checks on Jade's laptops.** The VM tests passed; these need
+  the real machine:
+  - USB: dock and external SSD after a rebuild (289), Bluetooth address
+    check (278), stage-1 keyboard gate on the ZBook (194, Q86).
+  - Fingerprint probe on the Framework (287).
+  - Developer confirm once on staging (283).
+  - Secure Boot with the shim on a laptop whose firmware cannot be
+    unlocked (293).
