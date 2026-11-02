@@ -18,7 +18,12 @@
 # w_download_to checks the cache folder name with grep '\/-'; GNU grep 3.8
 # and later warn "stray \ before /" on every download. '/-' matches the
 # same (book 753).
+#
+# vcrun2022 asks cabextract for a name its pinned redist does not use, so
+# Wine's own msvcp140 stayed in every prefix. Upstream PR #2495, carried
+# until a release has it (book 753).
 winetricks.overrideAttrs (old: {
+  patches = (old.patches or [ ]) ++ [ ./vcrun2022-msvcp140.patch ];
   postPatch = old.postPatch + ''
     substituteInPlace src/winetricks \
       --replace-fail "grep -q -e '\/-' -e '^-'" "grep -q -e '/-' -e '^-'" \
