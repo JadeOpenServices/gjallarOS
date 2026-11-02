@@ -3,6 +3,10 @@
 #
 # Make the systemd-boot entry of the ESP mounted at ESP_MOUNTPOINT the first
 # UEFI boot target, recreating it when missing, with every other entry after.
+# When lzbt installed shim (secureBootShim, firmware with fixed keys, Plane
+# 293), the entry starts EFI/nixos/shimx64.efi, which loads systemd-boot:
+# that firmware refuses systemd-boot itself. lzbt removes shim again when the
+# setting is off, so the file tells which one this ESP boots.
 # On the HP (2026-10-08) BootOrder held neither Linux Boot Manager entry, so
 # every boot landed in recovery, and bootctl install appended the restored
 # entry behind USB, PXE and recovery.
@@ -15,13 +19,21 @@ set -euo pipefail
 
 [ "$#" -eq 1 ] || { echo "usage: $0 ESP_MOUNTPOINT" >&2; exit 2; }
 mountpoint=$1
-systemd_boot='\EFI\systemd\systemd-bootx64.efi'
+file=EFI/systemd/systemd-bootx64.efi
+loader='\EFI\systemd\systemd-bootx64.efi'
+label='Linux Boot Manager'
+if [ -f "$mountpoint/EFI/nixos/shimx64.efi" ]; then
+  file=EFI/nixos/shimx64.efi
+  loader='\EFI\nixos\shimx64.efi'
+  label='Linux Boot Manager (shim)'
+fi
 
 esp=$(findmnt -nro SOURCE --mountpoint "$mountpoint" || true)
-[ -n "$esp" ] && [ -f "$mountpoint/EFI/systemd/systemd-bootx64.efi" ] || {
-  echo "ERROR: $mountpoint is not a mounted ESP with systemd-boot" >&2
+[ -n "$esp" ] && [ -f "$mountpoint/$file" ] || {
+  echo "ERROR: $mountpoint is not a mounted ESP with $file" >&2
   exit 1
 }
+loader_match=$(printf '%s' "$loader" | tr '[:upper:]' '[:lower:]')
 esp_partuuid=$(lsblk -dnro PARTUUID "$esp" | tr '[:upper:]' '[:lower:]')
 
 boot_entries() {
@@ -31,7 +43,7 @@ boot_entries() {
   list=$(efibootmgr -v) || return
   printf '%s\n' "$list" | tr '[:upper:]' '[:lower:]' |
     grep -F "gpt,$esp_partuuid," |
-    grep -F '\efi\systemd\systemd-bootx64.efi' |
+    grep -F "$loader_match" |
     sed -n 's/^boot\([0-9a-f]\{4\}\).*/\1/p'
   true
 }
@@ -42,11 +54,11 @@ if [ -z "$esp_entries" ]; then
     --create-only \
     --disk "/dev/$(lsblk -dnro PKNAME "$esp")" \
     --part "$(cat "/sys/class/block/$(basename "$(realpath "$esp")")/partition")" \
-    --label 'Linux Boot Manager' \
-    --loader "$systemd_boot" >/dev/null
+    --label "$label" \
+    --loader "$loader" >/dev/null
   esp_entries=$(boot_entries | paste -sd, -)
   [ -n "$esp_entries" ] || {
-    echo "ERROR: systemd-boot UEFI boot entry for $esp was not created" >&2
+    echo "ERROR: UEFI boot entry for $file on $esp was not created" >&2
     exit 1
   }
 fi
@@ -69,7 +81,7 @@ first=$(efibootmgr | sed -n 's/^BootOrder: //p' | cut -d, -f1 | tr '[:upper:]' '
 case ",$esp_entries," in
   *",$first,"*) ;;
   *)
-    echo "ERROR: firmware did not keep systemd-boot first in BootOrder" >&2
+    echo "ERROR: firmware did not keep $file first in BootOrder" >&2
     exit 1
     ;;
 esac

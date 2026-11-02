@@ -137,7 +137,7 @@ type Settings struct {
 	AIRemoteContextTokens                                                                   int
 	LUKSTPM2Enable, LUKSTPM2PIN                                                             bool
 	RecoveryEnable, RecoveryPartitionEnable, JODSPrebootLockEnable                          bool
-	SecureBootEnable                                                                        bool
+	SecureBootEnable, SecureBootShim                                                        bool
 	EndpointManagedDevice                                                                   bool
 	JODSEndpoint, JODSPolicySigningPublicKey                                                string
 	JODSRecoveryCommandSigningPublicKey                                                     string
@@ -209,6 +209,7 @@ func FromUser(user config.User) Settings {
 		RecoveryPartitionEnable:             user.RecoveryPartitionEnable,
 		JODSPrebootLockEnable:               user.JODSPrebootLockEnable,
 		SecureBootEnable:                    user.SecureBootEnable,
+		SecureBootShim:                      user.SecureBootShim,
 		EndpointManagedDevice:               user.EndpointManagedDevice,
 		JODSEndpoint:                        user.JODSEndpoint,
 		JODSPolicySigningPublicKey:          user.JODSPolicySigningKey,
@@ -303,6 +304,7 @@ var userIntentKeys = []string{
 	"recoveryPartitionEnable",
 	"jodsPrebootLockEnable",
 	"secureBootEnable",
+	"secureBootShim",
 	"endpointManagedDevice",
 	"jodsEndpoint",
 	"jodsPolicySigningPublicKey",
@@ -604,6 +606,7 @@ func Render(s Settings) []byte {
 	boolean("recoveryPartitionEnable", s.RecoveryPartitionEnable)
 	boolean("jodsPrebootLockEnable", s.JODSPrebootLockEnable)
 	boolean("secureBootEnable", s.SecureBootEnable)
+	boolean("secureBootShim", s.SecureBootEnable && s.SecureBootShim)
 	boolean("endpointManagedDevice", s.EndpointManagedDevice)
 	str("jodsEndpoint", s.JODSEndpoint)
 	str("jodsPolicySigningPublicKey", s.JODSPolicySigningPublicKey)

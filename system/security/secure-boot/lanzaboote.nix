@@ -26,6 +26,13 @@ let
   systemdLib = "${config.systemd.package}/lib/systemd";
   jq = "${pkgs.jq}/bin/jq";
 
+  # Firmware with fixed keys (locked setup, Plane 293) trusts only the
+  # Microsoft UEFI CAs. shim, signed by them, starts first and checks
+  # systemd-boot and the UKIs against our key in MOK. The patched lzbt
+  # (pkgs/lzbt-shim) installs it; without --shim-directory it removes it.
+  shim = settings.secureBootEnable && (settings.secureBootShim or false);
+  shimFiles = "${pkgs.callPackage ../../../pkgs/gjallar-shim { }}/share/shim";
+
   # lzbt keeps the pcrlock variants of installed boot files only. With one
   # generation (recovery) the UKI that is running loses its variant at every
   # rebuild, and a new systemd-boot replaces the old one's. make-policy then
@@ -36,7 +43,7 @@ let
   # boot measured as one more variant; boot removes it before make-policy.
   keepBooted = cfg.measuredBoot.enable && lib.elem 4 cfg.measuredBoot.pcrs;
   bootedVariant = "gjallar-booted.pcrlock";
-  bootedComponents = [
+  bootedComponents = lib.optional shim "620-shim" ++ [
     "630-bootloader"
     "635-lanzaboote"
   ];
@@ -97,6 +104,7 @@ let
         "--private-key=${toString cfg.privateKeyFile}"
       ]
       ++ lib.optional (lib.elem 4 cfg.measuredBoot.pcrs) "--pcrlock-directory=${cfg.measuredBoot.pcrlockDirectory}"
+      ++ lib.optional shim "--shim-directory=${shimFiles}"
       ++ [ mountPoint ]
     )
     + " /nix/var/nix/profiles/system-*-link";
@@ -180,6 +188,14 @@ in
   systemd.services.systemd-pcrlock-make-policy.after = lib.mkIf keepBooted [
     "systemd-tmpfiles-setup.service"
   ];
+
+  # lanzaboote turns fwupd's shim use off, which is right when the firmware
+  # takes our key. Under shim the capsule loader has to start through
+  # EFI/nixos/shimx64.efi, which checks it against MOK.
+  services.fwupd.uefiCapsuleSettings.DisableShimForSecureBoot = lib.mkIf shim (lib.mkForce false);
+  # shim trusts our key only once MokManager enrolled it; mokutil queues it
+  # and shows what MOK holds.
+  environment.systemPackages = lib.optional shim pkgs.mokutil;
 
   boot.loader.grub.enable = lib.mkIf settings.secureBootEnable (lib.mkForce false);
   boot.loader.systemd-boot.enable = lib.mkIf settings.secureBootEnable (lib.mkForce false);

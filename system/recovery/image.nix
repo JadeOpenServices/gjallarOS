@@ -68,6 +68,7 @@ let
       # Secure Boot like any other install. Generated state does not carry
       # this key, so a fixed false here meant never.
       secureBootPrompt = true;
+      secureBootShim = getSetting "secureBootShim" false;
 
       endpointManagedDevice = false;
       jodsPrebootLockEnable = false;

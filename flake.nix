@@ -119,6 +119,9 @@
         "gjallar-settings" = pkgs.callPackage ./pkgs/gjallar-settings { inherit gjallarctl; };
         "gjallar-recovery-install" = pkgs.callPackage ./pkgs/gjallar-recovery-install { };
         "gjallar-shim" = pkgs.callPackage ./pkgs/gjallar-shim { };
+        "lzbt-shim" = pkgs.callPackage ./pkgs/lzbt-shim {
+          inherit (inputs.lanzaboote.packages.${system}) lzbt;
+        };
         "gjallar-installer" = pkgs.callPackage ./pkgs/gjallar-installer { inherit (inputs) oddc; };
         "gjallar-recovery-iso" = self.nixosConfigurations.gjallar-recovery.config.system.build.isoImage;
         "gjallar-installer-lab-iso" =
@@ -170,6 +173,7 @@
             openvfs
             gjallar-opencode
             systemd-partition-reread
+            lzbt-shim
             qt6ct
             _nemu
             _wine
@@ -370,6 +374,8 @@
             inputs.lanzaboote.nixosModules.lanzaboote
 
             {
+              # Patched lzbt: shim first stage for fixed-key firmware (293).
+              boot.lanzaboote.package = self.packages.${system}.lzbt-shim;
               nixpkgs.overlays = [
                 inputs.nur.overlays.default
               ];
