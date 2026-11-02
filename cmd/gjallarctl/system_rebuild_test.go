@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/JadeOpenServices/gjallarOS/internal/devgate"
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/config"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/flakesource"
 )
 
@@ -101,5 +103,90 @@ func TestStageLocalChanges(t *testing.T) {
 	if _, status := stageLocalChanges(true, true, facts, &stdout, &stderr); status != 0 || facts.Local != nil ||
 		!strings.Contains(stdout.String(), "holds no .nix file") {
 		t.Fatalf("missing folder: %d %v %q", status, facts.Local, stdout.String())
+	}
+}
+
+func TestSystemRebuildNeedsDeveloperGrant(t *testing.T) {
+	saved := developerGrantPath
+	t.Cleanup(func() { developerGrantPath = saved })
+	developerGrantPath = filepath.Join(t.TempDir(), "developer-grant.json")
+
+	upstream, checkout := channelCheckout(t, "dev", "dev")
+	gitRun(t, upstream, "commit", "-q", "--allow-empty", "-m", "two")
+	before := gitOut(t, checkout, "rev-parse", "refs/remotes/origin/dev")
+	var stdout, stderr bytes.Buffer
+	if code := rebuildCheckout(checkout, rebuildOptions{update: true}, true, &stdout, &stderr); code != 1 ||
+		!strings.Contains(stderr.String(), "confirm-developer") {
+		t.Fatalf("dev without a grant: %d %q", code, stderr.String())
+	}
+	if after := gitOut(t, checkout, "rev-parse", "refs/remotes/origin/dev"); after != before {
+		t.Fatal("the dev channel was fetched without a grant")
+	}
+
+	user, err := config.Defaults()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code := checkDeveloperGrant(true, user, &stderr); code != 0 {
+		t.Fatalf("stable without a grant: %d", code)
+	}
+	user.ReleaseChannel = "dev"
+	if code := checkDeveloperGrant(false, user, &stderr); code != 0 {
+		t.Fatal("a development checkout asked for the grant")
+	}
+	if err := devgate.Save(developerGrantPath, devgate.Grant{Channels: true, Proof: devgate.ProofPIN}); err != nil {
+		t.Fatal(err)
+	}
+	if code := checkDeveloperGrant(true, user, &stderr); code != 0 {
+		t.Fatalf("dev with a channel grant: %d %q", code, stderr.String())
+	}
+	user.DeveloperMode = true
+	stderr.Reset()
+	if code := checkDeveloperGrant(true, user, &stderr); code != 1 || !strings.Contains(stderr.String(), "developer mode needs") {
+		t.Fatalf("developer mode on a channel grant: %d %q", code, stderr.String())
+	}
+	if err := os.WriteFile(developerGrantPath, []byte("{"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	user.DeveloperMode = false
+	if code := checkDeveloperGrant(true, user, &stderr); code != 1 {
+		t.Fatal("a broken grant let dev build")
+	}
+
+	// A configuration changed outside the settings service narrows the
+	// grant at the next rebuild.
+	if err := devgate.Save(developerGrantPath, devgate.Grant{Channels: true, DeveloperMode: true, Proof: devgate.ProofPIN}); err != nil {
+		t.Fatal(err)
+	}
+	if code := checkDeveloperGrant(true, user, &stderr); code != 0 {
+		t.Fatalf("dev with a wide grant: %d %q", code, stderr.String())
+	}
+	if g, err := devgate.Load(developerGrantPath); err != nil || !g.Channels || g.DeveloperMode {
+		t.Fatalf("grant after a rebuild without developer mode: %+v %v", g, err)
+	}
+	user.ReleaseChannel = "stable"
+	if code := checkDeveloperGrant(true, user, &stderr); code != 0 {
+		t.Fatalf("stable with a grant: %d %q", code, stderr.String())
+	}
+	if _, err := os.Stat(developerGrantPath); !os.IsNotExist(err) {
+		t.Fatalf("grant left after a stable rebuild: %v", err)
+	}
+
+	// A running system from before the gate cannot take the proof, so it
+	// builds the version that can; the gate holds again once it is there.
+	savedSocket := devproofSocketPath
+	t.Cleanup(func() { devproofSocketPath = savedSocket })
+	devproofSocketPath = filepath.Join(t.TempDir(), "missing.socket")
+	user.ReleaseChannel = "staging"
+	stderr.Reset()
+	if code := checkDeveloperGrant(true, user, &stderr); code != 0 || !strings.Contains(stderr.String(), "confirm-developer once") {
+		t.Fatalf("migration from a system without the gate: %d %q", code, stderr.String())
+	}
+	if _, err := os.Stat(developerGrantPath); !os.IsNotExist(err) {
+		t.Fatalf("the migration wrote a grant: %v", err)
+	}
+	devproofSocketPath = savedSocket
+	if code := checkDeveloperGrant(true, user, &stderr); code != 1 {
+		t.Fatal("staging without a grant built on a system with the gate")
 	}
 }

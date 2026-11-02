@@ -523,6 +523,12 @@ The channel is `releaseChannel` in `user.config.json`: `stable` (the
 default), `staging` or `dev`. Change it with
 `gjallarctl settings set releaseChannel=staging`. A move to `stable` applies
 at once; any other move waits like other critical settings.
+Moving to `staging` or `dev`, or turning on `developerMode`, also asks for
+the startup PIN or the recovery key once, after the password. Without a PIN,
+press Enter and type the recovery key. Moving back to `stable` and turning
+developer mode off ask for neither, and the next move away asks again.
+A device that was on `staging` or `dev` before this check refuses changes
+and rebuilds until you run `gjallarctl settings confirm-developer` once.
 Local commits or uncommitted edits stop the update, and nothing is rebuilt.
 A checkout that is ahead of its channel stays where it is until the channel
 catches up; it never goes back to an older commit.

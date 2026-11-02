@@ -16,11 +16,14 @@ buildGoModule {
       (lib.fileset.fileFilter (f: f.hasExt "go" || f.name == "meta.json") ../../apps)
       ../../apps/firefox-addons.json
       ../../apps/retired.json
+      ../../cmd/gjallar-devproof
       ../../cmd/gjallar-namecheck
       ../../cmd/gjallar-settingsd
       ../../cmd/gjallar-snapshotd
       ../../cmd/gjallar-system-disk
+      ../../internal/devgate
       ../../internal/installer/config
+      ../../internal/installer/diskcrypto
       ../../internal/installer/systemcheckout
       ../../internal/installer/targetdisk
       ../../internal/localchanges
@@ -39,6 +42,7 @@ buildGoModule {
   proxyVendor = true;
 
   subPackages = [
+    "cmd/gjallar-devproof"
     "cmd/gjallar-namecheck"
     "cmd/gjallar-settingsd"
     "cmd/gjallar-snapshotd"

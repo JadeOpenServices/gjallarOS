@@ -7,8 +7,10 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/JadeOpenServices/gjallarOS/internal/devgate"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/config"
 	"github.com/JadeOpenServices/gjallarOS/internal/localchanges"
 	"github.com/JadeOpenServices/gjallarOS/internal/settings"
@@ -37,6 +39,11 @@ func localFixture(t *testing.T, developerMode bool) *fixture {
 		return localchanges.ReadDir(dir)
 	}
 	f.setDeveloperMode(t, developerMode)
+	if developerMode {
+		if err := devgate.Save(f.svc.grantPath, devgate.Grant{DeveloperMode: true, Proof: devgate.ProofPIN}); err != nil {
+			t.Fatal(err)
+		}
+	}
 	return f
 }
 
@@ -69,6 +76,38 @@ func TestLocalChangeNeedsDeveloperMode(t *testing.T) {
 	f := localFixture(t, false)
 	if _, err := f.svc.RequestLocal(context.Background(), ":1.10", testFolder); !errors.Is(err, errRefused) {
 		t.Fatalf("request with developer mode off: %v, want refused", err)
+	}
+}
+
+// A local folder builds only with developer mode, so it needs the grant
+// for developer mode, before the request and again at Apply.
+func TestLocalChangeNeedsDeveloperGrant(t *testing.T) {
+	f := localFixture(t, true)
+	ctx := context.Background()
+	grant := f.grant(t)
+	if err := devgate.Save(f.svc.grantPath, devgate.Grant{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.svc.RequestLocal(ctx, ":1.10", testFolder); !errors.Is(err, errRefused) || !strings.Contains(err.Error(), "confirm-developer") {
+		t.Fatalf("local change without a grant: %v", err)
+	}
+	if err := devgate.Save(f.svc.grantPath, grant); err != nil {
+		t.Fatal(err)
+	}
+	change, err := f.svc.RequestLocal(ctx, ":1.10", testFolder)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := devgate.Save(f.svc.grantPath, devgate.Grant{}); err != nil {
+		t.Fatal(err)
+	}
+	f.now = f.now.Add(settings.SecurityDelay)
+	f.sys.home = true
+	if err := f.svc.Apply(ctx, ":1.10", change.ID, ""); !errors.Is(err, errRefused) || len(f.sys.rebuilt) != 0 {
+		t.Fatalf("apply after the grant went: %v, rebuilds %v", err, f.sys.rebuilt)
+	}
+	if _, err := os.Lstat(f.svc.localPath); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("the folder was written without a grant: %v", err)
 	}
 }
 
