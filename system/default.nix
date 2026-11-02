@@ -74,6 +74,10 @@
     );
   nixpkgs.config.allowUnfree = true;
 
+  # Per-device opt-in (aarch64Emulation): the kernel hands aarch64 programs to
+  # qemu-user, and Nix may build aarch64-linux on this device. Off by default.
+  boot.binfmt.emulatedSystems = lib.optional (settings.aarch64Emulation or false) "aarch64-linux";
+
   nix.settings.experimental-features = [
     "nix-command"
     "flakes"
