@@ -261,6 +261,11 @@
           stockUdiskie = nixpkgs.legacyPackages.${system}.udiskie;
         };
 
+        foreign-media-readonly = import ./tests/nix/foreign-media-readonly.nix {
+          inherit pkgs;
+          module = ./system/services/foreign-media-readonly.nix;
+        };
+
         boot-splash-retain = import ./tests/nix/boot-splash-retain.nix {
           inherit pkgs;
           stockPlymouth = nixpkgs.legacyPackages.${system}.plymouth;
