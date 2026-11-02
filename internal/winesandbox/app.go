@@ -28,6 +28,40 @@ type App struct {
 	// Exe is the program Wine starts, as a path inside the prefix
 	// (C:\...) or in the files folder (D:\...). Empty until one is chosen.
 	Exe string `json:"exe"`
+	// Fixes are the fixes from the fix table (internal/winefix) put into
+	// the prefix, in the order they went in. Repair puts them in again.
+	Fixes []string `json:"fixes,omitempty"`
+}
+
+// MaxFixes is the most fixes one record holds.
+const MaxFixes = 64
+
+// ValidFixName accepts a fix's name as the fix table writes it.
+func ValidFixName(name string) bool {
+	if name == "" || len(name) > 40 {
+		return false
+	}
+	for _, r := range name {
+		if !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '_') {
+			return false
+		}
+	}
+	return true
+}
+
+// checkFixes accepts a record's fix list: valid names, each once.
+func checkFixes(fixes []string) error {
+	if len(fixes) > MaxFixes {
+		return fmt.Errorf("%d fixes, more than %d", len(fixes), MaxFixes)
+	}
+	seen := make(map[string]bool, len(fixes))
+	for _, f := range fixes {
+		if !ValidFixName(f) || seen[f] {
+			return fmt.Errorf("the fix list is broken at %q", f)
+		}
+		seen[f] = true
+	}
+	return nil
 }
 
 // Ready says whether app id has a program to start.
@@ -113,6 +147,9 @@ func readRecord(record string) (App, error) {
 	if strings.ContainsRune(a.Exe, 0) {
 		return App{}, fmt.Errorf("%s: the program's path is broken", record)
 	}
+	if err := checkFixes(a.Fixes); err != nil {
+		return App{}, fmt.Errorf("%s: %w", record, err)
+	}
 	return a, nil
 }
 
@@ -121,6 +158,9 @@ func readRecord(record string) (App, error) {
 func WriteRecord(paths Paths, a App) error {
 	if !ValidName(a.Name) || strings.ContainsRune(a.Exe, 0) {
 		return fmt.Errorf("%q is not a folder name", a.Name)
+	}
+	if err := checkFixes(a.Fixes); err != nil {
+		return err
 	}
 	data, err := json.MarshalIndent(a, "", "  ")
 	if err != nil {

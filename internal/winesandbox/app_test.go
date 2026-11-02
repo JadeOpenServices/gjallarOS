@@ -3,6 +3,8 @@ package winesandbox
 import (
 	"os"
 	"path/filepath"
+	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -154,12 +156,12 @@ func TestLoadAppWithoutProgram(t *testing.T) {
 func TestWriteRecord(t *testing.T) {
 	home := t.TempDir()
 	paths := PathsFor(home, "synthetic", "Synthetic App")
-	want := App{Name: "Synthetic App", Exe: `C:\Program Files\Synthetic\app.exe`}
+	want := App{Name: "Synthetic App", Exe: `C:\Program Files\Synthetic\app.exe`, Fixes: []string{"vcrun2010", "d3dx9"}}
 	if err := WriteRecord(paths, want); err != nil {
 		t.Fatal(err)
 	}
 	got, err := readRecord(paths.Record)
-	if err != nil || got != want {
+	if err != nil || !reflect.DeepEqual(got, want) {
 		t.Fatalf("read back %+v %v", got, err)
 	}
 	if info, err := os.Stat(paths.Record); err != nil || info.Mode().Perm() != 0o600 {
@@ -239,5 +241,29 @@ func TestRemoveApp(t *testing.T) {
 	}
 	if err := RemoveApp(home, "../x", false); err == nil {
 		t.Error("bad id accepted")
+	}
+}
+
+// SYNTHETIC fix lists a record must not hold.
+func TestRecordFixes(t *testing.T) {
+	paths := PathsFor(t.TempDir(), "synthetic", "Synthetic App")
+	many := make([]string, MaxFixes+1)
+	for i := range many {
+		many[i] = "f" + strconv.Itoa(i)
+	}
+	for _, fixes := range [][]string{{"Vcrun2010"}, {"a", "a"}, {""}, {"../x"}, {strings.Repeat("a", 41)}, many} {
+		if err := WriteRecord(paths, App{Name: "Synthetic App", Fixes: fixes}); err == nil {
+			t.Errorf("wrote fixes %q", fixes)
+		}
+		data := `{"name":"Synthetic App","exe":"","fixes":["` + strings.Join(fixes, `","`) + `"]}`
+		if err := os.MkdirAll(filepath.Dir(paths.Record), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(paths.Record, []byte(data), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := readRecord(paths.Record); err == nil {
+			t.Errorf("read fixes %q", fixes)
+		}
 	}
 }

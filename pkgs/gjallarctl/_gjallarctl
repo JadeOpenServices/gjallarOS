@@ -346,8 +346,10 @@ _gjallarctl_wine() {
     'remove:remove an app'
     'reset:give an app a new Wine setup; files stay'
     'repair:set an app'"'"'s Wine setup up again; programs stay'
-    'undo:put an app back as it was before the last reset or repair'
+    'undo:put an app back as it was before the last reset, repair or fix'
     'check:tell what an installer needs, without running it'
+    'fixes:list the fixes for libraries Wine does not bring'
+    'fix:put a fix into an app'
     'import:copy a Wine prefix into a new app'
     'menu:bring the app menu in line with the apps'
   )
@@ -369,6 +371,12 @@ _gjallarctl_wine() {
     add) _arguments '1:app name:' "2:installer:$installer" ;;
     install) _arguments "1:app id:(${ids[*]})" "2:installer:$installer" ;;
     check) _arguments "1:installer:$installer" ;;
+    fixes)
+      local -a fixes=(${(f)"$(gjallarctl wine fixes --ids 2>/dev/null)"})
+      _arguments "1:fix or library:(${fixes[*]})" ;;
+    fix)
+      local -a fixes=(${(f)"$(gjallarctl wine fixes --ids 2>/dev/null)"})
+      _arguments "1:app id:(${ids[*]})" "2:fix:(${fixes[*]})" ;;
     program|reset|repair|undo) _arguments "1:app id:(${ids[*]})" ;;
     run) _arguments "1:app id:(${ids[*]})" '*:file:_files' ;;
     remove) _arguments "1:app id:(${ids[*]})" '--delete-files[also delete the app'"'"'s files folder]' ;;

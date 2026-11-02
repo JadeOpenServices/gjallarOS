@@ -58,3 +58,33 @@ func TestSandboxArgs(t *testing.T) {
 		t.Errorf("command = %q, want %q", tail, want)
 	}
 }
+
+// SYNTHETIC paths: a tool run without network.
+func TestSandboxArgsOfflineTool(t *testing.T) {
+	s := Sandbox{
+		Bwrap: "/store/bwrap", Self: "/store/gjallar-wine", Wine: "/store/wine",
+		UID: 1000, GID: 100, User: "tester", Home: "/home/tester",
+		RuntimeDir: "/run/user/1000", Wayland: "/run/user/1000/gjallar-wine/notepad.sock",
+		ResolvConf: "/run/user/1000/gjallar-wine/notepad.resolv",
+		Prefix:     "/home/tester/.local/share/gjallar-wine/notepad", Files: "/home/tester/WineApps/Notepad",
+		ID:      "notepad",
+		Offline: true,
+		Tool:    &Tool{Path: "/store/winetricks", Env: []string{"WINE=/store/wine", "W_CACHE=/p/drive_c/x=y"}},
+	}
+	args := s.Args([]string{"-q", "demo"})
+	joined := strings.Join(args, " ")
+	if strings.Contains(joined, "resolv.conf") || !slices.Contains(args, "--unshare-net") {
+		t.Errorf("offline sandbox has a network:\n%s", joined)
+	}
+	if strings.Contains(joined, "WINEDLLOVERRIDES") {
+		t.Error("the tool gets Wine's overrides")
+	}
+	if !strings.Contains(joined, "--setenv WINE /store/wine --setenv W_CACHE /p/drive_c/x=y") {
+		t.Errorf("tool environment missing:\n%s", joined)
+	}
+	tail := args[slices.Index(args, "--")+1:]
+	want := []string{"/store/gjallar-wine", "lock", "--sym", s.Prefix, "--sym", "/tmp", "--refer", "/", "--", "/store/gjallar-wine", "stay", "--tool", "/store/winetricks", "/store/wine", "-q", "demo"}
+	if !slices.Equal(tail, want) {
+		t.Errorf("command = %q, want %q", tail, want)
+	}
+}
