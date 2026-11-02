@@ -153,6 +153,14 @@ let
     ${lib.concatMapStringsSep "\n" installOnEsp (
       [ config.boot.loader.efi.efiSysMountPoint ] ++ cfg.extraEfiSysMountPoints
     )}
+    # Switching secureBootShim is a rebuild, so the firmware entry follows
+    # here: under fixed keys the firmware refuses systemd-boot and has to
+    # start shim (e2e-fw13, 2026-11-02). Writes nothing when the entry
+    # already starts the right file. It runs before make-policy: the entry
+    # belongs to the files just written, and a failed TPM update must not
+    # leave it pointing at a loader the firmware refuses (e2e-fw13,
+    # 2026-11-02, rebuild from a shim boot under a pre-shim policy).
+    ${bootFirst} --keep-order ${esp}
     ${lib.optionalString cfg.measuredBoot.enable ''
       ${lib.optionalString (lib.elem 4 cfg.measuredBoot.pcrs) (
         lib.concatMapStrings (entry: ''
@@ -240,11 +248,6 @@ in
       pkgs.writeShellScript "install-lanzaboote" ''
         set -euo pipefail
         ${installHook}
-        # Switching secureBootShim is a rebuild, so the firmware entry follows
-        # here: under fixed keys the firmware refuses systemd-boot and has to
-        # start shim (e2e-fw13, 2026-11-02). Writes nothing when the entry
-        # already starts the right file.
-        ${bootFirst} --keep-order ${esp}
         ${pkgs.coreutils}/bin/rm -f ${esp}/loader/entries/nixos*-generation-*.conf
         ${pkgs.coreutils}/bin/sync --file-system ${esp}
       ''
