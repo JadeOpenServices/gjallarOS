@@ -33,7 +33,28 @@ jobs:
           submodules: true
           persist-credentials: false
 
+      # The job downloads what earlier tags already put into the cache, so a
+      # tag builds only the packages it changed instead of all of them again
+      # (that took 2.5 to 4.5 hours each). Nix accepts only files signed with
+      # the key in deployment/binary-cache.json; an empty file (forks) adds
+      # nothing.
+      - name: Read the release cache
+        id: cache
+        run: |
+          python3 -I - <<'EOF' >> "$GITHUB_OUTPUT"
+          import json
+          c = json.load(open("deployment/binary-cache.json"))
+          url, key = c.get("url", ""), c.get("publicKey", "")
+          if url.startswith("https://") and key:
+              print("conf<<END")
+              print("extra-substituters = " + url)
+              print("extra-trusted-public-keys = " + key)
+              print("END")
+          EOF
+
       - uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31.11.1
+        with:
+          extra_nix_config: ${{ steps.cache.outputs.conf }}
 
       - name: Build
         run: nix build --print-build-logs --out-link result '.?submodules=1#prebuilt'

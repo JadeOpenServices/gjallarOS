@@ -629,7 +629,8 @@ machine compiled them itself. For each `v*` release tag,
 them and uploads them as files of the `nix-cache` release. Those files are a
 plain Nix binary cache. Each tag adds to it, so a machine on `main` downloads a
 package whenever it matches one built for any tag. Anything missing still
-builds locally.
+builds locally. The workflow itself downloads from the same cache, so a tag
+builds only the packages that changed since the tags before it.
 
 `deployment/binary-cache.json` names the cache and its public key:
 
