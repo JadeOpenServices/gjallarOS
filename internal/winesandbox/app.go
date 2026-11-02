@@ -246,7 +246,8 @@ func Apps(home string) ([]Listed, error) {
 	return apps, nil
 }
 
-// RemoveApp removes app id's record and prefix, and with files its files
+// RemoveApp removes app id's record, prefix, snapshots and start log, and
+// with files its files
 // folder too. The record goes first, so a half-removed app no longer
 // starts. A record that is gone leaves a prefix to remove, but no files
 // folder to find.
@@ -287,6 +288,9 @@ func RemoveApp(home, id string, files bool) error {
 		}
 	}
 	if err := DropSnapshots(home, id); err != nil {
+		return err
+	}
+	if err := DropStartLog(home, id); err != nil {
 		return err
 	}
 	if files {
