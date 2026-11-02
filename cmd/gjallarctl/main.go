@@ -190,6 +190,9 @@ func runInstaller(args []string, stdout, stderr io.Writer) int {
 	if args[0] == "tpm2-metadata-pin" {
 		return runTPM2MetadataPIN(args[1:], stdout, stderr)
 	}
+	if args[0] == "tpm2-metadata-policy" {
+		return runTPM2MetadataPolicy(args[1:], stdout, stderr)
+	}
 	if args[0] == "tpm2-check-pcrlock-policy" {
 		return runTPM2CheckPCRLockPolicy(args[1:], stdout, stderr)
 	}
@@ -519,6 +522,36 @@ func runTPM2MetadataPIN(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stdout, "yes")
 	} else {
 		fmt.Fprintln(stdout, "no")
+	}
+	return 0
+}
+
+// Tells the first chip enrollment what the volume already carries:
+// "none" (no chip slot), "unbound" (only chip slots without a startup
+// policy, which the enrollment replaces) or "bound" (a slot GjallarOS
+// enrolled, which only tpm2 reenroll replaces).
+func runTPM2MetadataPolicy(args []string, stdout, stderr io.Writer) int {
+	if len(args) != 1 {
+		fmt.Fprintln(stderr, "Usage: gjallarctl installer tpm2-metadata-policy <metadata-json>")
+		return 2
+	}
+	raw, err := os.ReadFile(args[0])
+	if err != nil {
+		fmt.Fprintf(stderr, "ERROR: %v\n", err)
+		return 1
+	}
+	slots, err := diskcrypto.ParseKeyslots(raw)
+	if err != nil {
+		fmt.Fprintf(stderr, "ERROR: %v\n", err)
+		return 1
+	}
+	switch {
+	case len(slots.TPM2) == 0:
+		fmt.Fprintln(stdout, "none")
+	case slots.TPM2Policy:
+		fmt.Fprintln(stdout, "bound")
+	default:
+		fmt.Fprintln(stdout, "unbound")
 	}
 	return 0
 }

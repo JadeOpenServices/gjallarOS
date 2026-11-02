@@ -53,6 +53,37 @@ func TestTPM2MetadataPIN(t *testing.T) {
 	}
 }
 
+func TestTPM2MetadataPolicy(t *testing.T) {
+	dir := t.TempDir()
+	for name, tc := range map[string]struct {
+		header string
+		want   string
+	}{
+		"no tpm":  {`{"keyslots":{"0":{}},"tokens":{}}`, "none\n"},
+		"unbound": {`{"keyslots":{"0":{},"1":{}},"tokens":{"0":{"type":"systemd-tpm2","keyslots":["1"],"tpm2-pcrs":[]}}}`, "unbound\n"},
+		"bound":   {`{"keyslots":{"0":{},"1":{}},"tokens":{"0":{"type":"systemd-tpm2","keyslots":["1"],"tpm2_pcrlock":true}}}`, "bound\n"},
+		"mixed": {`{"keyslots":{"0":{},"1":{},"2":{}},"tokens":{"0":{"type":"systemd-tpm2","keyslots":["1"]},` +
+			`"1":{"type":"systemd-tpm2","keyslots":["2"],"tpm2_pcrlock":true}}}`, "bound\n"},
+		"recovery only": {`{"keyslots":{"0":{},"1":{}},"tokens":{"0":{"type":"systemd-recovery","keyslots":["1"]}}}`, "none\n"},
+	} {
+		path := filepath.Join(dir, "m.json")
+		if err := os.WriteFile(path, []byte(tc.header), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		var out, errOut bytes.Buffer
+		if code := runTPM2MetadataPolicy([]string{path}, &out, &errOut); code != 0 || out.String() != tc.want {
+			t.Errorf("%s: code %d out %q err %q", name, code, out.String(), errOut.String())
+		}
+	}
+	var out, errOut bytes.Buffer
+	if code := runTPM2MetadataPolicy([]string{filepath.Join(dir, "missing")}, &out, &errOut); code != 1 {
+		t.Errorf("missing file: code %d", code)
+	}
+	if code := runTPM2MetadataPolicy(nil, &out, &errOut); code != 2 {
+		t.Errorf("no argument: code %d", code)
+	}
+}
+
 func TestLUKSArgsValid(t *testing.T) {
 	for _, args := range [][]string{{"status"}, {"recovery-key"}, {"setup"}, {"pin"}, {"pin", "--remove"}, {"record"}} {
 		if !luksArgsValid(args) {

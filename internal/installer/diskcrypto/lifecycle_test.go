@@ -17,10 +17,10 @@ func TestParseKeyslots(t *testing.T) {
 		file string
 		want Keyslots
 	}{
-		{"testdata/luks-tpm2-passphrase.json", Keyslots{All: []int{0, 2}, TPM2: []int{2}, TPM2Token: map[int]string{2: "1"}, Passphrase: []int{0}}},
-		{"testdata/luks-tpm2-recovery-passphrase.json", Keyslots{All: []int{0, 1, 2}, TPM2: []int{2}, TPM2Token: map[int]string{2: "1"}, Recovery: []int{1}, Passphrase: []int{0}}},
-		{"testdata/luks-tpm2pin-recovery.json", Keyslots{All: []int{0, 2}, TPM2: []int{0}, TPM2PIN: true, TPM2Token: map[int]string{0: "0"}, Recovery: []int{2}}},
-		{"testdata/luks-tpm2-recovery.json", Keyslots{All: []int{0, 2}, TPM2: []int{0}, TPM2Token: map[int]string{0: "0"}, Recovery: []int{2}}},
+		{"testdata/luks-tpm2-passphrase.json", Keyslots{All: []int{0, 2}, TPM2: []int{2}, TPM2Policy: true, TPM2Token: map[int]string{2: "1"}, Passphrase: []int{0}}},
+		{"testdata/luks-tpm2-recovery-passphrase.json", Keyslots{All: []int{0, 1, 2}, TPM2: []int{2}, TPM2Policy: true, TPM2Token: map[int]string{2: "1"}, Recovery: []int{1}, Passphrase: []int{0}}},
+		{"testdata/luks-tpm2pin-recovery.json", Keyslots{All: []int{0, 2}, TPM2: []int{0}, TPM2Policy: true, TPM2PIN: true, TPM2Token: map[int]string{0: "0"}, Recovery: []int{2}}},
+		{"testdata/luks-tpm2-recovery.json", Keyslots{All: []int{0, 2}, TPM2: []int{0}, TPM2Policy: true, TPM2Token: map[int]string{0: "0"}, Recovery: []int{2}}},
 	} {
 		raw, err := os.ReadFile(tc.file)
 		if err != nil {
@@ -90,8 +90,8 @@ func TestParseKeyslotsTokenWithoutPolicy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !got.TPM2NoPolicy {
-		t.Fatal("token without pcrlock policy not flagged")
+	if !got.TPM2NoPolicy || got.TPM2Policy {
+		t.Fatalf("token without pcrlock policy: NoPolicy %t, Policy %t", got.TPM2NoPolicy, got.TPM2Policy)
 	}
 	if cur, _ := ParseKeyslots(raw); cur.TPM2NoPolicy {
 		t.Fatal("pcrlock token flagged")

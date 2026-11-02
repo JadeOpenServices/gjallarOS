@@ -28,6 +28,8 @@ type Keyslots struct {
 	// one; the others came from the first installers (2026-08/09, no PCRs
 	// at all) or by hand, and nothing ties them to how the device starts.
 	TPM2NoPolicy bool
+	// A TPM2 token with a pcrlock policy: one GjallarOS enrolled.
+	TPM2Policy bool
 	// Token id of each TPM2 slot.
 	TPM2Token map[int]string
 	Recovery  []int
@@ -75,6 +77,7 @@ func ParseKeyslots(raw []byte) (Keyslots, error) {
 				k.TPM2PIN = k.TPM2PIN || token.TPM2PIN
 				k.TPM2NoSRK = k.TPM2NoSRK || token.TPM2SRK == ""
 				k.TPM2NoPolicy = k.TPM2NoPolicy || !token.Pcrlock
+				k.TPM2Policy = k.TPM2Policy || token.Pcrlock
 			case "systemd-recovery":
 				k.Recovery = append(k.Recovery, slot)
 			}
