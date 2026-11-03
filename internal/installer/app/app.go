@@ -83,6 +83,7 @@ type state struct {
 	recoverySigningKey       string
 	recoverySigningPublicKey string
 	secureBootFirmware       oddc.EffectiveSecureBootFirmwarePolicy
+	shimFacts                *secureboot.ShimFacts
 	deviceGate               string
 }
 
@@ -716,27 +717,48 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 		}
 	}
 
-	// Read before any Secure Boot question: every path below either turns
-	// Secure Boot off or installs own keys, and both need the firmware
-	// setup. On locked firmware neither works, so stop before asking.
+	// Read before any Secure Boot question: turning Secure Boot off and
+	// installing own keys both need the firmware setup. On locked firmware
+	// the only way in is shim, which must already start this system.
 	if trust, trustErr := secureboot.ReadFirmwareTrust(); trustErr != nil {
 		fmt.Fprintf(out, "What the firmware trusts could not be read (%v).\n", trustErr)
 	} else {
 		fmt.Fprint(out, firmwareTrustReport(trust))
-		if !s.user.UnattendedInstall {
+		if s.preset && s.user.SecureBootEnable && s.user.SecureBootShim {
+			fmt.Fprintln(out, "user.config.json: Secure Boot through shim; the firmware keys stay as they are.")
+		} else if !s.user.UnattendedInstall {
 			locked, err := askFirmwareLocked(ctx, ui, trust)
 			if err != nil {
 				return fail(errOut, err)
 			}
 			if locked {
-				fmt.Fprint(out, lockedFirmwareNotice)
-				return 0
+				if installedRoot != "/" {
+					fmt.Fprint(out, lockedFirmwareStop("Installing from recovery media cannot use shim yet."))
+					return 0
+				}
+				facts, ok, err := chooseLockedShim(ctx, ui, out, root, trust, s.user.LUKSTPM2Enable)
+				if err != nil {
+					return fail(errOut, err)
+				}
+				if !ok {
+					return 0
+				}
+				s.shimFacts = &facts
+				s.user.SecureBootEnable = true
+				s.user.SecureBootShim = true
+				s.user.FirmwarePasswordLock = false
+				if tpmAvailable && !s.user.Management.Enable {
+					if err := collectStartupUnlock(ctx, ui, diskcrypto.ModelTPMKind(), s.chassisType, s.touchscreen, &s.user); err != nil {
+						return fail(errOut, err)
+					}
+				}
 			}
 		}
 	}
 
 	if tpmAvailable &&
 		s.user.SecureBootPrompt &&
+		!s.user.SecureBootShim &&
 		!s.user.Management.Enable &&
 		s.secureBootFirmware.Policy.Supported {
 		// Taking over firmware key ownership needs informed consent: show
@@ -793,6 +815,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 		fmt.Fprint(out, noSecureBootPolicyNotice(resolvedDevice.ModelID))
 		fmt.Fprint(out, secureBootDeclinedNotice("After the install, gjallarctl secure-boot setup turns it on through shim where this firmware allows it."))
 	} else if s.user.SecureBootEnable &&
+		!s.user.SecureBootShim &&
 		s.secureBootFirmware.Policy.Supported {
 		// user.config.json or endpoint management already decided; still
 		// tell the user before any key is generated.
@@ -807,8 +830,9 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 		}
 	}
 
+	// shim needs no ODDC key policy: the firmware keys stay as they are.
 	if err := validateSecureBootFirmwareSupport(
-		s.user.SecureBootEnable,
+		s.user.SecureBootEnable && !s.user.SecureBootShim,
 		resolvedDevice.ModelID,
 		s.secureBootFirmware,
 	); err != nil {
@@ -906,6 +930,9 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 	} else if s.user.RecoveryPartitionEnable && !s.user.SecureBootEnable {
 		s.user.RecoveryPartitionEnable = false
 		fmt.Fprintln(out, noRecoveryPartitionNotice)
+	} else if s.user.RecoveryPartitionEnable && s.user.SecureBootShim {
+		s.user.RecoveryPartitionEnable = false
+		fmt.Fprintln(out, shimNoRecoveryPartitionNotice)
 	}
 
 	if s.existing &&
@@ -1144,7 +1171,31 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 			return fail(errOut, err)
 		}
 	}
-	if s.render.SecureBootEnable {
+	if s.render.SecureBootEnable && s.render.SecureBootShim {
+		// Before the rebuild: it puts the GjallarOS boot chain first, which
+		// shim starts only once it lists the GjallarOS key.
+		if installedRoot != "/" {
+			return fail(errOut, errors.New("Secure Boot through shim installs only on the running system"))
+		}
+		if err := secureboot.PrepareShim(ctx, out); err != nil {
+			return fail(errOut, err)
+		}
+		if s.shimFacts == nil {
+			facts, err := buildShimFacts(ctx, root)
+			if err != nil {
+				return fail(errOut, err)
+			}
+			s.shimFacts = &facts
+		}
+		listed, err := secureboot.QueueShimKey(ctx, out, *s.shimFacts, "the installer")
+		if err != nil {
+			return fail(errOut, err)
+		}
+		if !listed {
+			fmt.Fprintln(out, "Nothing about how this system starts has changed yet. Restart now; the installer keeps your answers.")
+			return 0
+		}
+	} else if s.render.SecureBootEnable {
 		if err := secureboot.Prepare(ctx, out); err != nil {
 			return fail(errOut, err)
 		}
@@ -1489,7 +1540,27 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 	//
 	// -no-rebuild means "do not install another NixOS generation"; it must
 	// never mean "skip an already-started Secure Boot transaction".
-	if s.render.SecureBootEnable {
+	if s.render.SecureBootEnable && s.render.SecureBootShim {
+		next, err := secureboot.ContinueShimInstall(
+			ctx,
+			ui,
+			out,
+			"/nix/var/nix/profiles/system/sw/bin/gjallar-verify-secure-boot-artifacts",
+		)
+		if err != nil {
+			return fail(errOut, err)
+		}
+		if next == secureboot.ContinuationReboot {
+			if err := armSecureBootResume(ctx, out); err != nil {
+				return fail(errOut, err)
+			}
+			fmt.Fprintln(out, "Restarting into GjallarOS through shim...")
+			if err := attached(ctx, "sudo", "systemctl", "reboot"); err != nil {
+				return fail(errOut, fmt.Errorf("restart: %w", err))
+			}
+			return 0
+		}
+	} else if s.render.SecureBootEnable {
 		next, err := secureboot.Continue(
 			ctx,
 			ui,
@@ -1505,45 +1576,9 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 		// A completed Secure Boot transaction needs no marker, firmware
 		// handoff, or reboot. This is especially important on installer reruns.
 		if secureboot.NeedsFirmwareReboot(next) {
-			if err := attached(
-				ctx,
-				"sudo", "install",
-				"-d", "-m", "0700",
-				"/var/lib/gjallarOS",
-			); err != nil {
-				return fail(
-					errOut,
-					fmt.Errorf(
-						"create installer continuation directory: %w",
-						err,
-					),
-				)
+			if err := armSecureBootResume(ctx, out); err != nil {
+				return fail(errOut, err)
 			}
-
-			if err := attached(
-				ctx,
-				"sudo", "install",
-				"-m", "0600",
-				"/dev/null",
-				installerSecureBootResumeMarker,
-			); err != nil {
-				return fail(
-					errOut,
-					fmt.Errorf(
-						"arm installer continuation across Secure Boot reboot: %w",
-						err,
-					),
-				)
-			}
-
-			fmt.Fprintln(
-				out,
-				"Installer continuation armed across Secure Boot reboot.",
-			)
-			fmt.Fprintln(
-				out,
-				"After Secure Boot is verified, GjallarOS will automatically run the final installer checks.",
-			)
 
 			fmt.Fprintln(
 				out,
@@ -2023,6 +2058,10 @@ func collectInteractive(ctx context.Context, ui prompt.UI, root string, partitio
 // nothing checks it before it starts.
 const noRecoveryPartitionNotice = "No recovery partition: it needs GjallarOS Secure Boot, which is off for this install. The disk is not shrunk."
 
+// shimNoRecoveryPartitionNotice: starting recovery through shim is not
+// tested yet (Plane 293).
+const shimNoRecoveryPartitionNotice = "No recovery partition: starting recovery through shim is not tested yet. The disk is not shrunk."
+
 // freshRecoveryPartition says whether a fresh disk gets a recovery partition. The
 // boot entry alone needs no partition; the partition comes only with
 // GjallarOS Secure Boot (collectRecovery).
@@ -2041,6 +2080,8 @@ func collectRecovery(ctx context.Context, ui prompt.UI, partitionable, secureBoo
 	u.RecoveryPartitionEnable = false
 	if u.RecoveryEnable && !secureBoot {
 		fmt.Fprintln(ui.Out, noRecoveryPartitionNotice)
+	} else if u.RecoveryEnable && u.SecureBootShim {
+		fmt.Fprintln(ui.Out, shimNoRecoveryPartitionNotice)
 	} else if u.RecoveryEnable && !partitionable {
 		fmt.Fprintln(ui.Out, "No recovery partition: this root is not on encrypted Btrfs, which recovery partitioning needs. The recovery boot entry is still installed.")
 	} else if u.RecoveryEnable {
@@ -3276,6 +3317,42 @@ func provisionRecoveryPartition(ctx context.Context, root string, s state) error
 		return fmt.Errorf("install recovery partition: %w", err)
 	}
 	return nil
+}
+
+// armSecureBootResume makes the first boot with Secure Boot verified run
+// the installer's final checks (installer-post-secure-boot).
+func armSecureBootResume(ctx context.Context, out io.Writer) error {
+	if err := attached(ctx, "sudo", "install", "-d", "-m", "0700", "/var/lib/gjallarOS"); err != nil {
+		return fmt.Errorf("create installer continuation directory: %w", err)
+	}
+	if err := attached(ctx, "sudo", "install", "-m", "0600", "/dev/null", installerSecureBootResumeMarker); err != nil {
+		return fmt.Errorf("arm installer continuation across Secure Boot reboot: %w", err)
+	}
+	fmt.Fprintln(out, "Installer continuation armed across Secure Boot reboot.")
+	fmt.Fprintln(out, "After Secure Boot is verified, GjallarOS will automatically run the final installer checks.")
+	return nil
+}
+
+// buildShimFacts builds the pinned shim from the checkout and reads what it
+// needs from the firmware. The running system is not GjallarOS yet, so it
+// has no /etc/gjallar/shim.json.
+func buildShimFacts(ctx context.Context, root string) (secureboot.ShimFacts, error) {
+	source, err := flakesource.Stage(root, "")
+	if err != nil {
+		return secureboot.ShimFacts{}, fmt.Errorf("build shim: %w", err)
+	}
+	defer source.Close()
+	paths, err := buildStaged(ctx, source, "gjallar-shim")
+	if err != nil {
+		return secureboot.ShimFacts{}, fmt.Errorf("build shim: %w", err)
+	}
+	for _, path := range strings.Fields(paths) {
+		facts := filepath.Join(path, "share", "shim", "shim.json")
+		if _, err := os.Stat(facts); err == nil {
+			return secureboot.LoadShimFacts(facts)
+		}
+	}
+	return secureboot.ShimFacts{}, errors.New("the shim build has no share/shim/shim.json")
 }
 
 // buildStaged evaluates attr and builds it in two nix processes, so the
