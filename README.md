@@ -483,6 +483,24 @@ GjallarOS asks about the new USB device.
 
 <div align="right"><a href="#gjallaros">↑ back to top</a></div>
 
+### Old names
+
+Every rename lives in one table, `system/tools/legacy/renames.json`:
+commands, settings keys, config fields, partition labels, units and
+paths. A row holds the old name, the new name, where it was removed, the
+date after which it can go (`deleteAfter`) and the Plane or JODS item.
+
+- An old command is not run. The shell prints the new name and stops,
+  for example: GjallarOS: rebuild was removed; use gjallarctl rebuild
+- The flake check `legacy-names` fails while an old name is still used
+  outside `system/tools/legacy/`, and once a row is past its
+  `deleteAfter` date. Then the row and the last traces are removed.
+- The system does not build when an old command name is a real command
+  again.
+
+A rename adds its row in the same commit. Tests and captured device
+output may still name the old name.
+
 ## 🧬 Hardware catalog (ODDC)
 
 [ODDC](https://github.com/JadeOpenServices/oddc) is a separate project,

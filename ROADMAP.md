@@ -677,17 +677,20 @@ Wiki 752 "Answered 2026-11-01" has the answers word for word.
 
 #### Old names (Q166)
 
-- [ ] **One legacy folder.** `system/tools/legacy/` holds one table for
-      every rename: commands, settings keys, config fields and paths. Each
-      row has the old name, the new name, the version it was removed in,
-      the version it can be deleted in and the Plane item.
-- [ ] Old commands are not run. The zsh `command_not_found_handler` prints
-      the new name and stops.
-- [ ] Old settings keys and config fields are translated once, with a
-      notice.
-- [ ] A flake check fails when an old name is still a real command, is
-      used outside the legacy folder, or has a row past its delete version.
-- [ ] The rule goes into README, the job rules (wiki 691) and memory.
+- [x] **One legacy folder.** `system/tools/legacy/renames.json` holds one
+      table for every rename: commands, settings keys, config fields,
+      labels, units and paths. Each row has the old name, the new name,
+      where it was removed, the date after which it can be deleted
+      (`deleteAfter`) and the Plane or JODS item (281).
+- [x] Old commands are not run. The zsh `command_not_found_handler` (and
+      the bash `command_not_found_handle`) prints the new name and stops.
+- [x] Old settings keys and config fields: the JODS-565 keys are not read
+      (Q195); generated state drops them once. A later rename that needs a
+      translation adds it next to its row, after asking Jade.
+- [x] The flake check `legacy-names` fails when an old name is used outside
+      the legacy folder or a row is past its `deleteAfter` date. system-path
+      fails to build when an old command is a real command again.
+- [x] The rule goes into README, the job rules (wiki 691) and memory.
 
 #### Update sources
 
