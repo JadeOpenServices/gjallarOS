@@ -2,12 +2,6 @@
 let
   gjallarctl = pkgs.callPackage ../../../pkgs/gjallarctl { };
   gjallarSettings = pkgs.callPackage ../../../pkgs/gjallar-settings { inherit gjallarctl; };
-  checkInstaller = pkgs.writeShellScriptBin "check-installer" ''
-    exec ${gjallarctl}/bin/gjallarctl check --repo ${lib.escapeShellArg settings.dotfilesDir} "$@"
-  '';
-  preflight = pkgs.writeShellScriptBin "gjallar-preflight" ''
-    exec ${gjallarctl}/bin/gjallarctl preflight --repo ${lib.escapeShellArg settings.dotfilesDir} "$@"
-  '';
   # The root side of `gjallarctl rebuild` for the system checkout (ROADMAP section 14).
   # The user's environment stays outside: the inner script starts from
   # env -i with fixed values and the Noctalia colors, which gjallarctl checks
@@ -60,10 +54,6 @@ let
       GJALLAR_NOCTALIA_COLORS="''${GJALLAR_NOCTALIA_COLORS:-}" \
       ${systemRebuildInner} "$@"
   '';
-  goCommand = name: command: pkgs.writeShellScriptBin name ''
-    exec ${gjallarctl}/bin/gjallarctl ${command} "$@"
-  '';
-
 in
 {
   # One fixed place on every deployment that names the system's checkout;
@@ -73,16 +63,9 @@ in
   };
 
   environment.systemPackages = [
-    (goCommand "helpme" "helpme")
     systemRebuild
-    (goCommand "cleanup" "cleanup")
-    (goCommand "cleanup-old-generations" "cleanup-old-generations")
-    (goCommand "thermal-status" "thermal-status")
-    (goCommand "thermal-test" "thermal-test")
     gjallarctl
     gjallarSettings
-    checkInstaller
-    preflight
     pkgs.yad
   ];
 }

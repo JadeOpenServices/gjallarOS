@@ -1762,7 +1762,7 @@ func runFan(args []string, stdout, stderr io.Writer) int {
 func runPreflight(args []string, stdout, stderr io.Writer) int {
 	flags := flag.NewFlagSet("gjallarctl preflight", flag.ContinueOnError)
 	flags.SetOutput(stderr)
-	repo := flags.String("repo", ".", "GjallarOS repository root")
+	repo := flags.String("repo", "", "GjallarOS repository root (default: the system checkout, then the current directory)")
 	if err := flags.Parse(args); err != nil {
 		return 2
 	}
@@ -1771,7 +1771,7 @@ func runPreflight(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 
-	root, err := installercheck.ResolveRepository(*repo)
+	root, err := installercheck.DiscoverRepository(*repo)
 	if err != nil {
 		fmt.Fprintf(stderr, "ERROR: %v\n", err)
 		return 2
@@ -1854,7 +1854,7 @@ func reportRebuildPreflightResult(
 func runCheck(args []string, stdout, stderr io.Writer) int {
 	flags := flag.NewFlagSet("gjallarctl check", flag.ContinueOnError)
 	flags.SetOutput(stderr)
-	repo := flags.String("repo", ".", "GjallarOS repository root")
+	repo := flags.String("repo", "", "GjallarOS repository root (default: the system checkout, then the current directory)")
 	timeout := flags.Duration("timeout", 5*time.Second, "maximum time for each safe external check")
 	if err := flags.Parse(args); err != nil {
 		return 2
@@ -1868,7 +1868,7 @@ func runCheck(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 
-	root, err := installercheck.ResolveRepository(*repo)
+	root, err := installercheck.DiscoverRepository(*repo)
 	if err != nil {
 		fmt.Fprintf(stderr, "ERROR: %v\n", err)
 		return 2
@@ -2342,7 +2342,7 @@ func rebuildCheckout(repo string, opts rebuildOptions, system bool, stdout, stde
 		if cleanupStatus := runCleanupOld(nil, stdout, stderr); cleanupStatus != 0 {
 			fmt.Fprintln(
 				stderr,
-				"WARN: rebuild switched successfully, but old-generation cleanup failed; run cleanup-old-generations later.",
+				"WARN: rebuild switched successfully, but old-generation cleanup failed; run gjallarctl cleanup-old-generations later.",
 			)
 		}
 	}
@@ -2798,7 +2798,7 @@ func runThermalStatus(args []string, stdout, stderr io.Writer) int {
 
 func runThermalTest(args []string, stdout, stderr io.Writer) int {
 	if len(args) != 2 {
-		fmt.Fprintln(stderr, "Usage: thermal-test <off|on|status> <process-pattern>")
+		fmt.Fprintln(stderr, "Usage: gjallarctl thermal-test <off|on|status> <process-pattern>")
 		return 2
 	}
 	data, _ := exec.Command("pgrep", "-f", args[1]).Output()
@@ -2866,29 +2866,42 @@ func rootToolArgv(tool string, euid int) []string {
 	return []string{"sudo", "-k", tool}
 }
 
+// helpmeTools is what helpme lists, in the terminal and in the window.
+var helpmeTools = [][2]string{
+	{"gjallarctl rebuild", "Apply the current NixOS configuration."},
+	{"gjallarctl rebuild --update", "Pull the system checkout and rebuild."},
+	{"gjallarctl cleanup", "Remove old generations and collect garbage."},
+	{"gjallarctl thermal-status", "Show temperatures and power state."},
+	{"gjallarctl thermal-test", "Pause/resume processes for troubleshooting."},
+	{"gjallarctl check", "Check installer configuration."},
+	{"gjallarctl preflight", "Run fast repository wiring checks."},
+}
+
 func runHelpme(args []string, stdout, stderr io.Writer) int {
 	if len(args) > 1 || len(args) == 1 && args[0] != "--text" {
 		return 2
 	}
-	text := "GjallarOS tools\n\n  gjallarctl rebuild            Apply the current NixOS configuration.\n  gjallarctl rebuild --update   Pull the system checkout and rebuild.\n  cleanup                       Remove old generations and collect garbage.\n  thermal-status                Show temperatures and power state.\n  thermal-test                  Pause/resume processes for troubleshooting.\n  check-installer               Check installer configuration.\n  gjallar-preflight             Run fast repository wiring checks.\n"
+	var text strings.Builder
+	text.WriteString("GjallarOS tools\n\n")
+	for _, tool := range helpmeTools {
+		fmt.Fprintf(&text, "  %-30s%s\n", tool[0], tool[1])
+	}
 	if len(args) == 1 || os.Getenv("DISPLAY")+os.Getenv("WAYLAND_DISPLAY") == "" {
-		fmt.Fprint(stdout, text)
+		fmt.Fprint(stdout, text.String())
 		return 0
 	}
 	if _, err := exec.LookPath("yad"); err != nil {
-		fmt.Fprint(stdout, text)
+		fmt.Fprint(stdout, text.String())
 		return 0
 	}
-	return runCommand(context.Background(), stdout, stderr, "yad",
+	yad := []string{
 		"--list", "--title=GjallarOS tools", "--width=900", "--height=520", "--center", "--button=Close:0",
 		"--column=Command", "--column=Description",
-		"gjallarctl rebuild", "Apply the current NixOS configuration.",
-		"gjallarctl rebuild --update", "Pull the system checkout and rebuild.",
-		"cleanup", "Remove old generations and collect garbage.",
-		"thermal-status", "Show temperatures and power state.",
-		"thermal-test", "Pause/resume processes for troubleshooting.",
-		"check-installer", "Check installer configuration.",
-		"gjallar-preflight", "Run fast repository wiring checks.")
+	}
+	for _, tool := range helpmeTools {
+		yad = append(yad, tool[0], tool[1])
+	}
+	return runCommand(context.Background(), stdout, stderr, "yad", yad...)
 }
 
 func runRebuildQuiet(stdout, stderr io.Writer, host string, messages []string, started time.Time, plan rebuildPlan) int {

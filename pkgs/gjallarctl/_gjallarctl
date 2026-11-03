@@ -1,8 +1,8 @@
-#compdef gjallarctl helpme cleanup cleanup-old-generations thermal-status thermal-test check-installer gjallar-preflight gjallar-system-rebuild
+#compdef gjallarctl gjallar-system-rebuild
 
 # Hand-written: gjallarctl parses its own arguments, so nothing can be
-# generated. Keep in step with printUsage in cmd/gjallarctl/main.go. The
-# other names are the wrappers in system/tools/commands/default.nix.
+# generated. Keep in step with printUsage in cmd/gjallarctl/main.go.
+# gjallar-system-rebuild is the root side of gjallarctl rebuild.
 
 _gjallarctl_rebuild() {
   _arguments -S \
@@ -433,11 +433,6 @@ _gjallarctl_oddc() {
 _gjallarctl() {
   case $service in
     gjallar-system-rebuild) _gjallarctl_system_rebuild; return ;;
-    helpme) _arguments '--text[print instead of opening a window]'; return ;;
-    cleanup) _arguments '(-k --keep)'{-k,--keep}'[generations to keep]:count:'; return ;;
-    cleanup-old-generations|thermal-status|gjallar-preflight) _message 'no arguments'; return ;;
-    thermal-test) _arguments '1:mode:(off on status)' '2:process pattern:_process_names'; return ;;
-    check-installer) _arguments '--timeout[time per external check]:duration:'; return ;;
   esac
 
   local -a cmds=(
