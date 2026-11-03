@@ -52,6 +52,11 @@ in
 
   environment.systemPackages = [
     secureBootTool
+    # `gjallarctl secure-boot setup` creates and archives the keys while
+    # Secure Boot is still off, before any of the gated services exist; it
+    # finds these through PATH (privilegedTool).
+    pkgs.sbctl
+    pkgs.openssl
     (pkgs.writeTextDir "share/zsh/site-functions/_gjallar-secure-boot" ''
       #compdef gjallar-secure-boot
       local -a cmds=(
