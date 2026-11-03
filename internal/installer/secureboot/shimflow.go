@@ -236,8 +236,12 @@ func QueueShimKey(ctx context.Context, out io.Writer, facts ShimFacts, again str
 		return false, fmt.Errorf("this firmware would not start shim with the GjallarOS key: %s", choice.Reason)
 	}
 	enrolled, err := mokHolds(liveFirmware, "MokListRT", keys.dbDER)
-	if err != nil || enrolled {
-		return enrolled, err
+	if err != nil {
+		return false, err
+	}
+	if enrolled {
+		fmt.Fprintln(out, "shim lists the GjallarOS key; building GjallarOS with shim.")
+		return true, nil
 	}
 	queued, err := mokHolds(liveFirmware, "MokNew", keys.dbDER)
 	if err != nil {

@@ -104,7 +104,8 @@ Steps:
 3. The installer builds GjallarOS with shim and restarts once more.
 
 What you need:
-- the Secure Boot recovery archive and passphrase shown next; store both
+- the Secure Boot recovery archive and passphrase, shown after the build and
+  before the restart; store both
   offline, they restore the GjallarOS signing keys
 `)
 	if luksTPM2 {
