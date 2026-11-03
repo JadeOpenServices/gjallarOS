@@ -26,20 +26,20 @@ and only the disk encryption passphrase can turn blocking off again.
       adopts the signing key on first start. VM-tested arm, block, disarm and
       re-arm on fw13 (2026-10-10).
 - [ ] **Rollout** (on the live host, run by the user):
-  1. `rebuild` with `usbTrustEnforce = false`. Check that
+  1. `gjallarctl rebuild` with `usbTrustEnforce = false`. Check that
      `gjallarctl usb status` reports `"armed": false` and that the review
      notices still work.
   2. Test the password fallback: click "Use password" during the scan. The
      askpass dialog must appear at once.
   3. Set `"usbTrustEnforce": true` in `user.config.json` (untracked), then
-     `rebuild`.
+     `gjallarctl rebuild`.
   4. Check that `gjallarctl usb status` reports `"armed": true`. The fingerprint
      reader and Bluetooth should be enrolled. The passkey and USB disk should
      wait for review.
   5. Break-glass test: `sudo gjallarctl usb disarm`. A wrong passphrase must
      fail after about 3 s; the right one must disarm.
   6. Turning enforcement off for good: set `"usbTrustEnforce": false`,
-     `rebuild`, then `sudo gjallarctl usb disarm`. Disarm alone does not
+     `gjallarctl rebuild`, then `sudo gjallarctl usb disarm`. Disarm alone does not
      last: the broker re-arms from the config on its next restart.
 - [ ] Show armed or audit mode in the review dialog header, not only in
       `status` JSON.
@@ -414,7 +414,7 @@ Ideas worth taking:
 
 - [ ] **Separate daily and admin accounts.** Today the installer creates one
       account that is in `wheel` and does everything. Malware running as that
-      user can wait for a sudo or `rebuild` password and reuse it. Option at
+      user can wait for a sudo or `gjallarctl rebuild` password and reuse it. Option at
       install time: a daily account without admin rights, and a second admin
       account that only `gjallarctl` operations and polkit ask for. The daily
       user then types the admin password, not their own, so a keylogger in the
@@ -461,7 +461,7 @@ Plan agreed 2026-10-10. Channels decided 2026-10-20 (Q16): `main` became
       to `stable` applies at once). New installs and older configurations
       get `stable`. The installer clones the installed commit, which must be
       on one of the three branches, onto a local branch that tracks the
-      chosen channel. `rebuild --update` fetches origin and only
+      chosen channel. `gjallarctl rebuild --update` fetches origin and only
       fast-forwards to the channel. A checkout ahead of its channel stays
       where it is until the channel catches up, so a move to an older
       channel never downgrades. A checkout on the old `main` branch or on
@@ -471,7 +471,7 @@ Plan agreed 2026-10-10. Channels decided 2026-10-20 (Q16): `main` became
       fast-forward. A bar notice when the channel is ahead. JODS sets the
       channel on managed devices.
 - [ ] **ODDC stays separate.** A release carries whatever ODDC commit its
-      `flake.lock` pins; the next item keeps that pin current. `rebuild --hardware-update --channel stable|staging`
+      `flake.lock` pins; the next item keeps that pin current. `gjallarctl rebuild --hardware-update --channel stable|staging`
       keeps working as it does today and is not tied to the GjallarOS
       channel.
 - [ ] **ODDC pin follows ODDC stable** (Jade, ODDC items 83, 100). Security
@@ -513,7 +513,7 @@ Plan agreed 2026-10-10. Channels decided 2026-10-20 (Q16): `main` became
          commit, because a key the workflow holds must never be able to
          update machines.
       7. **Reaching machines.** `dev` gets it with the next
-         `rebuild --update`. For `staging` and `stable`, a bump whose
+         `gjallarctl rebuild --update`. For `staging` and `stable`, a bump whose
          `oddc changes` classes are only data, evidence or docs may get its
          own tag on top of the current one without the soak, because flags
          only lower trust. A bump that changes ODDC's nix or Go code waits
@@ -524,7 +524,7 @@ Plan agreed 2026-10-10. Channels decided 2026-10-20 (Q16): `main` became
       whether the data-only fast lane to `stable` is wanted.
 - [ ] **Verifying updates.** Goes through the research flow again before
       any code. Waits for the release key talk (Jade, Q37 and Q76): until
-      then `rebuild --update` trusts git over HTTPS alone, as the 2026-10-27
+      then `gjallarctl rebuild --update` trusts git over HTTPS alone, as the 2026-10-27
       pin audit found. Ideas so far, from the sources below:
       - The trust root comes with the install, not from the server: the
         first commit the rule applies to and the key that signed it, like a
@@ -542,7 +542,7 @@ Plan agreed 2026-10-10. Channels decided 2026-10-20 (Q16): `main` became
         expire after a year (Qubes), and two signatures per release tag
         (TUF thresholds).
       - A mirror or a stale fork can serve an old `stable` forever (TUF
-        "indefinite freeze"). The release tag carries its date; `rebuild`
+        "indefinite freeze"). The release tag carries its date; `gjallarctl rebuild`
         warns when the newest tag on the channel is very old.
       - Check signatures locally. GitHub's "Verified" badge is not trusted
         (Qubes guide).
@@ -559,7 +559,7 @@ Plan agreed 2026-10-10. Channels decided 2026-10-20 (Q16): `main` became
       so slow devices compile them for a long time. Built: GitHub runners
       build the release tags and add them, signed, to the `nix-cache`
       release (README "Release cache"); those files are the only binaries
-      in a release. The installer and `rebuild` add it as a substituter.
+      in a release. The installer and `gjallarctl rebuild` add it as a substituter.
       Devices still evaluate the same source; the cache only skips building
       outputs with a matching hash, and `nix build --rebuild` can check it.
       Research flow first, because the cache signing key becomes a key every
@@ -599,7 +599,7 @@ Wiki 752 "Answered 2026-11-01" has the answers word for word.
       without a downgrade of the running system (it waits for `stable` to
       catch up). Root on the device stays out of the threat model
       (loophole 15). Standalone devices without Genbu keep working.
-- [ ] **Branches** (Q158). `rebuild --update BRANCH` takes a channel or a
+- [ ] **Branches** (Q158). `gjallarctl rebuild --update BRANCH` takes a channel or a
       feature branch, the latter with a warning. It is one shot:
       `releaseChannel` stays and the next plain update goes back to it.
       `--back` is the only way to a deliberate downgrade.
@@ -677,17 +677,20 @@ Wiki 752 "Answered 2026-11-01" has the answers word for word.
 
 #### Old names (Q166)
 
-- [ ] **One legacy folder.** `system/tools/legacy/` holds one table for
-      every rename: commands, settings keys, config fields and paths. Each
-      row has the old name, the new name, the version it was removed in,
-      the version it can be deleted in and the Plane item.
-- [ ] Old commands are not run. The zsh `command_not_found_handler` prints
-      the new name and stops.
-- [ ] Old settings keys and config fields are translated once, with a
-      notice.
-- [ ] A flake check fails when an old name is still a real command, is
-      used outside the legacy folder, or has a row past its delete version.
-- [ ] The rule goes into README, the job rules (wiki 691) and memory.
+- [x] **One legacy folder.** `system/tools/legacy/renames.json` holds one
+      table for every rename: commands, settings keys, config fields,
+      labels, units and paths. Each row has the old name, the new name,
+      where it was removed, the date after which it can be deleted
+      (`deleteAfter`) and the Plane or JODS item (281).
+- [x] Old commands are not run. The zsh `command_not_found_handler` (and
+      the bash `command_not_found_handle`) prints the new name and stops.
+- [x] Old settings keys and config fields: the JODS-565 keys are not read
+      (Q195); generated state drops them once. A later rename that needs a
+      translation adds it next to its row, after asking Jade.
+- [x] The flake check `legacy-names` fails when an old name is used outside
+      the legacy folder or a row is past its `deleteAfter` date. system-path
+      fails to build when an old command is a real command again.
+- [x] The rule goes into README, the job rules (wiki 691) and memory.
 
 #### Update sources
 
@@ -740,6 +743,17 @@ setup existed) can only get it by running the whole installer again.
       command call the same code for steps 2, 3 and 5; nothing is copied.
       zsh completion like every other command. gjallarctl asks for sudo
       itself.
+- [x] **Shim on maker keys (Plane 293 step 4, Jade Q189).** `setup`
+      defaults to shim when the firmware keeps its maker's keys: db holds
+      the CA that signed the pinned shim, and dbx and shim's SBAT level do
+      not revoke its chain, its distro key, its files or our key. Our db
+      certificate goes into MOK through `mokutil --import` and MokManager,
+      and the firmware keys stay as they are. The ownership record carries
+      stage `pending-mok` until the first Secure Boot start through shim,
+      which `secure-boot-verification` records as `enrolled`. Own keys:
+      `--own-keys`, Setup Mode, or db/dbx ruling shim out. Neither flow
+      continues a switch the other one started. Firmware variable writes
+      check free variable storage first.
 - [x] **Restore dbx before enrolling.** HP's "Clear Secure Boot Keys" also
       empties dbx, the list of revoked boot files. Without it, Secure Boot
       starts boot loaders that are known to be exploitable. Rule: in Setup
@@ -926,7 +940,7 @@ The desktop user owns that checkout, including `generated/`,
 system. `DiscoverRepository` also asks `GJALLAROS_REPO` and a state file in
 the user's home before `/etc/gjallar/repository`. So anything running as
 the user decides what root builds the next time someone types the password
-for `rebuild`. On a managed device, where the user has no root, that is a
+for `gjallarctl rebuild`. On a managed device, where the user has no root, that is a
 way to root.
 
 ### How others handle it
@@ -998,7 +1012,7 @@ way to root.
       owned by root and not writable by group or others, no link leaves the
       checkout, and an empty or missing checkout is named as such.
 - [x] **Checkpoint 2: privileged rebuild ignores user input.** On a system
-      checkout the user's `rebuild` only checks its options, authenticates
+      checkout the user's `gjallarctl rebuild` only checks its options, authenticates
       and starts `/run/current-system/sw/bin/gjallar-system-rebuild` with a
       fixed argument list (`sudo -n`, or `su -l` on managed devices). That
       script starts from `env -i`, runs the installed `gjallarctl system
@@ -1788,7 +1802,7 @@ store anyway.
    - lists the nested subvolumes, because a snapshot never holds them and
      they stay with the kept copy;
    - for `@config`, says that the settings are back but the system built
-     from them is not, so a `rebuild` follows.
+     from them is not, so a `gjallarctl rebuild` follows.
    btrbk keeps finding the older snapshots after a swap (it follows the
    whole parent chain), so they still age out normally.
 5. Existing installs keep their layout and get no snapshots until they

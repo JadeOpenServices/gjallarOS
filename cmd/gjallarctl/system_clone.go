@@ -153,7 +153,7 @@ func systemClone(args []string, stdout, stderr io.Writer) int {
 	if built.ODDC != "" && built.ODDC != built.ODDCPinned {
 		fmt.Fprintf(stdout, "The running system uses oddc %s given with --override-input; the checkout pins %s.\n",
 			shortRevision(built.ODDC), shortRevision(built.ODDCPinned))
-		fmt.Fprintf(stdout, "Pass rebuild --override-input oddc github:JadeOpenServices/oddc/%s to keep it.\n", built.ODDC)
+		fmt.Fprintf(stdout, "Run gjallarctl rebuild --override-input oddc github:JadeOpenServices/oddc/%s to keep it.\n", built.ODDC)
 	}
 	// /etc/gjallar/repository names from until this rebuild, so a plain
 	// rebuild would still build from.

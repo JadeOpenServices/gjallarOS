@@ -178,6 +178,17 @@ func runInstaller(args []string, stdout, stderr io.Writer) int {
 	if args[0] == "secure-boot-enroll" {
 		return runSecureBootEnroll(args[1:], stdout, stderr)
 	}
+	if args[0] == "secure-boot-record-shim" {
+		if len(args) != 1 {
+			fmt.Fprintln(stderr, "Usage: gjallarctl installer secure-boot-record-shim")
+			return 2
+		}
+		if err := secureboot.RecordShimEnrollment(context.Background(), stdout); err != nil {
+			fmt.Fprintf(stderr, "ERROR: record Secure Boot through shim: %v\n", err)
+			return 1
+		}
+		return 0
+	}
 	if args[0] == "secure-boot-verify-ownership" {
 		return runSecureBootVerifyOwnership(args[1:], stdout, stderr)
 	}
@@ -663,6 +674,10 @@ func runSecureBootVerifyOwnership(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
+	if viaShim {
+		fmt.Fprintln(stdout, "PASS: shim trusts the GjallarOS key and the firmware starts shim.")
+		return 0
+	}
 	fmt.Fprintln(
 		stdout,
 		"PASS: active GjallarOS PK/KEK/db ownership verified.",
@@ -1857,7 +1872,7 @@ func printUsage(out io.Writer) {
 	fmt.Fprintln(out, "       gjallarctl settings {list|get|set|pending|apply|cancel|export|import|pair}")
 	fmt.Fprintln(out, "       gjallarctl snapshots {list|restore PATH}")
 	fmt.Fprintln(out, "       gjallarctl wine {list|set|add|install|program|run|remove|reset|repair|undo|import|menu} (gjallarctl wine for more)")
-	fmt.Fprintln(out, "       gjallarctl secure-boot {status|setup|update-dbx} [--repo PATH]")
+	fmt.Fprintln(out, "       gjallarctl secure-boot {status|setup|update-dbx} [--repo PATH] [--own-keys]")
 	fmt.Fprintln(out, "       gjallarctl security {notice|oddc-notice|status [--json]|scan PATH [--json]|fix ID|switch ID on|off|apply ID|cancel ID}")
 	fmt.Fprintln(out, "       gjallarctl hyprland-render-gpu")
 	fmt.Fprintln(out, "       gjallarctl media notice")
@@ -2021,7 +2036,7 @@ func rebuildCheckout(repo string, opts rebuildOptions, system bool, stdout, stde
 			return code
 		}
 		if switchNow == "0" {
-			fmt.Fprintln(stdout, "[GjallarOS] oddc pin updated, not switched (--switch 0). Apply with: rebuild")
+			fmt.Fprintln(stdout, "[GjallarOS] oddc pin updated, not switched (--switch 0). Apply with: gjallarctl rebuild")
 			return 0
 		}
 	}
@@ -2573,7 +2588,7 @@ func pullCheckout(repo string, stdout, stderr io.Writer) int {
 }
 
 func printRebuildHelp(out io.Writer) {
-	fmt.Fprint(out, `Usage: rebuild [OPTIONS] [NIXOS-REBUILD-ARGS...]
+	fmt.Fprint(out, `Usage: gjallarctl rebuild [OPTIONS] [NIXOS-REBUILD-ARGS...]
 
 Apply the GjallarOS configuration in the system checkout.
 
@@ -2596,7 +2611,8 @@ Apply the GjallarOS configuration in the system checkout.
 Arguments after -- go to nixos-rebuild. --override-input oddc must name a
 commit (github:JadeOpenServices/oddc/<commit>); the ODDC answer for this
 machine is fetched at that commit too. Such a commit is not a release, so
-a notice comes at every login until a plain rebuild returns to the pin.
+a notice comes at every login until a plain gjallarctl rebuild returns to
+the pin.
 
 When /etc/gjallar/system is the system checkout, root builds it as it is
 on the official origin: --repo, --host, --update-inputs and other
@@ -2812,7 +2828,7 @@ func runHelpme(args []string, stdout, stderr io.Writer) int {
 	if len(args) > 1 || len(args) == 1 && args[0] != "--text" {
 		return 2
 	}
-	text := "GjallarOS tools\n\n  rebuild            Apply the current NixOS configuration.\n  rebuild --update   Pull the system checkout and rebuild.\n  cleanup            Remove old generations and collect garbage.\n  thermal-status     Show temperatures and power state.\n  thermal-test       Pause/resume processes for troubleshooting.\n  check-installer    Check installer configuration.\n  gjallar-preflight  Run fast repository wiring checks.\n"
+	text := "GjallarOS tools\n\n  gjallarctl rebuild            Apply the current NixOS configuration.\n  gjallarctl rebuild --update   Pull the system checkout and rebuild.\n  cleanup                       Remove old generations and collect garbage.\n  thermal-status                Show temperatures and power state.\n  thermal-test                  Pause/resume processes for troubleshooting.\n  check-installer               Check installer configuration.\n  gjallar-preflight             Run fast repository wiring checks.\n"
 	if len(args) == 1 || os.Getenv("DISPLAY")+os.Getenv("WAYLAND_DISPLAY") == "" {
 		fmt.Fprint(stdout, text)
 		return 0
@@ -2824,8 +2840,8 @@ func runHelpme(args []string, stdout, stderr io.Writer) int {
 	return runCommand(context.Background(), stdout, stderr, "yad",
 		"--list", "--title=GjallarOS tools", "--width=900", "--height=520", "--center", "--button=Close:0",
 		"--column=Command", "--column=Description",
-		"rebuild", "Apply the current NixOS configuration.",
-		"rebuild --update", "Pull the system checkout and rebuild.",
+		"gjallarctl rebuild", "Apply the current NixOS configuration.",
+		"gjallarctl rebuild --update", "Pull the system checkout and rebuild.",
 		"cleanup", "Remove old generations and collect garbage.",
 		"thermal-status", "Show temperatures and power state.",
 		"thermal-test", "Pause/resume processes for troubleshooting.",
@@ -2931,7 +2947,7 @@ func runRebuildQuiet(stdout, stderr io.Writer, host string, messages []string, s
 		fmt.Fprintf(stderr, "[rebuild] Detailed log retained: %s\n", log.Name())
 		if networkError != "" && !cancelled {
 			fmt.Fprintf(stderr, "[rebuild] No network: %s\n", networkError)
-			fmt.Fprintln(stderr, "[rebuild] Check the connection (Wi-Fi, DHCP lease, VPN, router) and run rebuild again.")
+			fmt.Fprintln(stderr, "[rebuild] Check the connection (Wi-Fi, DHCP lease, VPN, router) and run gjallarctl rebuild again.")
 		}
 	}
 	return status

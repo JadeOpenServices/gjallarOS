@@ -66,7 +66,7 @@ let
 
   checked =
     if present && local == null then
-      throw "GjallarOS: .gjallar-local is in the source, but gjallarctl did not stage it; build with rebuild"
+      throw "GjallarOS: .gjallar-local is in the source, but gjallarctl did not stage it; build with gjallarctl rebuild"
     else if !present && local != null then
       throw "GjallarOS: the build context names local changes, but .gjallar-local is missing"
     else if local != null && (local.hash or "") != hash then

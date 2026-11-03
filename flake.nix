@@ -208,6 +208,11 @@
 
         local-changes = import ./tests/nix/local-changes.nix { inherit pkgs; };
 
+        legacy-names = import ./tests/nix/legacy-names.nix {
+          inherit pkgs;
+          today = self.lastModifiedDate;
+        };
+
         nextcloud-client-patches = import ./tests/nix/nextcloud-client-patches.nix { inherit pkgs; };
 
         qt6ct-kde-style = import ./tests/nix/qt6ct-kde-style.nix { inherit pkgs; };

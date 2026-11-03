@@ -7,12 +7,22 @@ the right kind of file before it can land:
                signature; each one verified by sbverify
   vendor cert  the cert built into the shim has VENDOR_SHA256
   mmx64.efi    (and fbx64.efi) one signature, under that vendor cert
+  hashes       the Authenticode SHA-256 of each file is the digest its
+               signature carries
 
-Usage: check-shim.py WORKDIR SHIM MM FB VENDOR_SHA256 CA_SHA256...
+It then writes FACTS (JSON): the signer CAs; every cert in the shim's
+signature chains and the vendor cert, each by SHA-256 and by the SHA-256
+of its signed part (the two forms a dbx entry names a cert by); each file's
+Authenticode SHA-256 (the form a dbx entry names a file by) and the shim's
+SBAT lines. gjallarctl reads it to check the firmware's db and dbx before
+it picks the shim path.
+
+Usage: check-shim.py WORKDIR FACTS SHIM MM FB VENDOR_SHA256 CA_SHA256...
 """
 
 import base64
 import hashlib
+import json
 import os
 import re
 import struct
@@ -42,6 +52,55 @@ def pe_parts(data):
             name = data[at : data.index(b"\0", at)].decode()
         sections[name] = data[roff : roff + min(vsize, rsize)]
     return secdir, sections
+
+
+def authenticode(data):
+    """SHA-256 over the file minus the checksum, the security directory
+    entry and the signature table (Microsoft PE Authenticode, with the
+    sections laid out in file order, which the digest check below proves)."""
+    pe = struct.unpack_from("<I", data, 0x3C)[0]
+    checksum = pe + 24 + 64
+    secdir, _ = pe_parts(data)
+    off, size = struct.unpack_from("<II", data, secdir)
+    end = off if off else len(data)
+    h = hashlib.sha256()
+    h.update(data[:checksum])
+    h.update(data[checksum + 4 : secdir])
+    h.update(data[secdir + 8 : end])
+    h.update(data[off + size :] if off else b"")
+    return h.digest()
+
+
+def tbs_sha256(der):
+    """SHA-256 of a certificate's signed part, the form an X.509 SHA-256
+    dbx entry names."""
+    def header(at):
+        length = der[at + 1]
+        at += 2
+        if length & 0x80:
+            n = length & 0x7F
+            length = int.from_bytes(der[at : at + n], "big")
+            at += n
+        return at, length
+
+    if der[0] != 0x30:
+        raise SystemExit("cert is not a DER sequence")
+    inner, _ = header(0)
+    if der[inner] != 0x30:
+        raise SystemExit("cert has no signed part")
+    body, length = header(inner)
+    return hashlib.sha256(der[inner : body + length]).hexdigest()
+
+
+def pem_der(pem):
+    return base64.b64decode("".join(pem.strip().splitlines()[1:-1]))
+
+
+def signed_digest(blob, digest, label):
+    # The SpcIndirectDataContent in each signature holds the image digest
+    # as a plain OCTET STRING: 04 20 <32 bytes>.
+    if b"\x04\x20" + digest not in blob:
+        raise SystemExit(f"{label}: Authenticode hash differs from the signed digest")
 
 
 def signatures(data):
@@ -93,12 +152,15 @@ def verify(copy, ca_pem, work, label):
 
 
 def main():
-    work, shim, mm, fb, vendor_fp, *ca_fps = sys.argv[1:]
+    work, facts, shim, mm, fb, vendor_fp, *ca_fps = sys.argv[1:]
     data = open(shim, "rb").read()
+    hashes = {"shimx64.efi": authenticode(data)}
 
-    seen = set()
+    seen, chain_certs = set(), {}
     for copy, blob in signatures(data):
+        signed_digest(blob, hashes["shimx64.efi"], "shim")
         chain = certs(blob, work)
+        chain_certs.update(chain)
         cas = [fp for fp in ca_fps if fp in chain]
         if len(cas) != 1:
             raise SystemExit("shim: a signature not under exactly one expected CA")
@@ -119,11 +181,32 @@ def main():
         ["openssl", "x509", "-inform", "der"], input=vendor, check=True, capture_output=True,
     ).stdout.decode()
 
-    for path in (mm, fb):
-        sigs = signatures(open(path, "rb").read())
+    for path, name in ((mm, "mmx64.efi"), (fb, "fbx64.efi")):
+        raw = open(path, "rb").read()
+        sigs = signatures(raw)
         if len(sigs) != 1:
-            raise SystemExit(f"{os.path.basename(path)}: expected one signature")
-        verify(sigs[0][0], vendor_pem, work, os.path.basename(path))
+            raise SystemExit(f"{name}: expected one signature")
+        hashes[name] = authenticode(raw)
+        signed_digest(sigs[0][1], hashes[name], name)
+        verify(sigs[0][0], vendor_pem, work, name)
+
+    sbat = sections.get(".sbat")
+    if sbat is None:
+        raise SystemExit("shim: no SBAT section")
+    lines = [l for l in sbat.rstrip(b"\0").decode().splitlines() if l]
+
+    with open(facts, "w") as f:
+        json.dump({
+            "schema": 1,
+            "signerCAs": sorted(ca_fps),
+            "chainCerts": sorted(chain_certs),
+            "chainTBS": sorted({tbs_sha256(pem_der(p)) for p in chain_certs.values()}),
+            "vendorCA": vendor_fp,
+            "vendorCATBS": tbs_sha256(vendor),
+            "authenticode": {k: v.hex() for k, v in sorted(hashes.items())},
+            "sbat": lines,
+        }, f, indent=2, sort_keys=True)
+        f.write("\n")
 
 
 main()

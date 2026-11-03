@@ -217,6 +217,7 @@ in
     ./chromium.nix
     ./commands/default.nix
     ./fido2.nix
+    ./legacy
     ./network-diagnostics.nix
   ];
 

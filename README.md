@@ -75,7 +75,7 @@ Edit the copy, then run the installer. Secrets, LUKS passphrases, recovery
 settings, generated hardware data and backups are excluded from Git.
 
 > [!TIP]
-> After the install, apply every change with `rebuild`, not
+> After the install, apply every change with `gjallarctl rebuild`, not
 > `sudo nixos-rebuild switch --flake`. See
 > [Rebuilds and removable disks](#-rebuilds-and-removable-disks).
 
@@ -483,6 +483,24 @@ GjallarOS asks about the new USB device.
 
 <div align="right"><a href="#gjallaros">↑ back to top</a></div>
 
+### Old names
+
+Every rename lives in one table, `system/tools/legacy/renames.json`:
+commands, settings keys, config fields, partition labels, units and
+paths. A row holds the old name, the new name, where it was removed, the
+date after which it can go (`deleteAfter`) and the Plane or JODS item.
+
+- An old command is not run. The shell prints the new name and stops,
+  for example: GjallarOS: rebuild was removed; use gjallarctl rebuild
+- The flake check `legacy-names` fails while an old name is still used
+  outside `system/tools/legacy/`, and once a row is past its
+  `deleteAfter` date. Then the row and the last traces are removed.
+- The system does not build when an old command name is a real command
+  again.
+
+A rename adds its row in the same commit. Tests and captured device
+output may still name the old name.
+
 ## 🧬 Hardware catalog (ODDC)
 
 [ODDC](https://github.com/JadeOpenServices/oddc) is a separate project,
@@ -512,23 +530,23 @@ answer revisions before and after, the model, and whether the answer was
 fetched, kept or left unchanged. When the pinned commit differs from
 `generated/oddc/revision`, the rebuild fetches the same model again at the new
 commit and swaps it in only once complete. If that fetch fails, for example
-offline, the rebuild stops with the error and changes nothing. Without `--rebuild`, the next `rebuild` does the
+offline, the rebuild stops with the error and changes nothing. Without `--rebuild`, the next `gjallarctl rebuild` does the
 fetch. `gjallarctl oddc doctor` shows the ODDC revision the installed model
 came from.
 
-`rebuild --hardware-update [--channel stable|staging] [--switch 0|1]` does
+`gjallarctl rebuild --hardware-update [--channel stable|staging] [--switch 0|1]` does
 the same move as part of a rebuild: it runs `oddc update --flake <checkout>
 [--channel CHANNEL]` first and stops with `nothing rebuilt` if that fails.
 `--channel` moves the oddc input to the newest commit of that ODDC channel
 (`stable` when left out); no commit hash is needed. `--switch 1` (the default) rebuilds and switches right away;
-`--switch 0` only moves the pin, and the next `rebuild` applies it. It needs an
-`oddc` that knows `update --flake`. Always apply with `rebuild`, not `sudo
+`--switch 0` only moves the pin, and the next `gjallarctl rebuild` applies it. It needs an
+`oddc` that knows `update --flake`. Always apply with `gjallarctl rebuild`, not `sudo
 nixos-rebuild switch --flake`: `generated/` is untracked, so a plain git flake
 cannot see it.
 
-A plain `rebuild` never moves the pin. It asks GitHub whether the branch the
+A plain `gjallarctl rebuild` never moves the pin. It asks GitHub whether the branch the
 oddc input follows has a newer commit and, if so, prints `ODDC update
-available: OLD -> NEW. Apply with: rebuild --hardware-update`. Offline or on
+available: OLD -> NEW. Apply with: gjallarctl rebuild --hardware-update`. Offline or on
 any error it says nothing. Managed endpoints skip the check: JODS moves their
 pin.
 
@@ -545,7 +563,7 @@ validates this checkout on the device. Validation evidence goes to ODDC through
 ## 💾 Rebuilds and removable disks
 
 Every GjallarOS system names its checkout in `/etc/gjallar/repository`
-(`dotfilesDir`), so `rebuild`, `gjallarctl oddc update` and the other commands
+(`dotfilesDir`), so `gjallarctl rebuild`, `gjallarctl oddc update` and the other commands
 find it from any directory. `--repo PATH`, `GJALLAROS_REPO` and the checkout you
 last rebuilt from take precedence. Direct host flake builds fail unless the
 source was staged by `gjallarctl`; installer and recovery deployment also use
@@ -556,7 +574,7 @@ source. Package builds and recovery ISO builds remain available directly.
 To bring an install up to date with upstream, run:
 
 ```bash
-rebuild --update
+gjallarctl rebuild --update
 ```
 
 It fast-forwards that checkout to its release channel and then rebuilds.
@@ -573,8 +591,8 @@ and rebuilds until you run `gjallarctl settings confirm-developer` once.
 Local commits or uncommitted edits stop the update, and nothing is rebuilt.
 A checkout that is ahead of its channel stays where it is until the channel
 catches up; it never goes back to an older commit.
-`rebuild --update-inputs` moves every flake input first (for development
-checkouts). `rebuild --help` lists every option.
+`gjallarctl rebuild --update-inputs` moves every flake input first (for development
+checkouts). `gjallarctl rebuild --help` lists every option.
 
 When `dotfilesDir` is `/etc/gjallar/system`, root owns the checkout and
 builds it only as it is on the official origin. `--repo`, `--host`,
@@ -606,10 +624,10 @@ sudo gjallar-system-rebuild
 `system clone` clones the official repository at the running commit and
 copies `generated/` and `user.config.json` from the old checkout as files.
 It never runs git in the old checkout. The rebuild switches
-`/etc/gjallar/repository` to the new checkout; plain `rebuild` uses it from
+`/etc/gjallar/repository` to the new checkout; plain `gjallarctl rebuild` uses it from
 then on. The old checkout stays where it is.
 
-When `/etc/gjallar/system` is missing or broken, `rebuild` says so and names
+When `/etc/gjallar/system` is missing or broken, `gjallarctl rebuild` says so and names
 the same `system clone` step.
 
 To try a `gjallarctl` change before rebuilding, run it from the checkout with
@@ -641,7 +659,7 @@ builds only the packages that changed since the tags before it.
 }
 ```
 
-Machines add it to `nix.conf`, and `rebuild` and the installer pass it on the
+Machines add it to `nix.conf`, and `gjallarctl rebuild` and the installer pass it on the
 command line too, so the first install uses it as well. Nix only accepts
 files signed with that key.
 
@@ -729,7 +747,7 @@ It asks you to type `ROLLBACK-HOME` (or `ROLLBACK-CONFIG` for a `config.`
 snapshot). The snapshot itself stays as it was; the current `/home` is kept
 as a read-only copy in the list under "replaced by a rollback". When `/home`
 is in use, the change takes effect at the next start. After a settings
-rollback, run `rebuild` once the system is up so the system matches the
+rollback, run `gjallarctl rebuild` once the system is up so the system matches the
 settings again. `sudo gjallar-recover snapshot-drop / NAME` deletes a kept
 copy once you no longer need it.
 
@@ -752,12 +770,32 @@ cannot manage the machine. A system installed without it gets it with:
 gjallarctl secure-boot setup
 ```
 
-It takes the installer's steps: it checks the firmware state, creates the keys
-and shows their recovery archive, turns on `secureBootEnable`, rebuilds and
-offers to restart into firmware setup. After the restart the boot services
-enroll the keys and verify them. Run the command again after a step was
-interrupted; it picks up where it stopped. `gjallarctl secure-boot status`
-shows the current state.
+On a machine that still has its maker's keys, `setup` goes through shim and
+leaves the firmware keys alone. The firmware starts shim, which is signed by
+Microsoft, and shim checks GjallarOS's own key, which you confirm once in
+MokManager. This works on any model whose firmware trusts the pinned shim,
+also without an ODDC entry. The command checks that first: db must hold the
+certificate that signed shim, and dbx and shim's SBAT level must not revoke
+it. Each run does one step and says which restart comes next:
+
+1. Create the key, turn on `secureBootEnable` and `secureBootShim`, rebuild,
+   restart.
+2. Queue the key for MokManager (`mokutil --import`, with a one-time
+   password), restart and confirm it on the blue MokManager screen.
+3. Turn on Secure Boot in the firmware setup. The first Secure Boot start
+   records the switch and verifies it.
+
+`gjallarctl secure-boot setup --own-keys` replaces the firmware keys with
+GjallarOS keys instead. It needs an ODDC Secure Boot setup for the model. The
+command also takes this path on its own when the firmware is already in Setup
+Mode, or when db or dbx would stop shim.
+
+The own-keys path takes the installer's steps: it checks the firmware state,
+creates the keys and shows their recovery archive, turns on
+`secureBootEnable`, rebuilds and offers to restart into firmware setup. After
+the restart the boot services enroll the keys and verify them. On both paths,
+run the command again after a step was interrupted; it picks up where it
+stopped. `gjallarctl secure-boot status` shows the current state.
 
 Some firmware empties its revocation list (dbx) along with its keys. When the
 ODDC setup wants dbx kept, the firmware's own default list is written back
@@ -807,9 +845,9 @@ and review devices first.
 With an encrypted root, the installer also asks "Block unknown USB devices from
 the first boot?" (default no). Say no on a desktop with a USB keyboard: it is
 not built in, so it stays blocked until approved. Enforcement can be turned on
-later with `"usbTrustEnforce": true` in `user.config.json` and a `rebuild`. To
+later with `"usbTrustEnforce": true` in `user.config.json` and a `gjallarctl rebuild`. To
 turn it off, run `sudo gjallarctl usb disarm` first and enter the disk
-encryption passphrase, then set it back to `false` and `rebuild`. Disarm alone
+encryption passphrase, then set it back to `false` and `gjallarctl rebuild`. Disarm alone
 is temporary: the broker re-arms from the config on its next restart, or right
 away with `sudo gjallarctl usb arm`. The other
 order is refused by `gjallarctl settings`; done by hand, USBGuard keeps

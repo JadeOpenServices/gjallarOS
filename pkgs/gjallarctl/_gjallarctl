@@ -1,4 +1,4 @@
-#compdef gjallarctl rebuild helpme cleanup cleanup-old-generations thermal-status thermal-test check-installer gjallar-preflight gjallar-system-rebuild
+#compdef gjallarctl helpme cleanup cleanup-old-generations thermal-status thermal-test check-installer gjallar-preflight gjallar-system-rebuild
 
 # Hand-written: gjallarctl parses its own arguments, so nothing can be
 # generated. Keep in step with printUsage in cmd/gjallarctl/main.go. The
@@ -431,7 +431,6 @@ _gjallarctl_oddc() {
 
 _gjallarctl() {
   case $service in
-    rebuild) _gjallarctl_rebuild; return ;;
     gjallar-system-rebuild) _gjallarctl_system_rebuild; return ;;
     helpme) _arguments '--text[print instead of opening a window]'; return ;;
     cleanup) _arguments '(-k --keep)'{-k,--keep}'[generations to keep]:count:'; return ;;
@@ -497,7 +496,8 @@ _gjallarctl() {
         media) _arguments '1:media command:((notice\:"offer writing on disks from another system (session service)"))' ;;
         secure-boot)
           _arguments '1:secure-boot command:((status\:"show Secure Boot ownership" setup\:"set up Secure Boot on this installed system" update-dbx\:"install the newest dbx revocation list from LVFS"))' \
-            '--repo[GjallarOS checkout]:checkout:_files -/' ;;
+            '--repo[GjallarOS checkout]:checkout:_files -/' \
+            '--own-keys[setup: GjallarOS firmware keys instead of shim]' ;;
         fan) _arguments '1:fan command:(status list reconcile)' ;;
         cleanup) _arguments '(-k --keep)'{-k,--keep}'[generations to keep]:count:' ;;
         thermal-test) _arguments '1:mode:(off on status)' '2:process pattern:_process_names' ;;

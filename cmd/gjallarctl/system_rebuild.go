@@ -209,7 +209,7 @@ func runSystem(args []string, stdout, stderr io.Writer) int {
 		return runTimeWatch(args[1:], stderr)
 	}
 	if os.Geteuid() != 0 {
-		fmt.Fprintf(stderr, "ERROR: gjallarctl system %s runs as root; use rebuild\n", args[0])
+		fmt.Fprintf(stderr, "ERROR: gjallarctl system %s runs as root; use gjallarctl rebuild\n", args[0])
 		return 2
 	}
 	// time-check is the gjallar-time-check service, not a user command.

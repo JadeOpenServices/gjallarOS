@@ -18,7 +18,10 @@
 # Debian 13.7 archive index on 2026-11-02.
 #
 # check-shim.py runs at build time: a changed pin has to carry the same
-# signatures, or the build fails.
+# signatures, or the build fails. It also writes the "facts" output
+# (shim.json): signer CAs, Authenticode hashes and SBAT lines, which
+# gjallarctl compares with the firmware db/dbx before it picks the shim
+# path. That output holds no binaries, so any SB system can ship it.
 let
   ca2011 = "48e99b991f57fc52f76149599bff0a58c47154229b9f8d603ac40d3500248507";
   ca2023 = "f6124e34125bee3fe6d79a574eaa7b91c0e7bd9d929c1a321178efd611dad901";
@@ -43,6 +46,10 @@ let
 in
 stdenvNoCC.mkDerivation {
   pname = "gjallar-shim";
+  outputs = [
+    "out"
+    "facts"
+  ];
   version = "16.1-2-deb13u1";
 
   dontUnpack = true;
@@ -58,7 +65,7 @@ stdenvNoCC.mkDerivation {
     mkdir x work
     dpkg-deb --fsys-tarfile ${shimDeb} | tar -x -C x ./usr/lib/shim/shimx64.efi.signed
     dpkg-deb --fsys-tarfile ${helpersDeb} | tar -x -C x ./usr/lib/shim/mmx64.efi.signed ./usr/lib/shim/fbx64.efi.signed
-    python3 -I ${./check-shim.py} work \
+    python3 -I ${./check-shim.py} work shim.json \
       x/usr/lib/shim/shimx64.efi.signed \
       x/usr/lib/shim/mmx64.efi.signed \
       x/usr/lib/shim/fbx64.efi.signed \
@@ -71,6 +78,7 @@ stdenvNoCC.mkDerivation {
     install -Dm444 x/usr/lib/shim/shimx64.efi.signed $out/share/shim/shimx64.efi
     install -Dm444 x/usr/lib/shim/mmx64.efi.signed $out/share/shim/mmx64.efi
     install -Dm444 x/usr/lib/shim/fbx64.efi.signed $out/share/shim/fbx64.efi
+    install -Dm444 shim.json $facts/share/shim/shim.json
     runHook postInstall
   '';
 
