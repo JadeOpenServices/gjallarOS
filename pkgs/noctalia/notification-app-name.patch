@@ -1,0 +1,71 @@
+--- a/src/notification/notification_display_name.cpp
++++ b/src/notification/notification_display_name.cpp
+@@ -28,7 +28,7 @@
+     if (key.empty()) {
+       return std::nullopt;
+     }
+-    const auto entry = app_identity::findDesktopEntry(normalizeDesktopKey(key), desktopEntries());
++    const auto entry = app_identity::findDesktopEntryStrict(normalizeDesktopKey(key), desktopEntries());
+     if (!entry.has_value()) {
+       return std::nullopt;
+     }
+--- a/src/system/app_identity.cpp
++++ b/src/system/app_identity.cpp
+@@ -313,6 +313,17 @@
+     return std::nullopt;
+   }
+ 
++  std::optional<DesktopEntry>
++  findDesktopEntryStrict(std::string_view appKey, std::span<const DesktopEntry> allEntries) {
++    if (appKey.empty()) {
++      return std::nullopt;
++    }
++    if (auto matched = findBestRankedMatch(StringUtils::toLower(std::string(appKey)), allEntries)) {
++      return matched;
++    }
++    return findDesktopEntryByIdTail(appKey, allEntries);
++  }
++
+   DesktopEntry resolveRunningDesktopEntry(std::string_view runningAppId, std::span<const DesktopEntry> allEntries) {
+     return resolveRunningDesktopEntryWithStatus(runningAppId, allEntries).entry;
+   }
+--- a/src/system/app_identity.h
++++ b/src/system/app_identity.h
+@@ -30,6 +30,12 @@
+       std::span<const DesktopEntry> priorityEntries = {}
+   );
+ 
++  // Like findDesktopEntry, but without the identity-token guess: only an exact or normalized
++  // id, StartupWMClass or name, or a matching reverse-DNS tail. For names a sender picked, such
++  // as a notification's app name, where a guess would show another application's name.
++  [[nodiscard]] std::optional<DesktopEntry>
++  findDesktopEntryStrict(std::string_view appKey, std::span<const DesktopEntry> allEntries);
++
+   [[nodiscard]] DesktopEntry
+   resolveRunningDesktopEntry(std::string_view runningAppId, std::span<const DesktopEntry> allEntries);
+ 
+--- a/tests/app_identity_test.cpp
++++ b/tests/app_identity_test.cpp
+@@ -350,6 +350,22 @@
+   TEST_CHECK(resolvedSteamGame.id == "terraria");
+   TEST_CHECK(resolvedSteamGame.startupWmClass == "steam_app_105600");
+ 
++  // A notification's app name only names an entry it matches: "GjallarOS" shares a token with
++  // "gjallarOS-ai" but is not that application.
++  const auto namedEntries = std::array<DesktopEntry, 2>{
++      issueEntry("gjallarOS-ai", "gjallarOS AI", "gjallarOS-ai"),
++      issueEntry("org.mozilla.firefox", "Firefox", "firefox"),
++  };
++  TEST_CHECK(app_identity::findDesktopEntry("GjallarOS", namedEntries).has_value());
++  TEST_CHECK(!app_identity::findDesktopEntryStrict("GjallarOS", namedEntries).has_value());
++  TEST_CHECK(!app_identity::findDesktopEntryStrict("", namedEntries).has_value());
++  const auto byName = app_identity::findDesktopEntryStrict("Firefox", namedEntries);
++  TEST_CHECK(byName.has_value() && byName->id == "org.mozilla.firefox");
++  const auto byTail = app_identity::findDesktopEntryStrict("com.example.firefox", namedEntries);
++  TEST_CHECK(byTail.has_value() && byTail->id == "org.mozilla.firefox");
++  const auto byId = app_identity::findDesktopEntryStrict("gjallarOS-ai", namedEntries);
++  TEST_CHECK(byId.has_value() && byId->id == "gjallarOS-ai");
++
+   testAppImageOriginDetection();
+ 
+   return 0;

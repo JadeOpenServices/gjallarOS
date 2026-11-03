@@ -51,6 +51,12 @@ Client behaviour patches:
   "Classic sync" to set it apart from macOS File Provider. Linux has no File
   Provider, so the title sat above virtual-file folders and said the
   opposite of what they do. It now reads "Sync folders".
+- `nextcloud-quit-on-sigterm.patch`: `systemctl stop` and session logout
+  send SIGTERM. Upstream sets no handler, so the client died at once and
+  never stopped its folders; openvfs unmounted alone through the setuid
+  `fusermount3`, which user systemd cannot signal, and systemd killed
+  openvfs mid-unmount (Plane 184). SIGTERM now quits through the event loop
+  as the tray does, and the client exits once openvfs is gone.
 
 Hydration patches:
 
@@ -65,25 +71,28 @@ Hydration patches:
 - OpenVFS identifies the sync client from Unix socket peer credentials because
   Nextcloud does not include a PID in its VERSION response. Client threads must
   be able to write downloaded content without requesting hydration themselves.
-- OpenVFS registers requests before sending them, uses atomic request IDs,
-  waits for files already being hydrated, and releases waiters on errors,
-  cancellation, or a five-minute deadline.
-- The five-minute deadline counts from the last write into the file, not from
-  the request. The sync client writes the download through the mount, so a
-  large file on a slow link keeps its reader waiting while data arrives.
-  Upstream failed every open that took longer than five minutes, even with
-  the download still running.
+- OpenVFS registers requests before sending them, uses atomic request IDs
+  and ends a wait after `hydrationTimeoutSeconds` from its config file
+  (default 300); upstream does this since c20c0fe. Our patch also waits for
+  files already being hydrated and releases waiters on cancellation. A failed
+  download fails the open with EIO. Upstream returned ENOENT, so a program saw the file as gone and
+  could save a new file over the placeholder.
+- The deadline counts from the last write into the file, not from the
+  request. The sync client writes the download through the mount, so a large
+  file on a slow link keeps its reader waiting while data arrives. Upstream
+  fails every open that takes longer than the timeout, even with the download
+  still running.
 - OpenVFS ends a hydration wait when the FUSE session exits. libfuse joins
   every worker before it unmounts and a worker cannot be cancelled during a
-  request, so upstream ignored SIGTERM for up to five minutes. systemd then
+  request, so upstream ignored SIGTERM until the hydration timed out. systemd then
   killed openvfs together with its unmount helper and left a dead mount.
 - OpenVFS notices when the sync client closes its socket. Pending hydrations
   fail at once and new ones fail without waiting for the deadline. Upstream
   read EOF as "no data" and kept the closed socket's fd number for later
   writes.
 - OpenVFS unmounts when the sync client closes its socket, which it only does
-  when it exits, and does not mount when it cannot reach the client. Upstream
-  kept serving a mount after the client was killed; the restarted client's
+  when it exits. Upstream (like us) does not mount when it cannot reach the
+  client, but kept serving a mount after the client was killed; the restarted client's
   openvfs could not mount over it and the client aborted.
 - OpenVFS keeps FUSE workers free for the sync client. libfuse serves the
   mount from one pool of 10 workers by default, and a hydration wait holds
@@ -98,6 +107,10 @@ Hydration patches:
   debug log (`-d`). Upstream printed every hydration, with the file path and
   the app that opened it, to the journal on every run. Errors are still
   logged.
+- OpenVFS counts opens refused for lack of a hydration slot and writes only
+  the count to the journal: the first refusal at once, later ones at most once
+  a minute, the rest at a clean exit. No path and no program name. Debug mode
+  copies these counts into the Nextcloud diagnostics log (Plane 258).
 - OpenVFS placeholders always report themselves in sync. Upstream marked every
   unchanged file for a metadata update on each sync run, but OpenVFS cannot
   record that it finished, so tens of thousands of no-op jobs repeated forever.
@@ -114,19 +127,35 @@ Hydration patches:
   upstream ignore list therefore also applies to wrapped previews. KIO file
   protocol workers are exempt from the generic suffix rule so intentional copies
   can hydrate; explicit full-path exclusions still take precedence.
+- Hydration checks the bytes it wrote against the server's size. Upstream read
+  the Content-Length header, which Qt drops when it unpacks a gzip reply over
+  HTTP/1.1, so every file the server compressed (JSON, text) failed after a
+  complete download. Over HTTP/2 Qt keeps the compressed length, so the
+  download no longer compares it for encoded replies either.
+- A failed hydration empties the file and restores the dehydrated placeholder
+  with the server's size and mtime, and a file still marked Hydrating counts as
+  virtual during discovery. Upstream left the partial content, the Hydrating
+  state and the download time as mtime, so the next sync uploaded it as a local
+  edit and the reader retried, in a loop (Plane 254).
 
 The integration fixture uses a fake sync socket and a fresh temporary FUSE
 mount, never the user's Nextcloud directory:
 
 ```sh
-python3 tests/openvfs-hydration.py /path/to/openvfs --timeout
+python3 tests/openvfs-hydration.py /path/to/openvfs/bin/openvfs --timeout
 ```
+
+Upstream's own tests (strtools_test, socketthreadtest) run in every openvfs
+build. Our patch changes socketthreadtest: upstream expects a VERSION message
+to set the client PID, but we take it from the socket peer, so the test checks
+that VERSION cannot replace it.
 
 It checks concurrent opens, in-progress hydration, wrapped preview exclusion,
 server errors, cancellation with zero blocked requests, SIGTERM and sync
 client exit during a hydration (both must unmount), no mount without a sync
 client, the actual deadline, a slow download that outlasts it, and a burst
-of 60 opens that leaves other processes and the client's own writes served.
+of 60 opens that leaves other processes and the client's own writes served,
+with every refused open counted and no path in the count lines.
 It does not replace an integration check against the rebuilt Nextcloud client.
 
 KIO 6.26 normally runs its file worker inside Dolphin. `dolphin.nix` uses

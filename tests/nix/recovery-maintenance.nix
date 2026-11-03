@@ -26,8 +26,8 @@ let
         sourceRevision = "test";
         settings = {
           recoveryEnable = true;
-          jodsPrebootLockEnable = false;
-          endpointManagedDevice = false;
+          prebootLock.enable = false;
+          management.enable = false;
           secureBootEnable = false;
           luksTpm2Enable = false;
         };

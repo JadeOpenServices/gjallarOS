@@ -60,6 +60,11 @@ assert !(nixpkgs.lib.hasInfix "--external-tokens-path" tpm2.script);
 # "pcrValues":[] bound the disk key to nothing).
 assert nixpkgs.lib.hasInfix "tpm2-check-pcrlock-policy /var/lib/systemd/pcrlock.json \\\n  0 4 7"
   tpm2.script;
+# A chip slot without a startup policy is replaced in the same
+# cryptenroll call that adds the bound one (loophole 40/41).
+assert nixpkgs.lib.hasInfix "tpm2-metadata-policy" tpm2.script;
+assert nixpkgs.lib.hasInfix "wipe=(--wipe-slot=tpm2)" tpm2.script;
+assert nixpkgs.lib.hasInfix "systemd-cryptenroll \"\${wipe[@]}\" --unlock-key-file" tpm2.script;
 # The TPM2 passphrase prompt needs Plymouth, which greetd quits (e2e-target,
 # 2026-09-29: prompt hidden behind the greeter, enrollment hung).
 assert builtins.elem "display-manager.service" tpm2.before;
@@ -84,7 +89,14 @@ assert
   evaluated.config.boot.initrd.luks.devices.cryptroot.crypttabExtraOpts == [
     "tpm2-device=auto"
     "tpm2-measure-pcr=yes"
+    "tpm2-measure-keyslot-nvpcr=yes"
   ];
+# The keyslot record tells the login card whether the chip or a typed key
+# opened the disk. The NixOS initrd ships no NvPCR definitions; without
+# this file systemd-cryptsetup logs nothing (Plane 298).
+assert
+  evaluated.config.boot.initrd.systemd.contents."/etc/nvpcr/cryptsetup.nvpcr".source
+  == "${evaluated.config.boot.initrd.systemd.package}/lib/nvpcr/cryptsetup.nvpcr";
 # A PCRLock policy that no longer matches the TPM had no way back to TPM2
 # unlock (e2e-target, 2026-10-05).
 assert builtins.any (

@@ -48,6 +48,29 @@ func TestRunningScale(t *testing.T) {
 	}
 }
 
+func TestLuaString(t *testing.T) {
+	cases := map[string]string{
+		"eDP-1":       `"eDP-1"`,
+		`a"b\c`:       `"a\"b\\c"`,
+		"line\nbreak": `"line\010break"`,
+	}
+	for in, want := range cases {
+		if got := luaString(in); got != want {
+			t.Errorf("luaString(%q) = %s, want %s", in, got, want)
+		}
+	}
+}
+
+func TestRotationLua(t *testing.T) {
+	// SYNTHETIC monitor: Framework 13 panel size, turned to the right.
+	monitor := hyprMonitor{Name: "eDP-1", Width: 2256, Height: 1504, RefreshRate: 60, Scale: 1}
+	want := `hl.monitor({ output = "eDP-1", mode = "2256x1504@60.000", position = "0x0", scale = "1", transform = 3 }) ` +
+		`hl.config({ input = { touchdevice = { output = "eDP-1", transform = 3 }, tablet = { output = "eDP-1", transform = 3 } } })`
+	if got := rotationLua(monitor, 3); got != want {
+		t.Errorf("rotationLua:\n got %s\nwant %s", got, want)
+	}
+}
+
 func TestInternalDRMConnectorFindsConnectedEDP(t *testing.T) {
 	root := t.TempDir()
 

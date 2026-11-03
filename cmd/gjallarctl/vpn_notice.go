@@ -116,7 +116,11 @@ func showVPNNotice(ctx context.Context, v nettrust.Verdict) (string, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	key := vpnNoticeKey(v)
+	// The watch ends before the notice returns, so nothing reads the
+	// verdict after.
+	watched := make(chan struct{})
 	go func() {
+		defer close(watched)
 		tick := time.NewTicker(vpnNoticePoll)
 		defer tick.Stop()
 		for {
@@ -144,7 +148,10 @@ func showVPNNotice(ctx context.Context, v nettrust.Verdict) (string, error) {
 		Body:    body,
 		Actions: actions,
 	})
-	if err != nil && errors.Is(ctx.Err(), context.Canceled) {
+	stale := err != nil && errors.Is(ctx.Err(), context.Canceled)
+	cancel()
+	<-watched
+	if stale {
 		// Closed because it no longer applies; the caller looks again.
 		return "", nil
 	}

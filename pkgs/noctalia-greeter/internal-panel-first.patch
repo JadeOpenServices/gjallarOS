@@ -1,0 +1,68 @@
+diff --git a/src/compositor/noctalia_compositor.c b/src/compositor/noctalia_compositor.c
+index a6c558b..4fdd1d4 100644
+--- a/src/compositor/noctalia_compositor.c
++++ b/src/compositor/noctalia_compositor.c
+@@ -4,6 +4,7 @@
+ 
+ #include <ctype.h>
+ #include <fcntl.h>
++#include <glob.h>
+ #include <libinput.h>
+ #include <limits.h>
+ #include <signal.h>
+@@ -748,9 +749,47 @@ static bool any_output_active(const struct greeter_server* server) {
+   return false;
+ }
+ 
++static bool output_is_internal_panel(const char* name) {
++  return strncmp(name, "eDP-", 4) == 0 || strncmp(name, "LVDS-", 5) == 0 || strncmp(name, "DSI-", 4) == 0;
++}
++
++static bool lid_is_closed(void) {
++  glob_t states;
++  if (glob("/proc/acpi/button/lid/*/state", 0, NULL, &states) != 0) {
++    return false;
++  }
++  bool closed = false;
++  for (size_t i = 0; i < states.gl_pathc && !closed; ++i) {
++    FILE* file = fopen(states.gl_pathv[i], "re");
++    if (file == NULL) {
++      continue;
++    }
++    char line[64];
++    if (fgets(line, sizeof(line), file) != NULL && strstr(line, "closed") != NULL) {
++      closed = true;
++    }
++    fclose(file);
++  }
++  globfree(&states);
++  return closed;
++}
++
++static bool g_internal_panel_first;
++
++// While the lid is open the laptop panel comes first: it sits at (0,0), gets
++// the first greeter view and the cursor, and the other screens go to its
++// right. A TV sorting first by name used to take all three, so the touchpad
++// moved a pointer on a screen the user was not looking at.
+ static int compare_greeter_output_ptr(const void* a, const void* b) {
+   const struct greeter_output* const* oa = a;
+   const struct greeter_output* const* ob = b;
++  if (g_internal_panel_first) {
++    const bool pa = output_is_internal_panel((*oa)->wlr_output->name);
++    const bool pb = output_is_internal_panel((*ob)->wlr_output->name);
++    if (pa != pb) {
++      return pa ? -1 : 1;
++    }
++  }
+   return strcmp((*oa)->wlr_output->name, (*ob)->wlr_output->name);
+ }
+ 
+@@ -797,6 +836,7 @@ static size_t collect_outputs(struct greeter_server* server, struct greeter_outp
+       qsort(out, count, sizeof(out[0]), compare_greeter_output_by_config);
+       g_layout_sort_server = NULL;
+     } else {
++      g_internal_panel_first = !lid_is_closed();
+       qsort(out, count, sizeof(out[0]), compare_greeter_output_ptr);
+     }
+   }

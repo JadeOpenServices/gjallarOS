@@ -236,16 +236,17 @@
     "jods": {
       "flake": false,
       "locked": {
-        "lastModified": 1788770406,
-        "narHash": "sha256-W9uHt+t55RGOM5b3/++S4/bhskgIoxf0elxl1JoyAc4=",
-        "ref": "refs/heads/main",
-        "rev": "762d016f36f60225e592c0961a38a4d8352997f3",
+        "lastModified": 1793657297,
+        "narHash": "sha256-buGBWi7FvDh20nm7XD7ctqYd223OVOO59woU01waB0U=",
+        "ref": "refs/heads/feature/jods-278-edit-locks",
+        "rev": "cb6e86d4a1c1dd6bca1656fbe0c4a899b1b81c5f",
         "shallow": true,
         "type": "git",
         "url": "https://github.com/JadeOpenServices/jods.git"
       },
       "original": {
-        "rev": "762d016f36f60225e592c0961a38a4d8352997f3",
+        "ref": "feature/jods-278-edit-locks",
+        "rev": "cb6e86d4a1c1dd6bca1656fbe0c4a899b1b81c5f",
         "shallow": true,
         "type": "git",
         "url": "https://github.com/JadeOpenServices/jods.git"
@@ -298,11 +299,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1788271054,
-        "narHash": "sha256-h3178dyXuSnLclkH7biAfVCIhsi+2Y1s3Cnxj2wZYJ0=",
+        "lastModified": 1793024674,
+        "narHash": "sha256-XuCihFGu51wBr4GaO+RgNeP7nJ1iOZC/uss5FVtqOLI=",
         "owner": "noctalia-dev",
         "repo": "noctalia",
-        "rev": "dd80daf4428d7b8be4e0040b6e502c0014f87587",
+        "rev": "125a30d4f13e86200e704a013d17ac0ed88a8044",
         "type": "github"
       },
       "original": {

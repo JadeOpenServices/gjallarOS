@@ -12,7 +12,7 @@ pkgs.stdenvNoCC.mkDerivation {
   # (2026-09-30); discovery must use the effective pin like xattr/suffix VFS.
   installPhase = ''
     f=src/libsync/vfs/openvfs/vfs_openvfs.cpp
-    grep -Fq 'if (pin && *pin == PinState::OnlineOnly) {' "$f"
+    grep -Fq 'if (pin && *pin == PinState::OnlineOnly && sinceLastOpen(' "$f"
     grep -Fq 'if (pin && *pin == PinState::AlwaysLocal) {' "$f"
     # New local files have no placeholder attributes (default "Hydrated");
     # they must never be classified for dehydration.
@@ -98,6 +98,34 @@ pkgs.stdenvNoCC.mkDerivation {
     # below it, as the other backends do.
     grep -A24 'bool OpenVFS::setPinState' "$f" | grep -Fq 'resetPinsBelow(folderPath);'
     grep -A12 'void OpenVFS::resetPinsBelow' "$f" | grep -Fq 'params().journal->getFilesBelowPath(path,'
+    # Gzip replies failed hydration and the leftover file was uploaded as a
+    # local edit, over and over (Plane 254, 2026-10-27).
+    grep -A16 'if (errorMsg.isEmpty()) {' src/libsync/hydrationjob.cpp | grep -Fq 'const auto size = _device->pos();'
+    ! grep -Fq '_job->resumeStart() + _job->contentLength()' src/libsync/hydrationjob.cpp
+    grep -A64 'void GETFileJob::slotMetaDataChanged' src/libsync/propagatedownload.cpp \
+      | grep -Fq 'if (ok && !encoded && _expectedContentLength != -1'
+    grep -Fq 'restoreDehydrated(hydration->targetFileName(), hydration->record());' "$f"
+    grep -A3 'States::Hydrating) {' "$f" | grep -Fq 'stat->type = ItemTypeVirtualFile;'
+    # A click on a client notification did nothing (Plane 189). It carries
+    # a "default" action, and only our own ids open the tray window.
+    grep -Fq 'const QStringList actions = {u"default"_s, tr("Open")};' src/gui/systray.cpp
+    grep -A4 'void Systray::slotNotificationActionInvoked' src/gui/systray.cpp \
+      | grep -Fq '!_notificationIds.remove(id)'
+    # Freeing up emptied files a program still had open; it read zeros
+    # where its data was (Q79, Plane 254). An opened file stays on disk for
+    # 14 days, a free-up empties it at once, never while a program has it
+    # open; the last close after a free-up tells the client.
+    grep -Fq 'constexpr auto keptAfterOpen = std::chrono::days(14);' "$f"
+    grep -Fq 'sinceLastOpen(path.toStdString()) >= keptAfterOpen && !inUse(path.toStdString())' "$f"
+    grep -Fq 'virtual void freeUp([[maybe_unused]] const QString &folderPath) { }' src/common/vfs.h
+    grep -Fq 'data.folder->vfs().freeUp(data.folderRelativePath);' src/gui/socketapi/socketapi.cpp
+    grep -Fq 'void SocketApi::command_V2_FILE_CLOSED(' src/gui/socketapi/socketapi.cpp
+    grep -Fq 'folder->vfs().freeUp(path);' src/gui/accountsettings.cpp
+    # systemctl stop killed the client at once; openvfs unmounted alone, and
+    # systemd killed it mid-unmount (Plane 184, 2026-10-28). SIGTERM quits
+    # through the event loop, as the tray does.
+    grep -Fq 'sigaction(SIGTERM, &quitAction, nullptr);' src/gui/main.cpp
+    grep -F -A4 'QSocketNotifier::activated, &app, [quitSignal]' src/gui/main.cpp | grep -Fq 'QCoreApplication::quit();'
     touch $out
   '';
 }

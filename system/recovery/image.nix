@@ -68,9 +68,10 @@ let
       # Secure Boot like any other install. Generated state does not carry
       # this key, so a fixed false here meant never.
       secureBootPrompt = true;
+      secureBootShim = getSetting "secureBootShim" false;
 
-      endpointManagedDevice = false;
-      jodsPrebootLockEnable = false;
+      management.enable = false;
+      prebootLock.enable = false;
 
       autoReboot = false;
       runUpdateChecks = false;
@@ -169,8 +170,9 @@ in
   boot.initrd.systemd.enable = lib.mkForce false;
 
   # Stage 1 sets up both devices before it mounts anything:
-  # - partition UKI (gjallar.iso=): only a vfat JODSRECOV partition whose
-  #   ISO store matches gjallar.verity= is used; the store is read through
+  # - partition UKI (gjallar.iso=): only the UKI's own partition
+  #   (StubDevicePartUUID), a vfat GJALLAR-REC partition whose ISO store
+  #   matches gjallar.verity=, is used; the store is read through
   #   dm-verity, so a changed block fails to read instead of running.
   # - GRUB findiso= and USB/DVD boot (root=): no hash to check against, the
   #   store is used as is, like upstream.
@@ -191,6 +193,7 @@ in
   boot.initrd.availableKernelModules = [
     "dm_mod"
     "dm_verity"
+    "efivarfs"
   ];
   boot.initrd.postResumeCommands = ''
     gjallarIso=
@@ -258,26 +261,48 @@ in
         fail
       fi
       modprobe dm_verity
-      gjallarFound=
-      for delay in 0 5 10; do
-        sleep "$delay"
-        udevadm settle
-        for dev in $(blkid -t LABEL=JODSRECOV -o device); do
-          mount -t vfat -o ro,nodev,nosuid,noexec "$dev" /gjallar-src || continue
-          if [ -f "/gjallar-src$gjallarIso" ] \
-            && gjallarAttach "/gjallar-src$gjallarIso" "$gjallarVerity"; then
-            echo "recovery store verified on $dev"
-            gjallarFound=1
-            break 2
-          fi
-          echo "$dev: no recovery image matching this boot entry"
-          umount /gjallar-src
-        done
-      done
-      if [ -z "$gjallarFound" ]; then
-        echo "No recovery image matching this boot entry was found."
+      modprobe efivarfs
+      # The UKI's own partition, as systemd-stub reports it. Only that
+      # partition is mounted: a stick or a second disk with the same label
+      # is never read (Plane 306). efivars start with 4 attribute bytes; the
+      # value is UTF-16.
+      gjallarEfivars=/sys/firmware/efi/efivars
+      gjallarStubVar=$gjallarEfivars/StubDevicePartUUID-4a67b082-0a4c-41cf-b6c7-440b29bb8c4f
+      gjallarOwnEfivars=
+      if ! grep -q " $gjallarEfivars efivarfs " /proc/mounts; then
+        mount -t efivarfs -o ro,nodev,nosuid,noexec efivarfs "$gjallarEfivars" || fail
+        gjallarOwnEfivars=1
+      fi
+      gjallarPartUuid=
+      [ -r "$gjallarStubVar" ] \
+        && gjallarPartUuid=$(tail -c +5 "$gjallarStubVar" | tr -d '\000' | tr '[:upper:]' '[:lower:]')
+      [ -n "$gjallarOwnEfivars" ] && umount "$gjallarEfivars"
+      if ! echo "$gjallarPartUuid" \
+        | grep -Eqx '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'; then
+        echo "The boot stub did not report its partition (StubDevicePartUUID)."
         fail
       fi
+      # udevadm wait returns once udev has set up the link, or at the
+      # deadline; no polling.
+      gjallarDev=/dev/disk/by-partuuid/$gjallarPartUuid
+      if ! udevadm wait --timeout=90 "$gjallarDev"; then
+        echo "The recovery partition $gjallarPartUuid did not appear."
+        fail
+      fi
+      gjallarDev=$(readlink -f "$gjallarDev")
+      if [ "$(blkid -p -o value -s PART_ENTRY_NAME "$gjallarDev")" != GJALLAR-RECOVERY ] \
+        || [ "$(blkid -p -o value -s TYPE "$gjallarDev")" != vfat ] \
+        || [ "$(blkid -p -o value -s LABEL "$gjallarDev")" != GJALLAR-REC ]; then
+        echo "$gjallarDev is not the GjallarOS recovery partition."
+        fail
+      fi
+      mount -t vfat -o ro,nodev,nosuid,noexec "$gjallarDev" /gjallar-src || fail
+      if ! [ -f "/gjallar-src$gjallarIso" ] \
+        || ! gjallarAttach "/gjallar-src$gjallarIso" "$gjallarVerity"; then
+        echo "$gjallarDev: no recovery image matching this boot entry."
+        fail
+      fi
+      echo "recovery store verified on $gjallarDev"
     elif [ -n "$isoPath" ]; then
       for delay in 5 10; do
         for dev in $(blkid -o device); do

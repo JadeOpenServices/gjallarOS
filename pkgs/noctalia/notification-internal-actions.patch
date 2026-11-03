@@ -1,0 +1,156 @@
+diff --git a/src/app/application.h b/src/app/application.h
+index c658414..4cae6be 100644
+--- a/src/app/application.h
++++ b/src/app/application.h
+@@ -104,6 +104,8 @@
+ #include <functional>
+ #include <memory>
+ #include <optional>
++#include <string>
++#include <utility>
+ #include <vector>
+ 
+ namespace sdbus {
+@@ -302,12 +304,16 @@ private:
+   std::unique_ptr<PowerProfilesService> m_powerProfilesService;
+   std::unique_ptr<INetworkService> m_networkService;
+   std::unique_ptr<NetworkSecretAgent> m_networkSecretAgent;
++  // The Wi-Fi password card on screen (notification id, request it is for), 0 when none.
++  std::pair<std::uint32_t, std::uint64_t> m_networkPasswordCard;
+   ExternalIpService m_externalIpService{&m_httpClient, &m_configService};
+   std::unique_ptr<IwdSecretAgent> m_iwdSecretAgent;
+   // Declared before m_bluetoothService so it outlives the raw pointer in that service.
+   std::unique_ptr<UPowerService> m_upowerService;
+   std::unique_ptr<BluetoothService> m_bluetoothService;
+   std::unique_ptr<BluetoothAgent> m_bluetoothAgent;
++  // The Bluetooth pairing card on screen (notification id, device it is for), 0 when none.
++  std::pair<std::uint32_t, std::string> m_bluetoothPairingCard;
+   std::unique_ptr<ModemManagerService> m_modemManagerService;
+   Timer m_bluetoothResumeTimer;
+   std::unique_ptr<PolkitAgent> m_polkitAgent;
+diff --git a/src/app/application_services.cpp b/src/app/application_services.cpp
+index f9aef94..9a4857e 100644
+--- a/src/app/application_services.cpp
++++ b/src/app/application_services.cpp
+@@ -1379,8 +1379,7 @@ void Application::initSystemBusServices() {
+       // ends. The panel is not opened by itself, so the keyboard stays with
+       // the window being typed in.
+       m_networkSecretAgent->setRequestCallback([this, shouldRefreshControlCenter,
+-                                                shownRequest =
+-                                                    std::make_shared<std::pair<std::uint32_t, std::uint64_t>>()](
++                                                shownRequest = &m_networkPasswordCard](
+                                                    const NetworkSecretAgent::SecretRequest& request
+                                                ) {
+         if (shouldRefreshControlCenter()) {
+@@ -1405,9 +1404,17 @@ void Application::initSystemBusServices() {
+         }
+         const std::string ssid =
+             request.ssid.empty() ? i18n::tr("control-center.network.password-notify-unknown") : request.ssid;
+-        shownRequest->first = notifications->addInternal(
+-            "Network", i18n::tr("control-center.network.password-notify-title"),
+-            i18n::tr("control-center.network.password-notify-body", "ssid", ssid), Urgency::Normal, 0
++        // "default" is what a click on the card runs; it opens the Network tab.
++        shownRequest->first = notifications->addOrReplace(
++            NotificationRequest{
++                .appName = "Network",
++                .summary = i18n::tr("control-center.network.password-notify-title"),
++                .body = i18n::tr("control-center.network.password-notify-body", "ssid", ssid),
++                .urgency = Urgency::Normal,
++                .timeout = 0,
++                .origin = NotificationOrigin::Internal,
++                .actions = {"default", i18n::tr("control-center.network.password-notify-title")},
++            }
+         );
+       });
+     } catch (const std::exception& e) {
+@@ -1463,7 +1470,7 @@ void Application::initSystemBusServices() {
+         // device in range can ask to pair, and that must not take the
+         // keyboard from the window being typed in.
+         m_bluetoothAgent->setRequestCallback([this, shouldRefreshControlCenter,
+-                                              shownRequest = std::make_shared<std::pair<std::uint32_t, std::string>>()](
++                                              shownRequest = &m_bluetoothPairingCard](
+                                                  const BluetoothPairingRequest& request
+                                              ) {
+           if (shouldRefreshControlCenter()) {
+@@ -1498,9 +1505,17 @@ void Application::initSystemBusServices() {
+               }
+             }
+           }
+-          shownRequest->first = notifications->addInternal(
+-              "Bluetooth", i18n::tr("control-center.bluetooth.pairing-notify-title"),
+-              i18n::tr("control-center.bluetooth.pairing-notify-body", "device", device), Urgency::Normal, 0
++          // "default" is what a click on the card runs; it opens the Bluetooth tab.
++          shownRequest->first = notifications->addOrReplace(
++              NotificationRequest{
++                  .appName = "Bluetooth",
++                  .summary = i18n::tr("control-center.bluetooth.pairing-notify-title"),
++                  .body = i18n::tr("control-center.bluetooth.pairing-notify-body", "device", device),
++                  .urgency = Urgency::Normal,
++                  .timeout = 0,
++                  .origin = NotificationOrigin::Internal,
++                  .actions = {"default", i18n::tr("control-center.bluetooth.pairing-notify-title")},
++              }
+           );
+         });
+       } catch (const std::exception& e) {
+@@ -1785,6 +1800,25 @@ void Application::initSessionBusServices() {
+ 
+   // Load the persisted fired set before the first evaluation, or a restart would re-notify.
+   m_calendarReminderMonitor.initialize();
++  // The manager has one slot for clicks on the shell's own cards. The Wi-Fi password and Bluetooth
++  // pairing cards open their tab (only on a click, so the card never takes the keyboard); every
++  // other card goes to the calendar, which ignores ids it did not post.
++  m_notificationManager.setInternalActionCallback([this](
++                                                      std::uint32_t id, const std::string& actionKey,
++                                                      const std::string& activationToken, const std::string& /*sender*/
++                                                  ) {
++    if (actionKey == "default" && id != 0) {
++      if (id == m_networkPasswordCard.first) {
++        m_panelManager.openPanel("control-center", PanelOpenRequest{.context = "network"});
++        return;
++      }
++      if (id == m_bluetoothPairingCard.first) {
++        m_panelManager.openPanel("control-center", PanelOpenRequest{.context = "bluetooth"});
++        return;
++      }
++    }
++    m_calendarReminderMonitor.onNotificationAction(id, actionKey, activationToken);
++  });
+   (void)m_calendarService.addChangeCallback([this]() {
+     m_calendarReminderMonitor.onSnapshotChanged(m_calendarService.snapshot());
+   });
+diff --git a/src/calendar/calendar_reminder_monitor.cpp b/src/calendar/calendar_reminder_monitor.cpp
+index aca13b8..403bf1a 100644
+--- a/src/calendar/calendar_reminder_monitor.cpp
++++ b/src/calendar/calendar_reminder_monitor.cpp
+@@ -71,10 +71,6 @@ void CalendarReminderMonitor::initialize() {
+     return;
+   }
+   loadPersistedState();
+-  m_notifications.setInternalActionCallback([this](
+-                                                std::uint32_t id, const std::string& actionKey,
+-                                                const std::string& activationToken, const std::string& /*sender*/
+-                                            ) { onNotificationAction(id, actionKey, activationToken); });
+   m_initialized = true;
+ }
+ 
+diff --git a/src/calendar/calendar_reminder_monitor.h b/src/calendar/calendar_reminder_monitor.h
+index b101b0d..4125acb 100644
+--- a/src/calendar/calendar_reminder_monitor.h
++++ b/src/calendar/calendar_reminder_monitor.h
+@@ -45,12 +45,12 @@ public:
+ 
+   [[nodiscard]] int pollTimeoutMs() const;
+   void tick();
++  // Opens the meeting link of the notification the user clicked. The application's handler for
++  // NotificationManager::setInternalActionCallback passes every click on a shell card here.
++  void onNotificationAction(std::uint32_t id, const std::string& actionKey, const std::string& activationToken);
+ 
+ private:
+   void evaluate(std::chrono::system_clock::time_point now);
+-  // Opens the meeting link of the notification the user clicked. Registered with
+-  // NotificationManager::setInternalActionCallback.
+-  void onNotificationAction(std::uint32_t id, const std::string& actionKey, const std::string& activationToken);
+   void fireReminder(const calendar::DueReminder& due, std::chrono::system_clock::time_point now);
+   // Rewrites the bodies of reminders still counting down, dropping the ones that have settled on
+   // "starts now" or been dismissed. Returns the instant the next label changes, if any.

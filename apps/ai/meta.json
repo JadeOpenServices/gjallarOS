@@ -2,6 +2,7 @@
   "name": "Local AI",
   "description": "Ollama backend: local with hardware-aware model selection, or a central server.",
   "category": "development",
+  "package": "ollama",
   "default": false,
   "installer": "Enable AI tools?"
 }

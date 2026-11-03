@@ -84,6 +84,8 @@ func systemStatus(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stdout, "System copy (%s): built\n", localChangesPath)
 	case developerMode == "off":
 		fmt.Fprintf(stdout, "System copy (%s): %s, not built while developer mode is off\n", localChangesPath, settings.ShortHash(root.Hash()))
+	case developerMode == "unknown":
+		fmt.Fprintf(stdout, "System copy (%s): %s, not built; the next rebuild builds it only if developer mode is on\n", localChangesPath, settings.ShortHash(root.Hash()))
 	default:
 		fmt.Fprintf(stdout, "System copy (%s): %s, not built yet; the next rebuild builds it\n", localChangesPath, settings.ShortHash(root.Hash()))
 	}

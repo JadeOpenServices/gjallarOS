@@ -1,0 +1,32 @@
+# Plane 277: every download in the Wine fix table (internal/winefix/fixes.json)
+# must still match its pinned size and sha256. Publishers move or replace
+# files, so this also runs once a week. Files are hashed in memory, never
+# saved or run. No secrets.
+name: wine fix pins
+
+on:
+  push:
+    branches: [dev]
+    paths:
+      - internal/winefix/fixes.json
+      - tests/wine-fix-pins.py
+      - .github/workflows/wine-fix-pins.yml
+  schedule:
+    - cron: "17 4 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    if: github.repository == 'JadeOpenServices/gjallarOS'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: wine-fix-pins
+        run: python3 -I tests/wine-fix-pins.py internal/winefix/fixes.json

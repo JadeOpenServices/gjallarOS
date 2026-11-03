@@ -7,13 +7,13 @@
 }:
 
 let
-  managed = settings.endpointManagedDevice or false;
+  managed = settings.management.enable;
 
   gjallarctlPackage = pkgs.callPackage ../../pkgs/gjallarctl { };
   gjallarSudoAuth = "${gjallarctlPackage}/bin/gjallar-sudo-auth";
 
-  jodsEnrollmentAllowed =
-    settings.jodsFingerprintEnrollmentAllowed or false;
+  managedEnrollmentAllowed =
+    settings.management.fingerprintEnrollmentAllowed or false;
 
   # ODDC marks readers with no Linux driver (the ZBook x2's VFS495) as
   # support.linux.status = "unsupported". Treat those as no reader, so sudo and
@@ -56,14 +56,14 @@ lib.mkMerge [
   {
     assertions = [
       {
-        assertion = !jodsEnrollmentAllowed || managed;
+        assertion = !managedEnrollmentAllowed || managed;
         message =
-          "jodsFingerprintEnrollmentAllowed is valid only on a JODS-managed device.";
+          "management.fingerprintEnrollmentAllowed is valid only on a managed device.";
       }
       {
-        assertion = !jodsEnrollmentAllowed || fingerprintPresent;
+        assertion = !managedEnrollmentAllowed || fingerprintPresent;
         message =
-          "jodsFingerprintEnrollmentAllowed requires fingerprint hardware in the resolved ODDC device.";
+          "management.fingerprintEnrollmentAllowed requires fingerprint hardware in the resolved ODDC device.";
       }
     ];
 
@@ -124,8 +124,8 @@ lib.mkMerge [
         }
 
         if (${if managed then "true" else "false"}) {
-          // JODS owns enrollment policy. A local UI cannot grant itself access.
-          if (!${if jodsEnrollmentAllowed then "true" else "false"}) {
+          // The management server owns enrollment policy. A local UI cannot grant itself access.
+          if (!${if managedEnrollmentAllowed then "true" else "false"}) {
             return polkit.Result.NO;
           }
 

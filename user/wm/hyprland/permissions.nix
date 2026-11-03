@@ -12,18 +12,23 @@ let
   inPackage = pkg: "${lib.escapeRegex (toString pkg)}/.*";
   portal = osConfig.programs.hyprland.portalPackage or pkgs.xdg-desktop-portal-hyprland;
   pluginPath = plugin: "${plugin}/lib/lib${plugin.pname}.so";
+  hl = import ./lua.nix { inherit lib; };
+  allow = binary: type: {
+    inherit binary type;
+    mode = "allow";
+  };
 
   rules = [
-    "${inPackage portal}, screencopy, allow"
-    "${inPackage portal}, cursorpos, allow"
-    "${inPackage config.programs.hyprlock.package}, screencopy, allow"
+    (allow (inPackage portal) "screencopy")
+    (allow (inPackage portal) "cursorpos")
+    (allow (inPackage config.programs.hyprlock.package) "screencopy")
   ]
   ++ lib.optionals config.programs.noctalia.enable [
-    "${inPackage config.programs.noctalia.package}, screencopy, allow"
+    (allow (inPackage config.programs.noctalia.package) "screencopy")
   ]
-  ++ map (plugin: "${lib.escapeRegex (pluginPath plugin)}, plugin, allow") (
-    builtins.filter lib.isDerivation config.wayland.windowManager.hyprland.plugins
-  );
+  ++ map (
+    plugin: allow (lib.escapeRegex (pluginPath plugin)) "plugin"
+  ) config.gjallar.hyprlandPlugins;
 
   # Hyprland keeps the rules it started with until the next login, but reads
   # enforce_permissions again on every config reload. It records which rules
@@ -47,9 +52,16 @@ in
   # https://wiki.hypr.land/Configuring/Advanced-and-Cool/Permissions/
   # Rules load only at Hyprland start, so a change needs a new login.
   wayland.windowManager.hyprland.settings = {
-    ecosystem.enforce_permissions = true;
+    config.ecosystem.enforce_permissions = true;
     permission = rules;
-    exec-once = [ "${recordRules}" ];
+    on = [
+      {
+        _args = [
+          "hyprland.start"
+          (hl.inline "function() hl.exec_cmd(${hl.toLua "${recordRules}"}) end")
+        ];
+      }
+    ];
   };
 
   # After reloadSystemd: a Noctalia update restarts Noctalia, which is also the

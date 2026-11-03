@@ -43,6 +43,10 @@ type Controller struct {
 		AllowMedia(id, connection string) error
 		// MountedPorts lists USB devices, by port, with a mounted medium.
 		MountedPorts() map[string]bool
+		// Reclaim lists, by port, the media an earlier broker opened that
+		// are still mounted and unchanged. It is asked once, at the first
+		// Reconcile of an armed broker.
+		Reclaim() map[string]bool
 	}
 	mu               sync.Mutex
 	sessions         usbtrust.Sessions
@@ -55,9 +59,9 @@ type Controller struct {
 	// armed mirrors the last verified document; disarmed withdraws ArmOnStart
 	// until the daemon restarts.
 	armed, disarmed atomic.Bool
-	// kept holds the ports the arming in this process kept open; it stays
-	// nil when this process did not arm. ready is set once the first
-	// Reconcile has run, so the arming decision is known.
+	// kept holds the ports the arming in this process, or the reclaim at its
+	// start, kept open; it stays nil when neither ran. ready is set once the
+	// first Reconcile has run, so the decision is known.
 	kept  atomic.Pointer[map[string]bool]
 	ready atomic.Bool
 }
@@ -67,7 +71,8 @@ type Controller struct {
 func (c *Controller) Ready() bool { return c.ready.Load() }
 
 // KeptAtArming lists the USB ports whose mounted storage the arming in this
-// process kept open. It is nil after a boot or a broker restart.
+// process, or the reclaim after a broker restart, kept open. It is nil when
+// neither ran.
 func (c *Controller) KeptAtArming() map[string]bool {
 	if kept := c.kept.Load(); kept != nil {
 		return *kept
@@ -208,6 +213,7 @@ func (c *Controller) Policy(ctx context.Context) ([]usbtrust.Decision, uint64, e
 func (c *Controller) Reconcile(ctx context.Context) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	first := !c.ready.Load()
 	defer c.ready.Store(true)
 	if c.EnforcementEnabled() {
 		// USBGuard keeps its fallback across a broker restart and does not
@@ -220,6 +226,11 @@ func (c *Controller) Reconcile(ctx context.Context) error {
 	input, err := c.snapshot(ctx)
 	if err != nil {
 		return err
+	}
+	if first && c.armed.Load() && c.EnforcementEnabled() {
+		if err := c.reclaim(input); err != nil {
+			return fmt.Errorf("keep open USB media: %w", err)
+		}
 	}
 	if c.ArmOnStart && !c.disarmed.Load() && !c.armed.Load() && c.persistenceReady {
 		if err := c.arm(ctx, &input); err != nil {
@@ -461,6 +472,45 @@ func (c *Controller) keepMounted(input usbtrust.AuditInput) error {
 	return nil
 }
 
+// reclaim runs at the first Reconcile of a broker that starts armed, after a
+// restart of the broker alone. The sessions of the old process are gone, so
+// without it every allowed medium would be blocked under its mounted
+// filesystem. It keeps, for this connection only, the devices whose medium
+// the media gate still finds mounted and unchanged; the same rules as at
+// arming apply, so only mass-storage-only devices that would be offered
+// allow-once, or devices the owner already trusts, qualify. Anything else is
+// blocked and asked about again.
+func (c *Controller) reclaim(input usbtrust.AuditInput) error {
+	if c.Media == nil {
+		return nil
+	}
+	open := c.Media.Reclaim()
+	policy, err := c.sessions.Derive(input)
+	if err != nil {
+		return err
+	}
+	kept := map[string]bool{}
+	for _, decision := range policy {
+		port := decision.Identity.Port
+		if port == "" || !open[port] {
+			continue
+		}
+		switch {
+		case decision.Target == usbtrust.TargetAllow:
+		case decision.Target == usbtrust.TargetBlock && massStorageOnly(decision.Identity.Interfaces) &&
+			slices.Contains(decision.Actions, usbtrust.ActionAllowOnce):
+			if err := c.sessions.Choose(decision.RuntimeID, decision.Connection, usbtrust.TargetAllow); err != nil {
+				return err
+			}
+		default:
+			continue
+		}
+		kept[port] = true
+	}
+	c.kept.Store(&kept)
+	return nil
+}
+
 // massStorageOnly reports whether every interface is USB mass storage (08).
 func massStorageOnly(interfaces []string) bool {
 	if len(interfaces) == 0 {
@@ -515,6 +565,32 @@ func (c *Controller) disarm(ctx context.Context, key []byte) (broker.Response, e
 		}
 	}
 	return broker.Response{OK: true, Revision: doc.Revision, Message: "USB enforcement disarmed"}, nil
+}
+
+// rearm does now what the next broker start would do after a disarm, so
+// keeping blocking on needs no restart. It never arms against settings.
+func (c *Controller) rearm(ctx context.Context) (broker.Response, error) {
+	if !c.ArmOnStart {
+		return broker.Response{}, fmt.Errorf("USB blocking is off in settings")
+	}
+	if c.armed.Load() {
+		return broker.Response{OK: true, Message: "USB enforcement already armed", Enforcing: true}, nil
+	}
+	c.disarmed.Store(false)
+	if err := c.syncImplicit(ctx); err != nil {
+		return broker.Response{}, fmt.Errorf("USBGuard fallback: %w", err)
+	}
+	input, err := c.snapshot(ctx)
+	if err != nil {
+		return broker.Response{}, err
+	}
+	if err := c.arm(ctx, &input); err != nil {
+		return broker.Response{}, fmt.Errorf("arm USB enforcement: %w", err)
+	}
+	if err := c.apply(ctx, input); err != nil {
+		return broker.Response{}, err
+	}
+	return broker.Response{OK: true, Revision: input.Trusted.Revision, Message: "USB enforcement armed", Enforcing: true}, nil
 }
 
 func (c *Controller) next(trusted *usbtrust.Document) (usbtrust.Document, error) {
@@ -623,6 +699,9 @@ func (c *Controller) Mutate(ctx context.Context, request broker.Request) (broker
 	if request.Action == broker.ActionDisarm {
 		return c.disarm(ctx, []byte(request.RecoveryKey))
 	}
+	if request.Action == broker.ActionArm {
+		return c.rearm(ctx)
+	}
 	input, err := c.snapshot(ctx)
 	if err != nil {
 		return broker.Response{}, err
@@ -705,6 +784,7 @@ func persistentMutation(action broker.Action) bool {
 		broker.ActionAcceptReplacement,
 		broker.ActionEnrollInternal,
 		broker.ActionDisarm,
+		broker.ActionArm,
 		broker.ActionRenew:
 		return true
 	default:

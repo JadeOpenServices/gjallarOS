@@ -39,10 +39,12 @@ rec {
 	off := store
 	off.ID, off.Mode = "off@example.org", apps.AddonOff
 	user := config.User{
-		Hostname:           "gjallarOS",
-		Theme:              "noctalia",
-		AIAgentMode:        "workspace",
-		JODSEnrollmentMode: "manual",
+		Hostname:    "gjallarOS",
+		Theme:       "noctalia",
+		AIAgentMode: "workspace",
+		Management: config.ManagementIntent{
+			EnrollmentMode: "manual",
+		},
 		FirefoxAddons:      addons,
 		FirefoxStoreAddons: []apps.FirefoxStoreAddon{store, off},
 	}

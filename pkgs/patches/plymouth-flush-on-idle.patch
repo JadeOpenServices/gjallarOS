@@ -1,0 +1,15 @@
+--- a/src/libply-splash-core/ply-boot-splash.c
++++ b/src/libply-splash-core/ply-boot-splash.c
+@@ -775,6 +775,12 @@
+ on_idle (ply_boot_splash_t *splash)
+ {
+         ply_trace ("splash now idle");
++
++        /* Displays are flushed on the next frame tick, but the idle handler
++         * can deactivate the renderers before that tick comes. Show the
++         * splash's final frame now, so a retained splash keeps it.
++         */
++        ply_boot_splash_flush_displays (splash);
+         ply_event_loop_watch_for_timeout (splash->loop, 0.01,
+                                           (ply_event_loop_timeout_handler_t)
+                                           splash->idle_handler,

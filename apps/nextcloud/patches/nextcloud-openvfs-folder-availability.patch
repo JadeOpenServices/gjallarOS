@@ -1,4 +1,5 @@
 diff --git a/src/libsync/vfs/openvfs/vfs_openvfs.cpp b/src/libsync/vfs/openvfs/vfs_openvfs.cpp
+index 2d18b3b..974deec 100644
 --- a/src/libsync/vfs/openvfs/vfs_openvfs.cpp
 +++ b/src/libsync/vfs/openvfs/vfs_openvfs.cpp
 @@ -20,6 +20,7 @@
@@ -8,8 +9,8 @@ diff --git a/src/libsync/vfs/openvfs/vfs_openvfs.cpp b/src/libsync/vfs/openvfs/v
 +#include <QFileInfo>
  #include <QLoggingCategory>
  #include <QString>
- #include <QUuid>
-@@ -650,9 +651,16 @@ Optional<PinState> OpenVFS::pinState(const QString &folderPath)
+ #include <QTimer>
+@@ -707,9 +708,16 @@ Optional<PinState> OpenVFS::pinState(const QString &folderPath)
      }
  }
  

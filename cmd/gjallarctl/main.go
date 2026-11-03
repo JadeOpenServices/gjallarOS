@@ -131,14 +131,20 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runVPN(args[1:], stdout, stderr)
 	case "addons":
 		return runAddons(args[1:], stdout, stderr)
+	case "apps":
+		return runApps(args[1:], stdout, stderr)
 	case "settings":
 		return runSettings(args[1:], stdout, stderr)
 	case "snapshots":
 		return runSnapshots(args[1:], stdout, stderr)
+	case "wine":
+		return runWine(args[1:], stdout, stderr)
 	case "secure-boot":
 		return runSecureBoot(args[1:], stdout, stderr)
 	case "security":
-		return runSecurity(args[1:], stderr)
+		return runSecurity(args[1:], stdout, stderr)
+	case "media":
+		return runMedia(args[1:], stderr)
 	default:
 		fmt.Fprintf(stderr, "ERROR: unknown command %q\n", args[0])
 		printUsage(stderr)
@@ -172,6 +178,17 @@ func runInstaller(args []string, stdout, stderr io.Writer) int {
 	if args[0] == "secure-boot-enroll" {
 		return runSecureBootEnroll(args[1:], stdout, stderr)
 	}
+	if args[0] == "secure-boot-record-shim" {
+		if len(args) != 1 {
+			fmt.Fprintln(stderr, "Usage: gjallarctl installer secure-boot-record-shim")
+			return 2
+		}
+		if err := secureboot.RecordShimEnrollment(context.Background(), stdout); err != nil {
+			fmt.Fprintf(stderr, "ERROR: record Secure Boot through shim: %v\n", err)
+			return 1
+		}
+		return 0
+	}
 	if args[0] == "secure-boot-verify-ownership" {
 		return runSecureBootVerifyOwnership(args[1:], stdout, stderr)
 	}
@@ -183,6 +200,9 @@ func runInstaller(args []string, stdout, stderr io.Writer) int {
 	}
 	if args[0] == "tpm2-metadata-pin" {
 		return runTPM2MetadataPIN(args[1:], stdout, stderr)
+	}
+	if args[0] == "tpm2-metadata-policy" {
+		return runTPM2MetadataPolicy(args[1:], stdout, stderr)
 	}
 	if args[0] == "tpm2-check-pcrlock-policy" {
 		return runTPM2CheckPCRLockPolicy(args[1:], stdout, stderr)
@@ -517,6 +537,36 @@ func runTPM2MetadataPIN(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
+// Tells the first chip enrollment what the volume already carries:
+// "none" (no chip slot), "unbound" (only chip slots without a startup
+// policy, which the enrollment replaces) or "bound" (a slot GjallarOS
+// enrolled, which only tpm2 reenroll replaces).
+func runTPM2MetadataPolicy(args []string, stdout, stderr io.Writer) int {
+	if len(args) != 1 {
+		fmt.Fprintln(stderr, "Usage: gjallarctl installer tpm2-metadata-policy <metadata-json>")
+		return 2
+	}
+	raw, err := os.ReadFile(args[0])
+	if err != nil {
+		fmt.Fprintf(stderr, "ERROR: %v\n", err)
+		return 1
+	}
+	slots, err := diskcrypto.ParseKeyslots(raw)
+	if err != nil {
+		fmt.Fprintf(stderr, "ERROR: %v\n", err)
+		return 1
+	}
+	switch {
+	case len(slots.TPM2) == 0:
+		fmt.Fprintln(stdout, "none")
+	case slots.TPM2Policy:
+		fmt.Fprintln(stdout, "bound")
+	default:
+		fmt.Fprintln(stdout, "unbound")
+	}
+	return 0
+}
+
 func runTPM2CheckPCRLockPolicy(args []string, stdout, stderr io.Writer) int {
 	if len(args) < 2 {
 		fmt.Fprintln(stderr, "Usage: gjallarctl installer tpm2-check-pcrlock-policy <policy> <pcr>...")
@@ -594,10 +644,14 @@ func runSecureBootFirmwareInstructions(args []string, stdout, stderr io.Writer) 
 }
 
 func runSecureBootVerifyOwnership(args []string, stdout, stderr io.Writer) int {
+	viaShim := len(args) > 0 && args[0] == "--shim"
+	if viaShim {
+		args = args[1:]
+	}
 	if len(args) > 1 {
 		fmt.Fprintln(
 			stderr,
-			"Usage: gjallarctl installer secure-boot-verify-ownership [expected-stage]",
+			"Usage: gjallarctl installer secure-boot-verify-ownership [--shim] [expected-stage]",
 		)
 		return 2
 	}
@@ -610,6 +664,7 @@ func runSecureBootVerifyOwnership(args []string, stdout, stderr io.Writer) int {
 	if err := secureboot.VerifyOwnership(
 		context.Background(),
 		expectedStage,
+		viaShim,
 	); err != nil {
 		fmt.Fprintf(
 			stderr,
@@ -619,6 +674,10 @@ func runSecureBootVerifyOwnership(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
+	if viaShim {
+		fmt.Fprintln(stdout, "PASS: shim trusts the GjallarOS key and the firmware starts shim.")
+		return 0
+	}
 	fmt.Fprintln(
 		stdout,
 		"PASS: active GjallarOS PK/KEK/db ownership verified.",
@@ -1796,6 +1855,10 @@ func printUsage(out io.Writer) {
 	fmt.Fprintln(out, "       gjallarctl system {check|rebuild}   (root; rebuild starts it for the system checkout)")
 	fmt.Fprintln(out, "       gjallarctl system apply              (developer mode: build ~/GjallarOS-local)")
 	fmt.Fprintln(out, "       gjallarctl system status             (what the running system was built from)")
+	fmt.Fprintln(out, "       gjallarctl system time               (whether NTS confirmed the clock)")
+	fmt.Fprintln(out, "       gjallarctl system move               (what moving to the system checkout leaves behind)")
+	fmt.Fprintln(out, "       gjallarctl system clone --from DIR   (root; create the system checkout)")
+	fmt.Fprintln(out, "       gjallarctl system developer-off      (root; build the official system again)")
 	fmt.Fprintln(out, "       gjallarctl device-probe refresh [--output PATH]")
 	fmt.Fprintln(out, "       gjallarctl fan {status|list|reconcile}")
 	fmt.Fprintln(out, "       gjallarctl ai profile [--config PATH]")
@@ -1805,11 +1868,14 @@ func printUsage(out io.Writer) {
 	fmt.Fprintln(out, "       gjallarctl luks {status|recovery-key|pin [--remove]|setup|remind [--open|--refresh]}")
 	fmt.Fprintln(out, "       gjallarctl vpn status")
 	fmt.Fprintln(out, "       gjallarctl addons {list|set|pin|update} [--repo PATH]")
-	fmt.Fprintln(out, "       gjallarctl settings {list|get|set|pending|apply|cancel}")
+	fmt.Fprintln(out, "       gjallarctl apps {list [--json]|add ID|remove ID} [--window]")
+	fmt.Fprintln(out, "       gjallarctl settings {list|get|set|pending|apply|cancel|export|import|pair}")
 	fmt.Fprintln(out, "       gjallarctl snapshots {list|restore PATH}")
-	fmt.Fprintln(out, "       gjallarctl secure-boot {status|setup|update-dbx} [--repo PATH]")
-	fmt.Fprintln(out, "       gjallarctl security notice|oddc-notice")
+	fmt.Fprintln(out, "       gjallarctl wine {list|set|add|install|program|run|remove|reset|repair|undo|import|menu} (gjallarctl wine for more)")
+	fmt.Fprintln(out, "       gjallarctl secure-boot {status|setup|update-dbx} [--repo PATH] [--own-keys]")
+	fmt.Fprintln(out, "       gjallarctl security {notice|oddc-notice|status [--json]|scan PATH [--json]|fix ID|switch ID on|off|apply ID|cancel ID}")
 	fmt.Fprintln(out, "       gjallarctl hyprland-render-gpu")
+	fmt.Fprintln(out, "       gjallarctl media notice")
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "Safe GjallarOS maintenance commands. Rebuild invokes sudo explicitly.")
 }
@@ -1932,6 +1998,18 @@ func rebuildCheckout(repo string, opts rebuildOptions, system bool, stdout, stde
 	hardwareUpdate, channel, switchNow := opts.hardwareUpdate, opts.channel, opts.switchNow
 	update, updateInputs, rebuildArgs := opts.update, opts.updateInputs, opts.rebuildArgs
 
+	// The channel pull below follows the configuration, so the grant is
+	// checked before anything is fetched (Plane 283).
+	if system {
+		user, err := config.Load(filepath.Join(repo, "user.config.json"))
+		if err != nil {
+			fmt.Fprintf(stderr, "[GjallarOS] Error: %v; nothing rebuilt\n", err)
+			return 1
+		}
+		if code := checkDeveloperGrant(system, user, stderr); code != 0 {
+			return code
+		}
+	}
 	if update {
 		if code := pullCheckout(repo, stdout, stderr); code != 0 {
 			return code
@@ -1958,7 +2036,7 @@ func rebuildCheckout(repo string, opts rebuildOptions, system bool, stdout, stde
 			return code
 		}
 		if switchNow == "0" {
-			fmt.Fprintln(stdout, "[GjallarOS] oddc pin updated, not switched (--switch 0). Apply with: rebuild")
+			fmt.Fprintln(stdout, "[GjallarOS] oddc pin updated, not switched (--switch 0). Apply with: gjallarctl rebuild")
 			return 0
 		}
 	}
@@ -1993,6 +2071,11 @@ func rebuildCheckout(repo string, opts rebuildOptions, system bool, stdout, stde
 	if err != nil {
 		fmt.Fprintf(stderr, "[GjallarOS] Error: load user configuration: %v\n", err)
 		return 1
+	}
+	// Checked again on the configuration this build reads, which may have
+	// changed since the check above.
+	if code := checkDeveloperGrant(system, userConfig, stderr); code != 0 {
+		return code
 	}
 	legacyWebApplications := config.HasLegacyWebApplications(rawConfig)
 	retiredEntries := config.RetiredEntries(rawConfig)
@@ -2094,7 +2177,7 @@ func rebuildCheckout(repo string, opts rebuildOptions, system bool, stdout, stde
 	// Managed JODS endpoints deliberately remove the desktop user from
 	// wheel. Rebuilds on those systems therefore cross the explicit root
 	// authentication boundary instead of attempting sudo.
-	managedDevice := userConfig.EndpointManagedDevice
+	managedDevice := userConfig.Management.Enable
 
 	// JODS moves the pin on managed endpoints; elsewhere the user decides.
 	if !hardwareUpdate && !managedDevice {
@@ -2441,7 +2524,8 @@ func pullCheckout(repo string, stdout, stderr io.Writer) int {
 	// channel, so after a switch HEAD and the channel often diverge. A HEAD
 	// that a newer channel holds waits until the channel promotes it; a
 	// HEAD that only older channels hold moves to the channel, which holds
-	// everything HEAD has (e2e-fw13, 2026-10-27).
+	// everything HEAD has, also when HEAD is the older channel's merge of the
+	// channel's own commit (e2e-fw13, 2026-10-27).
 	at := slices.Index(config.ReleaseChannels, channel)
 	heldBy := func(channels []string) bool {
 		for _, name := range channels {
@@ -2454,21 +2538,37 @@ func pullCheckout(repo string, stdout, stderr io.Writer) int {
 	ahead := func() {
 		fmt.Fprintf(stdout, "[GjallarOS] %s is ahead of the %s channel; it stays at %s until %s reaches it\n", repo, channel, gitHead(repo), channel)
 	}
+	// --keep stops on local edits to files the move would change.
+	moveToChannel := func() int {
+		if git("reset", "--quiet", "--keep", upstream) != 0 {
+			return failed("git reset --keep origin/" + channel)
+		}
+		return 0
+	}
+	newer, older := config.ReleaseChannels[:at], config.ReleaseChannels[at+1:]
 	switch {
 	case isAncestor(upstream, "HEAD"):
-		if !isAncestor("HEAD", upstream) {
+		switch {
+		case isAncestor("HEAD", upstream):
+		// An older channel's promotion merge holds the channel's commit but
+		// is not on the channel: the next promotion would not fast-forward
+		// (stable -> staging, e2e-fw13, 2026-10-27).
+		case heldBy(older) && !heldBy(newer):
+			if code := moveToChannel(); code != 0 {
+				return code
+			}
+		default:
 			ahead()
 		}
 	case isAncestor("HEAD", upstream):
 		if git("merge", "--quiet", "--ff-only", upstream) != 0 {
 			return failed("git merge --ff-only origin/" + channel)
 		}
-	case heldBy(config.ReleaseChannels[:at]):
+	case heldBy(newer):
 		ahead()
-	case heldBy(config.ReleaseChannels[at+1:]):
-		// --keep stops on local edits to files the move would change.
-		if git("reset", "--quiet", "--keep", upstream) != 0 {
-			return failed("git reset --keep origin/" + channel)
+	case heldBy(older):
+		if code := moveToChannel(); code != 0 {
+			return code
 		}
 	default:
 		fmt.Fprintf(stderr, "[GjallarOS] Error: %s has commits that the %s channel does not hold; nothing rebuilt\n", repo, channel)
@@ -2488,7 +2588,7 @@ func pullCheckout(repo string, stdout, stderr io.Writer) int {
 }
 
 func printRebuildHelp(out io.Writer) {
-	fmt.Fprint(out, `Usage: rebuild [OPTIONS] [NIXOS-REBUILD-ARGS...]
+	fmt.Fprint(out, `Usage: gjallarctl rebuild [OPTIONS] [NIXOS-REBUILD-ARGS...]
 
 Apply the GjallarOS configuration in the system checkout.
 
@@ -2511,7 +2611,8 @@ Apply the GjallarOS configuration in the system checkout.
 Arguments after -- go to nixos-rebuild. --override-input oddc must name a
 commit (github:JadeOpenServices/oddc/<commit>); the ODDC answer for this
 machine is fetched at that commit too. Such a commit is not a release, so
-a notice comes at every login until a plain rebuild returns to the pin.
+a notice comes at every login until a plain gjallarctl rebuild returns to
+the pin.
 
 When /etc/gjallar/system is the system checkout, root builds it as it is
 on the official origin: --repo, --host, --update-inputs and other
@@ -2727,7 +2828,7 @@ func runHelpme(args []string, stdout, stderr io.Writer) int {
 	if len(args) > 1 || len(args) == 1 && args[0] != "--text" {
 		return 2
 	}
-	text := "GjallarOS tools\n\n  rebuild            Apply the current NixOS configuration.\n  rebuild --update   Pull the system checkout and rebuild.\n  cleanup            Remove old generations and collect garbage.\n  thermal-status     Show temperatures and power state.\n  thermal-test       Pause/resume processes for troubleshooting.\n  check-installer    Check installer configuration.\n  gjallar-preflight  Run fast repository wiring checks.\n"
+	text := "GjallarOS tools\n\n  gjallarctl rebuild            Apply the current NixOS configuration.\n  gjallarctl rebuild --update   Pull the system checkout and rebuild.\n  cleanup                       Remove old generations and collect garbage.\n  thermal-status                Show temperatures and power state.\n  thermal-test                  Pause/resume processes for troubleshooting.\n  check-installer               Check installer configuration.\n  gjallar-preflight             Run fast repository wiring checks.\n"
 	if len(args) == 1 || os.Getenv("DISPLAY")+os.Getenv("WAYLAND_DISPLAY") == "" {
 		fmt.Fprint(stdout, text)
 		return 0
@@ -2739,8 +2840,8 @@ func runHelpme(args []string, stdout, stderr io.Writer) int {
 	return runCommand(context.Background(), stdout, stderr, "yad",
 		"--list", "--title=GjallarOS tools", "--width=900", "--height=520", "--center", "--button=Close:0",
 		"--column=Command", "--column=Description",
-		"rebuild", "Apply the current NixOS configuration.",
-		"rebuild --update", "Pull the system checkout and rebuild.",
+		"gjallarctl rebuild", "Apply the current NixOS configuration.",
+		"gjallarctl rebuild --update", "Pull the system checkout and rebuild.",
 		"cleanup", "Remove old generations and collect garbage.",
 		"thermal-status", "Show temperatures and power state.",
 		"thermal-test", "Pause/resume processes for troubleshooting.",
@@ -2846,7 +2947,7 @@ func runRebuildQuiet(stdout, stderr io.Writer, host string, messages []string, s
 		fmt.Fprintf(stderr, "[rebuild] Detailed log retained: %s\n", log.Name())
 		if networkError != "" && !cancelled {
 			fmt.Fprintf(stderr, "[rebuild] No network: %s\n", networkError)
-			fmt.Fprintln(stderr, "[rebuild] Check the connection (Wi-Fi, DHCP lease, VPN, router) and run rebuild again.")
+			fmt.Fprintln(stderr, "[rebuild] Check the connection (Wi-Fi, DHCP lease, VPN, router) and run gjallarctl rebuild again.")
 		}
 	}
 	return status
@@ -3628,39 +3729,60 @@ func applyHyprlandRotation(sysRoot, orientation string) error {
 		return fmt.Errorf("internal connector %q not present in Hyprland", connector)
 	}
 
+	return hyprctlEval(rotationLua(*monitor, transform))
+}
+
+// rotationLua turns the running monitor and the touch screen and pen on it.
+// hl.monitor keeps the fields of an existing rule that are not given.
+func rotationLua(monitor hyprMonitor, transform int) string {
 	mode := fmt.Sprintf("%dx%d@%.3f", monitor.Width, monitor.Height, monitor.RefreshRate)
 	position := fmt.Sprintf("%dx%d", monitor.X, monitor.Y)
 	scale := strconv.FormatFloat(runningScale(monitor.Width, monitor.Height, monitor.Scale), 'f', -1, 64)
-	spec := fmt.Sprintf(
-		"%s,%s,%s,%s,transform,%d",
-		monitor.Name,
-		mode,
-		position,
-		scale,
+	name := luaString(monitor.Name)
+	return fmt.Sprintf(
+		"hl.monitor({ output = %s, mode = %s, position = %s, scale = %s, transform = %d }) "+
+			// Touch screen and pen belong to the built-in panel. Hyprland's
+			// automatic binding finds no monitor for them.
+			"hl.config({ input = { touchdevice = { output = %[1]s, transform = %[5]d }, tablet = { output = %[1]s, transform = %[5]d } } })",
+		name,
+		luaString(mode),
+		luaString(position),
+		luaString(scale),
 		transform,
 	)
+}
 
-	for _, args := range [][]string{
-		{"keyword", "monitor", spec},
-		// Touch screen and pen belong to the built-in panel. Hyprland's
-		// automatic binding finds no monitor for them.
-		{"keyword", "input:touchdevice:output", monitor.Name},
-		{"keyword", "input:tablet:output", monitor.Name},
-		{"keyword", "input:touchdevice:transform", strconv.Itoa(transform)},
-		{"keyword", "input:tablet:transform", strconv.Itoa(transform)},
-	} {
-		cmd := exec.Command("hyprctl", args...)
-		if out, err := cmd.CombinedOutput(); err != nil {
-			return fmt.Errorf(
-				"hyprctl %s: %w: %s",
-				strings.Join(args, " "),
-				err,
-				strings.TrimSpace(string(out)),
-			)
+// hyprctlEval runs Lua in the running Hyprland. hyprctl exits 0 whatever the
+// code did; the reply is "ok" only when it ran without errors.
+func hyprctlEval(code string) error {
+	out, err := exec.Command("hyprctl", "eval", code).CombinedOutput()
+	reply := strings.TrimSpace(string(out))
+	if err != nil {
+		return fmt.Errorf("hyprctl eval: %w: %s", err, reply)
+	}
+	if reply != "ok" {
+		return fmt.Errorf("hyprctl eval: %s", reply)
+	}
+	return nil
+}
+
+// luaString quotes s as a Lua string literal.
+func luaString(s string) string {
+	var b strings.Builder
+	b.WriteByte('"')
+	for i := 0; i < len(s); i++ {
+		switch c := s[i]; {
+		case c == '"' || c == '\\':
+			b.WriteByte('\\')
+			b.WriteByte(c)
+		case c < 0x20 || c == 0x7f:
+			fmt.Fprintf(&b, "\\%03d", c)
+		default:
+			b.WriteByte(c)
 		}
 	}
-
-	return nil
+	b.WriteByte('"')
+	return b.String()
 }
 
 // sensorOrientation reads the orientation from a monitor-sensor line.

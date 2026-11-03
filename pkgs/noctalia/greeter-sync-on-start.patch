@@ -1,0 +1,14 @@
+--- a/src/app/application.cpp
++++ b/src/app/application.cpp
+@@ -288,6 +288,11 @@
+   });
+ #endif
+ 
++  // The theme and wallpaper are applied before their change callbacks are
++  // set, so a look changed while the shell was off never reached the
++  // greeter. Ask for one sync after every start; it waits for the polkit
++  // agent like any other automatic sync.
++  m_greeterAutoSyncWaiting = true;
+   m_polkitInitTimer.start(std::chrono::milliseconds(1000), [this]() {
+     syncPolkitAgent();
+     m_polkitAgentChecked = true;

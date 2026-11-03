@@ -34,6 +34,9 @@ let
       # Hidden while a hardware keyboard is attached.
       autohide = true;
       inherit layout;
+      # No enlarged copy of each pressed key above the keyboard; it shows
+      # the passphrase one character at a time to anyone watching.
+      popovers = false;
     };
     theme.default = "breezy-dark";
   };

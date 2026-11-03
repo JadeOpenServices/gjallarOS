@@ -79,6 +79,15 @@ let
           <allow_active>auth_admin</allow_active>
         </defaults>
       </action>
+      <action id="org.gjallaros.wine.network">
+        <description>Let a Wine app reach the network</description>
+        <message>Authentication is required to let this app reach the network</message>
+        <defaults>
+          <allow_any>no</allow_any>
+          <allow_inactive>no</allow_inactive>
+          <allow_active>auth_admin</allow_active>
+        </defaults>
+      </action>
       <action id="org.gjallaros.settings.pair">
         <description>Pair your account with your account on another device</description>
         <message>Authentication is required to pair your account with another device</message>
@@ -302,6 +311,91 @@ lib.mkIf (settings.dotfilesDir == "/etc/gjallar/system") {
         "@system-service"
         "~@privileged"
         "~@resources"
+      ];
+    };
+  };
+
+  # Turning on the dev or staging channel or developer mode needs the
+  # startup PIN or the recovery key once (Plane 283). The settings service
+  # has no access to disks or the security chip, so this helper tests the
+  # proof: it may read the disks and use the chip, nothing else. It keeps
+  # its own count of wrong PINs (3 per 2 h) so the chip's lockout, which
+  # also guards startup, is never reached from here.
+  systemd.sockets.gjallar-devproof = {
+    description = "GjallarOS developer proof socket";
+    wantedBy = [ "sockets.target" ];
+    socketConfig = {
+      ListenStream = "/run/gjallar/devproof.sock";
+      SocketUser = "root";
+      SocketMode = "0600";
+      Accept = true;
+      MaxConnections = 1;
+    };
+  };
+
+  systemd.services."gjallar-devproof@" = {
+    description = "GjallarOS developer proof check";
+    path = [
+      pkgs.cryptsetup
+      pkgs.util-linux
+    ];
+    serviceConfig = {
+      ExecStart = "${settingsd}/bin/gjallar-devproof";
+      StandardInput = "socket";
+      StandardOutput = "socket";
+      StandardError = "journal";
+      RuntimeMaxSec = 40;
+      # The chip's device is root's own (0600), so no capability is needed
+      # to open it.
+      User = "root";
+      StateDirectory = "gjallar-devproof";
+      StateDirectoryMode = "0700";
+      UMask = "0077";
+      ProtectSystem = "strict";
+      ProtectHome = true;
+      PrivateTmp = true;
+      PrivateIPC = true;
+      PrivateNetwork = true;
+      IPAddressDeny = "any";
+      # cryptsetup takes its lock here.
+      ReadWritePaths = [ "-/run/cryptsetup" ];
+      DevicePolicy = "closed";
+      # Root sits on a device-mapper device (the open LUKS volume, maybe
+      # LVM); lsblk walks from it down to the LUKS partition.
+      DeviceAllow = [
+        "block-device-mapper r"
+        "block-blkext r"
+        "block-mmc r"
+        "block-sd r"
+        "block-virtblk r"
+        "/dev/tpmrm0 rw"
+      ];
+      # cryptsetup locks the key in memory while it tests it.
+      CapabilityBoundingSet = "CAP_IPC_LOCK";
+      AmbientCapabilities = "";
+      # The disk's key slots are decrypted through the kernel's crypto
+      # sockets.
+      RestrictAddressFamilies = [
+        "AF_UNIX"
+        "AF_ALG"
+      ];
+      NoNewPrivileges = true;
+      ProtectKernelTunables = true;
+      ProtectKernelModules = true;
+      ProtectKernelLogs = true;
+      ProtectControlGroups = true;
+      ProtectClock = true;
+      ProtectHostname = true;
+      ProtectProc = "invisible";
+      RestrictNamespaces = true;
+      RestrictRealtime = true;
+      RestrictSUIDSGID = true;
+      LockPersonality = true;
+      MemoryDenyWriteExecute = true;
+      SystemCallArchitectures = "native";
+      SystemCallFilter = [
+        "@system-service"
+        "~@privileged"
       ];
     };
   };

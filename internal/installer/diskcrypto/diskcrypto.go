@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -240,21 +241,9 @@ func ReadTPM2TokenID(metadataPath string) (string, error) {
 // a firmware event log it wrote "pcrValues":[] and the TPM then released
 // the disk key to any boot chain (e2e-target, 2026-09-29).
 func CheckPCRLockPolicy(path string, pcrs []int) error {
-	raw, err := os.ReadFile(path)
+	locked, err := pcrLockPolicyPCRs(path)
 	if err != nil {
-		return fmt.Errorf("read pcrlock policy: %w", err)
-	}
-	var policy struct {
-		PCRValues []struct {
-			PCR int `json:"pcr"`
-		} `json:"pcrValues"`
-	}
-	if err := json.Unmarshal(raw, &policy); err != nil {
-		return fmt.Errorf("parse pcrlock policy: %w", err)
-	}
-	locked := make(map[int]bool, len(policy.PCRValues))
-	for _, value := range policy.PCRValues {
-		locked[value.PCR] = true
+		return err
 	}
 	var missing []string
 	for _, pcr := range pcrs {
@@ -263,14 +252,56 @@ func CheckPCRLockPolicy(path string, pcrs []int) error {
 		}
 	}
 	if len(pcrs) == 0 || len(missing) != 0 {
+		hint := ""
+		if slices.Contains(missing, "4") {
+			hint = pcr4RestartHint
+		}
 		return fmt.Errorf(
-			"pcrlock policy %s does not lock PCR %s; refusing TPM2 enrollment",
+			"pcrlock policy %s does not lock PCR %s; refusing TPM2 enrollment%s",
 			path,
 			strings.Join(missing, ","),
+			hint,
 		)
 	}
 	return nil
 }
+
+// PCRLockPolicyLocks reports whether the systemd-pcrlock policy at path
+// locks pcr.
+func PCRLockPolicyLocks(path string, pcr int) (bool, error) {
+	locked, err := pcrLockPolicyPCRs(path)
+	return locked[pcr], err
+}
+
+func pcrLockPolicyPCRs(path string) (map[int]bool, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read pcrlock policy: %w", err)
+	}
+	var policy struct {
+		PCRValues []struct {
+			PCR int `json:"pcr"`
+		} `json:"pcrValues"`
+	}
+	if err := json.Unmarshal(raw, &policy); err != nil {
+		return nil, fmt.Errorf("parse pcrlock policy: %w", err)
+	}
+	locked := make(map[int]bool, len(policy.PCRValues))
+	for _, value := range policy.PCRValues {
+		locked[value.PCR] = true
+	}
+	return locked, nil
+}
+
+// pcr4RestartHint explains the one PCR 4 gap a user can fix alone. When the
+// firmware first tried a boot entry that failed (the old direct systemd-boot
+// entry right after switching the shim on, Plane 293, e2e-fw13 2026-11-02),
+// the event log holds "Returning from EFI Application" plus a second start
+// that no pcrlock component predicts, so make-policy cannot lock PCR 4 for
+// this boot. The next boot starts the right entry and the log is clean.
+const pcr4RestartHint = ". PCR 4 covers the boot programs this boot ran. " +
+	"If the firmware tried another boot entry first (right after switching " +
+	"the shim on, or after a firmware update), restart once and run this again"
 
 func WriteTPM2KeyslotRecord(
 	metadataPath string,

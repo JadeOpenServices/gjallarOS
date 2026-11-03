@@ -1,8 +1,8 @@
 diff --git a/src/common/syncjournaldb.h b/src/common/syncjournaldb.h
-index 596d973..9790ba0 100644
+index 54df9f3..bd096fb 100644
 --- a/src/common/syncjournaldb.h
 +++ b/src/common/syncjournaldb.h
-@@ -169,6 +169,11 @@ public:
+@@ -167,6 +167,11 @@ public:
          SelectiveSyncUndecidedList = 3,
          /** List of encrypted folders that will need to be removed from the blacklist when E2EE gets set up*/
          SelectiveSyncE2eFoldersToRemoveFromBlacklist = 4,
@@ -15,7 +15,7 @@ index 596d973..9790ba0 100644
      /* return the specified list from the database */
      QStringList getSelectiveSyncList(SelectiveSyncListType type, bool *ok);
 diff --git a/src/gui/accountsettings.cpp b/src/gui/accountsettings.cpp
-index 3ac59d0..34ee004 100644
+index e454d34..90f4561 100644
 --- a/src/gui/accountsettings.cpp
 +++ b/src/gui/accountsettings.cpp
 @@ -820,7 +820,6 @@ void AccountSettings::slotCustomContextMenuRequested(const QPoint &pos)
@@ -27,10 +27,10 @@ index 3ac59d0..34ee004 100644
          ac = availabilityMenu->addAction(Utility::vfsFreeSpaceActionText());
          connect(ac, &QAction::triggered, this, [this]() { slotSetCurrentFolderAvailability(PinState::OnlineOnly); });
 diff --git a/src/gui/folder.cpp b/src/gui/folder.cpp
-index ae87ff9..d16fbd9 100644
+index 9f008f6..a3e9148 100644
 --- a/src/gui/folder.cpp
 +++ b/src/gui/folder.cpp
-@@ -1256,12 +1256,48 @@ void Folder::startSync(const QStringList &pathList)
+@@ -1266,12 +1266,48 @@ void Folder::startSync(const QStringList &pathList)
      _engine->setFilesystemPermissionsReliable(_folderWatcher->canSetPermissions());
  
      correctPlaceholderFiles();
@@ -79,7 +79,7 @@ index ae87ff9..d16fbd9 100644
  void Folder::correctPlaceholderFiles()
  {
      if (_definition.virtualFilesMode == Vfs::Off) {
-@@ -1404,6 +1440,10 @@ void Folder::slotSyncFinished(bool success)
+@@ -1414,6 +1450,10 @@ void Folder::slotSyncFinished(bool success)
              _timeSinceLastFullLocalDiscovery.start();
          }
      }
@@ -91,10 +91,10 @@ index ae87ff9..d16fbd9 100644
      Q_EMIT syncStateChange();
  
 diff --git a/src/gui/folder.h b/src/gui/folder.h
-index db76a31..bd9634c 100644
+index a0de1a9..d6c8842 100644
 --- a/src/gui/folder.h
 +++ b/src/gui/folder.h
-@@ -553,6 +553,10 @@ private:
+@@ -558,6 +558,10 @@ private:
  
      void correctPlaceholderFiles();
  
@@ -326,10 +326,10 @@ index 95f3aba..1b91fe3 100644
 +};
  }
 diff --git a/src/gui/socketapi/socketapi.cpp b/src/gui/socketapi/socketapi.cpp
-index ffe7dc7..805a098 100644
+index 2ab0288..e5f111d 100644
 --- a/src/gui/socketapi/socketapi.cpp
 +++ b/src/gui/socketapi/socketapi.cpp
-@@ -1599,11 +1599,10 @@ void SocketApi::command_GET_MENU_ITEMS(const QString &argument, OCC::SocketListe
+@@ -1632,11 +1632,10 @@ void SocketApi::command_GET_MENU_ITEMS(const QString &argument, OCC::SocketListe
          auto makePinContextMenu = [&](bool makeAvailableLocally, bool freeSpace) {
              listener->sendMessage(QLatin1String("MENU_ITEM:CURRENT_PIN:d:")
                  + Utility::vfsCurrentAvailabilityText(*combined));
@@ -346,13 +346,13 @@ index ffe7dc7..805a098 100644
                  + (freeSpace ? QLatin1String(":") : QLatin1String("d:"))
                  + Utility::vfsFreeSpaceActionText());
 diff --git a/src/gui/wizard/accountwizardcontroller.cpp b/src/gui/wizard/accountwizardcontroller.cpp
-index 32e8fe6..229cd6e 100644
+index 3ef27e4..fc5b7fd 100644
 --- a/src/gui/wizard/accountwizardcontroller.cpp
 +++ b/src/gui/wizard/accountwizardcontroller.cpp
-@@ -1129,7 +1129,13 @@ void AccountWizardController::completeAuthentication()
-     if (needsSyncOptions()) {
+@@ -1228,7 +1228,13 @@ void AccountWizardController::chooseSyncModeAfterCapabilities()
          ConfigFile cfg;
-         if (Theme::instance()->forceOverrideServerUrl() && !cfg.overrideLocalDir().isEmpty()) {
+         const auto localDirLocked = cfg.isEnforced(QLatin1String(ConfigFile::overrideLocalDirC)) || cfg.hasUserOverrideLocalDir();
+         if (Theme::instance()->forceOverrideServerUrl() && localDirLocked && !applicableOverrideLocalDir().isEmpty()) {
 -            QTimer::singleShot(0, this, &AccountWizardController::finish);
 +            // No sync options page here, so a virtual-files account gets the
 +            // one question that matters on a new machine: what to keep local.
@@ -364,7 +364,7 @@ index 32e8fe6..229cd6e 100644
              return;
          }
  
-@@ -1615,6 +1621,7 @@ bool AccountWizardController::createSyncFolder(AccountState *accountState)
+@@ -1729,6 +1735,7 @@ bool AccountWizardController::createSyncFolder(AccountState *accountState)
  
      if (folderDefinition.virtualFilesMode != Vfs::Off && _syncMode == VirtualFiles) {
          folder->setRootPinState(PinState::OnlineOnly);
@@ -372,7 +372,7 @@ index 32e8fe6..229cd6e 100644
      }
  
      folder->journalDb()->setSelectiveSyncList(SyncJournalDb::SelectiveSyncBlackList, _selectiveSyncBlacklist);
-@@ -1745,6 +1752,29 @@ void AccountWizardController::openSelectiveSync()
+@@ -1888,6 +1895,29 @@ void AccountWizardController::openSelectiveSync()
      _selectiveSyncDialog->open();
  }
  
@@ -403,19 +403,19 @@ index 32e8fe6..229cd6e 100644
  {
      if (hasAdvancedOptions()) {
 diff --git a/src/gui/wizard/accountwizardcontroller.h b/src/gui/wizard/accountwizardcontroller.h
-index 137af4b..3e49006 100644
+index 56d5e87..8b4e94f 100644
 --- a/src/gui/wizard/accountwizardcontroller.h
 +++ b/src/gui/wizard/accountwizardcontroller.h
-@@ -26,6 +26,7 @@ class QNetworkReply;
+@@ -28,6 +28,7 @@ class QWindow;
  namespace OCC {
  
  class SelectiveSyncDialog;
 +class KeepLocalDialog;
  class AccountState;
+ class FolderDefinition;
  
- /**
-@@ -310,6 +311,10 @@ private:
-     LocalNetworkPermissionCheck _localNetworkPermissionCheck;
+@@ -336,6 +337,10 @@ private:
+     QPointer<QWindow> _window;
      std::unique_ptr<Flow2Auth> _flow2Auth;
      QPointer<SelectiveSyncDialog> _selectiveSyncDialog;
 +    QPointer<KeepLocalDialog> _keepLocalDialog;
@@ -426,10 +426,10 @@ index 137af4b..3e49006 100644
          AuthenticationRequired,
          NoAuthentication,
 diff --git a/src/libsync/discovery.cpp b/src/libsync/discovery.cpp
-index 53dd69b..e8823d1 100644
+index c699032..404194a 100644
 --- a/src/libsync/discovery.cpp
 +++ b/src/libsync/discovery.cpp
-@@ -2501,6 +2501,12 @@ void ProcessDirectoryJob::computePinState(PinState parentState)
+@@ -2620,6 +2620,12 @@ void ProcessDirectoryJob::computePinState(PinState parentState)
              _pinState = *state;
          }
      }
@@ -481,10 +481,10 @@ index 3138c89..5b11a28 100644
      // output
      QByteArray _dataFingerprint;
 diff --git a/src/libsync/syncengine.cpp b/src/libsync/syncengine.cpp
-index 0a7aa38..09a187c 100644
+index c053030..3214e1e 100644
 --- a/src/libsync/syncengine.cpp
 +++ b/src/libsync/syncengine.cpp
-@@ -662,6 +662,16 @@ void SyncEngine::startSync()
+@@ -664,6 +664,16 @@ void SyncEngine::startSync()
          finalize(false);
          return;
      }

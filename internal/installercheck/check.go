@@ -104,13 +104,16 @@ const (
 	presetInt
 	presetFirefoxAddons
 	presetFirefoxStoreAddons
+	presetManagement
+	presetPrebootLock
 )
 
 var presetSchema = map[string]presetValueType{
 	"hostname": presetString, "username": presetString,
 	"timezone": presetString, "locale": presetString, "keyboardLayout": presetString, "keyboardVariant": presetString,
-	"touchpadWorkspaceSwipe": presetBool, "clamshellEnable": presetBool, "consoleLoginEnable": presetBool, "usbguardEnable": presetBool, "usbTrustEnforce": presetBool, "usbTrustTpmHandle": presetString, "usbTrustLapseDays": presetInt, "snapshotsEnable": presetBool, "snapshotsKeepHours": presetInt, "snapshotsKeepDays": presetInt, "usbReviewTechnicalView": presetBool, "printingEnable": presetBool, "networkPrintingEnable": presetBool,
+	"touchpadWorkspaceSwipe": presetBool, "clamshellEnable": presetBool, "consoleLoginEnable": presetBool, "usbguardEnable": presetBool, "usbTrustEnforce": presetBool, "usbTrustTpmHandle": presetString, "usbTrustLapseDays": presetInt, "snapshotsEnable": presetBool, "snapshotsKeepHours": presetInt, "snapshotsKeepDays": presetInt, "usbReviewTechnicalView": presetBool, "printingEnable": presetBool, "networkPrintingEnable": presetBool, "firewallEnable": presetBool, "virusScanEnable": presetBool,
 	"dolphinDriveUsage":         presetBool,
+	"aarch64Emulation":          presetBool,
 	"firmwareFlashReadEntry":    presetBool,
 	"allowUnvalidatedODDCModel": presetBool,
 	"developerMode":             presetBool,
@@ -128,15 +131,12 @@ var presetSchema = map[string]presetValueType{
 	"apps": presetStringList, "thunderbirdSmartCard": presetBool, "debugFunctions": presetBool,
 	"overrideAiSelection": presetBool, "overrideModelWith": presetString, "aiAgentMode": presetString,
 	"aiEndpoint": presetString, "aiRemoteModel": presetString, "aiRemoteContextTokens": presetInt,
-	"jodsFingerprintEnrollmentAllowed": presetBool,
-	"luksTpm2Enable":                   presetBool,
-	"luksTpm2Pin":                      presetBool,
-	"recoveryEnable":                   presetBool,
-	"recoveryPartitionEnable":          presetBool, "jodsPrebootLockEnable": presetBool,
-	"secureBootEnable": presetBool, "secureBootPrompt": presetBool, "firmwarePasswordLock": presetBool, "endpointManagedDevice": presetBool,
-	"jodsEndpoint": presetString, "jodsPolicySigningPublicKey": presetString,
-	"jodsRecoveryCommandSigningPublicKey": presetString, "jodsEnrollmentMode": presetString,
-	"jodsAllowInsecureTls": presetBool, "jodsDeviceClass": presetString, "jodsDesktopProfile": presetString, "releaseChannel": presetString,
+	"luksTpm2Enable":          presetBool,
+	"luksTpm2Pin":             presetBool,
+	"recoveryEnable":          presetBool,
+	"recoveryPartitionEnable": presetBool, "prebootLock": presetPrebootLock,
+	"secureBootEnable": presetBool, "secureBootPrompt": presetBool, "secureBootShim": presetBool, "firmwarePasswordLock": presetBool,
+	"management": presetManagement, "releaseChannel": presetString,
 	"autoReboot": presetBool, "runUpdateChecks": presetBool, "writeConfig": presetBool, "runRebuild": presetBool, "forceRedeploy": presetBool,
 }
 
@@ -172,6 +172,10 @@ func matchesPresetType(raw json.RawMessage, expected presetValueType) bool {
 		return matchesPresetWebApplicationList(raw)
 	case presetTailscale:
 		return matchesPresetTailscale(raw)
+	case presetManagement:
+		return matchesPresetManagement(raw)
+	case presetPrebootLock:
+		return matchesPresetPrebootLock(raw)
 	case presetStringMap:
 		var value map[string]string
 		return json.Unmarshal(raw, &value) == nil

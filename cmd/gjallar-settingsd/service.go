@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/JadeOpenServices/gjallarOS/internal/devgate"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/config"
 	"github.com/JadeOpenServices/gjallarOS/internal/localchanges"
 	"github.com/JadeOpenServices/gjallarOS/internal/namecheck"
@@ -95,12 +96,24 @@ type service struct {
 	writePause func(string, nettrust.Pause) error
 	userName   func(uint32) (string, error)
 
+	// wineDir holds the Wine apps' network switches; wineChanged tells
+	// the launchers they changed. wineMu keeps writes from losing each
+	// other.
+	wineDir     string
+	wineChanged func()
+	wineMu      sync.Mutex
+
 	// keys signs and checks settings files; device is this machine's
 	// app-specific id in them. Without keys, Export and Import refuse.
 	keys   *keyStore
 	device string
 	// pairMu keeps pairing writes from losing each other.
 	pairMu sync.Mutex
+
+	// grantPath is the developer grant (Plane 283); askProof has
+	// gjallar-devproof test a startup PIN or recovery key.
+	grantPath string
+	askProof  func(ctx context.Context, kind string, secret []byte) (devgate.Reply, error)
 
 	mu      sync.Mutex
 	pending map[string]settings.Change
@@ -118,7 +131,13 @@ func newService(sys system, checkoutPath string, checkout func(string) error) *s
 		pausePath:    nettrust.PausePath,
 		writePause:   nettrust.WritePause,
 		userName:     lookupUserName,
-		pending:      map[string]settings.Change{},
+		wineDir:      wineDir,
+		wineChanged:  func() {},
+		grantPath:    devgate.GrantPath,
+		askProof: func(ctx context.Context, kind string, secret []byte) (devgate.Reply, error) {
+			return devgate.Ask(ctx, devgate.SocketPath, kind, secret)
+		},
+		pending: map[string]settings.Change{},
 	}
 }
 
@@ -134,9 +153,18 @@ func (s *service) readConfig() ([]byte, map[string]json.RawMessage, error) {
 	return data, fields, nil
 }
 
+// effective reads the configuration with defaults for keys it lacks.
+func (s *service) effective() (map[string]json.RawMessage, error) {
+	data, _, err := s.readConfig()
+	if err != nil {
+		return nil, err
+	}
+	return settings.Effective(data)
+}
+
 // List returns every key with its tier and current value, sorted by key.
 func (s *service) List() ([]settings.KeyValue, error) {
-	_, fields, err := s.readConfig()
+	fields, err := s.effective()
 	if err != nil {
 		return nil, err
 	}
@@ -158,7 +186,7 @@ func (s *service) Get(key string) (settings.KeyValue, error) {
 	if err != nil {
 		return settings.KeyValue{}, fmt.Errorf("%w: %v", errRefused, err)
 	}
-	_, fields, err := s.readConfig()
+	fields, err := s.effective()
 	if err != nil {
 		return settings.KeyValue{}, err
 	}
@@ -168,22 +196,31 @@ func (s *service) Get(key string) (settings.KeyValue, error) {
 // Request checks a change and keeps it until it is applied, cancelled, or
 // its session ends. A critical change needs the password already here.
 func (s *service) Request(ctx context.Context, sender, values string) (settings.Pending, error) {
-	who, err := s.sys.Caller(ctx, sender)
+	wanted, who, err := s.parseRequest(ctx, sender, values)
 	if err != nil {
 		return settings.Pending{}, err
 	}
+	return s.request(ctx, sender, who, wanted, nil, nil)
+}
+
+func (s *service) parseRequest(ctx context.Context, sender, values string) (map[string]json.RawMessage, caller, error) {
+	who, err := s.sys.Caller(ctx, sender)
+	if err != nil {
+		return nil, caller{}, err
+	}
 	if len(values) > settings.MaxRequestBytes {
-		return settings.Pending{}, fmt.Errorf("%w: the request is larger than %d bytes", errRefused, settings.MaxRequestBytes)
+		return nil, caller{}, fmt.Errorf("%w: the request is larger than %d bytes", errRefused, settings.MaxRequestBytes)
 	}
 	var wanted map[string]json.RawMessage
 	if err := json.Unmarshal([]byte(values), &wanted); err != nil {
-		return settings.Pending{}, fmt.Errorf("%w: the request is not a JSON object of keys and values", errRefused)
+		return nil, caller{}, fmt.Errorf("%w: the request is not a JSON object of keys and values", errRefused)
 	}
-	return s.request(ctx, sender, who, wanted, nil)
+	return wanted, who, nil
 }
 
-// request plans wanted for who and keeps it as a pending change.
-func (s *service) request(ctx context.Context, sender string, who caller, wanted map[string]json.RawMessage, notes []string) (settings.Pending, error) {
+// request plans wanted for who and keeps it as a pending change. p is the
+// startup PIN or recovery key when the caller sent one.
+func (s *service) request(ctx context.Context, sender string, who caller, wanted map[string]json.RawMessage, notes []string, p *proof) (settings.Pending, error) {
 	data, _, err := s.readConfig()
 	if err != nil {
 		return settings.Pending{}, err
@@ -193,7 +230,7 @@ func (s *service) request(ctx context.Context, sender string, who caller, wanted
 		return settings.Pending{}, fmt.Errorf("%w: %v", errRefused, err)
 	}
 	notes = append(notes, slowBuildNotes(change)...)
-	return s.keep(ctx, sender, who, change, append(notes, signingKeyNotes(change)...))
+	return s.keep(ctx, sender, who, change, append(notes, signingKeyNotes(change)...), p)
 }
 
 // slowBuildNotes warns when a change makes the rebuild compile large parts
@@ -231,7 +268,7 @@ func (s *service) RequestLocal(ctx context.Context, sender string, files map[str
 	if err != nil {
 		return settings.Pending{}, fmt.Errorf("%w: %v", errRefused, err)
 	}
-	return s.keep(ctx, sender, who, change, nil)
+	return s.keep(ctx, sender, who, change, nil, nil)
 }
 
 // developerMode refuses unless the configuration turns developer mode on.
@@ -251,7 +288,7 @@ func (s *service) developerMode() error {
 }
 
 // keep stores a planned change for who.
-func (s *service) keep(ctx context.Context, sender string, who caller, change settings.Change, notes []string) (settings.Pending, error) {
+func (s *service) keep(ctx context.Context, sender string, who caller, change settings.Change, notes []string, p *proof) (settings.Pending, error) {
 	change.UID, change.Session = who.UID, who.Session
 
 	s.mu.Lock()
@@ -288,6 +325,9 @@ func (s *service) keep(ctx context.Context, sender string, who caller, change se
 		if err := s.authorize(ctx, sender, change); err != nil {
 			return settings.Pending{}, err
 		}
+	}
+	if err := s.checkProof(ctx, &change, p); err != nil {
+		return settings.Pending{}, err
 	}
 	change.Asked = s.now()
 	s.mu.Lock()
@@ -436,7 +476,7 @@ func (s *service) Import(ctx context.Context, sender string, data []byte) (setti
 		}
 	}
 	log.Printf("uid %d imports a file of uid %d on device %s made %s", who.UID, file.UID, file.Device, file.Created.Format(time.RFC3339))
-	return s.request(ctx, sender, who, file.Settings, []string{note})
+	return s.request(ctx, sender, who, file.Settings, []string{note}, nil)
 }
 
 // madeOn shows when a file was made, in the device's time zone.
@@ -577,14 +617,15 @@ func (s *service) Apply(ctx context.Context, sender, id, colors string) error {
 	delete(s.pending, id)
 	log.Printf("uid %d applied %s change %s: %s", who.UID, change.Tier, id, change.KeyNames())
 	if err := s.sys.StartRebuild(ctx, colors); err != nil {
-		return fmt.Errorf("the change is written, but the rebuild did not start: %w; run rebuild", err)
+		return fmt.Errorf("the change is written, but the rebuild did not start: %w; run gjallarctl rebuild", err)
 	}
 	return nil
 }
 
-// writeConfig writes a change of keys into user.config.json. It is
-// errRefused when a key no longer holds the value the change was asked
-// against. The caller holds s.mu.
+// writeConfig writes a change of keys into user.config.json and fits the
+// developer grant to it. It is errRefused when a key no longer holds the
+// value the change was asked against, or when the change needs a grant
+// that is gone and brought no proof. The caller holds s.mu.
 func (s *service) writeConfig(change settings.Change) error {
 	data, _, err := s.readConfig()
 	if err != nil {
@@ -594,15 +635,39 @@ func (s *service) writeConfig(change settings.Change) error {
 	if err != nil {
 		return fmt.Errorf("%w: %v", errRefused, err)
 	}
-	return config.WriteText(s.configPath, updated)
+	need, covered, err := s.developerNeed(data, change)
+	if err != nil {
+		return err
+	}
+	if !covered && change.Proof == "" {
+		return fmt.Errorf("%w: the developer grant no longer covers this change; ask again", errRefused)
+	}
+	if err := config.WriteText(s.configPath, updated); err != nil {
+		return err
+	}
+	// Without the grant the root rebuild refuses the new configuration,
+	// so the rebuild does not start.
+	if err := s.updateGrant(need, change.Proof); err != nil {
+		return fmt.Errorf("the change is written, but %w; the rebuild did not start", err)
+	}
+	return nil
 }
 
 // writeLocal makes the change's folder root's copy. It is errRefused when
-// developer mode is off by now or the copy is no longer the one the change
+// developer mode is off or has no grant by now, or the copy is no longer the one the change
 // was asked against. The caller holds s.mu.
 func (s *service) writeLocal(change settings.Change) error {
 	if err := s.developerMode(); err != nil {
 		return err
+	}
+	data, _, err := s.readConfig()
+	if err != nil {
+		return err
+	}
+	if _, covered, err := s.developerNeed(data, change); err != nil {
+		return err
+	} else if !covered {
+		return fmt.Errorf("%w: developer mode has no confirmed grant; run gjallarctl settings confirm-developer first", errRefused)
 	}
 	current, err := s.readLocal(s.localPath)
 	if err != nil {

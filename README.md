@@ -40,6 +40,24 @@ interactive installer from that checkout. Re-running it reuses the checkout.
 `GJALLAR_CLONE_ONLY=1` stops after the clone. From an existing checkout,
 run `./scripts/installation/install.sh` directly.
 
+To install from `staging` or `dev` instead of `stable`, add `--channel`
+(or set `GJALLAR_CHANNEL`):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/JadeOpenServices/gjallarOS/staging/scripts/installation/install.sh | bash -s -- --channel staging
+```
+
+The script then checks out that branch. A checkout left by an earlier run
+moves to the newest commit of the channel by fast-forward, so a run that
+stopped halfway picks up the current installer and resumes. Local edits or
+local commits on that branch stop the script, and nothing is changed. The
+installed system follows the same channel. With security chip unlock, the
+first start confirms the channel when you type the disk passphrase or
+recovery key and set the PIN. Without it, run `gjallarctl luks setup` and
+then `gjallarctl settings confirm-developer` once; rebuilds wait until then.
+A preset `user.config.json` with a different `releaseChannel` stops the
+installer.
+
 That checkout only runs the installer. The installed system gets its own
 clone of the official repository in `/etc/gjallar/system`, owned by root,
 at the commit the installer was built from, with this machine's
@@ -57,7 +75,7 @@ Edit the copy, then run the installer. Secrets, LUKS passphrases, recovery
 settings, generated hardware data and backups are excluded from Git.
 
 > [!TIP]
-> After the install, apply every change with `rebuild`, not
+> After the install, apply every change with `gjallarctl rebuild`, not
 > `sudo nixos-rebuild switch --flake`. See
 > [Rebuilds and removable disks](#-rebuilds-and-removable-disks).
 
@@ -101,7 +119,7 @@ Taken in a QEMU test VM at 1920×1080.</sub>
 | **App catalogue** | One list in `user.config.json` picks the apps; each app owns its whole module. |
 | **Local AI** | Optional localhost-only Ollama with hardware-aware model selection, or a central HTTPS server with a sealed token. |
 | **Recovery** | Trusted recovery boot entry, recovery ISO, generation rollback without deleting anything newer. |
-| **Apps** | VSCodium, Thunderbird, web apps (Teams, Plane), system-wide Wine, optional Nemu. |
+| **Apps** | VSCodium, Thunderbird, web apps (Teams, Plane), Wine apps each in their own sandbox, optional Nemu. |
 | **Maintenance** | Helpers for rebuilding, cleanup, thermal status, and updates. |
 
 <details>
@@ -167,7 +185,13 @@ needs a `desc`, which is what the list shows.
 | <kbd>Super</kbd> + <kbd>Ctrl</kbd> + <kbd>K</kbd> | On-screen keyboard (touch devices) |
 
 On touch devices the on-screen keyboard also opens when the device folds
-into tablet mode and on the keyboard key some convertibles have. The HP ZBook
+into tablet mode and on the keyboard key some convertibles have. With no
+keyboard attached, the login screen and the lock screen show their own
+touch keyboard; with one attached, touch the password field to open it, and
+a key on the keyboard closes it again. The disk unlock prompt shows its touch
+keyboard on every touch device. These keyboards
+have letters, numbers and symbols only: no clipboard, emoji or word
+suggestions. The HP ZBook
 x2 bezel Quick Keys have three presets, switched with the third key from the
 top. GjallarOS maps none of them: every key sends a macro key
 (`XF86Macro1`–`15`) that no other key sends, so you can bind it in Hyprland,
@@ -196,6 +220,12 @@ it from older configs once and says so. Its browser profile in
 the Dolphin places panel. It patches KIO, so KIO, Dolphin and the file dialogs
 are compiled on the machine instead of downloaded. That adds a lot of time to
 a rebuild, so it is off by default.
+
+`"aarch64Emulation": true` lets this device build NixOS for ARM devices such as
+phones. The kernel then hands every aarch64 program to qemu-user, which runs it
+as the user who started it; set-user-ID bits on such programs are ignored.
+Nix also lists `aarch64-linux` (and `i686-linux`) in `extra-platforms`. It is a
+setting for one device and is off by default; turning it off applies at once.
 
 ### Changing settings
 
@@ -266,7 +296,8 @@ that device's (hostname, disk, boot and the like).
 ### App catalogue
 
 Optional applications live in `apps/<id>/`: `meta.json` (name, description,
-category, `default`, optional `installer` question), and a `home.nix` and/or
+category, `default`, optional `installer` question, optional `package`, the
+nixpkgs attribute of its main program), and a `home.nix` and/or
 `nixos.nix` module. Each app owns its whole module, so removing an app removes
 everything it brought in.
 
@@ -283,6 +314,56 @@ asks each app's `installer` question (today `ai`, `containers`, `nemu`,
 and the Home Manager side (`user/apps/default.nix`). The old `aiEnable`,
 `containersEnable` and `nemuEnable` keys are rejected; list `ai`,
 `containers` or `nemu` in `apps` instead.
+
+`gjallarctl apps list` shows the catalogue and what is installed;
+`gjallarctl apps add <id>` and `gjallarctl apps remove <id>` change the list
+and rebuild. `gjallarctl apps change +<id> -<id> ...` makes several changes
+with one password and one rebuild (`+` installs, `-` removes). The Apps page of
+the settings window does the same.
+
+### Settings window and gjallarHorn
+
+GjallarOS Settings (`gjallar-settings`) has two pages, also in the launcher on
+their own: Apps and gjallarHorn. gjallarHorn shows the security checks of this
+device (disk encryption, Secure Boot, USB devices, firewall, virus scan,
+updates, developer mode) and a fix button where one helps. `gjallarctl security status`
+prints the same checks. The window has no rights of its own; every change goes
+through `gjallarctl settings` and asks for the password.
+
+Each row says its state in words and has one button: Install or Remove, Turn
+on or Turn off. A click only marks the change; the button turns into Undo and
+a bar at the bottom counts the marked changes, with Discard and Apply. Apply
+installs and removes all marked apps with one password and one rebuild, then
+sets the marked Wine networks and protections. Closing the window with marked
+changes asks first.
+
+A click on an app opens its page: what it is, what it can reach, its licence
+and homepage, and the same button as its row. A Wine app's page also picks
+its program and removes it, with or without its files in `~/WineApps`. The
+licence and homepage come from the `package` in `meta.json` when the window
+is built; the window fetches nothing, and Open only goes to an https
+homepage.
+
+Some protections can be turned off, for people who run their own:
+
+| Key | Default | Switch |
+| --- | --- | --- |
+| `usbguardEnable`, `usbTrustEnforce` | `true` | USB devices |
+| `firewallEnable` | `true` | Firewall |
+| `virusScanEnable` | `true` | Virus scan |
+
+These change security-tier keys, so turning one off waits an hour away
+from home, as above. Until then the card says when the change is ready and
+offers Apply now and Keep it on. Turning a protection back on is stricter, so
+it applies at once after the password. A protection that is off shows "Off
+(your choice)" and does not ask again. The recovery system always has the firewall
+on.
+
+The virus scan is ClamAV, on demand only: no scanner daemon and no scanning of
+files as they open. freshclam fetches the signatures about once an hour (the
+first download is roughly 230 MB). Scan Downloads or Choose folder on the
+gjallarHorn page, or `gjallarctl security scan PATH`, runs `clamscan` as you
+in a sandbox without network that sees the system and your home read-only.
 
 ### Firefox add-ons
 
@@ -402,6 +483,24 @@ GjallarOS asks about the new USB device.
 
 <div align="right"><a href="#gjallaros">↑ back to top</a></div>
 
+### Old names
+
+Every rename lives in one table, `system/tools/legacy/renames.json`:
+commands, settings keys, config fields, partition labels, units and
+paths. A row holds the old name, the new name, where it was removed, the
+date after which it can go (`deleteAfter`) and the Plane or JODS item.
+
+- An old command is not run. The shell prints the new name and stops,
+  for example: GjallarOS: rebuild was removed; use gjallarctl rebuild
+- The flake check `legacy-names` fails while an old name is still used
+  outside `system/tools/legacy/`, and once a row is past its
+  `deleteAfter` date. Then the row and the last traces are removed.
+- The system does not build when an old command name is a real command
+  again.
+
+A rename adds its row in the same commit. Tests and captured device
+output may still name the old name.
+
 ## 🧬 Hardware catalog (ODDC)
 
 [ODDC](https://github.com/JadeOpenServices/oddc) is a separate project,
@@ -431,23 +530,23 @@ answer revisions before and after, the model, and whether the answer was
 fetched, kept or left unchanged. When the pinned commit differs from
 `generated/oddc/revision`, the rebuild fetches the same model again at the new
 commit and swaps it in only once complete. If that fetch fails, for example
-offline, the rebuild stops with the error and changes nothing. Without `--rebuild`, the next `rebuild` does the
+offline, the rebuild stops with the error and changes nothing. Without `--rebuild`, the next `gjallarctl rebuild` does the
 fetch. `gjallarctl oddc doctor` shows the ODDC revision the installed model
 came from.
 
-`rebuild --hardware-update [--channel stable|staging] [--switch 0|1]` does
+`gjallarctl rebuild --hardware-update [--channel stable|staging] [--switch 0|1]` does
 the same move as part of a rebuild: it runs `oddc update --flake <checkout>
 [--channel CHANNEL]` first and stops with `nothing rebuilt` if that fails.
 `--channel` moves the oddc input to the newest commit of that ODDC channel
 (`stable` when left out); no commit hash is needed. `--switch 1` (the default) rebuilds and switches right away;
-`--switch 0` only moves the pin, and the next `rebuild` applies it. It needs an
-`oddc` that knows `update --flake`. Always apply with `rebuild`, not `sudo
+`--switch 0` only moves the pin, and the next `gjallarctl rebuild` applies it. It needs an
+`oddc` that knows `update --flake`. Always apply with `gjallarctl rebuild`, not `sudo
 nixos-rebuild switch --flake`: `generated/` is untracked, so a plain git flake
 cannot see it.
 
-A plain `rebuild` never moves the pin. It asks GitHub whether the branch the
+A plain `gjallarctl rebuild` never moves the pin. It asks GitHub whether the branch the
 oddc input follows has a newer commit and, if so, prints `ODDC update
-available: OLD -> NEW. Apply with: rebuild --hardware-update`. Offline or on
+available: OLD -> NEW. Apply with: gjallarctl rebuild --hardware-update`. Offline or on
 any error it says nothing. Managed endpoints skip the check: JODS moves their
 pin.
 
@@ -464,7 +563,7 @@ validates this checkout on the device. Validation evidence goes to ODDC through
 ## 💾 Rebuilds and removable disks
 
 Every GjallarOS system names its checkout in `/etc/gjallar/repository`
-(`dotfilesDir`), so `rebuild`, `gjallarctl oddc update` and the other commands
+(`dotfilesDir`), so `gjallarctl rebuild`, `gjallarctl oddc update` and the other commands
 find it from any directory. `--repo PATH`, `GJALLAROS_REPO` and the checkout you
 last rebuilt from take precedence. Direct host flake builds fail unless the
 source was staged by `gjallarctl`; installer and recovery deployment also use
@@ -475,7 +574,7 @@ source. Package builds and recovery ISO builds remain available directly.
 To bring an install up to date with upstream, run:
 
 ```bash
-rebuild --update
+gjallarctl rebuild --update
 ```
 
 It fast-forwards that checkout to its release channel and then rebuilds.
@@ -483,11 +582,17 @@ The channel is `releaseChannel` in `user.config.json`: `stable` (the
 default), `staging` or `dev`. Change it with
 `gjallarctl settings set releaseChannel=staging`. A move to `stable` applies
 at once; any other move waits like other critical settings.
+Moving to `staging` or `dev`, or turning on `developerMode`, also asks for
+the startup PIN or the recovery key once, after the password. Without a PIN,
+press Enter and type the recovery key. Moving back to `stable` and turning
+developer mode off ask for neither, and the next move away asks again.
+A device that was on `staging` or `dev` before this check refuses changes
+and rebuilds until you run `gjallarctl settings confirm-developer` once.
 Local commits or uncommitted edits stop the update, and nothing is rebuilt.
 A checkout that is ahead of its channel stays where it is until the channel
 catches up; it never goes back to an older commit.
-`rebuild --update-inputs` moves every flake input first (for development
-checkouts). `rebuild --help` lists every option.
+`gjallarctl rebuild --update-inputs` moves every flake input first (for development
+checkouts). `gjallarctl rebuild --help` lists every option.
 
 When `dotfilesDir` is `/etc/gjallar/system`, root owns the checkout and
 builds it only as it is on the official origin. `--repo`, `--host`,
@@ -519,10 +624,10 @@ sudo gjallar-system-rebuild
 `system clone` clones the official repository at the running commit and
 copies `generated/` and `user.config.json` from the old checkout as files.
 It never runs git in the old checkout. The rebuild switches
-`/etc/gjallar/repository` to the new checkout; plain `rebuild` uses it from
+`/etc/gjallar/repository` to the new checkout; plain `gjallarctl rebuild` uses it from
 then on. The old checkout stays where it is.
 
-When `/etc/gjallar/system` is missing or broken, `rebuild` says so and names
+When `/etc/gjallar/system` is missing or broken, `gjallarctl rebuild` says so and names
 the same `system clone` step.
 
 To try a `gjallarctl` change before rebuilding, run it from the checkout with
@@ -535,13 +640,15 @@ whole directory into the Nix store, untracked files and VM disks included.
 ### Release cache
 
 GjallarOS patches a few packages (Noctalia, its greeter, the Nextcloud client
-with OpenVFS, OpenCode, Hyprland, Ghostty, Dolphin and others), so cache.nixos.org does not have
-them and every machine compiled them itself. For each `v*` release tag,
+with OpenVFS, OpenCode, Hyprland, Ghostty, Dolphin and the KDE apps that
+come with it, and others), so cache.nixos.org does not have them and every
+machine compiled them itself. For each `v*` release tag,
 `.github/workflows/cache.yml` builds them (flake package `prebuilt`), signs
 them and uploads them as files of the `nix-cache` release. Those files are a
 plain Nix binary cache. Each tag adds to it, so a machine on `main` downloads a
 package whenever it matches one built for any tag. Anything missing still
-builds locally.
+builds locally. The workflow itself downloads from the same cache, so a tag
+builds only the packages that changed since the tags before it.
 
 `deployment/binary-cache.json` names the cache and its public key:
 
@@ -552,7 +659,7 @@ builds locally.
 }
 ```
 
-Machines add it to `nix.conf`, and `rebuild` and the installer pass it on the
+Machines add it to `nix.conf`, and `gjallarctl rebuild` and the installer pass it on the
 command line too, so the first install uses it as well. Nix only accepts
 files signed with that key.
 
@@ -640,7 +747,7 @@ It asks you to type `ROLLBACK-HOME` (or `ROLLBACK-CONFIG` for a `config.`
 snapshot). The snapshot itself stays as it was; the current `/home` is kept
 as a read-only copy in the list under "replaced by a rollback". When `/home`
 is in use, the change takes effect at the next start. After a settings
-rollback, run `rebuild` once the system is up so the system matches the
+rollback, run `gjallarctl rebuild` once the system is up so the system matches the
 settings again. `sudo gjallar-recover snapshot-drop / NAME` deletes a kept
 copy once you no longer need it.
 
@@ -663,12 +770,32 @@ cannot manage the machine. A system installed without it gets it with:
 gjallarctl secure-boot setup
 ```
 
-It takes the installer's steps: it checks the firmware state, creates the keys
-and shows their recovery archive, turns on `secureBootEnable`, rebuilds and
-offers to restart into firmware setup. After the restart the boot services
-enroll the keys and verify them. Run the command again after a step was
-interrupted; it picks up where it stopped. `gjallarctl secure-boot status`
-shows the current state.
+On a machine that still has its maker's keys, `setup` goes through shim and
+leaves the firmware keys alone. The firmware starts shim, which is signed by
+Microsoft, and shim checks GjallarOS's own key, which you confirm once in
+MokManager. This works on any model whose firmware trusts the pinned shim,
+also without an ODDC entry. The command checks that first: db must hold the
+certificate that signed shim, and dbx and shim's SBAT level must not revoke
+it. Each run does one step and says which restart comes next:
+
+1. Create the key, turn on `secureBootEnable` and `secureBootShim`, rebuild,
+   restart.
+2. Queue the key for MokManager (`mokutil --import`, with a one-time
+   password), restart and confirm it on the blue MokManager screen.
+3. Turn on Secure Boot in the firmware setup. The first Secure Boot start
+   records the switch and verifies it.
+
+`gjallarctl secure-boot setup --own-keys` replaces the firmware keys with
+GjallarOS keys instead. It needs an ODDC Secure Boot setup for the model. The
+command also takes this path on its own when the firmware is already in Setup
+Mode, or when db or dbx would stop shim.
+
+The own-keys path takes the installer's steps: it checks the firmware state,
+creates the keys and shows their recovery archive, turns on
+`secureBootEnable`, rebuilds and offers to restart into firmware setup. After
+the restart the boot services enroll the keys and verify them. On both paths,
+run the command again after a step was interrupted; it picks up where it
+stopped. `gjallarctl secure-boot status` shows the current state.
 
 Some firmware empties its revocation list (dbx) along with its keys. When the
 ODDC setup wants dbx kept, the firmware's own default list is written back
@@ -718,12 +845,18 @@ and review devices first.
 With an encrypted root, the installer also asks "Block unknown USB devices from
 the first boot?" (default no). Say no on a desktop with a USB keyboard: it is
 not built in, so it stays blocked until approved. Enforcement can be turned on
-later with `"usbTrustEnforce": true` in `user.config.json` and a `rebuild`. To
+later with `"usbTrustEnforce": true` in `user.config.json` and a `gjallarctl rebuild`. To
 turn it off, run `sudo gjallarctl usb disarm` first and enter the disk
-encryption passphrase, then set it back to `false` and `rebuild`. Disarm alone
-is temporary: the broker re-arms from the config on its next restart. The other
+encryption passphrase, then set it back to `false` and `gjallarctl rebuild`. Disarm alone
+is temporary: the broker re-arms from the config on its next restart, or right
+away with `sudo gjallarctl usb arm`. The other
 order is refused by `gjallarctl settings`; done by hand, USBGuard keeps
 blocking unknown devices at boot while the stored state still says armed.
+
+Turning USB trust off altogether (`"usbguardEnable": false`) takes effect for
+new USB devices at the next reboot. Until then a newly plugged device stays
+off: USBGuard does not hand the ports back to the kernel's default when it
+stops, because anything that stops it would then let every device in.
 
 On a machine with TPM2 the installer also asks "Let approved USB devices expire
 when unused?" (default no). With it on, an approved external device that was
@@ -734,6 +867,13 @@ days before a device expires, a notice offers to renew it. Built-in devices
 never expire. Without a built-in USB keyboard, the keyboard and mouse used last
 never expire either. `gjallarctl settings` turns it on or shortens it at once;
 turning it off (`0`) or lengthening it waits out the security delay.
+
+With enforcement on, approving a USB device does not open its storage. Every
+stick, memory card, disc and disk, a disk in a dock or enclosure included,
+stays closed until you open it from its notice. A disk in a dock is named by
+the disk inside, then the dock. Storage closes again when the medium is
+swapped, when the device is unplugged, and when the USB trust service
+restarts. A rebuild can restart it, so unmount USB disks before a rebuild.
 
 The review dialog opens in a simple view. "Techy view" shows IDs, ports and
 interfaces for that dialog only. The "Always techy view" box writes
@@ -865,5 +1005,7 @@ later; see [LICENSE](LICENSE). Bundled parts keep their own licenses:
 - [`pkgs/monique`](https://github.com/vardstein/monique): GPL-3.0.
 - [`apps/nemu/module.nix`](apps/nemu/module.nix): nemu's upstream NixOS
   module, BSD-2-Clause, license text in the file header.
+- [`themes/brand/openjade`](themes/brand/openjade/README.md): the openJade
+  logo is a trademark and not covered by the AGPL.
 
 <div align="right"><a href="#gjallaros">↑ back to top</a></div>

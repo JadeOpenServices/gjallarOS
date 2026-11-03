@@ -1,0 +1,624 @@
+diff --git a/meson.build b/meson.build
+index a96f242a2d..ade8a722a0 100644
+--- a/meson.build
++++ b/meson.build
+@@ -79,6 +79,7 @@ pangoft2_dep        = dependency('pangoft2')
+ harfbuzz_dep        = dependency('harfbuzz')
+ librsvg_dep         = dependency('librsvg-2.0')
+ xkbcommon_dep       = dependency('xkbcommon')
++libudev_dep         = dependency('libudev')
+ glib_dep            = dependency('glib-2.0')
+ gobject_dep         = dependency('gobject-2.0')
+ gio_dep             = dependency('gio-2.0')
+@@ -1082,6 +1083,7 @@ _noctalia_system_dependencies = [
+   harfbuzz_dep,
+   librsvg_dep,
+   xkbcommon_dep,
++  libudev_dep,
+   glib_dep,
+   gobject_dep,
+   gio_dep,
+diff --git a/src/shell/lockscreen/lock_screen.cpp b/src/shell/lockscreen/lock_screen.cpp
+index ae398eb9fe..15e57b7c60 100644
+--- a/src/shell/lockscreen/lock_screen.cpp
++++ b/src/shell/lockscreen/lock_screen.cpp
+@@ -26,10 +26,14 @@
+ #include <algorithm>
+ #include <chrono>
+ #include <cmath>
++#include <cstring>
+ #include <ctime>
++#include <libudev.h>
++#include <linux/input.h>
+ #include <string>
+ #include <thread>
+ #include <utility>
++#include <xkbcommon/xkbcommon-keysyms.h>
+ 
+ namespace {
+ 
+@@ -86,6 +90,50 @@ namespace {
+     std::unreachable();
+   }
+ 
++  // True when a keyboard is attached that a person can type on: built in,
++  // USB or similar. Virtual devices (on-screen keyboards, uinput tools) and
++  // Bluetooth keyboards do not count, since a Bluetooth keyboard may not be
++  // paired or reachable at the lock screen. When unsure, report no keyboard:
++  // showing the on-screen keyboard is the safe side.
++  bool hasPhysicalKeyboard() {
++    udev* ctx = udev_new();
++    if (ctx == nullptr) {
++      return false;
++    }
++    bool found = false;
++    udev_enumerate* enumerate = udev_enumerate_new(ctx);
++    if (enumerate != nullptr) {
++      udev_enumerate_add_match_subsystem(enumerate, "input");
++      udev_enumerate_add_match_sysname(enumerate, "event*");
++      udev_enumerate_add_match_property(enumerate, "ID_INPUT_KEYBOARD", "1");
++      udev_enumerate_scan_devices(enumerate);
++      udev_list_entry* entry = nullptr;
++      udev_list_entry_foreach(entry, udev_enumerate_get_list_entry(enumerate)) {
++        const char* syspath = udev_list_entry_get_name(entry);
++        if (syspath == nullptr || std::strstr(syspath, "/devices/virtual/") != nullptr) {
++          continue;
++        }
++        udev_device* device = udev_device_new_from_syspath(ctx, syspath);
++        if (device == nullptr) {
++          continue;
++        }
++        udev_device* parent = udev_device_get_parent_with_subsystem_devtype(device, "input", nullptr);
++        const char* bus = parent != nullptr ? udev_device_get_sysattr_value(parent, "id/bustype") : nullptr;
++        if (bus != nullptr) {
++          const unsigned long busType = std::strtoul(bus, nullptr, 16);
++          found = busType != BUS_BLUETOOTH && busType != BUS_VIRTUAL;
++        }
++        udev_device_unref(device);
++        if (found) {
++          break;
++        }
++      }
++      udev_enumerate_unref(enumerate);
++    }
++    udev_unref(ctx);
++    return found;
++  }
++
+   // An output can only carry a lock surface once it is complete and has real geometry.
+   bool hasUsableOutput(const WaylandConnection& wayland) {
+     return std::ranges::any_of(wayland.outputs(), [](const WaylandOutput& output) {
+@@ -246,6 +294,7 @@ bool LockScreen::lock() {
+   clearSensitiveString(m_password);
+   m_status = i18n::tr("lockscreen.waiting");
+   m_statusIsError = false;
++  m_oskVisible = !hasPhysicalKeyboard();
+   syncInstances();
+   if (m_instances.empty()) {
+     kLog.warn("no outputs available for lock screen");
+@@ -327,6 +376,7 @@ void LockScreen::finishUnlock() {
+   clearSensitiveString(m_password);
+   m_status.clear();
+   m_statusIsError = false;
++  m_oskVisible = false;
+   m_wayland->stopKeyRepeat();
+   invalidateDesktopCaptures();
+   m_activeTransition.reset();
+@@ -525,6 +575,14 @@ void LockScreen::onKeyboardEvent(const KeyboardEvent& event) {
+     return;
+   }
+ 
++  // Typing on a real keyboard puts the on-screen one away. Media and other
++  // non-text keys leave it alone.
++  if (m_oskVisible
++      && (event.utf32 != 0 || event.sym == XKB_KEY_BackSpace || event.sym == XKB_KEY_Return
++          || event.sym == XKB_KEY_KP_Enter)) {
++    setOskVisibleOnSurfaces(false);
++  }
++
+   LockSurface* targetSurface = nullptr;
+   if (m_pointerSurface != nullptr) {
+     for (auto& instance : m_instances) {
+@@ -602,6 +660,15 @@ bool LockScreen::tryActionShortcut(std::uint32_t sym, std::uint32_t modifiers) {
+ 
+ void LockScreen::markOutputsWoke() { m_wokeAtMillis = bootTimeMillis(); }
+ 
++void LockScreen::setOskVisibleOnSurfaces(bool visible) {
++  m_oskVisible = visible;
++  for (auto& instance : m_instances) {
++    if (instance.surface != nullptr) {
++      instance.surface->setOskVisible(visible);
++    }
++  }
++}
++
+ bool LockScreen::isActive() const noexcept { return m_lockPending || m_locked; }
+ 
+ bool LockScreen::isInGracePeriod() const noexcept {
+@@ -929,6 +996,7 @@ void LockScreen::handleFinished(void* data, ext_session_lock_v1* /*lock*/) {
+   self->invalidateDesktopCaptures();
+   self->m_activeTransition.reset();
+   self->m_transitionSuppressed = false;
++  self->m_oskVisible = false;
+   if (wasLockedInteractive && self->m_onSessionUnlocked) {
+     self->m_onSessionUnlocked();
+   } else if (!wasLockedInteractive && self->m_onLockAborted) {
+@@ -1318,6 +1386,8 @@ void LockScreen::createInstance(const WaylandOutput& output) {
+   surface->setOnLogin([this]() { tryAuthenticate(); });
+   surface->setOnCycleLayout([this]() { cycleKeyboardLayout(); });
+   surface->setOnPasswordChanged([this](const std::string& value) { handlePasswordEdited(value); });
++  surface->setOskVisible(m_oskVisible);
++  surface->setOnOskVisibilityRequest([this](bool visible) { setOskVisibleOnSurfaces(visible); });
+   surface->setLoginBoxServices(m_sessionActions, m_mpris, m_weather, m_httpClient);
+   surface->setPromptState(m_user, m_password, m_status, m_statusIsError, m_authenticating);
+   applyIndicatorsToSurface(*surface);
+diff --git a/src/shell/lockscreen/lock_screen.h b/src/shell/lockscreen/lock_screen.h
+index c66a269a16..bc619264a0 100644
+--- a/src/shell/lockscreen/lock_screen.h
++++ b/src/shell/lockscreen/lock_screen.h
+@@ -119,6 +119,7 @@ private:
+   [[nodiscard]] bool captureDesktopSnapshots();
+   void invalidateDesktopCaptures();
+   [[nodiscard]] bool shouldCaptureDesktop() const;
++  void setOskVisibleOnSurfaces(bool visible);
+   [[nodiscard]] bool allSurfacesReady() const;
+   bool tryFlushPendingAfterLocked();
+   void dispatchPendingAfterLocked(bool timedOut = false);
+@@ -184,6 +185,9 @@ private:
+   bool m_lockStarting = false;
+   bool m_desktopCapturesPrimed = false;
+   std::uint64_t m_desktopCaptureGeneration = 0;
++  // On-screen keyboard shown on every lock surface; starts shown when no
++  // physical keyboard is attached.
++  bool m_oskVisible = false;
+   bool m_lockDeferred = false;
+   bool m_transitionSuppressed = false;
+   bool m_unlocking = false;
+diff --git a/src/shell/lockscreen/lock_surface.cpp b/src/shell/lockscreen/lock_surface.cpp
+index 8cfab4149a..641705975e 100644
+--- a/src/shell/lockscreen/lock_surface.cpp
++++ b/src/shell/lockscreen/lock_surface.cpp
+@@ -40,6 +40,7 @@
+ #include <tuple>
+ #include <utility>
+ #include <wayland-client-core.h>
++#include <xkbcommon/xkbcommon.h>
+ 
+ namespace {
+ 
+@@ -57,6 +58,59 @@ namespace {
+   constexpr int kForecastDayCountAlone = 5;
+   constexpr float kWeatherCurrentMinText = 56.0F;
+ 
++  // On-screen keyboard. Each page fills the same 26 character keys (rows of
++  // 10, 9 and 7); a 0 leaves that key hidden. Together the pages cover every
++  // printable ASCII character, so any password typed on a hardware keyboard
++  // can be typed here too.
++  struct OskRows {
++    std::u32string_view top;
++    std::u32string_view middle;
++    std::u32string_view bottom;
++  };
++  constexpr std::size_t kOskTopCount = 10;
++  constexpr std::size_t kOskMiddleCount = 9;
++  constexpr OskRows kOskLettersLower{U"qwertyuiop", U"asdfghjkl", U"zxcvbnm"};
++  constexpr OskRows kOskLettersUpper{U"QWERTYUIOP", U"ASDFGHJKL", U"ZXCVBNM"};
++  constexpr OskRows kOskSymbols{U"1234567890", U"@#$%&*-+(", U")!\"':;/"};
++  constexpr OskRows kOskMoreSymbols{U"[]{}<>=^_~", U",.?`|\\", U""};
++  constexpr OskRows kOskAccentsLower{U"äöüßéèêëàâ", U"áíóúñçîïô", U"ìòùûœæå"};
++  constexpr OskRows kOskAccentsUpper{U"ÄÖÜßÉÈÊËÀÂ", U"ÁÍÓÚÑÇÎÏÔ", U"ÌÒÙÛŒÆÅ"};
++  constexpr float kOskMaxWidth = 1100.0F;
++  constexpr float kOskMinKeyHeight = 44.0F;
++  constexpr float kOskMaxKeyHeight = 72.0F;
++
++  [[nodiscard]] char32_t oskRowsCharAt(const OskRows& rows, std::size_t index) {
++    const auto pick = [](std::u32string_view row, std::size_t i) -> char32_t { return i < row.size() ? row[i] : 0; };
++    if (index < kOskTopCount) {
++      return pick(rows.top, index);
++    }
++    index -= kOskTopCount;
++    if (index < kOskMiddleCount) {
++      return pick(rows.middle, index);
++    }
++    return pick(rows.bottom, index - kOskMiddleCount);
++  }
++
++  [[nodiscard]] std::string encodeUtf8(char32_t cp) {
++    std::string out;
++    if (cp < 0x80) {
++      out.push_back(static_cast<char>(cp));
++    } else if (cp < 0x800) {
++      out.push_back(static_cast<char>(0xC0 | (cp >> 6)));
++      out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
++    } else if (cp < 0x10000) {
++      out.push_back(static_cast<char>(0xE0 | (cp >> 12)));
++      out.push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3F)));
++      out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
++    } else {
++      out.push_back(static_cast<char>(0xF0 | (cp >> 18)));
++      out.push_back(static_cast<char>(0x80 | ((cp >> 12) & 0x3F)));
++      out.push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3F)));
++      out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
++    }
++    return out;
++  }
++
+   [[nodiscard]] int fitForecastDays(
+       Renderer& renderer, float weatherBudget, float weatherGlyphSize, float forecastGlyphSize, float captionSize,
+       int maxDays
+@@ -565,6 +619,7 @@ LockSurface::LockSurface(WaylandConnection& connection, ConfigService* config) :
+     transitionCover->setZIndex(1000);
+     m_transitionCover = static_cast<LockscreenTransitionCover*>(m_root.addChild(std::move(transitionCover)));
+   }
++  buildOsk();
+ 
+   m_inputDispatcher.setSceneRoot(&m_root);
+   m_inputDispatcher.setCursorShapeCallback([this](std::uint32_t serial, std::uint32_t shape) {
+@@ -680,10 +735,272 @@ void LockSurface::setLockedState(bool locked) {
+     focusPasswordField();
+   } else {
+     m_inputDispatcher.setFocus(nullptr);
++    setOskVisible(false);
+   }
+   requestUpdate();
+ }
+ 
++void LockSurface::setOskVisible(bool visible) {
++  if (m_oskVisible == visible) {
++    return;
++  }
++  m_oskVisible = visible;
++  if (!visible) {
++    // Open on the letters page next time, as phones do.
++    m_oskPage = OskPage::Letters;
++    m_oskShift = OskShift::Off;
++    syncOskKeys();
++  }
++  requestLayout();
++}
++
++void LockSurface::setOnOskVisibilityRequest(std::function<void(bool)> onRequest) {
++  m_onOskVisibilityRequest = std::move(onRequest);
++}
++
++void LockSurface::buildOsk() {
++  {
++    auto layer = ui::node({});
++    // Above the login and status panels: the keyboard is drawn last.
++    layer->setZIndex(8);
++    layer->setVisible(false);
++    m_oskLayer = m_root.addChild(std::move(layer));
++  }
++
++  m_oskLayer->addChild(
++      ui::flex(
++          FlexDirection::Horizontal,
++          {
++              .out = &m_oskPanel,
++              .configure = [](Flex& flex) { flex.setZIndex(0); },
++          }
++      )
++  );
++
++  // Keys never take keyboard focus: the password field keeps it, and the
++  // keyboard only ever types into that field. It has no clipboard, emoji,
++  // settings or launch keys and no word prediction, and no key previews the
++  // pressed character above the keyboard.
++  const auto addKey = [this](Button** out, std::optional<std::string> glyph, ButtonVariant variant,
++                             std::function<void()> onClick) {
++    m_oskLayer->addChild(
++        ui::button({
++            .out = out,
++            .glyph = std::move(glyph),
++            .variant = variant,
++            .onClick = std::move(onClick),
++            .configure =
++                [](Button& button) {
++                  button.setZIndex(1);
++                  button.setTabStop(false);
++                },
++        })
++    );
++  };
++
++  for (std::size_t i = 0; i < kOskCharKeyCount; ++i) {
++    addKey(&m_oskCharKeys[i], std::nullopt, ButtonVariant::Secondary, [this, i]() { oskTypeChar(i); });
++  }
++  addKey(&m_oskShiftKey, "arrow-big-up", ButtonVariant::Default, [this]() { oskCycleShift(); });
++  addKey(&m_oskSymbolShiftKey, std::nullopt, ButtonVariant::Default, [this]() {
++    oskSetPage(m_oskPage == OskPage::Symbols ? OskPage::MoreSymbols : OskPage::Symbols);
++  });
++  addKey(&m_oskBackspaceKey, "backspace", ButtonVariant::Default, [this]() { oskSendKey(XKB_KEY_BackSpace, 0); });
++  addKey(&m_oskPageKey, std::nullopt, ButtonVariant::Default, [this]() {
++    const bool letters = m_oskPage == OskPage::Letters || m_oskPage == OskPage::Accents;
++    oskSetPage(letters ? OskPage::Symbols : OskPage::Letters);
++  });
++  addKey(&m_oskAccentKey, std::nullopt, ButtonVariant::Default, [this]() {
++    oskSetPage(m_oskPage == OskPage::Accents ? OskPage::Letters : OskPage::Accents);
++  });
++  addKey(&m_oskSpaceKey, std::nullopt, ButtonVariant::Secondary, [this]() { oskSendKey(XKB_KEY_space, U' '); });
++  addKey(&m_oskHideKey, "keyboard-hide", ButtonVariant::Default, [this]() {
++    if (m_onOskVisibilityRequest) {
++      m_onOskVisibilityRequest(false);
++    }
++  });
++  addKey(&m_oskEnterKey, "corner-down-left", ButtonVariant::Primary, [this]() {
++    if (m_locked && !m_blackout && m_onLogin) {
++      m_onLogin();
++    }
++  });
++  m_oskAccentKey->setText("àé");
++
++  syncOskKeys();
++}
++
++char32_t LockSurface::oskCharAt(std::size_t index) const {
++  const bool upper = m_oskShift != OskShift::Off;
++  switch (m_oskPage) {
++  case OskPage::Letters:
++    return oskRowsCharAt(upper ? kOskLettersUpper : kOskLettersLower, index);
++  case OskPage::Symbols:
++    return oskRowsCharAt(kOskSymbols, index);
++  case OskPage::MoreSymbols:
++    return oskRowsCharAt(kOskMoreSymbols, index);
++  case OskPage::Accents:
++    return oskRowsCharAt(upper ? kOskAccentsUpper : kOskAccentsLower, index);
++  }
++  return 0;
++}
++
++void LockSurface::syncOskKeys() {
++  if (m_oskLayer == nullptr) {
++    return;
++  }
++  for (std::size_t i = 0; i < kOskCharKeyCount; ++i) {
++    const char32_t cp = oskCharAt(i);
++    m_oskCharKeys[i]->setVisible(cp != 0);
++    if (cp != 0) {
++      m_oskCharKeys[i]->setText(encodeUtf8(cp));
++    }
++  }
++
++  const bool symbols = m_oskPage == OskPage::Symbols || m_oskPage == OskPage::MoreSymbols;
++  m_oskShiftKey->setVisible(!symbols);
++  m_oskShiftKey->setGlyph(m_oskShift == OskShift::Locked ? "arrow-big-up-lines" : "arrow-big-up");
++  m_oskShiftKey->setSelected(m_oskShift != OskShift::Off);
++  m_oskSymbolShiftKey->setVisible(symbols);
++  m_oskSymbolShiftKey->setText(m_oskPage == OskPage::MoreSymbols ? "2/2" : "1/2");
++  m_oskPageKey->setText(symbols ? "ABC" : "?123");
++  m_oskAccentKey->setSelected(m_oskPage == OskPage::Accents);
++  requestLayout();
++}
++
++void LockSurface::oskTypeChar(std::size_t index) {
++  const char32_t cp = oskCharAt(index);
++  if (cp == 0) {
++    return;
++  }
++  oskSendKey(xkb_utf32_to_keysym(cp), cp);
++  if (m_oskShift == OskShift::Once) {
++    m_oskShift = OskShift::Off;
++    syncOskKeys();
++  }
++}
++
++void LockSurface::oskSendKey(std::uint32_t sym, std::uint32_t utf32) {
++  if (!m_locked || m_blackout || m_passwordField == nullptr) {
++    return;
++  }
++  // Pressing a key may have moved focus; the keyboard only types into the
++  // password field. No modifiers are ever sent, so no shortcut can fire.
++  focusPasswordField();
++  m_inputDispatcher.keyEvent(sym, utf32, 0, true, false);
++  m_inputDispatcher.keyEvent(sym, utf32, 0, false, false);
++  focusPasswordField();
++}
++
++void LockSurface::oskCycleShift() {
++  switch (m_oskShift) {
++  case OskShift::Off:
++    m_oskShift = OskShift::Once;
++    break;
++  case OskShift::Once:
++    m_oskShift = OskShift::Locked;
++    break;
++  case OskShift::Locked:
++    m_oskShift = OskShift::Off;
++    break;
++  }
++  syncOskKeys();
++}
++
++void LockSurface::oskSetPage(OskPage page) {
++  m_oskPage = page;
++  if (page == OskPage::Symbols || page == OskPage::MoreSymbols) {
++    m_oskShift = OskShift::Off;
++  }
++  syncOskKeys();
++}
++
++float LockSurface::layoutOsk(
++    Renderer& renderer, float sw, float sh, bool show, const lockscreen_login_box::LoginBoxStyle& style
++) {
++  if (m_oskLayer == nullptr) {
++    return sh;
++  }
++  m_oskLayer->setVisible(show);
++  if (!show) {
++    return sh;
++  }
++
++  const float pad = Style::spaceSm;
++  const float gap = Style::spaceXs;
++  const float kbWidth = std::min(sw, kOskMaxWidth);
++  const float keyW = std::floor((kbWidth - 2.0F * pad - 9.0F * gap) / 10.0F);
++  const float keyH = std::round(std::clamp(sh * 0.075F, kOskMinKeyHeight, kOskMaxKeyHeight));
++  const float kbHeight = 4.0F * keyH + 3.0F * gap + 2.0F * pad;
++  const float kbX = std::round((sw - kbWidth) * 0.5F);
++  const float kbY = sh - kbHeight;
++  const float rowW = 10.0F * keyW + 9.0F * gap;
++  const float x0 = kbX + std::round((kbWidth - rowW) * 0.5F);
++  const float wideW = 1.5F * keyW + 0.5F * gap;
++  const float fontSize = std::round(keyH * 0.4F);
++  const float radius = Style::scaledRadius(style.inputRadius);
++
++  m_oskLayer->setPosition(0.0F, 0.0F);
++  m_oskLayer->setSize(sw, sh);
++
++  m_oskPanel->setFill(style.panelFill);
++  m_oskPanel->setBorder(colorForRole(ColorRole::OutlineVariant, style.panelOpacity), Style::borderWidth);
++  m_oskPanel->setRadius(Style::scaledRadius(style.panelRadius));
++  m_oskPanel->setSoftness(1.0F);
++  m_oskPanel->setMinWidth(kbWidth);
++  m_oskPanel->setMaxWidth(kbWidth);
++  m_oskPanel->setMinHeight(kbHeight);
++  m_oskPanel->setMaxHeight(kbHeight);
++  m_oskPanel->arrange(renderer, LayoutRect{kbX, kbY, kbWidth, kbHeight});
++
++  const auto place = [&](Button* key, float x, float y, float w, bool text) {
++    key->setRadius(radius);
++    if (text) {
++      key->setFontSize(fontSize);
++    } else {
++      key->setGlyphSize(fontSize);
++    }
++    key->setMinWidth(w);
++    key->setMaxWidth(w);
++    key->setControlHeight(keyH);
++    key->arrange(renderer, LayoutRect{x, y, w, keyH});
++  };
++
++  const float rowY0 = kbY + pad;
++  const float step = keyW + gap;
++  for (std::size_t i = 0; i < kOskTopCount; ++i) {
++    place(m_oskCharKeys[i], x0 + static_cast<float>(i) * step, rowY0, keyW, true);
++  }
++  const float rowY1 = rowY0 + keyH + gap;
++  const float x1 = x0 + std::round(step * 0.5F);
++  for (std::size_t i = 0; i < kOskMiddleCount; ++i) {
++    place(m_oskCharKeys[kOskTopCount + i], x1 + static_cast<float>(i) * step, rowY1, keyW, true);
++  }
++  const float rowY2 = rowY1 + keyH + gap;
++  place(m_oskShiftKey, x0, rowY2, wideW, false);
++  place(m_oskSymbolShiftKey, x0, rowY2, wideW, true);
++  const float x2 = x0 + wideW + gap;
++  const std::size_t bottomCount = kOskCharKeyCount - kOskTopCount - kOskMiddleCount;
++  for (std::size_t i = 0; i < bottomCount; ++i) {
++    place(m_oskCharKeys[kOskTopCount + kOskMiddleCount + i], x2 + static_cast<float>(i) * step, rowY2, keyW, true);
++  }
++  place(m_oskBackspaceKey, x0 + rowW - wideW, rowY2, wideW, false);
++
++  const float rowY3 = rowY2 + keyH + gap;
++  const float spaceW = 5.0F * keyW + 4.0F * gap;
++  float x = x0;
++  place(m_oskPageKey, x, rowY3, wideW, true);
++  x += wideW + gap;
++  place(m_oskAccentKey, x, rowY3, keyW, true);
++  x += keyW + gap;
++  place(m_oskSpaceKey, x, rowY3, spaceW, true);
++  x += spaceW + gap;
++  place(m_oskHideKey, x, rowY3, keyW, false);
++  x += keyW + gap;
++  place(m_oskEnterKey, x, rowY3, wideW, false);
++
++  return kbY;
++}
++
+ bool LockSurface::passwordFieldContainsPoint(float sceneX, float sceneY) const {
+   return m_passwordField != nullptr && m_passwordField->containsScenePoint(sceneX, sceneY);
+ }
+@@ -989,6 +1306,10 @@ void LockSurface::onPointerEvent(const PointerEvent& event) {
+     if (m_locked && pressed && passwordFieldContainsPoint(x, y)) {
+       focusPasswordField();
+     }
++    // A touch anywhere on the lock screen brings up the on-screen keyboard.
++    if (event.touch && pressed && m_locked && !m_oskVisible && m_onOskVisibilityRequest) {
++      m_onOskVisibilityRequest(true);
++    }
+     m_inputDispatcher.pointerButton(x, y, event.button, pressed, event.serial, event.time, event.touch);
+     if (m_locked && pressed && passwordFieldContainsPoint(x, y)) {
+       focusPasswordField();
+@@ -1237,6 +1558,9 @@ void LockSurface::layoutScene(std::uint32_t width, std::uint32_t height) {
+     }
+     layoutTransitionCover();
+     syncTransitionCover();
++    if (m_oskLayer != nullptr) {
++      m_oskLayer->setVisible(false);
++    }
+     return;
+   }
+ 
+@@ -1289,6 +1613,13 @@ void LockSurface::layoutScene(std::uint32_t width, std::uint32_t height) {
+   panelX = util::clampOrdered(panelX, Style::spaceLg, sw - panelWidth - Style::spaceLg);
+   panelY = util::clampOrdered(panelY, Style::spaceLg, sh - panelHeight - Style::spaceLg);
+ 
++  // Keep the login box above the on-screen keyboard.
++  const bool showOsk = m_oskVisible && m_locked && loginVisible;
++  const float oskTop = layoutOsk(renderer, sw, sh, showOsk, loginStyle);
++  if (showOsk) {
++    panelY = std::max(Style::spaceLg, std::min(panelY, oskTop - Style::spaceLg - panelHeight));
++  }
++
+   m_root.setSize(sw, sh);
+ 
+   m_backgroundLayer->setPosition(0.0F, 0.0F);
+diff --git a/src/shell/lockscreen/lock_surface.h b/src/shell/lockscreen/lock_surface.h
+index 5824692ddc..47f4528762 100644
+--- a/src/shell/lockscreen/lock_surface.h
++++ b/src/shell/lockscreen/lock_surface.h
+@@ -78,6 +78,11 @@ public:
+   void setOnLogin(std::function<void()> onLogin);
+   void setOnCycleLayout(std::function<void()> onCycleLayout);
+   void setOnPasswordChanged(std::function<void(const std::string&)> onPasswordChanged);
++  // On-screen keyboard for touch-only machines. The lock screen owns the
++  // shown/hidden state for all outputs; a surface asks for a change through
++  // the request callback (touch shows it, the hide key hides it).
++  void setOskVisible(bool visible);
++  void setOnOskVisibilityRequest(std::function<void(bool)> onRequest);
+   void setLoginBoxServices(
+       SessionActionRunner* sessionActions, MprisService* mpris, const WeatherService* weather, HttpClient* httpClient
+   );
+@@ -154,6 +159,21 @@ private:
+   [[nodiscard]] bool passwordFieldContainsPoint(float sceneX, float sceneY) const;
+   void focusPasswordField();
+ 
++  enum class OskPage : std::uint8_t { Letters, Symbols, MoreSymbols, Accents };
++  enum class OskShift : std::uint8_t { Off, Once, Locked };
++  static constexpr std::size_t kOskCharKeyCount = 26;
++
++  void buildOsk();
++  void syncOskKeys();
++  [[nodiscard]] char32_t oskCharAt(std::size_t index) const;
++  void oskTypeChar(std::size_t index);
++  void oskSendKey(std::uint32_t sym, std::uint32_t utf32);
++  void oskCycleShift();
++  void oskSetPage(OskPage page);
++  // Lays out the keyboard at the bottom edge; returns its top edge (sh when hidden).
++  [[nodiscard]] float
++  layoutOsk(Renderer& renderer, float sw, float sh, bool show, const lockscreen_login_box::LoginBoxStyle& style);
++
+   ext_session_lock_surface_v1* m_lockSurface = nullptr;
+   wl_output* m_output = nullptr;
+   bool m_receivedConfigure = false;
+@@ -192,6 +212,21 @@ private:
+   Button* m_layoutChip = nullptr;
+   Flex* m_sessionRow = nullptr;
+   std::vector<Button*> m_sessionButtons;
++  Node* m_oskLayer = nullptr;
++  Flex* m_oskPanel = nullptr;
++  std::array<Button*, kOskCharKeyCount> m_oskCharKeys{};
++  Button* m_oskShiftKey = nullptr;
++  Button* m_oskSymbolShiftKey = nullptr;
++  Button* m_oskBackspaceKey = nullptr;
++  Button* m_oskPageKey = nullptr;
++  Button* m_oskAccentKey = nullptr;
++  Button* m_oskSpaceKey = nullptr;
++  Button* m_oskHideKey = nullptr;
++  Button* m_oskEnterKey = nullptr;
++  bool m_oskVisible = false;
++  OskPage m_oskPage = OskPage::Letters;
++  OskShift m_oskShift = OskShift::Off;
++  std::function<void(bool)> m_onOskVisibilityRequest;
+   SharedTextureCache* m_textureCache = nullptr;
+   SharedTextureCache::Lease m_wallpaperLease;
+   SharedTextureCache::Lease m_pendingWallpaperLease;

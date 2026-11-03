@@ -45,7 +45,7 @@
     };
 
     jods = {
-      url = "git+https://github.com/JadeOpenServices/jods.git?rev=762d016f36f60225e592c0961a38a4d8352997f3&shallow=1";
+      url = "git+https://github.com/JadeOpenServices/jods.git?ref=feature/jods-278-edit-locks&rev=cb6e86d4a1c1dd6bca1656fbe0c4a899b1b81c5f&shallow=1";
       flake = false;
     };
   };
@@ -99,7 +99,11 @@
         pkgs = basePkgs;
         inherit inputs;
       };
+      # Modules read management.enable and prebootLock.enable directly, so a
+      # state.nix without them stops here, not as an unmanaged build.
       settings =
+        assert lib.assertMsg (stateSettings ? management.enable && stateSettings ? prebootLock.enable)
+          "generated/state.nix has no management.enable or prebootLock.enable; rebuild with gjallarctl so it writes them from user.config.json";
         stateSettings
         // lib.optionalAttrs (builtins.elem "librewolf" stateSettings.browsers) {
           browsers = [ "firefox" ] ++ builtins.filter (b: b != "firefox") stateSettings.browsers;
@@ -116,7 +120,12 @@
         gjallarctl = pkgs.callPackage ./pkgs/gjallarctl { };
         "gjallar-usbtrustd" = pkgs.callPackage ./pkgs/gjallar-usbtrustd { };
         "gjallar-settingsd" = pkgs.callPackage ./pkgs/gjallar-settingsd { };
+        "gjallar-settings" = pkgs.callPackage ./pkgs/gjallar-settings { inherit gjallarctl; };
         "gjallar-recovery-install" = pkgs.callPackage ./pkgs/gjallar-recovery-install { };
+        "gjallar-shim" = pkgs.callPackage ./pkgs/gjallar-shim { };
+        "lzbt-shim" = pkgs.callPackage ./pkgs/lzbt-shim {
+          inherit (inputs.lanzaboote.packages.${system}) lzbt;
+        };
         "gjallar-installer" = pkgs.callPackage ./pkgs/gjallar-installer { inherit (inputs) oddc; };
         "gjallar-recovery-iso" = self.nixosConfigurations.gjallar-recovery.config.system.build.isoImage;
         "gjallar-installer-lab-iso" =
@@ -144,37 +153,52 @@
         inherit (pkgs)
           _nemu
           _wine
+          btrbk
+          chrony
           ghostty
           hyprland
+          plymouth
           udiskie
           usbguard
           wvkbd
           xdg-desktop-portal-hyprland
           ;
 
-        prebuilt = pkgs.linkFarmFromDrvs "gjallar-prebuilt" [
-          gjallarctl
-          gjallar-usbtrustd
-          gjallar-settingsd
-          noctalia
-          noctalia-greeter
-          monique
-          nextcloud-client-openvfs
-          openvfs
-          gjallar-opencode
-          systemd-partition-reread
-          qt6ct
-          _nemu
-          _wine
-          # pkgs/overlays patches these, so cache.nixos.org has other builds.
-          dolphin
-          ghostty
-          hyprland
-          udiskie
-          usbguard
-          wvkbd
-          xdg-desktop-portal-hyprland
-        ];
+        prebuilt = pkgs.linkFarmFromDrvs "gjallar-prebuilt" (
+          [
+            gjallarctl
+            gjallar-usbtrustd
+            gjallar-settingsd
+            gjallar-settings
+            noctalia
+            noctalia-greeter
+            monique
+            nextcloud-client-openvfs
+            openvfs
+            gjallar-opencode
+            systemd-partition-reread
+            lzbt-shim
+            qt6ct
+            _nemu
+            _wine
+            # pkgs/overlays patches these, so cache.nixos.org has other builds.
+            btrbk
+            chrony
+            dolphin
+            ghostty
+            hyprland
+            plymouth
+            udiskie
+            usbguard
+            wvkbd
+            xdg-desktop-portal-hyprland
+            # Built against the patched KDE libraries.
+            (import ./themes/apps/dolphin/darkly.nix { inherit pkgs; }).package
+          ]
+          # Cached, they spare every machine the build and the -dev outputs of
+          # the patched KDE libraries it needs.
+          ++ import ./apps/dolphin/kde-apps.nix pkgs
+        );
       };
 
       checks.${system} = {
@@ -184,9 +208,16 @@
 
         local-changes = import ./tests/nix/local-changes.nix { inherit pkgs; };
 
+        legacy-names = import ./tests/nix/legacy-names.nix {
+          inherit pkgs;
+          today = self.lastModifiedDate;
+        };
+
         nextcloud-client-patches = import ./tests/nix/nextcloud-client-patches.nix { inherit pkgs; };
 
         qt6ct-kde-style = import ./tests/nix/qt6ct-kde-style.nix { inherit pkgs; };
+
+        theme-palettes = import ./tests/nix/theme-palettes.nix { inherit pkgs; };
 
         security-baseline = import ./tests/nix/security-baseline.nix {
           inherit nixpkgs system;
@@ -234,9 +265,45 @@
           fixModule = ./system/fixes/systemd-partition-reread;
         };
 
+        adb-usbguard-allow = import ./tests/nix/adb-usbguard-allow.nix {
+          inherit pkgs;
+          patchedTools = pkgs.android-tools;
+          stockTools = nixpkgs.legacyPackages.${system}.android-tools;
+        };
+
+        fprintd-claim-after-close = import ./tests/nix/fprintd-claim-after-close.nix {
+          inherit pkgs;
+          stockFprintd = nixpkgs.legacyPackages.${system}.fprintd;
+        };
+
         udiskie-new-media-only = import ./tests/nix/udiskie-new-media-only.nix {
           inherit pkgs;
           stockUdiskie = nixpkgs.legacyPackages.${system}.udiskie;
+        };
+
+        foreign-media-readonly = import ./tests/nix/foreign-media-readonly.nix {
+          inherit pkgs;
+          module = ./system/services/foreign-media-readonly.nix;
+        };
+
+        boot-splash-retain = import ./tests/nix/boot-splash-retain.nix {
+          inherit pkgs;
+          stockPlymouth = nixpkgs.legacyPackages.${system}.plymouth;
+        };
+
+        noctalia-notification-app-name = import ./tests/nix/noctalia-notification-app-name.nix {
+          inherit pkgs;
+          noctalia = self.packages.${system}.noctalia;
+        };
+
+        btrbk-onchange = import ./tests/nix/btrbk-onchange.nix {
+          inherit pkgs;
+          stockBtrbk = nixpkgs.legacyPackages.${system}.btrbk;
+        };
+
+        chrony-rtc-no-interrupts = import ./tests/nix/chrony-rtc-no-interrupts.nix {
+          inherit pkgs;
+          stockChrony = nixpkgs.legacyPackages.${system}.chrony;
         };
 
         kio-fuse-slow = import ./tests/nix/kio-fuse-slow.nix {
@@ -272,6 +339,11 @@
           inherit nixpkgs system;
           inherit (inputs) oddc;
           gjallarctlSource = ./cmd/gjallarctl;
+        };
+
+        usbtrust-oddc-devices = import ./tests/nix/usbtrust-oddc-devices.nix {
+          inherit nixpkgs system;
+          inherit (inputs) oddc;
         };
 
         recovery-maintenance = import ./tests/nix/recovery-maintenance.nix {
@@ -327,12 +399,17 @@
             inputs.lanzaboote.nixosModules.lanzaboote
 
             {
+              # Patched lzbt: shim first stage for fixed-key firmware (293).
+              boot.lanzaboote.package = self.packages.${system}.lzbt-shim;
               nixpkgs.overlays = [
                 inputs.nur.overlays.default
               ];
 
               home-manager.useGlobalPkgs = true;
               home-manager.useUserPackages = true;
+              # The user's profile gets libexec too: gjallarctl wine finds
+              # its helper there, where only root writes (Plane 277).
+              environment.pathsToLink = [ "/libexec" ];
               home-manager.backupFileExtension = "hm-bak";
 
               home-manager.extraSpecialArgs = {
@@ -363,9 +440,9 @@
 
             ./system/default.nix
           ]
-          ++ nixpkgs.lib.optionals (settings.endpointManagedDevice or false) [
-            ./system/management/jods
-            "${inputs.jods}/nix/modules/jods-mdm-agent.nix"
+          ++ nixpkgs.lib.optionals settings.management.enable [
+            ./system/management
+            "${inputs.jods}/nix/modules/mdm-agent.nix"
           ];
 
           specialArgs = {

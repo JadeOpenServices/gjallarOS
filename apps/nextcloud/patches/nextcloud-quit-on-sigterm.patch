@@ -1,0 +1,50 @@
+--- a/src/gui/main.cpp
++++ b/src/gui/main.cpp
+@@ -12,6 +12,8 @@
+ #ifdef Q_OS_UNIX
+ #include <sys/time.h>
+ #include <sys/resource.h>
++#include <sys/socket.h>
++#include <unistd.h>
+ #endif
+ 
+ #include "application.h"
+@@ -33,6 +35,9 @@
+ #include <QSurfaceFormat>
+ #include <QOperatingSystemVersion>
+ #include <QQmlExtensionPlugin>
++#ifdef Q_OS_UNIX
++#include <QSocketNotifier>
++#endif
+ 
+ Q_IMPORT_QML_PLUGIN(com_nextcloud_desktopclient_searchPlugin)
+ Q_IMPORT_QML_PLUGIN(com_nextcloud_desktopclient_sharingPlugin)
+@@ -115,6 +120,28 @@
+ #ifndef Q_OS_WIN
+     signal(SIGPIPE, SIG_IGN);
+ #endif
++#ifdef Q_OS_UNIX
++    // systemd and session logout stop the client with SIGTERM. Quit as from
++    // the tray, so the folders stop and openvfs unmounts before the process
++    // exits; dying at once left the unmount to openvfs alone, after the
++    // client was gone.
++    static int quitSignalFds[2] = {-1, -1};
++    if (::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, quitSignalFds) == 0) {
++        auto quitSignal = new QSocketNotifier(quitSignalFds[1], QSocketNotifier::Read, &app);
++        QObject::connect(quitSignal, &QSocketNotifier::activated, &app, [quitSignal] {
++            quitSignal->setEnabled(false);
++            QCoreApplication::quit();
++        });
++        struct sigaction quitAction{};
++        quitAction.sa_handler = [](int) {
++            const char byte = 1;
++            [[maybe_unused]] const auto written = ::write(quitSignalFds[0], &byte, 1);
++        };
++        sigemptyset(&quitAction.sa_mask);
++        quitAction.sa_flags = SA_RESTART;
++        sigaction(SIGTERM, &quitAction, nullptr);
++    }
++#endif
+     if (app.giveHelp()) {
+         app.showHelp();
+         return 0;

@@ -8,6 +8,10 @@
 
 let
   winePackage = pkgs._wine;
+  sandboxLauncher = pkgs.callPackage ../../pkgs/gjallar-wine {
+    inherit wineInit winetricks;
+    dolphinPlace = pkgs.callPackage ../../pkgs/dolphin-place { };
+  };
 
   # The winetricks vkd3d verb asks the GitHub API for the latest release, which
   # fails offline and under its rate limit. The hash is the digest GitHub lists
@@ -29,36 +33,17 @@ let
     }
   '';
 
-  # The setup run's own winetricks (Q74). In unattended mode winetricks keeps
-  # going after a SHA256 mismatch when it has no dialog to ask, and accepts
-  # files with no checksum. Both stop the step here instead. The Wayback
-  # Machine retry stays, since the hash still has to match. aka.ms always
-  # points at the newest VC runtime; the versioned URL it redirects to is
-  # named by the hash winetricks pins. A winetricks update that changes
-  # these lines fails the build until the pins are checked again.
-  winetricks = pkgs.winetricks.overrideAttrs (old: {
-    postPatch = old.postPatch + ''
-      substituteInPlace src/winetricks \
-        --replace-fail 'w_askpermission "SHA256 mismatch!' \
-          'w_die "SHA256 mismatch for ''${_W_url}"; w_askpermission "SHA256 mismatch!' \
-        --replace-fail '    w_get_shatype "''${_W_sum}"' \
-          '    w_get_shatype "''${_W_sum}"; test -n "''${_W_sum}" || w_die "No checksum for ''${_W_url}"' \
-        --replace-fail \
-          'https://aka.ms/vs/17/release/vc_redist.x86.exe 0c09f2611660441084ce0df425c51c11e147e6447963c3690f97e0b25c55ed64' \
-          'https://download.visualstudio.microsoft.com/download/pr/990c720a-46ce-4dc7-87b9-c2eb615d34b9/0C09F2611660441084CE0DF425C51C11E147E6447963C3690F97E0B25C55ED64/VC_redist.x86.exe 0c09f2611660441084ce0df425c51c11e147e6447963c3690f97e0b25c55ed64 vc_redist.x86.exe' \
-        --replace-fail \
-          'https://aka.ms/vs/17/release/vc_redist.x64.exe cc0ff0eb1dc3f5188ae6300faef32bf5beeba4bdd6e8e445a9184072096b713b' \
-          'https://download.visualstudio.microsoft.com/download/pr/990c720a-46ce-4dc7-87b9-c2eb615d34b9/CC0FF0EB1DC3F5188AE6300FAEF32BF5BEEBA4BDD6E8E445A9184072096B713B/VC_redist.x64.exe cc0ff0eb1dc3f5188ae6300faef32bf5beeba4bdd6e8e445a9184072096b713b vc_redist.x64.exe'
-    '';
-  });
+  winetricks = pkgs.callPackage ../../pkgs/gjallar-winetricks { };
 
-  # Runs on the first start, not at rebuild (Q38): the runtimes come from their
-  # publishers and stay out of our cache. The desktop launcher has no terminal,
-  # so progress goes to a window and the full output to a log.
-  wineInit = pkgs.writeShellScriptBin "wine-win11-init" ''
+  # Sets up the base prefix every Wine app is copied from (Plane 272). It runs
+  # when the first app is added, not at rebuild (Q38): the runtimes come from
+  # their publishers and stay out of our cache. gjallarctl wine add may run
+  # without a terminal, so progress also goes to a window and the full output
+  # to a log.
+  wineInit = pkgs.writeShellScriptBin "gjallar-wine-init" ''
     set -euo pipefail
 
-    export WINEPREFIX="''${WINEPREFIX:-$HOME/.local/share/wine/win11}"
+    export WINEPREFIX="''${WINEPREFIX:?}"
     export WINEARCH=win64
     export WINEDEBUG="-all"
     # winetricks calls wine from PATH and needs unzstd for vkd3d-proton.
@@ -70,12 +55,12 @@ let
 
     unset WINEDLLOVERRIDES
 
-    state="''${XDG_STATE_HOME:-$HOME/.local/state}/wine-win11"
+    state="''${XDG_STATE_HOME:-$HOME/.local/state}/gjallar-wine"
     log="$state/setup.log"
     install -d -m 0700 "$state" "$WINEPREFIX"
 
     exec 3>&2 >>"$log" 2>&1
-    echo "--- $(date -Is) wine-win11-init"
+    echo "--- $(date -Is) gjallar-wine-init"
 
     gui=
     if [[ ! -t 3 ]] && [[ -n "''${WAYLAND_DISPLAY:-''${DISPLAY:-}}" ]]; then
@@ -87,8 +72,8 @@ let
     step=0
     steps=12
     say() {
-      echo "wine-win11 setup: $1"
-      echo "wine-win11 setup: $1" >&3 || true
+      echo "Wine setup: $1"
+      echo "Wine setup: $1" >&3 || true
       # A subshell, so a closed window ends only the write, not the setup.
       if [[ -n "$gui" ]]; then
         ( printf '%s\n# %s\n' "$((step * 100 / steps))" "$1" >&4 ) 2>/dev/null || true
@@ -128,6 +113,19 @@ let
     if grep -q '^"\*comctl32"="native,builtin"' "$WINEPREFIX/user.reg" 2>/dev/null; then
       wine reg delete 'HKCU\Software\Wine\DllOverrides' /v '*comctl32' /f ||
         failed+=("reg *comctl32")
+    fi
+    # A .NET step run by winetricks before PR #2533 left OnlyUseLatestCLR
+    # out for 32-bit programs, and wineboot -u then never ends (see the
+    # winetricks override above). A value already there stays as it is.
+    if [[ -f "$WINEPREFIX/system.reg" ]] &&
+       ${pkgs.gawk}/bin/awk '
+         /^\[/ { s = tolower($1) }
+         tolower($0) ~ /^"onlyuselatestclr"=/ {
+           if (s == "[software\\\\microsoft\\\\.netframework]") a = (tolower($0) == "\"onlyuselatestclr\"=dword:00000001")
+           if (s == "[software\\\\wow6432node\\\\microsoft\\\\.netframework]") b = 1
+         }
+         END { exit !(a && !b) }' "$WINEPREFIX/system.reg"; then
+      reg_add 'HKLM\Software\Wow6432Node\Microsoft\.NETFramework' OnlyUseLatestCLR REG_DWORD 1
     fi
     wineboot -u || failed+=("wineboot")
     wineserver -w || true
@@ -201,67 +199,20 @@ let
     finish "Wine setup is done. Programs start without this step from now on."
   '';
 
-  wineWin11 = pkgs.writeShellScriptBin "wine-win11" ''
-    set -euo pipefail
-
-    prefix="''${WINEPREFIX:-$HOME/.local/share/wine/win11}"
-
-    export WINEPREFIX="$prefix"
-    export WINEARCH=win64
-    export WINEESYNC=1
-    export WINEFSYNC=1
-    export DXVK_LOG_LEVEL=none
-    export DXVK_ASYNC=0
-    export DXVK_ENABLE_NVAPI=0
-    export DXVK_FRAME_RATE=0
-    export WINE_FULLSCREEN_FSR=0
-    export DXVK_STATE_CACHE=1
-    export DXVK_STATE_CACHE_PATH="''${XDG_CACHE_HOME:-$HOME/.cache}/dxvk"
-    export STAGING_SHARED_MEMORY=1
-    export WINE_LARGE_ADDRESS_AWARE=1
-    export VKD3D_FEATURE_LEVEL=12_1
-    export PULSE_LATENCY_MSEC=60
-    export WPF_DISABLE_HARDWARE_ACCELERATION=1
-    export WINEDEBUG="-fixme"
-    export WINEDLLOVERRIDES="winhttp=n,b;d3dcompiler_47=n,b;d3dcompiler_43=n,b;dxgi=n,b;d3d11=n,b;d3d10core=n,b;d3d9=n,b"
-
-    mkdir -p "$DXVK_STATE_CACHE_PATH"
-
-    if [[ ! -d "$prefix" ]] ||
-       [[ ! -f "$prefix/.gjallar-wine-initialized" ]]; then
-      mkdir -p "$(dirname "$prefix")"
-
-      exec 9>"$prefix.gjallar-init.lock"
-      ${pkgs.util-linux}/bin/flock 9
-
-      if [[ ! -f "$prefix/.gjallar-wine-initialized" ]]; then
-        ${wineInit}/bin/wine-win11-init 9>&- ||
-          echo "wine-win11: starting with an incomplete Wine setup" >&2
-      fi
-      # Wine and its wineserver would inherit the lock and hold it.
-      exec 9>&-
-    fi
-
-    if [[ "$#" -gt 0 ]]; then
-      exec ${winePackage}/bin/wine "$@"
-    fi
-  '';
-
-  wineDesktop = pkgs.makeDesktopItem {
-    name = "wine-win11";
-    desktopName = "Wine Windows 11 Wrapper";
-    comment = "Run Windows executables through GjallarOS Wine";
-    exec = "${wineWin11}/bin/wine-win11 %f";
+  # A double click on an installer opens the settings' "New Wine app" with
+  # it filled in. Hidden from the menu: it needs a file.
+  setupDesktop = pkgs.makeDesktopItem {
+    name = "gjallar-wine-setup";
+    desktopName = "New Wine app";
+    comment = "Set up a Wine app with this installer";
+    exec = "gjallar-settings wine-setup %f";
+    icon = "wine";
     terminal = false;
-
+    noDisplay = true;
     mimeTypes = [
       "application/x-ms-dos-executable"
       "application/x-msi"
-      "application/x-ms-shortcut"
-      "application/x-wine-extension-msp"
     ];
-
-    categories = [ "Utility" ];
   };
 
   fexPackages =
@@ -277,20 +228,8 @@ in
 lib.mkIf config.gjallar.apps.wine.enable {
   home.packages =
     [
-      winePackage
-      wineInit
-      wineWin11
-      wineDesktop
-      (pkgs.writeTextDir "share/zsh/site-functions/_wine-win11" ''
-        #compdef wine-win11
-        _arguments '1:Windows program:_files -g "*.(exe|msi|bat|lnk|EXE|MSI|BAT|LNK)"' '*::argument:_files'
-      '')
-
-      pkgs.winetricks
-      pkgs.dxvk
-      pkgs.vkd3d
-      pkgs.cabextract
-      pkgs.p7zip
+      sandboxLauncher
+      setupDesktop
     ]
     ++ fexPackages;
 
@@ -298,10 +237,15 @@ lib.mkIf config.gjallar.apps.wine.enable {
     enable = true;
 
     defaultApplications = {
-      "application/x-ms-dos-executable" = [ "wine-win11.desktop" ];
-      "application/x-msi" = [ "wine-win11.desktop" ];
-      "application/x-ms-shortcut" = [ "wine-win11.desktop" ];
-      "application/x-wine-extension-msp" = [ "wine-win11.desktop" ];
+      "application/x-ms-dos-executable" = [ "gjallar-wine-setup.desktop" ];
+      "application/x-msi" = [ "gjallar-wine-setup.desktop" ];
     };
   };
+
+  # Apps set up before their menu entries came get one, and entries of apps
+  # that are gone go. Wine's own menu builder is off in the sandbox, so these
+  # are the only entries Wine apps have.
+  home.activation.gjallarWineMenu = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+    run ${sandboxLauncher}/libexec/gjallar-wine menu
+  '';
 }

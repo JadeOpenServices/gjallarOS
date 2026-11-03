@@ -149,6 +149,15 @@ func TestCheckPCRLockPolicyRequiresEveryRequestedPCR(t *testing.T) {
 	if err := CheckPCRLockPolicy(partial, []int{0, 4, 7}); err == nil || !strings.Contains(err.Error(), "PCR 0") {
 		t.Fatalf("partial policy error = %v, want missing PCR 0", err)
 	}
+	if err := CheckPCRLockPolicy(partial, []int{0, 4, 7}); err == nil || strings.Contains(err.Error(), "restart once") {
+		t.Fatalf("PCR 0 gap error = %v, want no restart hint", err)
+	}
+	// e2e-fw13, 2026-11-02: first boot after the shim switch came through a
+	// failed boot entry, so PCR 4 had unpredicted events.
+	noPCR4 := write(`{"pcrValues":[{"pcr":0,"values":["aa"]},{"pcr":7,"values":["bb"]}]}`)
+	if err := CheckPCRLockPolicy(noPCR4, []int{0, 4, 7}); err == nil || !strings.Contains(err.Error(), "PCR 4") || !strings.Contains(err.Error(), "restart once") {
+		t.Fatalf("PCR 4 gap error = %v, want restart hint", err)
+	}
 	if err := CheckPCRLockPolicy(partial, nil); err == nil {
 		t.Fatal("accepted an empty PCR request")
 	}

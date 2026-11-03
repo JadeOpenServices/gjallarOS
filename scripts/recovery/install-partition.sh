@@ -33,13 +33,13 @@ fi
   exit 1
 }
 part_label=$(lsblk -dnro PARTLABEL "$partition")
-[ "$part_label" = JODS-RECOVERY ] || {
-  echo "ERROR: target partition must have GPT label JODS-RECOVERY" >&2
+[ "$part_label" = GJALLAR-RECOVERY ] || {
+  echo "ERROR: target partition must have GPT label GJALLAR-RECOVERY" >&2
   exit 1
 }
 part_type=$(lsblk -dnro PARTTYPE "$partition" | tr '[:upper:]' '[:lower:]')
 [ "$part_type" = bc13c2ff-59e6-4262-a352-b275fd6f7172 ] || {
-  echo "ERROR: JODS-RECOVERY must use the XBOOTLDR partition type" >&2
+  echo "ERROR: the recovery partition must use the XBOOTLDR partition type" >&2
   exit 1
 }
 [ -z "$(lsblk -nro MOUNTPOINTS "$partition" | tr -d '[:space:]')" ] || {
@@ -103,7 +103,7 @@ if [ -n "$esp" ] && [ "$(lsblk -dnro PKNAME "$esp")" != "$parent_name" ]; then
   exit 1
 fi
 echo "Target: $partition ($(numfmt --to=iec "$size"))"
-# The installer creates JODS-RECOVERY empty or as vfat JODSRECOV and asks
+# The installer creates GJALLAR-RECOVERY empty or as vfat GJALLAR-REC and asks
 # before it gets here; anything else on the partition needs typed consent.
 # blkid -p exits 2 when it finds no signature. Ambiguous signatures (8) or a
 # failed read are not an empty partition and need consent like any other
@@ -121,15 +121,15 @@ case $probe_rc in
     fs_type=unknown fs_label=''
     ;;
 esac
-if ! $local_build || { [ -n "$fs_type" ] && [ "$fs_type:$fs_label" != vfat:JODSRECOV ]; }; then
-  printf 'Type FORMAT-JODS-RECOVERY to erase that partition: '
+if ! $local_build || { [ -n "$fs_type" ] && [ "$fs_type:$fs_label" != vfat:GJALLAR-REC ]; }; then
+  printf 'Type FORMAT-GJALLAR-RECOVERY to erase that partition: '
   read -r answer
-  [ "$answer" = FORMAT-JODS-RECOVERY ] || { echo "Cancelled." >&2; exit 1; }
+  [ "$answer" = FORMAT-GJALLAR-RECOVERY ] || { echo "Cancelled." >&2; exit 1; }
 fi
 
 # Preserve the XBOOTLDR GUID validated above. Changing it to an ESP here would
 # make discovery inconsistent and could cause firmware/bootloader ambiguity.
-mkfs.vfat -F 32 -n JODSRECOV "$partition"
+mkfs.vfat -F 32 -n GJALLAR-REC "$partition"
 mount_dir=$(mktemp -d)
 cleanup() {
   mountpoint -q "$mount_dir" && umount "$mount_dir"

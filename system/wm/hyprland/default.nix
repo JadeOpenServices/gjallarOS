@@ -45,34 +45,8 @@ let
   moniquePackage = pkgs.callPackage ../../../pkgs/monique/nix/package.nix { };
   hyprlandSession = pkgs.writeShellScriptBin "gjallar-hyprland-session" ''
         state_dir="''${XDG_STATE_HOME:-$HOME/.local/state}/hyprland"
-        noctalia_state_dir="''${XDG_STATE_HOME:-$HOME/.local/state}/noctalia"
         hypr_config_dir="''${XDG_CONFIG_HOME:-$HOME/.config}/hypr"
         mkdir -p "$state_dir"
-        mkdir -p "$noctalia_state_dir" "$hypr_config_dir"
-
-        if [ ! -e "$noctalia_state_dir/hyprland-colors.conf" ]; then
-          cat >"$noctalia_state_dir/hyprland-colors.conf" <<'EOF'
-    $primary = rgb(7aa2f7)
-    $surface = rgb(1a1b26)
-    $secondary = rgb(7dcfff)
-    $error = rgb(f7768e)
-
-    general {
-      col.active_border = $primary
-      col.inactive_border = $surface
-    }
-
-    group {
-      col.border_active = $secondary
-      col.border_inactive = $surface
-      col.border_locked_active = $error
-      col.border_locked_inactive = $surface
-    }
-    EOF
-        fi
-        for display_config in monitors.conf workspaces.conf; do
-          [ -e "$hypr_config_dir/$display_config" ] || : >"$hypr_config_dir/$display_config"
-        done
 
         # Render on the GPU that drives the screens connected now, as ODDC's
         # render quirk says (ODDC 78). Models without the quirk, ODDC pins
@@ -89,7 +63,7 @@ let
         mkdir -m 0700 -p "$XDG_RUNTIME_DIR/gjallar"
         printf '%s\n' "''${AQ_DRM_DEVICES-}" >"$XDG_RUNTIME_DIR/gjallar/render-gpu"
 
-        export HYPRLAND_CONFIG="$hypr_config_dir/hyprland.conf"
+        export HYPRLAND_CONFIG="$hypr_config_dir/hyprland.lua"
         # Nothing in startup.log has a time, so mark where each session starts
         # and ends; a session that died shows up as an end with a failed
         # status (or, after a hard power-off, no end at all).

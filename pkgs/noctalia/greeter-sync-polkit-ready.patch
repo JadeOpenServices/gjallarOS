@@ -1,0 +1,110 @@
+diff --git a/src/app/application.cpp b/src/app/application.cpp
+index 235787e..3d7a5b4 100644
+--- a/src/app/application.cpp
++++ b/src/app/application.cpp
+@@ -288,7 +288,11 @@ void Application::run(std::function<void()> startupReadyCallback) {
+   });
+ #endif
+ 
+-  m_polkitInitTimer.start(std::chrono::milliseconds(1000), [this]() { syncPolkitAgent(); });
++  m_polkitInitTimer.start(std::chrono::milliseconds(1000), [this]() {
++    syncPolkitAgent();
++    m_polkitAgentChecked = true;
++    resumeGreeterAutoSync();
++  });
+ 
+   m_mainLoop = std::make_unique<MainLoop>(m_wayland, m_bar, [this]() { return currentPollSources(); });
+   if (startupReadyCallback) {
+diff --git a/src/app/application.h b/src/app/application.h
+index 4cae6be..7be4389 100644
+--- a/src/app/application.h
++++ b/src/app/application.h
+@@ -230,6 +230,9 @@ private:
+   void syncScreenTimeService();
+   void performGreeterSync(bool quiet = false);
+   void scheduleGreeterAutoSync();
++  void runGreeterAutoSync();
++  void resumeGreeterAutoSync();
++  [[nodiscard]] bool polkitAgentStarting() const noexcept;
+   bool runShellCommandBlocking(const std::string& command);
+   bool runIdleAction(const IdleActionRequest& action);
+   bool setOutputPower(bool on);
+@@ -440,6 +443,9 @@ private:
+   Timer m_pluginAutoUpdateTimer;
+   Timer m_graphicsRecoveryTimer;
+   std::uint64_t m_greeterSyncGeneration = 0;
++  bool m_polkitAgentChecked = false;
++  bool m_polkitAgentReady = false;
++  bool m_greeterAutoSyncWaiting = false;
+   int m_graphicsRecoveryAttempts = 0;
+   bool m_graphicsRecoveryScheduled = false;
+ 
+diff --git a/src/app/application_services.cpp b/src/app/application_services.cpp
+index 9a4857e..dadc58a 100644
+--- a/src/app/application_services.cpp
++++ b/src/app/application_services.cpp
+@@ -416,6 +416,7 @@ void Application::syncPolkitAgent() {
+     return;
+   }
+ 
++  m_polkitAgentReady = false;
+   m_polkitAgent = std::make_unique<PolkitAgent>(*m_systemBus);
+   m_polkitAgent->setReadyCallback([this](bool ok, const std::string& error) {
+     if (!ok) {
+@@ -429,10 +430,13 @@ void Application::syncPolkitAgent() {
+         }
+         m_polkitPollSource.reset();
+         m_polkitAgent.reset();
++        resumeGreeterAutoSync();
+       });
+       return;
+     }
+     kLog.info("polkit authentication agent active");
++    m_polkitAgentReady = true;
++    resumeGreeterAutoSync();
+   });
+   m_polkitAgent->setStateCallback([this]() {
+     if (m_polkitAgent == nullptr) {
+diff --git a/src/app/application_ui.cpp b/src/app/application_ui.cpp
+index 4c6749d..28983c0 100644
+--- a/src/app/application_ui.cpp
++++ b/src/app/application_ui.cpp
+@@ -331,7 +331,37 @@ void Application::scheduleGreeterAutoSync() {
+     return;
+   }
+   m_greeterAutoSyncTimer.stop();
+-  m_greeterAutoSyncTimer.start(std::chrono::milliseconds(1000), [this]() { performGreeterSync(true); });
++  m_greeterAutoSyncTimer.start(std::chrono::milliseconds(1000), [this]() { runGreeterAutoSync(); });
++}
++
++// The greeter helper asks for the password through this shell's own polkit
++// agent. Started before the agent is registered, pkexec finds no agent for
++// the session and fails, so the look is never applied. A sync asked for in
++// that window waits until the agent is up or known to be off.
++void Application::runGreeterAutoSync() {
++  if (polkitAgentStarting()) {
++    m_greeterAutoSyncWaiting = true;
++    return;
++  }
++  performGreeterSync(true);
++}
++
++void Application::resumeGreeterAutoSync() {
++  if (!m_greeterAutoSyncWaiting) {
++    return;
++  }
++  m_greeterAutoSyncWaiting = false;
++  scheduleGreeterAutoSync();
++}
++
++bool Application::polkitAgentStarting() const noexcept {
++  if (!m_configService.config().shell.polkitAgent) {
++    return false;
++  }
++  if (!m_polkitAgentChecked) {
++    return true;
++  }
++  return m_polkitAgent != nullptr && !m_polkitAgentReady;
+ }
+ 
+ void Application::initLockScreenAndSession() {

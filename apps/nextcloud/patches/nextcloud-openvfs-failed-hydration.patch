@@ -1,0 +1,60 @@
+diff --git a/src/libsync/vfs/openvfs/vfs_openvfs.cpp b/src/libsync/vfs/openvfs/vfs_openvfs.cpp
+index 4fe0149..5ef9d24 100644
+--- a/src/libsync/vfs/openvfs/vfs_openvfs.cpp
++++ b/src/libsync/vfs/openvfs/vfs_openvfs.cpp
+@@ -99,6 +99,33 @@ OCC::Result<void, QString> setPlaceholderAttributes(const OpenVFS::PlaceHolderAt
+     return {};
+ }
+ 
++// A failed hydration leaves the placeholder as createPlaceholder() made it:
++// empty, dehydrated, with the server's size and mtime.
++void restoreDehydrated(const QString &filePath, const OCC::SyncJournalFileRecord &record)
++{
++    auto attributes = placeHolderAttributes(filePath);
++    if (!attributes || attributes.state != OpenVFS::Constants::States::Hydrating) {
++        return;
++    }
++    QFile file(filePath);
++    if (!file.open(QFile::WriteOnly | QFile::Truncate)) {
++        qCWarning(lcOpenVFS) << u"Failed to empty placeholder after failed hydration" << filePath << file.errorString();
++        return;
++    }
++    file.close();
++    attributes.state = OpenVFS::Constants::States::DeHydrated;
++    OCC::Result<void, QString> result;
++    if (record.isValid()) {
++        attributes.size = record._fileSize;
++        result = setPlaceholderAttributes(attributes, record._modtime);
++    } else {
++        result = setPlaceholderAttributes(attributes);
++    }
++    if (!result) {
++        qCWarning(lcOpenVFS) << u"Failed to restore placeholder after failed hydration" << filePath << result.error();
++    }
++}
++
+ OpenVFS::Constants::PinStates convertPinState(OCC::PinState pState)
+ {
+     switch (pState) {
+@@ -562,6 +589,10 @@ HydrationJob *OpenVFS::hydrateFile(const QByteArray &fileId, const QString &targ
+         qCWarning(lcOpenVFS) << u"Hydration failed" << error;
+         this->_hydrationJobs.remove(hydration->fileId());
+         hydration->deleteLater();
++        // Left as it was, the file kept what had arrived, the "Hydrating"
++        // state and the download time as mtime, and the next sync uploaded
++        // that as a local edit.
++        restoreDehydrated(hydration->targetFileName(), hydration->record());
+     });
+ 
+     return hydration;
+@@ -663,6 +694,10 @@ bool OpenVFS::statTypeVirtualFile(csync_file_stat_t *stat, void *statData)
+             if (pin && *pin == PinState::AlwaysLocal) {
+                 stat->type = ItemTypeVirtualFileDownload;
+             }
++        } else if (attribs && attribs.state == ::OpenVFS::Constants::States::Hydrating) {
++            // A running download writes this file. Its content and mtime are
++            // the server's file arriving, never a local edit to upload.
++            stat->type = ItemTypeVirtualFile;
+         } else if (attribs && attribs.state == ::OpenVFS::Constants::States::Hydrated) {
+             if (pin && *pin == PinState::OnlineOnly) {
+                 stat->type = ItemTypeVirtualFileDehydration;

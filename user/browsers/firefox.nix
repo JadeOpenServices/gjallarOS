@@ -366,6 +366,13 @@ in
   programs.firefox = {
     enable = true;
     inherit package;
+    # Home Manager 26.05 moved the default to ~/.config/mozilla/firefox. Each
+    # install keeps the folder its baseline already uses, so no profile moves.
+    configPath =
+      if lib.versionOlder config.home.stateVersion "26.05" then
+        ".mozilla/firefox"
+      else
+        "${lib.removePrefix "${config.home.homeDirectory}/" config.xdg.configHome}/mozilla/firefox";
     profiles.${profileName} = {
       isDefault = true;
       search = {

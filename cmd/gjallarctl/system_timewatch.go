@@ -241,7 +241,8 @@ func showTimeNotice(ctx context.Context, stamp, now time.Time, stderr io.Writer)
 		Icon:    "preferences-system-time",
 		Summary: summary,
 		Body:    body,
-		Actions: []noticeAction{{"details", "Details"}, {"ok", "OK"}},
+		// A click on the card itself shows the details, like the button.
+		Actions: []noticeAction{{"default", "Details"}, {"details", "Details"}, {"ok", "OK"}},
 	})
 	if err != nil {
 		if ctx.Err() == nil {
@@ -249,7 +250,7 @@ func showTimeNotice(ctx context.Context, stamp, now time.Time, stderr io.Writer)
 		}
 		return
 	}
-	if choice == "details" {
+	if choice == "details" || choice == "default" {
 		if err := exec.Command("systemctl", "--user", "start", "--no-block", "gjallar-time-details.service").Run(); err != nil {
 			fmt.Fprintf(stderr, "ERROR: details: %v\n", err)
 		}

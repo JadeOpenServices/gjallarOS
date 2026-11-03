@@ -8,8 +8,8 @@ in
   src = fetchFromGitHub {
     owner = "nextcloud";
     repo = "desktop";
-    rev = "fc07fe7474afb938dd5253aded6da0ea1f664704";
-    sha256 = "0q387p0g3n13d8rw5rp6l6y48i4vmadr843a9b8s1xzhdp9wvxqw";
+    rev = "d1f9f6469a038ca223e1e86ad1dcc5c199735957";
+    sha256 = "14mzqq4133m6sj9sm9ari0x53n1dsyjdsidmpyz3yyzl231vn7jm";
   };
 
   # The nixpkgs patch targets the old 4.0.8 source. GjallarOS already
@@ -35,7 +35,8 @@ in
     # A folder's keep or free-up choice covers the folders below it, also
     # those that had their own choice.
     ./patches/nextcloud-openvfs-folder-pin-below.patch
-    # New accounts start as virtual-files folders on Linux too.
+    # New accounts start as virtual-files folders on Linux too, unless the
+    # server's managed settings turn virtual files off.
     ./patches/nextcloud-vfs-default.patch
     # Windows, menus and popups follow the Qt palette (Noctalia via qt6ct,
     # else the system palette) instead of hardcoded light/dark colors.
@@ -43,7 +44,7 @@ in
     # A rebuilt client never adds itself to autostart; GjallarOS starts it.
     ./patches/nextcloud-no-autostart.patch
     # A folder added in the settings follows the VFS default too, not only
-    # the wizard checkbox.
+    # the wizard checkbox. A server that enforces VFS off still wins.
     ./patches/nextcloud-vfs-folder-wizard.patch
     # NEXTCLOUD_BROWSER_OPENER gets web links (login flow included) and
     # NEXTCLOUD_BROWSER_CLOSER runs after login. Mail links stay with the
@@ -62,5 +63,21 @@ in
     ./patches/nextcloud-remote-options-no-exit.patch
     # The folder list is titled "Sync folders", not "Classic sync".
     ./patches/nextcloud-sync-folders-title.patch
+    # Hydration counts the bytes it wrote. The Content-Length header is gone
+    # or counts compressed bytes when the server gzips a reply.
+    ./patches/nextcloud-hydration-encoded-size.patch
+    # A failed or running hydration is never uploaded as a local edit.
+    ./patches/nextcloud-openvfs-failed-hydration.patch
+    # A click on a client notification opens the tray window, like a click
+    # on the tray icon (Plane 189).
+    ./patches/nextcloud-notification-click.patch
+    # An opened file stays on disk; "Free up space" empties it at any time;
+    # it goes back to online-only once nothing has read it for 14 days. A
+    # file a program has open is never emptied; openvfs tells the client
+    # when the last program closes a file freed up meanwhile (Q79, Plane 254).
+    ./patches/nextcloud-openvfs-keep-open-files.patch
+    # SIGTERM quits as from the tray: folders stop and openvfs unmounts
+    # before the client exits (Plane 184).
+    ./patches/nextcloud-quit-on-sigterm.patch
   ];
 }

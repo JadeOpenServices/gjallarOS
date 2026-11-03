@@ -23,6 +23,10 @@ type State string
 const (
 	StateOEMFactoryDerived State = "oem-factory-derived"
 	StateGjallarManaged    State = "gjallar-managed"
+	// StateGjallarShim: the firmware keeps its maker's keys and starts shim
+	// through the UEFI CA; shim checks systemd-boot and the UKIs against
+	// the GjallarOS db certificate in MOK (Plane 293).
+	StateGjallarShim       State = "gjallar-shim"
 	StatePendingEnrollment State = "gjallar-pending-enrollment"
 	StateSetupModeUnknown  State = "setup-mode-unknown"
 	StateForeignManaged    State = "foreign-managed"
@@ -30,11 +34,14 @@ const (
 )
 
 type Inspection struct {
-	State       State
-	SetupMode   bool
-	SecureBoot  bool
-	Recorded    bool
-	OwnerGUID   string
+	State      State
+	SetupMode  bool
+	SecureBoot bool
+	Recorded   bool
+	OwnerGUID  string
+	// Stage is the stage of a valid ownership record ("pending-enrollment",
+	// "pending-mok", "enrolled"); empty without one.
+	Stage       string
 	Description string
 }
 
@@ -59,7 +66,7 @@ type localKeys struct {
 	dbHash    string
 }
 
-func Inspect(ctx context.Context) (Inspection, error) {
+func Inspect(ctx context.Context) (inspection Inspection, err error) {
 	setupMode, err := efivarBool("SetupMode")
 	if err != nil {
 		return Inspection{}, fmt.Errorf("read UEFI SetupMode: %w", err)
@@ -89,6 +96,13 @@ func Inspect(ctx context.Context) (Inspection, error) {
 				record.PKSHA256 == keys.pkHash &&
 				record.KEKSHA256 == keys.kekHash &&
 				record.DbSHA256 == keys.dbHash
+	}
+	if recordValid {
+		defer func() {
+			if err == nil {
+				inspection.Stage = record.Stage
+			}
+		}()
 	}
 
 	if recorded && !recordValid {
@@ -152,6 +166,25 @@ func Inspect(ctx context.Context) (Inspection, error) {
 			OwnerGUID:   keys.ownerGUID,
 			Description: "The active PK/KEK/db contain the current GjallarOS sbctl certificates.",
 		}, nil
+	}
+
+	// Booted through shim: only this boot tells, because shim leaves its key
+	// list for the system it started and nothing else does.
+	if recordValid && secureBoot {
+		viaShim, err := liveFirmware.shimTrustsKey(keys.dbDER)
+		if err != nil {
+			return Inspection{}, err
+		}
+		if viaShim {
+			return Inspection{
+				State:       StateGjallarShim,
+				SetupMode:   false,
+				SecureBoot:  true,
+				Recorded:    true,
+				OwnerGUID:   keys.ownerGUID,
+				Description: "Secure Boot is on with the firmware maker's keys; shim started this boot and checks it against the current GjallarOS db certificate in MOK.",
+			}, nil
+		}
 	}
 
 	// A pending record is valid outside Setup Mode only while the firmware is
@@ -272,7 +305,11 @@ func verifyOwnershipRecord(
 	return nil
 }
 
-func VerifyOwnership(ctx context.Context, expectedStage string) error {
+// VerifyOwnership checks that the running boot was verified against the
+// current GjallarOS keys. viaShim is set on a system built to boot through
+// shim; only there does a shim boot count. A system set to its own firmware
+// keys that comes up through shim had its keys replaced, so it fails.
+func VerifyOwnership(ctx context.Context, expectedStage string, viaShim bool) error {
 	record, recorded, err := readOwnership(ctx)
 	if err != nil {
 		return fmt.Errorf("read GjallarOS Secure Boot ownership metadata: %w", err)
@@ -298,14 +335,26 @@ func VerifyOwnership(ctx context.Context, expectedStage string) error {
 		return fmt.Errorf("inspect active Secure Boot ownership: %w", err)
 	}
 
-	if inspection.State != StateGjallarManaged {
+	return acceptBoot(inspection, viaShim)
+}
+
+// acceptBoot is the verdict on how this boot was checked.
+func acceptBoot(inspection Inspection, viaShim bool) error {
+	switch {
+	case inspection.State == StateGjallarManaged:
+		return nil
+	case inspection.State == StateGjallarShim && viaShim:
+		return nil
+	case inspection.State == StateGjallarShim:
 		return fmt.Errorf(
-			"active firmware does not contain the current GjallarOS PK/KEK/db hierarchy: %s",
+			"this boot came through shim, but the system is set to its own firmware keys: %s",
 			inspection.Description,
 		)
 	}
-
-	return nil
+	return fmt.Errorf(
+		"active firmware does not contain the current GjallarOS PK/KEK/db hierarchy: %s",
+		inspection.Description,
+	)
 }
 
 func RecordOwnership(ctx context.Context, stage string) error {
@@ -572,4 +621,31 @@ func command(ctx context.Context, name string, args ...string) error {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
+}
+
+// shimTrustsKey tells whether the shim that started this boot checks loaders
+// against the certificate der from its key list. A shim whose own check was
+// switched off in MokManager starts anything, so it trusts nothing here.
+func (f firmwareFiles) shimTrustsKey(der []byte) (bool, error) {
+	state, present, err := f.shimVar("MokSBStateRT")
+	if err != nil {
+		return false, err
+	}
+	if present && (len(state) != 1 || state[0] != 0) {
+		return false, nil
+	}
+	mok, present, err := f.shimVar("MokListRT")
+	if err != nil || !present {
+		return false, err
+	}
+	list := parseSignatureList(mok, true)
+	if list.Malformed {
+		return false, nil
+	}
+	for _, c := range list.Certs {
+		if bytes.Equal(c.der, der) {
+			return true, nil
+		}
+	}
+	return false, nil
 }

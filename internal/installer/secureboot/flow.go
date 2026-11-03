@@ -34,6 +34,9 @@ func Prepare(ctx context.Context, out io.Writer) error {
 		return nil
 
 	case StatePendingEnrollment:
+		if inspection.Stage == StagePendingMOK {
+			return errShimPending
+		}
 		fmt.Fprintln(out, "Existing GjallarOS Secure Boot provisioning is pending; reusing the prepared key set.")
 		return nil
 
@@ -92,6 +95,9 @@ func Continue(
 	inspection, err := Inspect(ctx)
 	if err != nil {
 		return "", fmt.Errorf("inspect Secure Boot state before continuation: %w", err)
+	}
+	if inspection.Stage == StagePendingMOK {
+		return "", errShimPending
 	}
 
 	if inspection.State == StateOEMFactoryDerived ||

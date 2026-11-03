@@ -20,7 +20,7 @@ import (
 	"github.com/JadeOpenServices/gjallarOS/internal/installercheck"
 )
 
-const secureBootUsage = "Usage: gjallarctl secure-boot {status|setup|update-dbx} [--repo PATH]"
+const secureBootUsage = "Usage: gjallarctl secure-boot {status|setup|update-dbx} [--repo PATH] [--own-keys]"
 
 const dbxUpdateTool = "gjallar-secure-boot-dbx-update"
 
@@ -34,14 +34,19 @@ func runSecureBoot(args []string, stdout, stderr io.Writer) int {
 		return 0
 	}
 	repo := ""
+	ownKeys := false
 	rest := args[1:]
 	for i := 0; i < len(rest); i++ {
-		if rest[i] != "--repo" || i+1 >= len(rest) {
+		switch {
+		case rest[i] == "--own-keys" && args[0] == "setup":
+			ownKeys = true
+		case rest[i] == "--repo" && i+1 < len(rest):
+			i++
+			repo = rest[i]
+		default:
 			fmt.Fprintln(stderr, secureBootUsage)
 			return 2
 		}
-		i++
-		repo = rest[i]
 	}
 	ctx := context.Background()
 
@@ -49,7 +54,7 @@ func runSecureBoot(args []string, stdout, stderr io.Writer) int {
 	case "status":
 		return runSecureBootStatus(ctx, stdout, stderr)
 	case "setup":
-		return runSecureBootSetup(ctx, repo, stdout, stderr)
+		return runSecureBootSetup(ctx, repo, ownKeys, stdout, stderr)
 	case "update-dbx":
 		if repo != "" {
 			fmt.Fprintln(stderr, secureBootUsage)
@@ -77,7 +82,7 @@ func runSecureBootStatus(ctx context.Context, stdout, stderr io.Writer) int {
 	return 0
 }
 
-func runSecureBootSetup(ctx context.Context, repo string, stdout, stderr io.Writer) int {
+func runSecureBootSetup(ctx context.Context, repo string, ownKeys bool, stdout, stderr io.Writer) int {
 	fail := func(err error) int {
 		fmt.Fprintf(stderr, "ERROR: %v\n", err)
 		return 1
@@ -91,6 +96,14 @@ func runSecureBootSetup(ctx context.Context, repo string, stdout, stderr io.Writ
 	user, err := config.Load(configPath)
 	if err != nil {
 		return fail(err)
+	}
+
+	shim, err := chooseShimPath(ctx, user, ownKeys, stdout)
+	if err != nil {
+		return fail(err)
+	}
+	if shim {
+		return runShimSetup(ctx, repo, configPath, user, stdout, stderr)
 	}
 
 	device, err := oddcvalidation.LoadDeviceContext(repo)
@@ -140,7 +153,7 @@ func runSecureBootSetup(ctx context.Context, repo string, stdout, stderr io.Writ
 				return fail(err)
 			}
 			if !user.SecureBootEnable {
-				fmt.Fprintln(stdout, "Once the change is applied and the rebuild is done, run gjallarctl secureboot setup again to finish.")
+				fmt.Fprintln(stdout, "Once the change is applied and the rebuild is done, run gjallarctl secure-boot setup --own-keys again to finish.")
 				return 0
 			}
 		} else {
@@ -174,6 +187,31 @@ func runSecureBootSetup(ctx context.Context, repo string, stdout, stderr io.Writ
 	}
 	if next == secureboot.ContinuationNone {
 		return offerDBXUpdate(ctx, ui, stdout, stderr)
+	}
+	return restartFor(ctx, ui, next, stdout, stderr)
+}
+
+// restartFor offers the restart a continuation asks for.
+func restartFor(ctx context.Context, ui prompt.UI, next secureboot.Continuation, stdout, stderr io.Writer) int {
+	fail := func(err error) int {
+		fmt.Fprintf(stderr, "ERROR: %v\n", err)
+		return 1
+	}
+	if next == secureboot.ContinuationReboot {
+		reboot, err := ui.Confirm(ctx, "Restart now?", true)
+		if err != nil {
+			return fail(err)
+		}
+		if !reboot {
+			fmt.Fprintln(stdout, "Restart when you are ready: systemctl reboot")
+			return 0
+		}
+		cmd := exec.CommandContext(ctx, "sudo", "systemctl", "reboot")
+		cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, stdout, stderr
+		if err := cmd.Run(); err != nil {
+			return fail(fmt.Errorf("restart: %w", err))
+		}
+		return 0
 	}
 	if !secureboot.NeedsFirmwareReboot(next) {
 		return 0

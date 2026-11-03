@@ -1,0 +1,35 @@
+--- a/dlls/setupapi/queue.c
++++ b/dlls/setupapi/queue.c
+@@ -1170,6 +1170,13 @@
+ 
+     if (docopy)
+     {
++        DWORD attr = GetFileAttributesW( target );
++
++        /* A read-only target would make the copy fail with access denied.
++         * Files copied from a read-only source keep that attribute, so a
++         * later update of the same file has to clear it first. */
++        if (attr != INVALID_FILE_ATTRIBUTES && (attr & FILE_ATTRIBUTE_READONLY))
++            SetFileAttributesW( target, attr & ~FILE_ATTRIBUTE_READONLY );
+         rc = copy_file( source, target );
+         if (!rc && GetLastError() == ERROR_SHARING_VIOLATION &&
+             (style & SP_COPY_IN_USE_NEEDS_REBOOT))
+@@ -1187,7 +1194,17 @@
+                     DeleteFileW(temp_file);
+             }
+         }
+-        if (!rc) WARN( "failed to copy, err %lu\n", GetLastError() );
++        if (!rc)
++        {
++            DWORD err = GetLastError();
++
++            WARN( "failed to copy, err %lu\n", err );
++            /* The old file stays as it was, read-only attribute included. */
++            if (attr != INVALID_FILE_ATTRIBUTES && (attr & FILE_ATTRIBUTE_READONLY) &&
++                GetFileAttributesW( target ) != INVALID_FILE_ATTRIBUTES)
++                SetFileAttributesW( target, attr );
++            SetLastError( err );
++        }
+     }
+     else
+         SetLastError(ERROR_SUCCESS);

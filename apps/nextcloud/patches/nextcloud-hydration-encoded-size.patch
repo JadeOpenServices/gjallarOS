@@ -1,0 +1,37 @@
+diff --git a/src/libsync/hydrationjob.cpp b/src/libsync/hydrationjob.cpp
+index 0fe7e9a..72e6f95 100644
+--- a/src/libsync/hydrationjob.cpp
++++ b/src/libsync/hydrationjob.cpp
+@@ -63,8 +63,12 @@ void HydrationJob::start()
+             errorMsg = _job->reply()->errorString();
+         }
+ 
+-        if (_job->contentLength() != -1) {
+-            const auto size = _job->resumeStart() + _job->contentLength();
++        // Count what reached the file, not the Content-Length header. Qt
++        // unpacks a gzip reply and drops that header over HTTP/1.1, and
++        // GETFileJob then reported 0, so every file the server compressed
++        // (JSON, text) failed here after a complete download.
++        if (errorMsg.isEmpty()) {
++            const auto size = _device->pos();
+             if (size != _record._fileSize) {
+                 //: %1: expected file size in bytes, %2: actual file size in bytes
+                 errorMsg = tr("Unexpected file size transferred. Expected %1 received %2").arg(QString::number(_record._fileSize), QString::number(size));
+diff --git a/src/libsync/propagatedownload.cpp b/src/libsync/propagatedownload.cpp
+index f9e18c2..3c900e9 100644
+--- a/src/libsync/propagatedownload.cpp
++++ b/src/libsync/propagatedownload.cpp
+@@ -201,7 +201,12 @@ void GETFileJob::slotMetaDataChanged()
+ 
+     bool ok = false;
+     _contentLength = reply()->header(QNetworkRequest::ContentLengthHeader).toLongLong(&ok);
+-    if (ok && _expectedContentLength != -1 && _contentLength != _expectedContentLength) {
++    // Over HTTP/2 Qt keeps the Content-Length of a compressed reply, which
++    // counts the compressed bytes (QTBUG-73364). It says nothing about the
++    // file then; HydrationJob checks the bytes it wrote instead.
++    const auto contentEncoding = reply()->rawHeader("Content-Encoding").toLower();
++    const bool encoded = !contentEncoding.isEmpty() && contentEncoding != "identity";
++    if (ok && !encoded && _expectedContentLength != -1 && _contentLength != _expectedContentLength) {
+         qCWarning(lcGetJob) << "We received a different content length than expected!"
+                             << _expectedContentLength << "vs" << _contentLength;
+         _errorString = tr("We received an unexpected download Content-Length.");

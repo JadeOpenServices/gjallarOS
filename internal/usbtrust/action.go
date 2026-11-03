@@ -14,6 +14,9 @@ const (
 	ActionAcceptReplacement Action = "accept-replacement"
 	ActionEnrollInternal    Action = "enroll-internal"
 	ActionDisarm            Action = "disarm"
+	// ActionArm turns blocking back on after a disarm, as the next broker
+	// start would, when blocking is on in settings.
+	ActionArm Action = "arm"
 	// ActionAllowMedia opens the medium that is in an allowed reader now.
 	ActionAllowMedia Action = "allow-media"
 	// ActionRenew restarts the lapse clock of a trusted device that is about
@@ -34,6 +37,7 @@ func (a Action) Valid() bool {
 		ActionAcceptReplacement,
 		ActionEnrollInternal,
 		ActionDisarm,
+		ActionArm,
 		ActionAllowMedia,
 		ActionRenew:
 		return true
@@ -53,6 +57,7 @@ func (a Action) Mutation() bool {
 		ActionAcceptReplacement,
 		ActionEnrollInternal,
 		ActionDisarm,
+		ActionArm,
 		ActionAllowMedia,
 		ActionRenew:
 		return true

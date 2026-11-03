@@ -1,0 +1,88 @@
+diff --git a/src/gui/systray.cpp b/src/gui/systray.cpp
+index 31c628d..9f83ab3 100644
+--- a/src/gui/systray.cpp
++++ b/src/gui/systray.cpp
+@@ -41,6 +41,8 @@
+ #include <QDBusInterface>
+ #include <QDBusMessage>
+ #include <QDBusPendingCall>
++#include <QDBusPendingCallWatcher>
++#include <QDBusPendingReply>
+ #define NOTIFICATIONS_SERVICE "org.freedesktop.Notifications"
+ #define NOTIFICATIONS_PATH "/org/freedesktop/Notifications"
+ #define NOTIFICATIONS_IFACE "org.freedesktop.Notifications"
+@@ -173,6 +175,29 @@ Systray::Systray()
+     connect(AccountManager::instance(), &AccountManager::accountAdded,
+         this, [this]{ showTrayPopup(WindowPosition::Center); });
+ #endif
++
++#ifdef USE_FDO_NOTIFICATIONS
++    // A click on one of our notifications opens the tray window, like a
++    // click on the tray icon. Only the notification server can send these.
++    QDBusConnection::sessionBus().connect(NOTIFICATIONS_SERVICE, NOTIFICATIONS_PATH, NOTIFICATIONS_IFACE,
++        QStringLiteral("ActionInvoked"), this, SLOT(slotNotificationActionInvoked(uint,QString)));
++    QDBusConnection::sessionBus().connect(NOTIFICATIONS_SERVICE, NOTIFICATIONS_PATH, NOTIFICATIONS_IFACE,
++        QStringLiteral("NotificationClosed"), this, SLOT(slotNotificationClosed(uint,uint)));
++#endif
++}
++
++void Systray::slotNotificationActionInvoked(uint id, const QString &actionKey)
++{
++    if (actionKey != "default"_L1 || !_notificationIds.remove(id)) {
++        return;
++    }
++    showTrayPopup(WindowPosition::Center);
++}
++
++void Systray::slotNotificationClosed(uint id, uint reason)
++{
++    Q_UNUSED(reason)
++    _notificationIds.remove(id);
+ }
+ 
+ void Systray::create()
+@@ -1138,11 +1163,21 @@ void Systray::showMessage(const QString &title, const QString &message, MessageI
+ #ifdef USE_FDO_NOTIFICATIONS
+     if (QDBusInterface(NOTIFICATIONS_SERVICE, NOTIFICATIONS_PATH, NOTIFICATIONS_IFACE).isValid()) {
+         const QVariantMap hints = {{QStringLiteral("desktop-entry"), LINUX_APPLICATION_ID}};
++        // "default" is the click on the notification itself; servers do not
++        // show it as a button.
++        const QStringList actions = {u"default"_s, tr("Open")};
+         QList<QVariant> args = QList<QVariant>() << APPLICATION_NAME << quint32(0) << APPLICATION_ICON_NAME
+-                                                 << title << message << QStringList() << hints << qint32(-1);
++                                                 << title << message << actions << hints << qint32(-1);
+         QDBusMessage method = QDBusMessage::createMethodCall(NOTIFICATIONS_SERVICE, NOTIFICATIONS_PATH, NOTIFICATIONS_IFACE, "Notify");
+         method.setArguments(args);
+-        QDBusConnection::sessionBus().asyncCall(method);
++        auto watcher = new QDBusPendingCallWatcher(QDBusConnection::sessionBus().asyncCall(method), this);
++        connect(watcher, &QDBusPendingCallWatcher::finished, this, [this](QDBusPendingCallWatcher *call) {
++            const QDBusPendingReply<uint> reply = *call;
++            if (reply.isValid()) {
++                _notificationIds.insert(reply.value());
++            }
++            call->deleteLater();
++        });
+     } else
+ #endif
+ #if defined(Q_OS_MACOS) && __MAC_OS_X_VERSION_MIN_REQUIRED >= MAC_OS_X_VERSION_10_14 && defined(BUILD_OWNCLOUD_OSX_BUNDLE)
+diff --git a/src/gui/systray.h b/src/gui/systray.h
+index 7e6d7a9..b39c6c7 100644
+--- a/src/gui/systray.h
++++ b/src/gui/systray.h
+@@ -184,6 +184,8 @@ public Q_SLOTS:
+ private Q_SLOTS:
+     void slotUnpauseAllFolders();
+     void slotPauseAllFolders();
++    void slotNotificationActionInvoked(uint id, const QString &actionKey);
++    void slotNotificationClosed(uint id, uint reason);
+ 
+ private:
+     // Argument allows user to specify a specific dialog to be raised
+@@ -235,6 +237,7 @@ private:
+     AccessManagerFactory _accessManagerFactory;
+ 
+     QSet<qint64> _callsAlreadyNotified;
++    QSet<uint> _notificationIds;
+     QPointer<QObject> _editFileLocallyLoadingDialog;
+     QPointer<QObject> _encryptionTokenDiscoveryDialog;
+     QVector<QQuickWindow *> _fileDetailDialogs;

@@ -1,0 +1,160 @@
+fprintd: a Claim that arrives while the device closes for the previous
+holder waits for the close instead of failing with AlreadyInUse.
+
+pam_fprintd leaves without Release after a match (upstream bb23b7e9, so
+the result is not delayed by finger removal). fprintd then closes the
+device for the vanished client, which takes a while on match-on-chip
+readers, and keeps the session set until the close is done. Any Claim
+in that window was refused with "Device was already claimed", e.g. a
+second sudo right after the first.
+
+GjallarOS Plane GJALLAROS-287. Not sent upstream yet (book 753).
+
+--- a/src/device.c
++++ b/src/device.c
+@@ -119,6 +119,14 @@
+   FprintDeviceAction     current_action;
+   GCancellable          *current_cancellable;
+   GDBusMethodInvocation *current_cancel_invocation;
++
++  /* Set while the device closes for a holder that released it or went
++   * away; read with g_atomic_int_get() as authorization may run in a
++   * worker thread. A Claim arriving then waits in pending_claims until
++   * the close has finished, instead of failing with AlreadyInUse. */
++  gint    closing;
++  GQueue  pending_claims;
++  guint   pending_claims_id;
+ } FprintDevicePrivate;
+ 
+ G_DEFINE_TYPE_WITH_CODE (FprintDevice, fprint_device,
+@@ -234,6 +242,17 @@
+ {
+   FprintDevice *self = (FprintDevice *) object;
+   FprintDevicePrivate *priv = fprint_device_get_instance_private (self);
++  GDBusMethodInvocation *invocation;
++
++  g_clear_handle_id (&priv->pending_claims_id, g_source_remove);
++  while ((invocation = g_queue_pop_head (&priv->pending_claims)))
++    {
++      g_dbus_method_invocation_return_error_literal (invocation,
++                                                     FPRINT_ERROR,
++                                                     FPRINT_ERROR_NO_SUCH_DEVICE,
++                                                     "Device was removed");
++      g_object_unref (invocation);
++    }
+ 
+   g_hash_table_remove_all (priv->clients);
+ 
+@@ -785,6 +804,11 @@
+       if (!session)
+         return TRUE;
+ 
++      /* The holder released it or went away and the device is still
++       * closing: fprint_device_claim() lets the claim wait for that. */
++      if (g_atomic_int_get (&priv->closing))
++        return TRUE;
++
+       g_set_error (error, FPRINT_ERROR, FPRINT_ERROR_ALREADY_IN_USE,
+                    "Device was already claimed");
+       return FALSE;
+@@ -949,6 +973,50 @@
+   return g_strdup (username);
+ }
+ 
++static gboolean fprint_device_claim (FprintDBusDevice      *dbus_dev,
++                                     GDBusMethodInvocation *invocation,
++                                     const char            *username);
++
++static gboolean
++fprint_device_run_pending_claims (gpointer user_data)
++{
++  FprintDevice *rdev = user_data;
++  FprintDevicePrivate *priv = fprint_device_get_instance_private (rdev);
++  GDBusMethodInvocation *invocation;
++
++  priv->pending_claims_id = 0;
++
++  /* The first claim opens the device again; the others get AlreadyInUse
++   * from the normal check, as they would without waiting. */
++  while ((invocation = g_queue_pop_head (&priv->pending_claims)))
++    {
++      const char *username = NULL;
++
++      g_variant_get (g_dbus_method_invocation_get_parameters (invocation),
++                     "(&s)", &username);
++      g_debug ("claim from %s ran after the device closed",
++               g_dbus_method_invocation_get_sender (invocation));
++      fprint_device_claim (FPRINT_DBUS_DEVICE (rdev), invocation, username);
++      g_object_unref (invocation);
++    }
++
++  return G_SOURCE_REMOVE;
++}
++
++/* Call after the session was unset at the end of a close. */
++static void
++fprint_device_closed (FprintDevice *rdev)
++{
++  FprintDevicePrivate *priv = fprint_device_get_instance_private (rdev);
++
++  g_atomic_int_set (&priv->closing, FALSE);
++
++  /* From an idle callback: the close callers still reset the current
++   * action when they return. */
++  if (!g_queue_is_empty (&priv->pending_claims) && priv->pending_claims_id == 0)
++    priv->pending_claims_id = g_idle_add (fprint_device_run_pending_claims, rdev);
++}
++
+ static void
+ _fprint_device_client_vanished (GDBusConnection *connection,
+                                 const char      *name,
+@@ -964,6 +1032,7 @@
+   if (session != NULL &&
+       g_strcmp0 (session->sender, name) == 0)
+     {
++      g_atomic_int_set (&priv->closing, TRUE);
+       g_cancellable_cancel (priv->current_cancellable);
+ 
+       if (!priv->current_cancellable)
+@@ -996,6 +1065,7 @@
+         g_critical ("Error closing device after disconnect: %s", error->message);
+ 
+       session_data_set_new (priv, NULL, NULL);
++      fprint_device_closed (rdev);
+     }
+   g_hash_table_remove (priv->clients, name);
+ 
+@@ -1108,6 +1178,17 @@
+       return TRUE;
+     }
+ 
++  session = session_data_get (priv);
++  if (session)
++    {
++      /* The check passed while a session exists only because the device
++       * is closing; run this claim once the close has finished. */
++      g_debug ("claim from %s waits for the device to close",
++               g_dbus_method_invocation_get_sender (invocation));
++      g_queue_push_tail (&priv->pending_claims, g_object_ref (invocation));
++      return TRUE;
++    }
++
+   user = g_object_steal_qdata (G_OBJECT (invocation), quark_auth_user);
+   g_assert (user);
+   g_assert (g_str_equal (username, "") || g_str_equal (user, username));
+@@ -1139,6 +1220,7 @@
+ 
+   session = session_data_get (priv);
+   session_data_set_new (priv, NULL, NULL);
++  fprint_device_closed (rdev);
+   invocation = g_steal_pointer (&session->invocation);
+   action_unset = rdev;
+ 
+@@ -1200,6 +1282,7 @@
+ 
+   session->invocation = g_object_ref (invocation);
+ 
++  g_atomic_int_set (&priv->closing, TRUE);
+   priv->current_action = ACTION_CLOSE;
+   fp_device_close (priv->dev, NULL, (GAsyncReadyCallback) dev_close_cb, rdev);
+ 

@@ -1,6 +1,6 @@
 --- a/src/openvfsfuse/main.cpp
 +++ b/src/openvfsfuse/main.cpp
-@@ -44,7 +44,8 @@ std::optional<openVFSfuse_Args> processArgs(int argc, char *argv[])
+@@ -46,7 +46,8 @@ std::optional<openVFSfuse_Args> processArgs(int argc, char *argv[])
      // preset passed standard options which can not be set in fuse_config in
      // the init function called openVFSfuse_init()
      // auto_umount: Unmount the fuse layer automatically if the app crashes.
@@ -12,7 +12,7 @@
          switch (res) {
 --- a/src/openvfsfuse/openvfsfuse.cpp
 +++ b/src/openvfsfuse/openvfsfuse.cpp
-@@ -31,11 +31,13 @@
+@@ -32,11 +32,13 @@
  #include <fuse3/fuse_lowlevel.h>
  #include <grp.h>
  #include <iostream>
@@ -26,8 +26,8 @@
  
  #include <nlohmann/json.hpp>
  
-@@ -205,6 +207,68 @@ static SocketThread _socketThread("SocketThread", _jobs);
- 
+@@ -211,6 +213,68 @@ static SocketThread _socketThread("SocketThread", _jobs);
+ // FUSE dispatches requests from several threads, so the transfer id needs to be atomic
  static std::atomic<int> _transfer_id{12};
  
 +// The client writes a hydrated file, and reads its sync database, through
@@ -95,22 +95,22 @@
  
  void openvfsfuse_log(const std::string &path, const char *action, int returncode, const char *format, ...)
  {
-@@ -588,6 +652,12 @@ static int openVFSfuse_open(const char *orig_path, struct fuse_file_info *fi)
-                     return -EPERM;
-                 }
+@@ -599,6 +663,12 @@ static int openVFSfuse_open(const char *orig_path, struct fuse_file_info *fi)
+                 return -EPERM;
+             }
  
-+                const HydrationSlot slot(fuse_get_context()->pid);
-+                if (!slot) {
-+                    openvfsfuse_log(path, "open", -1, "no hydration slot free for %s", opener.c_str());
-+                    return -EAGAIN;
-+                }
++            const HydrationSlot slot(fuse_get_context()->pid);
++            if (!slot) {
++                openvfsfuse_log(path, "open", -1, "no hydration slot free for %s", opener.c_str());
++                return -EAGAIN;
++            }
 +
-                 // Create message to send to worker thread 1
-                 std::shared_ptr<MsgData> msgData(new MsgData());
-                 msgData->msg = "V2/HYDRATE_FILE";
+             // Create message to send to worker thread 1
+             std::shared_ptr<MsgData> msgData(new MsgData());
+             msgData->msg = "V2/HYDRATE_FILE";
 --- a/src/openvfsfuse/openvfsfuse.h
 +++ b/src/openvfsfuse/openvfsfuse.h
-@@ -27,5 +27,15 @@ struct openVFSfuse_Args
+@@ -32,5 +32,15 @@ struct openVFSfuse_Args
      bool debugEnabled = false; // checked in the central logging function if logging is enabled
  };
  

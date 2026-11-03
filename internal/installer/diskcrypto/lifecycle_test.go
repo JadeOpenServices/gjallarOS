@@ -17,10 +17,10 @@ func TestParseKeyslots(t *testing.T) {
 		file string
 		want Keyslots
 	}{
-		{"testdata/luks-tpm2-passphrase.json", Keyslots{All: []int{0, 2}, TPM2: []int{2}, TPM2Token: map[int]string{2: "1"}, Passphrase: []int{0}}},
-		{"testdata/luks-tpm2-recovery-passphrase.json", Keyslots{All: []int{0, 1, 2}, TPM2: []int{2}, TPM2Token: map[int]string{2: "1"}, Recovery: []int{1}, Passphrase: []int{0}}},
-		{"testdata/luks-tpm2pin-recovery.json", Keyslots{All: []int{0, 2}, TPM2: []int{0}, TPM2PIN: true, TPM2Token: map[int]string{0: "0"}, Recovery: []int{2}}},
-		{"testdata/luks-tpm2-recovery.json", Keyslots{All: []int{0, 2}, TPM2: []int{0}, TPM2Token: map[int]string{0: "0"}, Recovery: []int{2}}},
+		{"testdata/luks-tpm2-passphrase.json", Keyslots{All: []int{0, 2}, TPM2: []int{2}, TPM2Policy: true, TPM2Token: map[int]string{2: "1"}, Passphrase: []int{0}}},
+		{"testdata/luks-tpm2-recovery-passphrase.json", Keyslots{All: []int{0, 1, 2}, TPM2: []int{2}, TPM2Policy: true, TPM2Token: map[int]string{2: "1"}, Recovery: []int{1}, Passphrase: []int{0}}},
+		{"testdata/luks-tpm2pin-recovery.json", Keyslots{All: []int{0, 2}, TPM2: []int{0}, TPM2Policy: true, TPM2PIN: true, TPM2Token: map[int]string{0: "0"}, Recovery: []int{2}}},
+		{"testdata/luks-tpm2-recovery.json", Keyslots{All: []int{0, 2}, TPM2: []int{0}, TPM2Policy: true, TPM2Token: map[int]string{0: "0"}, Recovery: []int{2}}},
 	} {
 		raw, err := os.ReadFile(tc.file)
 		if err != nil {
@@ -63,6 +63,38 @@ func TestParseKeyslotsOldTPM2Token(t *testing.T) {
 	}
 	if cur, _ := ParseKeyslots(raw); cur.TPM2NoSRK {
 		t.Fatal("current token flagged as old")
+	}
+}
+
+// The first installers ran systemd-cryptenroll --tpm2-device=auto with no
+// PCRs and no pcrlock policy. The e2e-fw13 header with the pcrlock fields
+// taken out has the same token fields as such a token.
+func TestParseKeyslotsTokenWithoutPolicy(t *testing.T) {
+	raw, err := os.ReadFile("testdata/luks-tpm2-recovery.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var header map[string]any
+	if err := json.Unmarshal(raw, &header); err != nil {
+		t.Fatal(err)
+	}
+	for _, token := range header["tokens"].(map[string]any) {
+		delete(token.(map[string]any), "tpm2_pcrlock")
+		delete(token.(map[string]any), "tpm2_pcrlock_nv")
+	}
+	unbound, err := json.Marshal(header)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := ParseKeyslots(unbound)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.TPM2NoPolicy || got.TPM2Policy {
+		t.Fatalf("token without pcrlock policy: NoPolicy %t, Policy %t", got.TPM2NoPolicy, got.TPM2Policy)
+	}
+	if cur, _ := ParseKeyslots(raw); cur.TPM2NoPolicy {
+		t.Fatal("pcrlock token flagged")
 	}
 }
 

@@ -1,0 +1,232 @@
+diff --git a/src/cli/schema_config.h b/src/cli/schema_config.h
+index 9bbee88..c5238a5 100644
+--- a/src/cli/schema_config.h
++++ b/src/cli/schema_config.h
+@@ -60,6 +60,19 @@ namespace noctalia::cli {
+       false,
+   };
+ 
++  inline constexpr Command kConfigSettingsPathCmd{
++      "settings-path",
++      "Print the state-dir settings file in use",
++      "Each config version keeps its own copy of the state-dir settings\n"
++      "(settings.v<N>.toml), so an older build still finds its own after a rollback.\n"
++      "Prints the copy this build reads, or the file it will start one from.",
++      {},
++      {},
++      {},
++      {},
++      false,
++  };
++
+   inline constexpr std::array kConfigReplayFlags{
+       Flag{"--target", {}, "<dir>", "Directory where replay files are written", {}, {}, false, true},
+       Flag{"--flattened", {}, {}, "Write only merged_config.content as config.toml", {}, {}, false, false},
+@@ -84,6 +97,7 @@ namespace noctalia::cli {
+       kConfigExportCmd,
+       kConfigReplayReportCmd,
+       kConfigSettingsCountCmd,
++      kConfigSettingsPathCmd,
+       kConfigValidateCmd,
+   };
+   inline constexpr Command kConfigCmd{
+diff --git a/src/config/cli.cpp b/src/config/cli.cpp
+index de2d58a..a1a486c 100644
+--- a/src/config/cli.cpp
++++ b/src/config/cli.cpp
+@@ -3,6 +3,7 @@
+ #include "cli/help.h"
+ #include "cli/parse.h"
+ #include "cli/schema_config.h"
++#include "config/config_migrations.h"
+ #include "config/config_service.h"
+ #include "config/config_validate.h"
+ #include "core/log.h"
+@@ -346,7 +347,7 @@ namespace noctalia::config {
+         const std::string configDir = FileUtils::configDir();
+         std::string settingsPath;
+         if (const std::string stateDir = FileUtils::stateDir(); !stateDir.empty()) {
+-          settingsPath = stateDir + "/settings.toml";
++          settingsPath = settingsFileForRead(stateDir).string();
+         }
+         diagnostics = validateConfigSources(configDir, settingsPath);
+       } else {
+@@ -416,7 +417,7 @@ namespace noctalia::config {
+       const std::string configDir = FileUtils::configDir();
+       std::string settingsPath;
+       if (const std::string stateDir = FileUtils::stateDir(); !stateDir.empty()) {
+-        settingsPath = stateDir + "/settings.toml";
++        settingsPath = settingsFileForRead(stateDir).string();
+       }
+ 
+       std::string error;
+@@ -453,6 +454,23 @@ namespace noctalia::config {
+       return runExport(argc, argv);
+     if (std::strcmp(argv[2], "settings-count") == 0)
+       return runSettingsCount(argc, argv);
++    if (std::strcmp(argv[2], "settings-path") == 0) {
++      auto parsed = cli::parseOrReport(
++          cli::kConfigSettingsPathCmd, "noctalia config settings-path",
++          std::span<char* const>{argv + 3, static_cast<std::size_t>(argc - 3)}
++      );
++      if (!parsed)
++        return 1;
++      if (parsed->helpRequested)
++        return 0;
++      const std::string stateDir = FileUtils::stateDir();
++      if (stateDir.empty()) {
++        std::println(stderr, "error: no state directory");
++        return 1;
++      }
++      std::println("{}", settingsFileForRead(stateDir).string());
++      return 0;
++    }
+     if (std::strcmp(argv[2], "replay-report") == 0) {
+       auto parsed = cli::parseOrReport(
+           cli::kConfigReplayReportCmd, "noctalia config replay-report",
+diff --git a/src/config/config_migrations.cpp b/src/config/config_migrations.cpp
+index 17843b6..7cd8319 100644
+--- a/src/config/config_migrations.cpp
++++ b/src/config/config_migrations.cpp
+@@ -5,6 +5,7 @@
+ #include <algorithm>
+ #include <array>
+ #include <cstdint>
++#include <filesystem>
+ #include <format>
+ #include <limits>
+ #include <set>
+@@ -994,6 +995,75 @@ namespace noctalia::config {
+     return version;
+   }
+ 
++  std::string settingsFileName(int version) { return std::format("settings.v{}.toml", version); }
++
++  namespace {
++
++    constexpr std::string_view kLegacySettingsFile = "settings.toml";
++
++    // The file a missing copy starts from: the newest older version's copy, else settings.toml
++    // unless it was written by a newer build. Empty when there is none.
++    std::filesystem::path settingsSeedSource(const std::filesystem::path& stateDir) {
++      const int current = currentConfigVersion();
++      std::error_code ec;
++      for (int version = current - 1; version >= 0; --version) {
++        const auto older = stateDir / settingsFileName(version);
++        if (std::filesystem::is_regular_file(older, ec)) {
++          return older;
++        }
++      }
++      const auto legacy = stateDir / kLegacySettingsFile;
++      if (!std::filesystem::is_regular_file(legacy, ec)) {
++        return {};
++      }
++      try {
++        const toml::table root = toml::parse_file(legacy.string());
++        if (const auto stored = root[kConfigVersionKey].value<std::int64_t>(); stored.has_value() && *stored > current) {
++          return {};
++        }
++      } catch (const toml::parse_error&) {
++        // Start from it anyway: loading reports the parse error as it always did.
++      }
++      return legacy;
++    }
++
++  } // namespace
++
++  std::filesystem::path settingsFileForRead(const std::filesystem::path& stateDir) {
++    std::error_code ec;
++    const auto legacy = stateDir / kLegacySettingsFile;
++    if (std::filesystem::is_symlink(legacy, ec)) {
++      return legacy;
++    }
++    const auto own = stateDir / settingsFileName();
++    if (std::filesystem::exists(own, ec)) {
++      return own;
++    }
++    const auto seed = settingsSeedSource(stateDir);
++    return seed.empty() ? own : seed;
++  }
++
++  std::filesystem::path prepareSettingsFile(const std::filesystem::path& stateDir) {
++    const auto source = settingsFileForRead(stateDir);
++    const auto own = stateDir / settingsFileName();
++    if (source == own || (source == stateDir / kLegacySettingsFile && std::filesystem::is_symlink(source))) {
++      return source;
++    }
++    // Copied under a temporary name and renamed, so a crash never leaves half a copy in use. If
++    // the copy fails the build still uses its own path and starts from defaults: migrating the
++    // source in place would break the older build that reads it.
++    std::error_code ec;
++    const auto partial = stateDir / (settingsFileName() + ".partial");
++    std::filesystem::copy_file(source, partial, std::filesystem::copy_options::overwrite_existing, ec);
++    if (!ec) {
++      std::filesystem::rename(partial, own, ec);
++    }
++    if (ec) {
++      std::filesystem::remove(partial, ec);
++    }
++    return own;
++  }
++
+   int applyPendingConfigMigrations(
+       toml::table& root, int storedVersion, schema::Diagnostics& diag, std::span<const ConfigMigration> migrations
+   ) {
+diff --git a/src/config/config_migrations.h b/src/config/config_migrations.h
+index 01276e5..597b1e1 100644
+--- a/src/config/config_migrations.h
++++ b/src/config/config_migrations.h
+@@ -4,6 +4,7 @@
+ #include "core/toml.h"
+ 
+ #include <cstdint>
++#include <filesystem>
+ #include <optional>
+ #include <span>
+ #include <string>
+@@ -34,6 +35,16 @@ namespace noctalia::config {
+   [[nodiscard]] const std::vector<ConfigMigration>& configMigrations();
+   [[nodiscard]] int currentConfigVersion();
+   [[nodiscard]] std::optional<int> storedConfigVersion(const toml::table& root, schema::Diagnostics& diag);
++
++  // Each config version keeps its own copy of the state-dir settings, settings.v<N>.toml. A build
++  // migrates only its own copy, so after a rollback the older build finds the file it last wrote,
++  // untouched. Builds from before this scheme read settings.toml, which is never written here.
++  // A settings.toml that is a symlink is managed elsewhere and stays the one file in use.
++  [[nodiscard]] std::string settingsFileName(int version = currentConfigVersion());
++  // The file this build reads: its own copy, else the file a new copy would start from.
++  [[nodiscard]] std::filesystem::path settingsFileForRead(const std::filesystem::path& stateDir);
++  // settingsFileForRead(), after creating this build's own copy from that file when it is missing.
++  [[nodiscard]] std::filesystem::path prepareSettingsFile(const std::filesystem::path& stateDir);
+   [[nodiscard]] int applyPendingConfigMigrations(
+       toml::table& root, int storedVersion, schema::Diagnostics& diag,
+       std::span<const ConfigMigration> migrations = configMigrations()
+diff --git a/src/config/config_service.cpp b/src/config/config_service.cpp
+index 0404227..ecea5c4 100644
+--- a/src/config/config_service.cpp
++++ b/src/config/config_service.cpp
+@@ -564,12 +564,12 @@ ConfigService::WallpaperBatch::~WallpaperBatch() {
+ ConfigService::ConfigService() {
+   m_configDir = FileUtils::configDir();
+ 
+-  // Resolve settings.toml path; create the state dir eagerly so writes don't
+-  // race with directory creation later.
++  // Resolve the settings path (this version's copy, see prepareSettingsFile); create the state
++  // dir eagerly so writes don't race with directory creation later.
+   if (auto dir = FileUtils::stateDir(); !dir.empty()) {
+     std::error_code ec;
+     std::filesystem::create_directories(dir, ec);
+-    m_overridesPath = dir + "/settings.toml";
++    m_overridesPath = noctalia::config::prepareSettingsFile(dir).string();
+     m_stateStore.setPath(dir + "/state.toml");
+     m_setupMarkerPath = dir + "/.setup-complete";
+   }
+@@ -777,7 +777,7 @@ std::string ConfigService::buildSupportReport() const {
+ 
+   toml::table state;
+   state.insert_or_assign("kind", "state");
+-  state.insert_or_assign("relative_path", "settings.toml");
++  state.insert_or_assign("relative_path", std::filesystem::path(m_overridesPath).filename().string());
+   state.insert_or_assign("path", m_overridesPath);
+ 
+   const bool settingsExists = !m_overridesPath.empty() && std::filesystem::exists(m_overridesPath);

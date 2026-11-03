@@ -46,7 +46,7 @@ func TestJODSEnrollmentStartsOnlyAfterSuccessfulInstallation(t *testing.T) {
 		t.Fatal(err)
 	}
 	joined := fmt.Sprint(calls)
-	if !strings.Contains(joined, "jods-mdm-agent-enroll.service") || !strings.Contains(joined, "jods-mdm-agent-enroll.timer") {
+	if !strings.Contains(joined, "mdm-agent-enroll.service") || !strings.Contains(joined, "mdm-agent-enroll.timer") {
 		t.Fatalf("successful installation did not activate enrollment lifecycle: %v", calls)
 	}
 }
@@ -62,9 +62,9 @@ func TestInsecureJODSRequiresExplicitConfirmation(t *testing.T) {
 }
 
 func TestUnmanagedPresetForcesJODSPrebootLockOff(t *testing.T) {
-	u := config.User{EndpointManagedDevice: false, RecoveryEnable: true, JODSPrebootLockEnable: true}
+	u := config.User{RecoveryEnable: true, PrebootLock: config.PrebootLockIntent{Enable: true}}
 	normalizeManagementSafety(&u)
-	if u.JODSPrebootLockEnable {
+	if u.PrebootLock.Enable {
 		t.Fatal("unmanaged preset retained JODS preboot lock")
 	}
 }
@@ -154,7 +154,9 @@ func TestValidateSelections(t *testing.T) {
 
 func TestManagedPresetForcesBootRecoveryContract(t *testing.T) {
 	u := config.User{
-		EndpointManagedDevice: true,
+		Management: config.ManagementIntent{
+			Enable: true,
+		},
 	}
 	normalizeManagementSafety(&u)
 
@@ -167,7 +169,7 @@ func TestManagedPresetForcesBootRecoveryContract(t *testing.T) {
 	if !u.RecoveryEnable {
 		t.Fatal("managed preset did not force recovery")
 	}
-	if !u.JODSPrebootLockEnable {
+	if !u.PrebootLock.Enable {
 		t.Fatal("managed preset did not force JODS preboot lock")
 	}
 }
@@ -389,7 +391,7 @@ func TestCollectRecoverySkipsPartitionWithoutSecureBoot(t *testing.T) {
 	}
 }
 
-// A fresh disk without GjallarOS Secure Boot got JODS-RECOVERY anyway: the
+// A fresh disk without GjallarOS Secure Boot got a recovery partition anyway: the
 // plan followed the boot entry answer, not the partition answer.
 func TestFreshDiskGetsRecoveryPartitionOnlyWhenChosen(t *testing.T) {
 	var output bytes.Buffer
@@ -503,22 +505,22 @@ func TestCollectUSBTrustLapse(t *testing.T) {
 // the whole interview and then failed the Secure Boot check.
 func TestCollectJODSManagementSkippedWithoutSecureBootSupport(t *testing.T) {
 	var output bytes.Buffer
-	u := config.User{EndpointManagedDevice: true}
-	blocker := jodsManagementBlocker(false, true)
+	u := config.User{Management: config.ManagementIntent{Enable: true}}
+	blocker := managementBlocker(false, true)
 	if err := collectJODSManagement(context.Background(), prompt.New(strings.NewReader("yes\n"), &output), blocker, nil, &u); err != nil {
 		t.Fatal(err)
 	}
-	if u.EndpointManagedDevice || strings.Contains(output.String(), "Manage this machine with JODS?") ||
+	if u.Management.Enable || strings.Contains(output.String(), "Manage this machine with JODS?") ||
 		!strings.Contains(output.String(), "Secure Boot") {
-		t.Fatalf("managed=%t output:\n%s", u.EndpointManagedDevice, output.String())
+		t.Fatalf("managed=%t output:\n%s", u.Management.Enable, output.String())
 	}
 }
 
 func TestJODSManagementBlockerNamesTPM2(t *testing.T) {
-	if got := jodsManagementBlocker(true, false); !strings.Contains(got, "TPM2") {
+	if got := managementBlocker(true, false); !strings.Contains(got, "TPM2") {
 		t.Fatalf("blocker = %q", got)
 	}
-	if got := jodsManagementBlocker(true, true); got != "" {
+	if got := managementBlocker(true, true); got != "" {
 		t.Fatalf("supported machine blocked: %q", got)
 	}
 }
@@ -529,19 +531,23 @@ func TestCollectJODSManagementAskedWhenSupported(t *testing.T) {
 	if err := collectJODSManagement(context.Background(), prompt.New(strings.NewReader("yes\n"), &output), "", nil, &u); err != nil {
 		t.Fatal(err)
 	}
-	if !u.EndpointManagedDevice {
+	if !u.Management.Enable {
 		t.Fatalf("managed not enabled:\n%s", output.String())
 	}
 }
 
 func TestManagedPresetRequiresRecoveryPartitionProvisioning(t *testing.T) {
 	u := config.User{
-		EndpointManagedDevice:   true,
+		Management: config.ManagementIntent{
+			Enable: true,
+		},
 		RecoveryEnable:          false,
 		RecoveryPartitionEnable: false,
-		JODSPrebootLockEnable:   false,
-		SecureBootEnable:        false,
-		LUKSTPM2Enable:          false,
+		PrebootLock: config.PrebootLockIntent{
+			Enable: false,
+		},
+		SecureBootEnable: false,
+		LUKSTPM2Enable:   false,
 	}
 
 	normalizeManagementSafety(&u)
@@ -558,7 +564,7 @@ func TestManagedPresetRequiresRecoveryPartitionProvisioning(t *testing.T) {
 	if !u.LUKSTPM2Enable {
 		t.Fatal("managed preset did not force TPM2 LUKS")
 	}
-	if !u.JODSPrebootLockEnable {
+	if !u.PrebootLock.Enable {
 		t.Fatal("managed preset did not force JODS preboot lock")
 	}
 }
@@ -631,10 +637,12 @@ func TestRecoveryLifecycleAuthorityIsSeparated(t *testing.T) {
 
 func TestDisableTPMDependentSecurity(t *testing.T) {
 	user := config.User{
-		SecureBootPrompt:      true,
-		SecureBootEnable:      true,
-		LUKSTPM2Enable:        true,
-		JODSPrebootLockEnable: true,
+		SecureBootPrompt: true,
+		SecureBootEnable: true,
+		LUKSTPM2Enable:   true,
+		PrebootLock: config.PrebootLockIntent{
+			Enable: true,
+		},
 	}
 
 	disableTPMDependentSecurity(&user)
@@ -648,7 +656,7 @@ func TestDisableTPMDependentSecurity(t *testing.T) {
 	if user.LUKSTPM2Enable {
 		t.Fatal("TPM2 LUKS unlock remained enabled")
 	}
-	if user.JODSPrebootLockEnable {
+	if user.PrebootLock.Enable {
 		t.Fatal("JODS preboot TPM policy remained enabled")
 	}
 }

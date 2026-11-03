@@ -26,20 +26,20 @@ and only the disk encryption passphrase can turn blocking off again.
       adopts the signing key on first start. VM-tested arm, block, disarm and
       re-arm on fw13 (2026-10-10).
 - [ ] **Rollout** (on the live host, run by the user):
-  1. `rebuild` with `usbTrustEnforce = false`. Check that
+  1. `gjallarctl rebuild` with `usbTrustEnforce = false`. Check that
      `gjallarctl usb status` reports `"armed": false` and that the review
      notices still work.
   2. Test the password fallback: click "Use password" during the scan. The
      askpass dialog must appear at once.
   3. Set `"usbTrustEnforce": true` in `user.config.json` (untracked), then
-     `rebuild`.
+     `gjallarctl rebuild`.
   4. Check that `gjallarctl usb status` reports `"armed": true`. The fingerprint
      reader and Bluetooth should be enrolled. The passkey and USB disk should
      wait for review.
   5. Break-glass test: `sudo gjallarctl usb disarm`. A wrong passphrase must
      fail after about 3 s; the right one must disarm.
   6. Turning enforcement off for good: set `"usbTrustEnforce": false`,
-     `rebuild`, then `sudo gjallarctl usb disarm`. Disarm alone does not
+     `gjallarctl rebuild`, then `sudo gjallarctl usb disarm`. Disarm alone does not
      last: the broker re-arms from the config on its next restart.
 - [ ] Show armed or audit mode in the review dialog header, not only in
       `status` JSON.
@@ -414,7 +414,7 @@ Ideas worth taking:
 
 - [ ] **Separate daily and admin accounts.** Today the installer creates one
       account that is in `wheel` and does everything. Malware running as that
-      user can wait for a sudo or `rebuild` password and reuse it. Option at
+      user can wait for a sudo or `gjallarctl rebuild` password and reuse it. Option at
       install time: a daily account without admin rights, and a second admin
       account that only `gjallarctl` operations and polkit ask for. The daily
       user then types the admin password, not their own, so a keylogger in the
@@ -452,7 +452,7 @@ Plan agreed 2026-10-10. Channels decided 2026-10-20 (Q16): `main` became
       1. A branch bumps all flake inputs (nixpkgs, Home Manager, Noctalia,
          the ODDC pin and the rest).
       2. The full `.vm/installer-e2e/REGRESSION.md` runs in VMs.
-      3. Merge to `main` and tag.
+      3. Merge to `dev` and tag.
       4. `staging` moves to the tag. The Framework 13 and the ZBook x2 G4
          run it for a while.
       5. `stable` moves to the same tag.
@@ -461,7 +461,7 @@ Plan agreed 2026-10-10. Channels decided 2026-10-20 (Q16): `main` became
       to `stable` applies at once). New installs and older configurations
       get `stable`. The installer clones the installed commit, which must be
       on one of the three branches, onto a local branch that tracks the
-      chosen channel. `rebuild --update` fetches origin and only
+      chosen channel. `gjallarctl rebuild --update` fetches origin and only
       fast-forwards to the channel. A checkout ahead of its channel stays
       where it is until the channel catches up, so a move to an older
       channel never downgrades. A checkout on the old `main` branch or on
@@ -471,7 +471,7 @@ Plan agreed 2026-10-10. Channels decided 2026-10-20 (Q16): `main` became
       fast-forward. A bar notice when the channel is ahead. JODS sets the
       channel on managed devices.
 - [ ] **ODDC stays separate.** A release carries whatever ODDC commit its
-      `flake.lock` pins; the next item keeps that pin current. `rebuild --hardware-update --channel stable|staging`
+      `flake.lock` pins; the next item keeps that pin current. `gjallarctl rebuild --hardware-update --channel stable|staging`
       keeps working as it does today and is not tied to the GjallarOS
       channel.
 - [ ] **ODDC pin follows ODDC stable** (Jade, ODDC items 83, 100). Security
@@ -513,7 +513,7 @@ Plan agreed 2026-10-10. Channels decided 2026-10-20 (Q16): `main` became
          commit, because a key the workflow holds must never be able to
          update machines.
       7. **Reaching machines.** `dev` gets it with the next
-         `rebuild --update`. For `staging` and `stable`, a bump whose
+         `gjallarctl rebuild --update`. For `staging` and `stable`, a bump whose
          `oddc changes` classes are only data, evidence or docs may get its
          own tag on top of the current one without the soak, because flags
          only lower trust. A bump that changes ODDC's nix or Go code waits
@@ -524,7 +524,7 @@ Plan agreed 2026-10-10. Channels decided 2026-10-20 (Q16): `main` became
       whether the data-only fast lane to `stable` is wanted.
 - [ ] **Verifying updates.** Goes through the research flow again before
       any code. Waits for the release key talk (Jade, Q37 and Q76): until
-      then `rebuild --update` trusts git over HTTPS alone, as the 2026-10-27
+      then `gjallarctl rebuild --update` trusts git over HTTPS alone, as the 2026-10-27
       pin audit found. Ideas so far, from the sources below:
       - The trust root comes with the install, not from the server: the
         first commit the rule applies to and the key that signed it, like a
@@ -542,7 +542,7 @@ Plan agreed 2026-10-10. Channels decided 2026-10-20 (Q16): `main` became
         expire after a year (Qubes), and two signatures per release tag
         (TUF thresholds).
       - A mirror or a stale fork can serve an old `stable` forever (TUF
-        "indefinite freeze"). The release tag carries its date; `rebuild`
+        "indefinite freeze"). The release tag carries its date; `gjallarctl rebuild`
         warns when the newest tag on the channel is very old.
       - Check signatures locally. GitHub's "Verified" badge is not trusted
         (Qubes guide).
@@ -559,7 +559,7 @@ Plan agreed 2026-10-10. Channels decided 2026-10-20 (Q16): `main` became
       so slow devices compile them for a long time. Built: GitHub runners
       build the release tags and add them, signed, to the `nix-cache`
       release (README "Release cache"); those files are the only binaries
-      in a release. The installer and `rebuild` add it as a substituter.
+      in a release. The installer and `gjallarctl rebuild` add it as a substituter.
       Devices still evaluate the same source; the cache only skips building
       outputs with a matching hash, and `nix build --rebuild` can check it.
       Research flow first, because the cache signing key becomes a key every
@@ -574,6 +574,137 @@ Plan agreed 2026-10-10. Channels decided 2026-10-20 (Q16): `main` became
       on cache.nixos.org for our nixpkgs pin), the qt6ct patch 2 %. A cache
       of these saves about 63 %. Kernel modules and the initrd depend on the
       device and always build locally (2 %).
+
+### Organisation and updates (Jade, 2026-11-01, Q157-Q167)
+
+Wiki 752 "Answered 2026-11-01" has the answers word for word.
+
+- [ ] **Who runs what.** `dev` is where tickets land, each tested in the VM
+      that matches the device first. `staging` is Jade's daily system and
+      moves only after a full REGRESSION pass. `stable` moves per release
+      pack and through the hotfix lane. New installs get `stable` with
+      developer mode off.
+- [ ] **Developer mode unlocks channels** (Q157, Q161). `staging`, `dev` and
+      `gjallarctl rebuild --update BRANCH` need `developerMode`. Without it
+      the channel setting refuses anything but `stable` and the system
+      tools offer no way around that. Developer mode stays refused on
+      JODS-managed devices, so a hand edit of `user.config.json` changes
+      nothing there. This is the phase until Genbu MDM exists, not a
+      workaround.
+- [ ] **Developer grant, after Genbu MDM** (later phase). JODS/Genbu signs a
+      grant bound to one device (machine id plus the TPM key), with a scope
+      (`staging`, `dev`, branches) and an expiry. The local setting then
+      only works on standalone devices; a joined device needs the grant. A
+      revoked or expired grant moves the device back to `stable` at once,
+      without a downgrade of the running system (it waits for `stable` to
+      catch up). Root on the device stays out of the threat model
+      (loophole 15). Standalone devices without Genbu keep working.
+- [ ] **Branches** (Q158). `gjallarctl rebuild --update BRANCH` takes a channel or a
+      feature branch, the latter with a warning. It is one shot:
+      `releaseChannel` stays and the next plain update goes back to it.
+      `--back` is the only way to a deliberate downgrade.
+- [ ] **Tags** (Q159). Every merge that changes a patched package gets a
+      tag, on `dev` too, so VM runs and slow devices pull from the cache.
+      Several dev merges in a row share one tag. A promotion to `staging`
+      or `stable` reuses the cache entries (they are keyed by store path)
+      and builds nothing new.
+- [ ] **Hotfix lane** (Q160). A fix that cannot wait for a pack goes to
+      `staging` after the full REGRESSION pass, soaks on the Framework 13,
+      gets its own tag on `stable` and is merged back into `dev`. First
+      user: H0 (278 and 279), held until the passkey report is understood.
+- [ ] **Release packs** (Q167). Each pack is a Plane module and a label.
+      H0 hotfix (278, 279). P1 Wine (272, 275, 277, Lobu-Online import,
+      274). P2 one CLI (`gjallarctl` tree, help, completion, legacy
+      folder). P3 Settings and Updates (276, Updates page). P4 Nextcloud
+      266.
+
+#### Updates page and card (Q162-Q165)
+
+- [ ] **Own Updates page** in the settings app, linked from Security.
+      Shows the channel, the running tag, the newest tag, the state
+      (current, update found, prepared, waiting for a restart) and the
+      changelog.
+- [ ] **Check as root, ask as the user.** A root timer fetches and checks
+      only, and writes a status file that root owns and every user can
+      read. It holds tags, dates, the rating and the changelog, never a
+      secret. The card and the page only read it.
+- [ ] **Prepare and install.** Prepare builds the new system in the
+      background without a password: on mains power, not on a metered
+      network, once per version. Install switches to it and always needs
+      the password or the fingerprint through polkit.
+- [ ] **The card** in gjallarHorn stays until it is answered or swiped away,
+      like "set keys now". It never asks for a password itself; Prepare
+      runs from the card, Install opens the Updates page. Its state is
+      stored per version, so a relogin or restart does not bring back a
+      card that was handled.
+- [ ] **Behaviour by rating** (AppStream urgency: low, medium, high,
+      critical; tags security, fixes, features):
+      - low and medium: Later offers tonight, tomorrow or next week. A swipe
+        brings it back after 3 days, then after 7, then only the Updates
+        page shows it.
+      - high: a swipe brings it back the next day.
+      - critical: no swipe. Prepare, Install or remind in 1 h.
+      - The card gets more visible with the age of the update.
+      - Forced restart is a separate Genbu setting for a later phase and
+        stays off on standalone devices.
+- [ ] **Quiet during calls and screen sharing.** The card waits while the
+      camera, the microphone or a screen share is in use. Security pass
+      (2026-11-01):
+      - The signal comes from the user's own PipeWire session, the same
+        source the bar's privacy widget reads. No new permission; checked
+        at build time.
+      - A program could hold a fake stream open to hide updates. The quiet
+        time is capped at 2 h, 1 h for critical. The Updates page and the
+        bar show the real state the whole time.
+      - Stream names come from other apps. Only the media class counts;
+        names are never shown, parsed, logged or passed to a shell.
+      - The "sharing now" value stays in the user session. It is not
+        logged and never goes to root, JODS or Genbu.
+- [ ] **Changelog box.** A simple view (plain "What's new" lines) and a
+      technical view (the `GJAL` subjects, Plane numbers and the package
+      version changes from the closure diff). Shown as plain text only.
+- [ ] **Before install** (Q165). Install now or at the next restart. A
+      notice first says what will happen: which services restart, whether
+      Wi-Fi drops, whether a logout or restart follows and which apps close.
+      Nothing is closed for the user, so there is time to save work and
+      finish forms. A kernel change suggests the next restart; the power
+      menu then shows "Restart to update". No full-screen "working on
+      updates" screen.
+- [ ] **Fake notices.** Other apps can send notifications that look like
+      the card. The card is fed from the root status file and installing
+      only ever asks through polkit, so a fake notice cannot get the
+      password by itself. The Updates page explains this.
+
+#### Old names (Q166)
+
+- [x] **One legacy folder.** `system/tools/legacy/renames.json` holds one
+      table for every rename: commands, settings keys, config fields,
+      labels, units and paths. Each row has the old name, the new name,
+      where it was removed, the date after which it can be deleted
+      (`deleteAfter`) and the Plane or JODS item (281).
+- [x] Old commands are not run. The zsh `command_not_found_handler` (and
+      the bash `command_not_found_handle`) prints the new name and stops.
+- [x] Old settings keys and config fields: the JODS-565 keys are not read
+      (Q195); generated state drops them once. A later rename that needs a
+      translation adds it next to its row, after asking Jade.
+- [x] The flake check `legacy-names` fails when an old name is used outside
+      the legacy folder or a row is past its `deleteAfter` date. system-path
+      fails to build when an old command is a real command again.
+- [x] The rule goes into README, the job rules (wiki 691) and memory.
+
+#### Update sources
+
+- Apple, declarative software updates:
+  https://support.apple.com/guide/deployment/install-and-enforce-software-updates-depd30715cbb/web
+- Microsoft, update deadlines and grace periods:
+  https://learn.microsoft.com/en-us/windows/deployment/update/wufb-compliancedeadlines
+- ChromeOS RelaunchNotification policy:
+  https://chromeenterprise.google/policies/#RelaunchNotification
+- Nudge (macOS update prompts): https://github.com/macadmins/nudge
+- systemd offline updates:
+  https://www.freedesktop.org/software/systemd/man/latest/systemd.offline-updates.html
+- AppStream release urgency:
+  https://www.freedesktop.org/software/appstream/docs/chap-Metadata.html#tag-releases
 
 Sources:
 
@@ -612,6 +743,17 @@ setup existed) can only get it by running the whole installer again.
       command call the same code for steps 2, 3 and 5; nothing is copied.
       zsh completion like every other command. gjallarctl asks for sudo
       itself.
+- [x] **Shim on maker keys (Plane 293 step 4, Jade Q189).** `setup`
+      defaults to shim when the firmware keeps its maker's keys: db holds
+      the CA that signed the pinned shim, and dbx and shim's SBAT level do
+      not revoke its chain, its distro key, its files or our key. Our db
+      certificate goes into MOK through `mokutil --import` and MokManager,
+      and the firmware keys stay as they are. The ownership record carries
+      stage `pending-mok` until the first Secure Boot start through shim,
+      which `secure-boot-verification` records as `enrolled`. Own keys:
+      `--own-keys`, Setup Mode, or db/dbx ruling shim out. Neither flow
+      continues a switch the other one started. Firmware variable writes
+      check free variable storage first.
 - [x] **Restore dbx before enrolling.** HP's "Clear Secure Boot Keys" also
       empties dbx, the list of revoked boot files. Without it, Secure Boot
       starts boot loaders that are known to be exploitable. Rule: in Setup
@@ -798,7 +940,7 @@ The desktop user owns that checkout, including `generated/`,
 system. `DiscoverRepository` also asks `GJALLAROS_REPO` and a state file in
 the user's home before `/etc/gjallar/repository`. So anything running as
 the user decides what root builds the next time someone types the password
-for `rebuild`. On a managed device, where the user has no root, that is a
+for `gjallarctl rebuild`. On a managed device, where the user has no root, that is a
 way to root.
 
 ### How others handle it
@@ -870,7 +1012,7 @@ way to root.
       owned by root and not writable by group or others, no link leaves the
       checkout, and an empty or missing checkout is named as such.
 - [x] **Checkpoint 2: privileged rebuild ignores user input.** On a system
-      checkout the user's `rebuild` only checks its options, authenticates
+      checkout the user's `gjallarctl rebuild` only checks its options, authenticates
       and starts `/run/current-system/sw/bin/gjallar-system-rebuild` with a
       fixed argument list (`sudo -n`, or `su -l` on managed devices). That
       script starts from `env -i`, runs the installed `gjallarctl system
@@ -1660,7 +1802,7 @@ store anyway.
    - lists the nested subvolumes, because a snapshot never holds them and
      they stay with the kept copy;
    - for `@config`, says that the settings are back but the system built
-     from them is not, so a `rebuild` follows.
+     from them is not, so a `gjallarctl rebuild` follows.
    btrbk keeps finding the older snapshots after a swap (it follows the
    whole parent chain), so they still age out normally.
 5. Existing installs keep their layout and get no snapshots until they
@@ -2531,8 +2673,16 @@ security bs goes in" (Q48), kernel HMAC "Leave off for now" (Q49).
 status shows the chip type and no hint with a PIN set, the record carries
 `pin=1`, the old install got its USB key pinned after its signed state
 verified, and a wrong pin is refused. Item 1 waits on ODDC 103; until then
-every model is unknown and gets the PIN preselected. Still to test: the
-card on an install without a PIN, and fresh provisioning.
+every model is unknown and gets the PIN preselected.
+
+**Status (2026-10-28):** the rest passed on e2e-fw13: without a PIN the
+login card shows, Later brings it back on the next reminder, Don't ask
+holds; setting the PIN again brings back the PIN prompt at boot and ends
+the card. Fresh provisioning writes the pin with the key, and a wrong pin
+still keeps permanent USB trust off. ODDC answered item 103: no model has
+TPM facts yet, so all stay unknown, and ODDC also recommends the PIN on
+every model, firmware TPM included. Item 1 stays open until ODDC ships the
+field; the field names wait on Jade (questionnaire).
 
 **Tests:** unit tests for the token check and the status lines; installer
 text test per TPM type; e2e-fw13 for status and card. Wire attacks cannot
@@ -2747,3 +2897,125 @@ threads on pull versus push.
 - draw.io was a test web application and is removed (2026-10-27, Jade).
   It can come back as a regular catalogue app. Taking `drawio` out of
   `apps/retired.json` is part of that job, so older configs keep it again.
+
+## 23. Touch keyboard at the lock, greeter and LUKS prompt
+
+Written 2026-10-28 for Plane GJALLAROS-164 (ODDC items 101, 103 and 104).
+A tablet or a convertible folded flat has no usable keyboard at the three
+password prompts. ODDC's rules (item 104): fail closed, the keyboard is part
+of the lock surface, no clipboard, emoji, URL, settings or app launch keys,
+no prediction or learning, rotation never drops the lock, and the same rules
+at the LUKS prompt.
+
+### Today
+
+- **Session lock** (Noctalia, ext-session-lock-v1): no on-screen keyboard.
+  The session's wvkbd sits below the lock and gets no input there.
+- **Greeter** (our small wlroots compositor, `pkgs/noctalia-greeter`):
+  wvkbd-mobintl, started by the compositor itself over a socket pair, so
+  only that client sees the layer-shell and virtual-keyboard globals. It
+  shows on a touch and hides on a physical key press. It does not show by
+  itself when no keyboard is attached, and the greeter does not rotate.
+- **LUKS prompt** (unl0kr from buffybox 3.5.1, only with a touchscreen):
+  its own keyboard, hidden when a hardware keyboard is found at start, with a
+  button to show it. Key popovers are on: every pressed key is shown large
+  above the keyboard. No rotation option.
+
+### How others handle it
+
+- **Linux Mint, 2021** (CVE-2021-3567 family, Arch bug 69338, oss-security
+  2021-01-15): two children found that hammering the on-screen keyboard
+  (caribou, a separate X11 process) crashed the screensaver and left the
+  desktop open. The lesson: the keyboard must not be able to take the lock
+  down with it.
+- **ext-session-lock-v1** (waylock, quickshell docs): if the lock client
+  dies, the compositor keeps the session locked and paints a solid colour.
+  Hyprland does the same. A keyboard inside the lock process inherits that:
+  a crash leaves a locked, blank screen, never an open desktop.
+- **GNOME** (gnome-shell issue 5966): the OSK learned a typed password and
+  offered it as a word suggestion. No prediction or learning at a password.
+- **KDE Plasma** (KDE bugs 306596 and related forum threads): Maliit at
+  kscreenlocker is unreliable on Wayland. **Plasma Mobile** draws its own
+  keypad inside the lock screen instead of using Maliit.
+
+### Security pass
+
+**Threat model.** (1) Someone holding the locked device, touching the
+screen. (2) Someone looking over the user's shoulder. (3) A process in the
+user's session (a compromised app) trying to read the password or get into
+the lock. (4) A crash or rotation while locked.
+
+- (1) and (4): the lock keyboard is drawn by the lock client itself, in the
+  same process and on the same lock surface. There is no second client
+  that can crash, and a crash of the lock client keeps the session locked
+  (ext-session-lock). Rotation is a new configure on the same lock
+  surface; the lock object is not touched, so it cannot drop the lock.
+- (3): keys go straight into the password field in memory. Nothing goes
+  over Wayland: no virtual-keyboard or input-method protocol, so no other
+  client sees the keys. The lock never enables text-input-v3, so no input
+  method can feed or read the field. The keyboard sends no modifiers, so the
+  field's Ctrl shortcuts (paste, undo) cannot fire from it.
+- (2): no key popups, no preview of the pressed character. Keys show the
+  usual pressed shade only. The field stays masked.
+- No clipboard, emoji, URL, settings, layout or launch keys. No word list,
+  no suggestions, nothing is stored. The only state is Shift and the page
+  (letters, symbols, accents), reset on every lock.
+- Showing it is never a security decision: it shows when no physical
+  keyboard is attached at lock time, on any touch of the lock, and goes
+  away on a physical key press or its own hide key. A wrong guess only
+  means one extra touch. The lock checks for a keyboard once, when it
+  locks; a keyboard cover taken off while locked needs one touch.
+- "Physical keyboard" means a udev keyboard (`ID_INPUT_KEYBOARD=1`) that is
+  not Bluetooth (bus 0x05) and not virtual (`/devices/virtual`, which also
+  covers uhid and uinput). Bluetooth keyboards do not count (ODDC 101): they
+  may not be connected yet, and they are not there at the greeter or LUKS
+  prompt. A USB keyboard blocked by USB trust has no input device, so it does
+  not count either.
+- **Greeter:** stays wvkbd, started and fenced by the compositor as today.
+  The greeter is not a lock (nothing is unlocked behind it), and wvkbd's
+  globals are only offered to the one client the compositor started.
+  Added: show it when the compositor has no physical keyboard, counted from
+  the same rule on its own libinput devices, so a keyboard taken off shows
+  the keyboard at once. wvkbd key popups go off (`--no-popup`), the same as
+  the lock and unl0kr.
+- **LUKS prompt:** unl0kr is one process with its keyboard built in, so the
+  same rules hold. Key popovers go off. unl0kr keeps its show/hide button.
+
+**What stays open.** The greeter does not rotate, and unl0kr has no rotation
+setting; both stay in the panel's normal orientation. Rotating them needs
+the accelerometer and its mount matrix in the greeter and in stage 1. Logged
+as a follow-up.
+
+**Sources:** bugs.archlinux.org/task/69338,
+openwall.com/lists/oss-security/2021/01/15/1,
+securityaffairs.com/113518/hacking/screensaver-bypass-linux-mint.html,
+bugs.mageia.org/show_bug.cgi?id=28072, isaacfreund.com/software/waylock,
+gitlab.gnome.org/GNOME/gnome-shell/-/issues/5966,
+bugs.kde.org/show_bug.cgi?id=306596,
+liliputing.com/plasma-mobile-ui-for-linux-phones-gets-new-lockscreen-keyboard-and-apps.
+
+## 24. Human phase (last, after all tickets)
+
+Decided with Jade (wiki 752 Q5, 2026-10-20, and Q83, 2026-11-02): work that
+needs Jade in person waits until every ticket is done, then runs as one
+phase. Nothing here blocks a ticket; a ticket that needs a hardware check
+ships with its VM test and gets its line here.
+
+- **Contributors (Q5).** Reach out to the AlfheimOS contributors. The
+  README credits are already done (6e70f98d).
+- **Upstream reports.** Every upstream patch and bug report is queued on
+  wiki book 753. Jade reviews each one, learns the change and sends it.
+  No session sends upstream PRs or issues on its own.
+- **Touch keyboard on the ZBook (Q83, Plane 164).** Boot with the keyboard
+  detached and check which input devices count as a keyboard, so the lock
+  shows its touch keyboard.
+- **Hyprland signal for the touch keyboard (Q6, W10).** Find a real
+  compositor signal; the current fix stays until then.
+- **Hardware checks on Jade's laptops.** The VM tests passed; these need
+  the real machine:
+  - USB: dock and external SSD after a rebuild (289), Bluetooth address
+    check (278), stage-1 keyboard gate on the ZBook (194, Q86).
+  - Fingerprint probe on the Framework (287).
+  - Developer confirm once on staging (283).
+  - Secure Boot with the shim on a laptop whose firmware cannot be
+    unlocked (293).

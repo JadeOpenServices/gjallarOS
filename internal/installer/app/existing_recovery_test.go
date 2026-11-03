@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -364,7 +365,7 @@ func TestRecoveryInstalledRootAcceptsAuthenticatedMapper(t *testing.T) {
 func TestRecoveryAfterMaintenanceNeedsNoAnswers(t *testing.T) {
 	original := findRecoveryPartition
 	t.Cleanup(func() { findRecoveryPartition = original })
-	findRecoveryPartition = func(context.Context) string { return "/dev/vda3" }
+	findRecoveryPartition = func(context.Context) (string, error) { return "/dev/vda3", nil }
 
 	for _, tc := range []struct {
 		name, state, input, want string
@@ -411,7 +412,7 @@ func TestRecoveryAfterMaintenanceNeedsNoAnswers(t *testing.T) {
 func TestRecoveryPartitionUnusedWithoutSecureBoot(t *testing.T) {
 	original := findRecoveryPartition
 	t.Cleanup(func() { findRecoveryPartition = original })
-	findRecoveryPartition = func(context.Context) string { return "/dev/vda3" }
+	findRecoveryPartition = func(context.Context) (string, error) { return "/dev/vda3", nil }
 
 	for _, resume := range []string{"", installerresume.StateMaintenanceReboot} {
 		t.Setenv("GJALLAR_INSTALLER_RESUME_STATE", resume)
@@ -438,6 +439,41 @@ func TestRecoveryPartitionUnusedWithoutSecureBoot(t *testing.T) {
 		}
 		if !strings.Contains(out.String(), "/dev/vda3 stays unused") {
 			t.Fatalf("resume %q: no notice:\n%s", resume, out.String())
+		}
+	}
+}
+
+// A failed lookup stops the rebuild only where the partition is used: with
+// Secure Boot. Without it the rebuild goes on (Plane 307).
+func TestRecoveryPartitionLookupFailure(t *testing.T) {
+	original := findRecoveryPartition
+	t.Cleanup(func() { findRecoveryPartition = original })
+	findRecoveryPartition = func(context.Context) (string, error) {
+		return "", errors.New("SYNTHETIC: /dev/vda has more than one partition named GJALLAR-RECOVERY")
+	}
+	t.Setenv("GJALLAR_INSTALLER_RESUME_STATE", installerresume.StateMaintenanceReboot)
+
+	for _, secureBoot := range []bool{false, true} {
+		s := state{
+			existing: true,
+			user: config.User{
+				RecoveryEnable:          true,
+				RecoveryPartitionEnable: true,
+				SecureBootEnable:        secureBoot,
+			},
+		}
+		var out bytes.Buffer
+		err := configureRecoveryProvisioning(
+			context.Background(),
+			prompt.New(strings.NewReader(""), &out),
+			options{},
+			&s,
+		)
+		if secureBoot != (err != nil) {
+			t.Fatalf("Secure Boot %t: err = %v", secureBoot, err)
+		}
+		if s.recoveryPartition != "" {
+			t.Fatalf("Secure Boot %t: recovery partition %q", secureBoot, s.recoveryPartition)
 		}
 	}
 }

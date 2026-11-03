@@ -2,5 +2,7 @@
   "name": "LibreOffice",
   "description": "Office suite.",
   "category": "office",
+  "package": "libreoffice-fresh",
+  "icon": "libreoffice-startcenter",
   "default": true
 }

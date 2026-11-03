@@ -26,6 +26,14 @@ let
   systemdLib = "${config.systemd.package}/lib/systemd";
   jq = "${pkgs.jq}/bin/jq";
 
+  # Firmware with fixed keys (locked setup, Plane 293) trusts only the
+  # Microsoft UEFI CAs. shim, signed by them, starts first and checks
+  # systemd-boot and the UKIs against our key in MOK. The patched lzbt
+  # (pkgs/lzbt-shim) installs it; without --shim-directory it removes it.
+  shim = settings.secureBootEnable && (settings.secureBootShim or false);
+  shimFiles = "${pkgs.callPackage ../../../pkgs/gjallar-shim { }}/share/shim";
+  bootFirst = "${pkgs.callPackage ../../../pkgs/gjallar-recovery-install { }}/bin/gjallar-boot-first";
+
   # lzbt keeps the pcrlock variants of installed boot files only. With one
   # generation (recovery) the UKI that is running loses its variant at every
   # rebuild, and a new systemd-boot replaces the old one's. make-policy then
@@ -36,7 +44,7 @@ let
   # boot measured as one more variant; boot removes it before make-policy.
   keepBooted = cfg.measuredBoot.enable && lib.elem 4 cfg.measuredBoot.pcrs;
   bootedVariant = "gjallar-booted.pcrlock";
-  bootedComponents = [
+  bootedComponents = lib.optional shim "620-shim" ++ [
     "630-bootloader"
     "635-lanzaboote"
   ];
@@ -97,6 +105,7 @@ let
         "--private-key=${toString cfg.privateKeyFile}"
       ]
       ++ lib.optional (lib.elem 4 cfg.measuredBoot.pcrs) "--pcrlock-directory=${cfg.measuredBoot.pcrlockDirectory}"
+      ++ lib.optional shim "--shim-directory=${shimFiles}"
       ++ [ mountPoint ]
     )
     + " /nix/var/nix/profiles/system-*-link";
@@ -121,9 +130,16 @@ let
       echo "error: this is the firmware flash read entry. Restart into the normal entry to rebuild." >&2
       exit 1
     fi
+    # The same holds for the recovery partition, whose UKI is in PCR 4 when
+    # gjallar-recover rebuilds through nixos-enter, which mounts this /proc
+    # (e2e-fw13, 2026-10-28). make-policy failed there and so did the rebuild.
+    recovery=
+    if [[ " $(</proc/cmdline) " == *" gjallar.recovery=partition "* ]]; then
+      recovery=1
+    fi
     has_tpm2=
     ${lib.optionalString cfg.measuredBoot.enable ''
-      if ${config.systemd.package}/bin/systemd-analyze has-tpm2 >/dev/null 2>&1; then
+      if [ -z "$recovery" ] && ${config.systemd.package}/bin/systemd-analyze has-tpm2 >/dev/null 2>&1; then
         has_tpm2=1
       fi
     ''}
@@ -137,6 +153,14 @@ let
     ${lib.concatMapStringsSep "\n" installOnEsp (
       [ config.boot.loader.efi.efiSysMountPoint ] ++ cfg.extraEfiSysMountPoints
     )}
+    # Switching secureBootShim is a rebuild, so the firmware entry follows
+    # here: under fixed keys the firmware refuses systemd-boot and has to
+    # start shim (e2e-fw13, 2026-11-02). Writes nothing when the entry
+    # already starts the right file. It runs before make-policy: the entry
+    # belongs to the files just written, and a failed TPM update must not
+    # leave it pointing at a loader the firmware refuses (e2e-fw13,
+    # 2026-11-02, rebuild from a shim boot under a pre-shim policy).
+    ${bootFirst} --keep-order ${esp}
     ${lib.optionalString cfg.measuredBoot.enable ''
       ${lib.optionalString (lib.elem 4 cfg.measuredBoot.pcrs) (
         lib.concatMapStrings (entry: ''
@@ -146,7 +170,20 @@ let
       if [ -n "$has_tpm2" ]; then
         ${lib.optionalString keepBooted restoreBooted}
         echo "Predicting the PCR state for future boots..."
-        ${lib.last config.systemd.services.systemd-pcrlock-make-policy.serviceConfig.ExecStart}
+        # The rebuild still fails; the message names the way out. A policy
+        # made for another Secure Boot path (shim switched on or off since the
+        # TPM was enrolled) can't authorize its own update (e2e-fw13,
+        # 2026-11-02, "Failed to submit AuthorizeNV policy").
+        ${lib.last config.systemd.services.systemd-pcrlock-make-policy.serviceConfig.ExecStart} || {
+          echo "error: the TPM policy could not be updated (see above)." >&2
+          echo "error: if Secure Boot now starts through another path than when the TPM was enrolled (shim switched on or off), boot with the recovery key and run: gjallarctl tpm2 reenroll" >&2
+          exit 1
+        }
+      elif [ -n "$recovery" ]; then
+        # The old policy still covers the boot files it knew, so the same
+        # system unlocks as before (e2e-fw13, 2026-10-28).
+        echo "warning: the recovery partition cannot update the TPM policy; if the next boot starts a system the TPM policy does not know, it asks for the recovery key or disk passphrase." >&2
+        echo "warning: after such a boot, run: gjallarctl tpm2 reenroll" >&2
       else
         echo "warning: no usable TPM2 (see: systemd-analyze has-tpm2); the TPM policy was not updated." >&2
         echo "warning: once the TPM is back, boot with the recovery key or disk passphrase and run: gjallarctl tpm2 reenroll" >&2
@@ -165,9 +202,19 @@ in
   systemd.tmpfiles.rules = lib.mkIf keepBooted (
     map (component: "r! ${componentDir component}/${bootedVariant}") bootedComponents
   );
-  systemd.services.systemd-pcrlock-make-policy.after = lib.mkIf keepBooted [
-    "systemd-tmpfiles-setup.service"
-  ];
+  # The whole unit under mkIf: a bare .after = mkIf … still defines the
+  # service and leaves an empty unit file without ExecStart= behind.
+  systemd.services.systemd-pcrlock-make-policy = lib.mkIf keepBooted {
+    after = [ "systemd-tmpfiles-setup.service" ];
+  };
+
+  # lanzaboote turns fwupd's shim use off, which is right when the firmware
+  # takes our key. Under shim the capsule loader has to start through
+  # EFI/nixos/shimx64.efi, which checks it against MOK.
+  services.fwupd.uefiCapsuleSettings.DisableShimForSecureBoot = lib.mkIf shim (lib.mkForce false);
+  # shim trusts our key only once MokManager enrolled it; mokutil queues it
+  # and shows what MOK holds.
+  environment.systemPackages = lib.optional shim pkgs.mokutil;
 
   boot.loader.grub.enable = lib.mkIf settings.secureBootEnable (lib.mkForce false);
   boot.loader.systemd-boot.enable = lib.mkIf settings.secureBootEnable (lib.mkForce false);

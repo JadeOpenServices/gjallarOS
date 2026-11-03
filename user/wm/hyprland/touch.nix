@@ -71,9 +71,10 @@ let
   #
   # Hyprland reports a switch that is already on (device folded at login) once,
   # when it adds the device, before this unit can bind anything. So every name
-  # also goes into a file Hyprland sources at start; from the next login on the
+  # also goes into a file the config binds at start; from the next login on the
   # bind exists before the device does.
-  tabletSwitches = "${config.xdg.stateHome}/gjallar/tablet-switches.conf";
+  tabletSwitches = "${config.xdg.stateHome}/gjallar/tablet-switches.txt";
+  legacyTabletSwitches = "${config.xdg.stateHome}/gjallar/tablet-switches.conf";
   tabletModeBinds = pkgs.writeShellApplication {
     name = "gjallar-tablet-mode-binds";
     runtimeInputs = [
@@ -88,7 +89,7 @@ let
       state="$XDG_RUNTIME_DIR/${tabletState}"
       declare -A bound=()
       bindSwitches() {
-        local caps name words
+        local caps mode name words
         for caps in /sys/class/input/input*/capabilities/sw; do
           [ -r "$caps" ] || continue
           read -r -a words <"$caps"
@@ -96,23 +97,24 @@ let
           (( 16#''${words[-1]} & 2 )) || continue
           name=$(<"''${caps%/capabilities/sw}/name")
           [ -z "''${bound[$name]:-}" ] || continue
-          # The name ends up inside a bind line, where a comma would start a
-          # new field. USB devices pick their own names, so allow plain ones only.
+          # The name ends up inside a Lua string and a bind key, where a quote
+          # or a + would break out. USB devices pick their own names, so allow
+          # plain ones only; the config checks the file with the same rule.
           if [[ ! $name =~ ^[A-Za-z0-9\ ._()-]+$ ]]; then
             echo "skipping tablet mode switch with an unusual name: ''${name@Q}"
             continue
           fi
           bound[$name]=1
           # Hyprland already has the binds from the file since its last config load.
-          if grep -qF "switch:on:$name," "$known" 2>/dev/null; then
+          if grep -qxF "$name" "$known" 2>/dev/null; then
             echo "tablet mode switch: $name (known)"
             continue
           fi
-          hyprctl keyword bindl ", switch:on:$name, exec, $kbd tablet-on" >/dev/null
-          hyprctl keyword bindl ", switch:off:$name, exec, $kbd tablet-off" >/dev/null
-          # By command name, not store path: the file outlives this generation.
-          printf 'bindl = , switch:%s:%s, exec, gjallar-virtual-keyboard %s\n' \
-            on "$name" tablet-on off "$name" tablet-off >>"$known"
+          for mode in on off; do
+            hyprctl eval "hl.bind(\"switch:$mode:$name\", hl.dsp.exec_cmd(\"$kbd tablet-$mode\"), { locked = true })" >/dev/null
+          done
+          mkdir -p "''${known%/*}"
+          echo "$name" >>"$known"
           echo "tablet mode switch: $name"
         done
         # A switch that is on at login has written "on" already; keep that.
@@ -139,17 +141,29 @@ let
       )
     '';
   };
+  migrateTabletSwitches = pkgs.writeShellScript "gjallar-tablet-switches-migrate" ''
+    set -eu
+    old=${lib.escapeShellArg legacyTabletSwitches}
+    [ -e "$old" ] || exit 0
+    ${pkgs.gnused}/bin/sed -n -E 's/^bindl = , switch:on:(.+), exec, .*/\1/p' "$old" \
+      >>${lib.escapeShellArg tabletSwitches}
+    rm -f "$old"
+  '';
   shell = hyprlandShellDetails.binds;
+  hl = import ./lua.nix { inherit lib; };
+  keyboard = hl.exec (lib.getExe virtualKeyboard);
 
   # hyprgrass binds with the text the shortcut list (Super+F1) shows for them.
   gestures = [
     {
-      bind = ", edge:d:u, exec, ${lib.getExe virtualKeyboard}";
+      pattern = "edge:d:u";
+      action = keyboard;
       keys = "Swipe up from the bottom edge";
       description = "Show or hide on-screen keyboard";
     }
     {
-      bind = ", edge:u:d, exec, ${shell.controlCenter}";
+      pattern = "edge:u:d";
+      action = hl.exec shell.controlCenter;
       keys = "Swipe down from the top edge";
       description = "Open control center";
     }
@@ -157,32 +171,38 @@ let
     # 20.7). hyprgrass only starts a workspace swipe on a sideways drag, so
     # these do not get in the way of three fingers left and right.
     {
-      bind = ", swipe:3:u, exec, ${shell.launcher}";
+      pattern = "swipe:3:u";
+      action = hl.exec shell.launcher;
       keys = "Three fingers up";
       description = "Open launcher";
     }
     {
-      bind = ", swipe:3:d, exec, ${shell.controlCenter}";
+      pattern = "swipe:3:d";
+      action = hl.exec shell.controlCenter;
       keys = "Three fingers down";
       description = "Open control center";
     }
     {
-      bind = ", swipe:4:u, exec, ${shell.launcher}";
+      pattern = "swipe:4:u";
+      action = hl.exec shell.launcher;
       keys = "Four fingers up";
       description = "Open launcher";
     }
     {
-      bind = ", swipe:4:l, movetoworkspace, +1";
+      pattern = "swipe:4:l";
+      action = hl.dispatcher "movetoworkspace" "+1";
       keys = "Four fingers left";
       description = "Move window to next workspace";
     }
     {
-      bind = ", swipe:4:r, movetoworkspace, -1";
+      pattern = "swipe:4:r";
+      action = hl.dispatcher "movetoworkspace" "-1";
       keys = "Four fingers right";
       description = "Move window to previous workspace";
     }
     {
-      bind = ", tap:3, togglefloating, active";
+      pattern = "tap:3";
+      action = hl.dispatcher "togglefloating" "active";
       keys = "Three-finger tap";
       description = "Float or tile window";
     }
@@ -280,54 +300,91 @@ lib.mkIf (settings.touchscreenEnable or false) {
     };
   };
 
-  # Hyprland reports a missing source file as a config error. Binds saved
-  # before the tablet units existed showed the keyboard on the switch alone.
+  # The legacy config sourced bind lines; the Lua config reads names only.
   home.activation.gjallarTabletSwitches = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
-    if [ ! -e ${lib.escapeShellArg tabletSwitches} ]; then
-      run ${pkgs.coreutils}/bin/install -D -m 0644 /dev/null ${lib.escapeShellArg tabletSwitches}
-    else
-      run ${pkgs.gnused}/bin/sed -i -E \
-        -e 's/(gjallar-virtual-keyboard) show$/\1 tablet-on/' \
-        -e 's/(gjallar-virtual-keyboard) hide$/\1 tablet-off/' \
-        ${lib.escapeShellArg tabletSwitches}
-    fi
+    run ${migrateTabletSwitches}
   '';
 
+  gjallar.hyprlandPlugins = [ hyprgrass ];
+
   wayland.windowManager.hyprland = {
-    plugins = [ hyprgrass ];
+    settings.bind = [
+      # Not plain Super+K: that already moves focus up, and Hyprland would
+      # run both.
+      (hl.bind {
+        mods = "SUPER CTRL";
+        key = "K";
+        dispatcher = keyboard;
+        description = "Show or hide on-screen keyboard";
+      })
+      # KEY_KEYBOARD (374, xkb 382): the keyboard key some convertibles send.
+      (hl.bind {
+        key = "code:382";
+        dispatcher = keyboard;
+        description = "Show or hide on-screen keyboard";
+      })
+    ];
 
-    settings = {
-      bindd = [
-        # Not plain Super+K: that already moves focus up, and Hyprland would
-        # run both.
-        "SUPER CTRL, K, Show or hide on-screen keyboard, exec, ${lib.getExe virtualKeyboard}"
-        # KEY_KEYBOARD (374, xkb 382): the keyboard key some convertibles
-        # send.
-        ", code:382, Show or hide on-screen keyboard, exec, ${lib.getExe virtualKeyboard}"
-      ];
+    # hyprgrass adds hl.plugin.hyprgrass once it has loaded, and Hyprland
+    # reads the config again then.
+    extraConfig = ''
+      if hl.plugin.hyprgrass then
+        hl.config(${
+          hl.toLua {
+            plugin.hyprgrass = {
+              # The default is meant for small phone screens; 4.0 is upstream's
+              # advice for tablets. Swipes complete after about 40 px; the patch
+              # above keeps the 100 px sideways tolerance.
+              sensitivity = 4.0;
+              # Wider than the 10 px default, so a finger at the bezel still hits it.
+              edge_margin = 20;
+              # One finger on a border or gap resizes, as resize_on_border does for
+              # the mouse (upstream default, set here because the patch builds on it).
+              resize_on_border_long_press = true;
+            };
+          }
+        })
+        -- Three fingers left/right switch workspaces. Edge swipes are bound
+        -- below, so none of them switches workspaces.
+        hl.plugin.hyprgrass.gesture(${
+          hl.toLua {
+            pattern = {
+              kind = "swipe";
+              fingers = 3;
+              direction = "horizontal";
+            };
+            action = "workspace";
+          }
+        })
+        ${lib.concatMapStrings (g: ''
+          hl.plugin.hyprgrass.bind(${hl.toLua { inherit (g) pattern action; }})
+        '') gestures}
+        -- Hold two fingers on a window and drag it.
+        hl.plugin.hyprgrass.bind(${
+          hl.toLua {
+            pattern = "longpress:2";
+            action = hl.mouseDispatcher "movewindow";
+            mouse = true;
+          }
+        })
+      end
 
-      source = [ tabletSwitches ];
-
-      plugin.touch_gestures = {
-        # The default is meant for small phone screens; 4.0 is upstream's
-        # advice for tablets. Swipes complete after about 40 px; the patch
-        # above keeps the 100 px sideways tolerance.
-        sensitivity = 4.0;
-        # Three fingers left/right switch workspaces.
-        workspace_swipe_fingers = 3;
-        # Edge swipes are bound below, so none of them switches workspaces.
-        workspace_swipe_edge = "none";
-        # Wider than the 10 px default, so a finger at the bezel still hits it.
-        edge_margin = 20;
-        # One finger on a border or gap resizes, as resize_on_border does for
-        # the mouse (upstream default, set here because the patch builds on it).
-        resize_on_border_long_press = true;
-      };
-
-      hyprgrass-bind = map (g: g.bind) gestures;
-
-      # Hold two fingers on a window and drag it.
-      hyprgrass-bindm = [ ", longpress:2, movewindow" ];
-    };
+      -- Tablet mode switches seen before: names only, never run, and only the
+      -- plain names gjallar-tablet-mode writes. By command name, not store
+      -- path: the file outlives this generation.
+      do
+        local file = io.open(${hl.toLua tabletSwitches}, "r")
+        if file then
+          for name in file:lines() do
+            if name:match("^[%w ._()-]+$") then
+              for _, mode in ipairs({ "on", "off" }) do
+                hl.bind("switch:" .. mode .. ":" .. name, hl.dsp.exec_cmd("gjallar-virtual-keyboard tablet-" .. mode), { locked = true })
+              end
+            end
+          end
+          file:close()
+        end
+      end
+    '';
   };
 }

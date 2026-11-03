@@ -61,6 +61,9 @@ let
       /var/lib/systemd/pcrlock.json
     rm -f -- "$state/luks/metadata.json.tmp"
     chmod 0600 "$state/luks/keyslots.json"
+    # This boot was not opened by the new token; the login card must not
+    # read the boot's unlock record as "the chip failed" (Plane 298).
+    gjallarctl luks record --reenrolled
   '';
 
   # Rebinds TPM2 unlock after the measured state changed on purpose
@@ -126,20 +129,36 @@ in
   # also asks for a startup PIN forever and never falls back to the recovery
   # key (e2e-fw13, 2026-10-09). systemd skips it when it measures the volume
   # key into PCR 15, which also tells later boot stages which disk was
-  # opened. PCR 15 is not in the pcrlock policy. Extending the submodule sets
-  # both on every device without reading the attrset back.
+  # opened. PCR 15 is not in the pcrlock policy. tpm2-measure-keyslot-nvpcr
+  # logs which keyslot and kind of key opened the disk (tpm2, or none for a
+  # typed key), so the login card can tell a recovery-key start from a chip
+  # start (Plane 298). systemd ignores a failed measurement, so unlock never
+  # depends on it; the option also makes systemd-cryptsetup use its own TPM2
+  # code instead of the token plugin. Extending the submodule sets these on
+  # every device without reading the attrset back.
   options.boot.initrd.luks.devices = lib.mkOption {
     type = lib.types.attrsOf (
       lib.types.submodule {
         config.crypttabExtraOpts = lib.mkIf tpm2Enabled [
           "tpm2-device=auto"
           "tpm2-measure-pcr=yes"
+          "tpm2-measure-keyslot-nvpcr=yes"
         ];
       }
     );
   };
 
   config.environment.systemPackages = lib.mkIf tpm2Enabled [ tpm2Reenroll ];
+
+  # systemd-cryptsetup looks the "cryptsetup" NvPCR up in /etc/nvpcr and
+  # friends; the NixOS initrd ships no NvPCR definitions (its tpm2 module
+  # leaves them out). The NV index and anchor are the ones
+  # systemd-tpm2-setup already keeps on every measured boot. The anchor
+  # event extends PCR 9, which is not in the pcrlock policy.
+  config.boot.initrd.systemd.contents = lib.mkIf tpm2Enabled {
+    "/etc/nvpcr/cryptsetup.nvpcr".source =
+      "${config.boot.initrd.systemd.package}/lib/nvpcr/cryptsetup.nvpcr";
+  };
 
   # make-policy rewrites the credential on the ESP here too (boot, enrollment,
   # re-enroll); its own fsyncs do not make that durable on vfat, see
@@ -204,16 +223,33 @@ in
       device=${lib.escapeShellArg luksDevice}
       state=/var/lib/gjallarOS
       keyfile="$(mktemp /run/gjallar-luks-key.XXXXXX)"
-      trap 'rm -f -- "$keyfile"' EXIT
+      trap 'rm -f -- "$keyfile" "$keyfile.meta"' EXIT
 
       [ ! -e "$state/secure-boot-enable-required" ] || exit 0
       gjallar-verify-secure-boot-artifacts
       gjallar-verify-secure-boot-ownership enrolled
 
-      if cryptsetup luksDump --dump-json-metadata "$device" | grep -q 'systemd-tpm2'; then
-        printf '%s\n' 'ERROR: an existing TPM2 token must be replaced with: sudo gjallarctl tpm2 reenroll; no slot was changed.' >&2
-        exit 1
-      fi
+      # A chip slot without a startup policy (first installers, or made by
+      # hand) opens the disk for any start; the enrollment below replaces
+      # it in the same call that adds the bound slot (loophole 40/41). A
+      # slot GjallarOS enrolled stays: only its finished enrollment may
+      # replace it.
+      cryptsetup luksDump --dump-json-metadata "$device" >"$keyfile.meta"
+      chip="$(gjallarctl installer tpm2-metadata-policy "$keyfile.meta")"
+      rm -f -- "$keyfile.meta"
+      wipe=()
+      case "$chip" in
+        none) ;;
+        unbound)
+          wipe=(--wipe-slot=tpm2)
+          printf '%s\n' 'Replacing the security chip slot GjallarOS did not set up; it has no startup policy.'
+          ;;
+        *)
+          printf 'ERROR: %s has a GjallarOS security chip slot, but its enrollment did not finish; no slot was changed. Remove it with systemd-cryptenroll --wipe-slot=tpm2 %s and restart to enroll again.\n' \
+            "$device" "$device" >&2
+          exit 1
+          ;;
+      esac
       # The policy from the first boot locks the PCR 7 of the time before
       # Secure Boot was enabled, and make-policy cannot rewrite its NV index
       # (e2e-fw13, 2026-10-07: AuthorizeNV policy mismatch). No token uses
@@ -237,10 +273,16 @@ in
         newpin="$(gjallarctl luks new-pin)"
         pin_arg=--tpm2-with-pin=yes
       ''}
-      NEWPIN="$newpin" systemd-cryptenroll --unlock-key-file="$keyfile" --tpm2-device=auto \
+      # systemd-cryptenroll wipes only after the new slot is enrolled.
+      NEWPIN="$newpin" systemd-cryptenroll "''${wipe[@]}" --unlock-key-file="$keyfile" --tpm2-device=auto \
         --tpm2-pcrlock=/var/lib/systemd/pcrlock.json "$pin_arg" "$device"
 
       ${recordEnrollment}
+      # The disk secret and the new PIN typed above also confirm a dev or
+      # staging channel the installer recorded (Plane 297, Q192). Only
+      # possible before the marker below exists.
+      gjallarctl luks grant-developer ${if pinEnabled then "pin" else "recovery"} ||
+        printf '%s\n' 'Developer channel not confirmed; run gjallarctl settings confirm-developer once.' >&2
       install -m 0600 /dev/null "$state/tpm2-enrollment-complete"
       printf '%s\n' 'GjallarOS measured-boot TPM2 enrollment completed; human recovery keyslots were preserved.'
 

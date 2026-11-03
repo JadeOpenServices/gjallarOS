@@ -1,5 +1,5 @@
 diff --git a/src/render/scene/input_dispatcher.cpp b/src/render/scene/input_dispatcher.cpp
-index 6621f50..b42aedd 100644
+index 633027fc47..50377028c4 100644
 --- a/src/render/scene/input_dispatcher.cpp
 +++ b/src/render/scene/input_dispatcher.cpp
 @@ -6,6 +6,7 @@
@@ -34,7 +34,7 @@ index 6621f50..b42aedd 100644
    m_touchGesture = {};
    cancelPointerCapture();
    m_hasPointerPosition = false;
-@@ -148,6 +152,11 @@ void InputDispatcher::pointerMotion(float x, float y, std::uint32_t serial) {
+@@ -148,6 +152,11 @@ void InputDispatcher::pointerMotion(float x, float y, std::uint32_t serial, std:
    m_lastPointerY = y;
    m_hasPointerPosition = true;
  
@@ -46,7 +46,7 @@ index 6621f50..b42aedd 100644
    if (m_touchGesture.pending) {
      const float dx = x - m_touchGesture.pressX;
      const float dy = y - m_touchGesture.pressY;
-@@ -178,6 +187,17 @@ void InputDispatcher::pointerMotion(float x, float y, std::uint32_t serial) {
+@@ -178,6 +187,17 @@ void InputDispatcher::pointerMotion(float x, float y, std::uint32_t serial, std:
  bool InputDispatcher::pointerButton(
      float x, float y, std::uint32_t button, bool pressed, std::uint32_t serial, std::uint32_t time, bool touch
  ) {
@@ -110,7 +110,7 @@ index 6621f50..b42aedd 100644
    area->setDestroyCallback([this](InputArea* a) {
      const bool ownedCursor = m_hoveredArea == a || m_capturedArea == a;
 diff --git a/src/render/scene/input_dispatcher.h b/src/render/scene/input_dispatcher.h
-index 1e9cac8..b9f57e8 100644
+index 5d03237302..14e5cd1be9 100644
 --- a/src/render/scene/input_dispatcher.h
 +++ b/src/render/scene/input_dispatcher.h
 @@ -1,5 +1,7 @@
@@ -133,7 +133,7 @@ index 1e9cac8..b9f57e8 100644
  
    void setSceneRoot(Node* root);
    void setCursorShapeCallback(CursorShapeCallback callback);
-@@ -74,6 +81,9 @@ private:
+@@ -75,6 +82,9 @@ private:
    void trackArea(InputArea* area);
    void clearTextInputFocus(InputArea* area);
    void syncTextInputFocus();
@@ -143,7 +143,7 @@ index 1e9cac8..b9f57e8 100644
  
    struct TouchScrollGesture {
      bool pending = false;
-@@ -86,6 +96,16 @@ private:
+@@ -87,6 +97,16 @@ private:
      InputArea* horizontalArea = nullptr;
    };
  
@@ -160,7 +160,7 @@ index 1e9cac8..b9f57e8 100644
    Node* m_sceneRoot = nullptr;
    CursorShapeCallback m_cursorShapeCallback;
    HoverChangeCallback m_hoverChangeCallback;
-@@ -105,4 +125,9 @@ private:
+@@ -106,4 +126,9 @@ private:
    float m_lastPointerY = 0.0F;
    bool m_hasPointerPosition = false;
    bool m_cancelingPointerCapture = false;

@@ -2,12 +2,12 @@
 """Integration regression test for the pinned OpenVFS hydration patch.
 
 Run as the desktop user with access to /dev/fuse, cat and fusermount3:
-    python3 tests/openvfs-hydration.py /path/to/openvfs [--timeout]
+    python3 tests/openvfs-hydration.py /path/to/openvfs/bin/openvfs [--timeout]
 
 Uses only a fresh temporary mount and a fake local sync socket. The optional
-five-minute timeout check and the slow download next to it (about six minutes
-together) require no server or Nextcloud account. Logs remain
-in the printed temporary directory. Never mounts the real Nextcloud directory.
+five-minute timeout check (the default hydrationTimeoutSeconds) and the slow
+download next to it (about six minutes together) require no server or
+Nextcloud account. Logs remain in the printed temporary directory. Never mounts the real Nextcloud directory.
 """
 import json
 import os
@@ -246,6 +246,11 @@ try:
     out = hog.communicate(timeout=10)[0].split()
     assert out == [str(per_process).encode(), str(len(hogs) - per_process).encode()], out
     print('PASS: other processes and the sync client stay served during the burst', flush=True)
+    # Refusals are counted without names: the first one at once, the rest
+    # with a later line (Plane 258).
+    refusals = [l for l in (base / 'daemon.log').read_text().splitlines() if 'opens refused' in l]
+    assert refusals == ['openVFSfuse: 1 opens refused, no hydration slot free'], refusals
+    print('PASS: the first refused open is counted at once, without a name', flush=True)
     if '--timeout' in sys.argv[2:]:
         start = time.monotonic()
         p = cat('timeout')
@@ -321,6 +326,10 @@ try:
         raise AssertionError('openvfs outlived its sync client') from None
     assert not os.path.ismount(mount) and time.monotonic() - start < 10
     print(f'PASS: sync client exit releases the waiter and unmounts in {time.monotonic() - start:.1f} s', flush=True)
+    refusals = [l for l in (base / 'daemon.log').read_text().splitlines() if 'opens refused' in l]
+    want = BURST - (slots - per_process) + len(hogs) - per_process
+    assert sum(int(l.split()[1]) for l in refusals) == want and not any('/' in l for l in refusals), refusals
+    print(f'PASS: all {want} refused opens are counted by exit', flush=True)
     assert not errors, errors
 finally:
     subprocess.run(['fusermount3', '-uz', str(mount)], capture_output=True, timeout=5)

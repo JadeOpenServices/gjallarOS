@@ -1,7 +1,8 @@
 diff --git a/src/wayland/wayland_seat.cpp b/src/wayland/wayland_seat.cpp
+index 4ba5c72e83..39895b788d 100644
 --- a/src/wayland/wayland_seat.cpp
 +++ b/src/wayland/wayland_seat.cpp
-@@ -335,9 +335,9 @@ void WaylandSeat::handlePointerAxis(
+@@ -366,9 +366,9 @@ void WaylandSeat::handlePointerAxis(
        .axisGestureSerial = axis < self->m_axisGestureSerial.size() ? self->m_axisGestureSerial[axis] : 0,
    };
  
@@ -14,7 +15,7 @@ diff --git a/src/wayland/wayland_seat.cpp b/src/wayland/wayland_seat.cpp
    if (axis < self->m_pendingAxisDetents.size()) {
      AxisDetent& detent = self->m_pendingAxisDetents[axis];
      if (detent.valid) {
-@@ -354,6 +354,7 @@ void WaylandSeat::handlePointerAxis(
+@@ -385,6 +385,7 @@ void WaylandSeat::handlePointerAxis(
  void WaylandSeat::handlePointerAxisSource(void* data, wl_pointer* /*pointer*/, std::uint32_t axisSource) {
    auto* self = static_cast<WaylandSeat*>(data);
    self->m_pendingAxisSource = axisSource;
@@ -22,7 +23,7 @@ diff --git a/src/wayland/wayland_seat.cpp b/src/wayland/wayland_seat.cpp
  }
  
  void WaylandSeat::handlePointerAxisStop(
-@@ -397,7 +398,28 @@ void WaylandSeat::handlePointerFrame(void* data, wl_pointer* /*pointer*/) {
+@@ -428,7 +429,28 @@ void WaylandSeat::handlePointerFrame(void* data, wl_pointer* /*pointer*/) {
    auto* self = static_cast<WaylandSeat*>(data);
    std::vector<PointerEvent> events = std::move(self->m_pendingPointerEvents);
    self->m_pendingPointerEvents.clear();
@@ -52,9 +53,10 @@ diff --git a/src/wayland/wayland_seat.cpp b/src/wayland/wayland_seat.cpp
    self->m_pendingAxisDetents.fill({});
  
 diff --git a/src/wayland/wayland_seat.h b/src/wayland/wayland_seat.h
+index 7033c902fd..5bd6b189f5 100644
 --- a/src/wayland/wayland_seat.h
 +++ b/src/wayland/wayland_seat.h
-@@ -164,6 +164,9 @@ private:
+@@ -176,6 +176,9 @@ private:
    PointerEventCallback m_pointerEventCallback;
    std::vector<PointerEvent> m_pendingPointerEvents;
    std::uint32_t m_pendingAxisSource = 0;

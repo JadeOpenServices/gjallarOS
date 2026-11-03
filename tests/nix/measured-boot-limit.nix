@@ -21,6 +21,8 @@ let
         flashReadModule
         {
           system.stateVersion = "26.05";
+          # As on every host (system/hardware/firmware.nix).
+          services.fwupd.enable = true;
           fileSystems."/" = {
             device = "/dev/null";
             fsType = "ext4";
@@ -52,6 +54,12 @@ let
     firmwareFlashReadEntry = true;
   };
   flashReadEntry = flashRead.specialisation.gjallar-flash-read.configuration;
+  shim = evaluateWith {
+    luksTpm2Enable = true;
+    recoveryEnable = false;
+    secureBootShim = true;
+  };
+  noShim = evaluate true false;
 in
 # systemd-pcrlock: at most 8 alternatives per PCR; PCR 4 sees every UKI.
 assert measured.measuredBoot.enable;
@@ -69,8 +77,18 @@ assert !(nixpkgs.lib.elem "iomem=relaxed" flashRead.boot.kernelParams);
 # A failed unseal with a startup PIN asked for the PIN forever there.
 assert flashReadEntry.boot.initrd.luks.devices.cryptroot.crypttabExtraOpts == [ "tries=0" ];
 assert nixpkgs.lib.elem "tpm2-device=auto" flashRead.boot.initrd.luks.devices.cryptroot.crypttabExtraOpts;
+# Shim mode (Plane 293): fwupd starts its capsule loader through shim, and
+# the install hook differs from the one without shim (--shim-directory).
+assert shim.services.fwupd.uefiCapsuleSettings.DisableShimForSecureBoot == false;
+assert noShim.services.fwupd.uefiCapsuleSettings.DisableShimForSecureBoot == true;
+assert shim.system.build.installBootLoader.drvPath != noShim.system.build.installBootLoader.drvPath;
+assert shim.boot.lanzaboote.configurationLimit == noShim.boot.lanzaboote.configurationLimit;
 # The wrapped hook also drops systemd-boot's stale entries.
 assert nixpkgs.lib.hasInfix "install-lanzaboote" "${recovery.system.build.installBootLoader}";
+# Without measured boot there is no make-policy unit at all; a bare
+# .after left an empty unit without ExecStart= (fw13, 2026-11-03).
+assert !((evaluate false false).systemd.services ? systemd-pcrlock-make-policy);
+assert builtins.elem "systemd-tmpfiles-setup.service" noShim.systemd.services.systemd-pcrlock-make-policy.after;
 nixpkgs.legacyPackages.${system}.runCommand "gjallar-measured-boot-limit-check" { } ''
   touch "$out"
 ''

@@ -13,11 +13,11 @@ in
   assertions = [
     {
       assertion =
-        !settings.endpointManagedDevice
+        !settings.management.enable
         || rootPasswordReady;
 
       message =
-        "endpointManagedDevice=true requires a configured and existing "
+        "management.enable=true requires a configured and existing "
         + "rootPasswordFile before local wheel/Polkit administration "
         + "may be revoked.";
     }
@@ -26,7 +26,7 @@ in
   nix.settings.trusted-users = lib.mkForce [ "root" ];
 
   security.polkit.adminIdentities =
-    if settings.endpointManagedDevice then
+    if settings.management.enable then
       [ "unix-user:root" ]
     else
       [ "unix-group:wheel" ];

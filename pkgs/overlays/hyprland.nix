@@ -29,6 +29,12 @@
 # main (PR #15492, not in 0.56.x) centres new floating windows on the screen
 # and keeps them fully on it (misc:new_float_force_onscreen = 2). Drop this
 # when nixpkgs ships a release with it.
+#
+# Unlocking with the pointer on a notification or the bare desktop left no
+# window with the keyboard: unlock only refocuses what is under the pointer,
+# so the keys stayed on the lock surface and went away with it. The patch
+# hands them back to the window that had them. Open upstream as of
+# 2026-10-29.
 final: prev:
 
 let
@@ -37,7 +43,7 @@ in
 {
   hyprland =
     assert lib.assertMsg (prev.hyprland.version == "0.55.4")
-      "GjallarOS hyprland overlay patches 0.55.4; drop pkgs/patches/hyprland-stale-cursor.patch if ${prev.hyprland.version} has Hyprland PR #15376, pkgs/patches/hyprland-permission-client-destroy.patch if it has PR #16353, pkgs/patches/hyprland-axis-relative-direction.patch if onMouseWheel passes e.relativeDirection, pkgs/patches/hyprland-sendshortcut-unshifted.patch if sendshortcut no longer reads KB->m_xkbState, and pkgs/patches/hyprland-float-onscreen.patch if it has misc:new_float_force_onscreen.";
+      "GjallarOS hyprland overlay patches 0.55.4; drop pkgs/patches/hyprland-stale-cursor.patch if ${prev.hyprland.version} has Hyprland PR #15376, pkgs/patches/hyprland-permission-client-destroy.patch if it has PR #16353, pkgs/patches/hyprland-axis-relative-direction.patch if onMouseWheel passes e.relativeDirection, pkgs/patches/hyprland-sendshortcut-unshifted.patch if sendshortcut no longer reads KB->m_xkbState, pkgs/patches/hyprland-float-onscreen.patch if it has misc:new_float_force_onscreen, and pkgs/patches/hyprland-unlock-focus.patch if the session unlock gives the keyboard back to the last window.";
     prev.hyprland.overrideAttrs (old: {
       patches = (old.patches or [ ]) ++ [
         ../patches/hyprland-stale-cursor.patch
@@ -45,6 +51,7 @@ in
         ../patches/hyprland-axis-relative-direction.patch
         ../patches/hyprland-sendshortcut-unshifted.patch
         ../patches/hyprland-float-onscreen.patch
+        ../patches/hyprland-unlock-focus.patch
       ];
     });
 }

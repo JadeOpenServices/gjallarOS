@@ -260,10 +260,45 @@ func TestUnpluggedConnectionIsInactive(t *testing.T) {
 	}
 }
 
+func TestAllowedConnectionIsNotBlocked(t *testing.T) {
+	policy := []usbtrust.Decision{{Connection: "a", Target: usbtrust.TargetBlock}, {Connection: "b", Target: usbtrust.TargetAllow}}
+	if !usbConnectionBlocked(policy, "a") {
+		t.Fatal("blocked connection reported decided")
+	}
+	if usbConnectionBlocked(policy, "b") || usbConnectionBlocked(policy, "c") {
+		t.Fatal("allowed or unplugged connection reported blocked")
+	}
+}
+
 func TestUSBMediaNotice(t *testing.T) {
 	body := usbMediaNotice(usbtrust.MediaDecision{ID: "6:0:0:0", Reader: "<b>Reader</b>", Bytes: 31_900_000_000}).Body
 	if !strings.Contains(body, "&lt;b&gt;Reader&lt;/b&gt;, 31.9 GB") {
 		t.Fatalf("body = %q", body)
+	}
+	for kind, want := range map[string]string{
+		"":                        "USB storage connected",
+		"SYNTHETIC-unknown":       "USB storage connected",
+		usbtrust.MediaDisc:        "Disc inserted",
+		usbtrust.MediaSDCard:      "SD card inserted",
+		usbtrust.MediaMemoryStick: "Memory Stick inserted",
+		usbtrust.MediaCard:        "Memory card inserted",
+		usbtrust.MediaDisk:        "USB disk connected",
+	} {
+		if got := usbMediaNotice(usbtrust.MediaDecision{Kind: kind}).Summary; got != want {
+			t.Errorf("kind %q: summary %q, want %q", kind, got, want)
+		}
+	}
+	for _, c := range []struct {
+		m    usbtrust.MediaDecision
+		want string
+	}{
+		{usbtrust.MediaDecision{Kind: usbtrust.MediaDisk, Disk: "SYNTHETIC EXAMPLE 256G", Reader: "Example Dock", Bytes: 256_100_000_000}, "SYNTHETIC EXAMPLE 256G in Example Dock, 256.1 GB\n"},
+		{usbtrust.MediaDecision{Kind: usbtrust.MediaDisk, Disk: "Example SSD", Reader: "Example SSD"}, "Example SSD\n"},
+		{usbtrust.MediaDecision{Kind: usbtrust.MediaDisk, Disk: "<i>Disk</i>"}, "&lt;i&gt;Disk&lt;/i&gt;\n"},
+	} {
+		if got := usbMediaNotice(c.m).Body; !strings.HasPrefix(got, c.want) {
+			t.Errorf("disk body = %q, want prefix %q", got, c.want)
+		}
 	}
 	if usbMediaActive([]usbtrust.MediaDecision{{Connection: "a", Allowed: true}}, "a") {
 		t.Fatal("an opened medium keeps its notice")

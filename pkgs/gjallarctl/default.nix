@@ -26,6 +26,7 @@ buildGoModule {
       ../../cmd
       ../../internal/ai
       ../../internal/binarycache
+      ../../internal/devgate
       ../../internal/gittest
       ../../internal/hardware
       ../../internal/input
@@ -41,6 +42,7 @@ buildGoModule {
       ../../internal/snapshots
       ../../internal/sshsig
       ../../internal/usbtrust
+      ../../internal/winesandbox
     ];
   };
 

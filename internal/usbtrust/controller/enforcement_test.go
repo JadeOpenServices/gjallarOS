@@ -95,6 +95,58 @@ func TestDisarmRequiresDiskPassphrase(t *testing.T) {
 	}
 }
 
+func TestArmAfterDisarmBlocksAgain(t *testing.T) {
+	c, s, implicit := armedFixture(t)
+	ctx := context.Background()
+	if _, err := c.Mutate(ctx, broker.Request{Action: broker.ActionDisarm, RecoveryKey: "correct horse"}); err != nil {
+		t.Fatal(err)
+	}
+	s.doc.Devices = nil
+	response, err := c.Mutate(ctx, broker.Request{Action: broker.ActionArm})
+	if err != nil || !response.Enforcing {
+		t.Fatalf("arm = %+v, %v", response, err)
+	}
+	if !s.doc.Enforcement.Armed || !c.EnforcementEnabled() || len(s.doc.Devices) != 0 {
+		t.Fatalf("arm did not block or changed trust: %+v", s.doc)
+	}
+	if last := (*implicit)[len(*implicit)-1]; last != usbtrust.TargetBlock {
+		t.Fatalf("USBGuard fallback still %q", last)
+	}
+	if response, err := c.Mutate(ctx, broker.Request{Action: broker.ActionArm}); err != nil || !response.Enforcing {
+		t.Fatalf("second arm = %+v, %v", response, err)
+	}
+}
+
+func TestArmRefusedWhenSettingsHaveBlockingOff(t *testing.T) {
+	c, s, _ := armedFixture(t)
+	ctx := context.Background()
+	if _, err := c.Mutate(ctx, broker.Request{Action: broker.ActionDisarm, RecoveryKey: "correct horse"}); err != nil {
+		t.Fatal(err)
+	}
+	c.ArmOnStart = false
+	if _, err := c.Mutate(ctx, broker.Request{Action: broker.ActionArm}); err == nil {
+		t.Fatal("arm went against settings")
+	}
+	if s.doc.Enforcement.Armed {
+		t.Fatal("refused arm armed anyway")
+	}
+}
+
+func TestArmIsRootOnlyWithoutArguments(t *testing.T) {
+	if err := broker.ValidateRequest(broker.Request{Action: broker.ActionArm, RecoveryKey: "x"}); err == nil {
+		t.Fatal("arm accepted a passphrase")
+	}
+	if err := broker.ValidateRequest(broker.Request{Action: broker.ActionArm}); err != nil {
+		t.Fatal(err)
+	}
+	if err := broker.AuthorizePeer(1000, broker.ActionArm, 1000); err == nil {
+		t.Fatal("desktop user armed without root")
+	}
+	if err := broker.AuthorizePeer(0, broker.ActionArm, 1000); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestArmedStateEnforcesWithoutFlag(t *testing.T) {
 	c, _, _ := armedFixture(t)
 	restarted := &Controller{Reader: c.Reader, MachineID: c.MachineID, ModelID: c.ModelID, Apply: c.Apply}
@@ -120,6 +172,16 @@ type mountedMedia map[string]bool
 func (mountedMedia) MediaPolicy() ([]usbtrust.MediaDecision, bool) { return nil, true }
 func (mountedMedia) AllowMedia(string, string) error               { return nil }
 func (m mountedMedia) MountedPorts() map[string]bool               { return m }
+func (mountedMedia) Reclaim() map[string]bool                      { return nil }
+
+// reclaimMedia is a media gate whose record still finds media open after a
+// broker restart.
+type reclaimMedia struct {
+	mountedMedia
+	open map[string]bool
+}
+
+func (m reclaimMedia) Reclaim() map[string]bool { return m.open }
 
 func targets(t *testing.T, c *Controller) map[string]usbtrust.Target {
 	t.Helper()
@@ -167,14 +229,43 @@ func TestArmingKeepsOnlyMountedMassStorage(t *testing.T) {
 		t.Fatalf("kept ports: %v", kept)
 	}
 
-	// A restarted broker finds the state armed and keeps nothing.
+	// A restarted broker finds the state armed. Mounted alone is not enough:
+	// without a matching record it keeps nothing.
 	restarted := &Controller{Reader: c.Reader, MachineID: c.MachineID, ModelID: c.ModelID, Commit: c.Commit, ArmOnStart: true, Apply: c.Apply, Media: c.Media}
 	restarted.SetPersistenceReady(true)
 	if err := restarted.Reconcile(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if restarted.KeptAtArming() != nil || targets(t, restarted)["13"] != usbtrust.TargetBlock {
+	if len(restarted.KeptAtArming()) != 0 || targets(t, restarted)["13"] != usbtrust.TargetBlock {
 		t.Fatal("broker restart kept the mounted reader open")
+	}
+
+	// With the record matching, the reader stays open; a device that is
+	// not mass storage only stays blocked even when the record names it.
+	media := reclaimMedia{mountedMedia: mountedMedia{"1-3": true, "1-4": true}, open: map[string]bool{"1-3": true, "1-4": true, "1-5": true}}
+	again := &Controller{Reader: c.Reader, MachineID: c.MachineID, ModelID: c.ModelID, Commit: c.Commit, ArmOnStart: true, Apply: c.Apply, Media: media}
+	again.SetPersistenceReady(true)
+	if err := again.Reconcile(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	got = targets(t, again)
+	if got["13"] != usbtrust.TargetAllow {
+		t.Fatal("broker restart blocked a reader still open as recorded")
+	}
+	for _, id := range []string{"14", "15", "16"} {
+		if got[id] != usbtrust.TargetBlock {
+			t.Fatalf("broker restart kept device %s open", id)
+		}
+	}
+	if kept := again.KeptAtArming(); len(kept) != 1 || !kept["1-3"] {
+		t.Fatalf("kept ports: %v", kept)
+	}
+	// Only the first Reconcile asks; a later one keeps the same answer.
+	if err := again.Reconcile(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if kept := again.KeptAtArming(); len(kept) != 1 || targets(t, again)["13"] != usbtrust.TargetAllow {
+		t.Fatal("second reconcile changed the kept media")
 	}
 }
 

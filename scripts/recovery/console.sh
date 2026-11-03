@@ -43,6 +43,14 @@ pick_device() {
   device=${devices[$((choice - 1))]}
 }
 
+# Keys typed while no prompt is up are neither shown nor taken as the next
+# answer: a recovery key typed after its prompt had gone stayed on the screen
+# and went to the menu (e2e-fw13, 2026-10-28).
+drop_typeahead() {
+  while read -r -s -t 0.05 -n 4096 _; do :; done
+  stty echo
+}
+
 close_system() {
   if findmnt -rn --mountpoint /mnt >/dev/null 2>&1; then
     umount -R /mnt || return
@@ -64,11 +72,14 @@ open_system() {
     printf '%s\n' 'No partition chosen.'
     return
   }
+  stty -echo
   if ! gjallar-recover open-root "$device" "$mapping"; then
     # Each wrong guess costs time on top of the LUKS key derivation.
     sleep 5
+    drop_typeahead
     return
   fi
+  drop_typeahead
   printf '%s\n' '' \
     'Recovery shell as root. The installed system is at /mnt.' \
     'gjallar-recover lists the repair commands. exit returns to the menu.' ''
@@ -112,6 +123,7 @@ while true; do
     '  2) Erase this device and reinstall GjallarOS' \
     '  3) Restart' \
     '  4) Power off'
+  drop_typeahead
   printf 'Choice: '
   read -r choice || exit 1
   case $choice in

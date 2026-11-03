@@ -18,12 +18,19 @@ const (
 	fingerprintNoPrints
 	fingerprintUntrusted
 	fingerprintProbeFailed
+	fingerprintUnavailable
 )
 
 // fingerprintProbe tells whether the calling user can use the fingerprint
 // phase, and if not, why. The fingerprint-only PAM service fails at once
 // without a print, and sudo counts each failure as a wrong password: three
 // "Sorry, try again" before the password prompt (real HP, 2026-10-09).
+//
+// Prints on record are not enough: the reader must also open. fprintd keeps
+// a reader it can no longer open when the device was taken away and given
+// back under it (the USB trust loop of Plane 278 did this thousands of
+// times on fw13, 2026-11-01). pam_fprintd then fails at once, every try.
+// Claiming the reader the same way pam_fprintd does tells that apart.
 //
 // The answer only decides whether to offer the scan. The scan itself runs in
 // pam_fprintd inside sudo; nothing here can make it succeed. Every state but
@@ -45,6 +52,8 @@ func (p fingerprintProbe) Message() string {
 		return "Fingerprint service is not run by root (" + p.Detail + "); ignoring it and using password."
 	case fingerprintProbeFailed:
 		return "Fingerprint reader did not answer (" + p.Detail + "); using password."
+	case fingerprintUnavailable:
+		return "Fingerprint reader is busy or not working right now; using password."
 	}
 	return ""
 }
@@ -61,6 +70,8 @@ type fprintBus interface {
 	OwnerUID(ctx context.Context, name string) (uint32, error)
 	DefaultDevice(ctx context.Context) (dbus.ObjectPath, error)
 	EnrolledFingers(ctx context.Context, device dbus.ObjectPath) ([]string, error)
+	Claim(ctx context.Context, device dbus.ObjectPath) error
+	Release(ctx context.Context, device dbus.ObjectPath) error
 }
 
 type systemFprintBus struct{ conn *dbus.Conn }
@@ -93,6 +104,19 @@ func (b systemFprintBus) EnrolledFingers(ctx context.Context, device dbus.Object
 	err := b.conn.Object(fprintName, device).CallWithContext(ctx,
 		fprintDevice+".ListEnrolledFingers", 0, "").Store(&fingers)
 	return fingers, err
+}
+
+// Claim opens the reader for the caller, as pam_fprintd does before a scan.
+// It needs the verify action, which polkit grants the active session without
+// a dialog and refuses every other session outright.
+func (b systemFprintBus) Claim(ctx context.Context, device dbus.ObjectPath) error {
+	return b.conn.Object(fprintName, device).CallWithContext(ctx,
+		fprintDevice+".Claim", 0, "").Err
+}
+
+func (b systemFprintBus) Release(ctx context.Context, device dbus.ObjectPath) error {
+	return b.conn.Object(fprintName, device).CallWithContext(ctx,
+		fprintDevice+".Release", 0).Err
 }
 
 func probeFingerprint(ctx context.Context) fingerprintProbe {
@@ -151,6 +175,16 @@ func probeFingerprintOn(ctx context.Context, bus fprintBus) fingerprintProbe {
 	}
 	if len(fingers) == 0 {
 		return fingerprintProbe{State: fingerprintNoPrints}
+	}
+
+	// fprintd releases a claim when the claiming connection closes, so a
+	// failed Release cannot leave the reader held: probeFingerprint closes
+	// its connection on return.
+	if err := bus.Claim(ctx, device); err != nil {
+		return fingerprintProbe{fingerprintUnavailable, dbusErrorName(err)}
+	}
+	if err := bus.Release(ctx, device); err != nil {
+		return fingerprintProbe{fingerprintUnavailable, dbusErrorName(err)}
 	}
 	return fingerprintProbe{State: fingerprintReady}
 }

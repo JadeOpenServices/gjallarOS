@@ -25,6 +25,7 @@
     ./hardware/memory.nix
 
     ./security/firewall.nix
+    ./security/virus-scan.nix
     ./security/local-hardening.nix
     ./security/console-lockdown.nix
     ./security/disk-unlock.nix
@@ -45,6 +46,7 @@
 
     ./recovery
     ../themes/lib/common.nix
+    ../themes/lib/boot-splash.nix
     ./tools
     ./users/privilege.nix
     ./users/shell.nix
@@ -72,6 +74,10 @@
     );
   nixpkgs.config.allowUnfree = true;
 
+  # Per-device opt-in (aarch64Emulation): the kernel hands aarch64 programs to
+  # qemu-user, and Nix may build aarch64-linux on this device. Off by default.
+  boot.binfmt.emulatedSystems = lib.optional (settings.aarch64Emulation or false) "aarch64-linux";
+
   nix.settings.experimental-features = [
     "nix-command"
     "flakes"
@@ -93,7 +99,7 @@
     shell = pkgs.${settings.shell};
     description = settings.username;
     extraGroups = [ "networkmanager" ]
-    ++ lib.optionals (!settings.endpointManagedDevice) [ "wheel" ];
+    ++ lib.optionals (!settings.management.enable) [ "wheel" ];
     # Set by the installer. NixOS reads it only when it creates the account;
     # a later passwd change stays.
     hashedPasswordFile = lib.mkIf (

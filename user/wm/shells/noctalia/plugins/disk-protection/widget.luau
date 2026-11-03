@@ -1,13 +1,16 @@
 -- gjallarctl luks remind (system/security/disk-unlock.nix) writes what is
 -- missing here at login and after every keyslot change. The shield stays
 -- until it reads done; a click starts the setup in a terminal. The PIN
--- suggestion ("pin") is a login card only and shows no shield.
+-- suggestion ("pin") and "restart" (nothing to click) are login cards only
+-- and show no shield.
 local stateFile = (noctalia.getenv("XDG_RUNTIME_DIR") or "") .. "/gjallar/disk-protection"
 
 local tooltips = {
   ["setup"] = "Disk protection not finished. Click to set it up.",
   ["secure-boot"] = "Disk protection not set up: Secure Boot is off. Click to set it up.",
   ["recovery-key"] = "No recovery key for your disk. Click to create one.",
+  ["reenroll"] = "The security chip did not unlock your disk. Click to re-enroll.",
+  ["chip-no-policy"] = "Disk not protected at startup: the security chip opens it for any start. Click for details.",
 }
 
 local shown = false

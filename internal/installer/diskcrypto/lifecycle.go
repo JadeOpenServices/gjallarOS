@@ -1,6 +1,7 @@
 package diskcrypto
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/json"
@@ -23,6 +24,12 @@ type Keyslots struct {
 	// systemd before 255 wrote those; their unlock trusts whatever chip
 	// answers. gjallar-tpm2-reenroll replaces them.
 	TPM2NoSRK bool
+	// A TPM2 token without a pcrlock policy. GjallarOS enrolls only with
+	// one; the others came from the first installers (2026-08/09, no PCRs
+	// at all) or by hand, and nothing ties them to how the device starts.
+	TPM2NoPolicy bool
+	// A TPM2 token with a pcrlock policy: one GjallarOS enrolled.
+	TPM2Policy bool
 	// Token id of each TPM2 slot.
 	TPM2Token map[int]string
 	Recovery  []int
@@ -38,6 +45,7 @@ func ParseKeyslots(raw []byte) (Keyslots, error) {
 			Keyslots []string `json:"keyslots"`
 			TPM2PIN  bool     `json:"tpm2-pin"`
 			TPM2SRK  string   `json:"tpm2_srk"`
+			Pcrlock  bool     `json:"tpm2_pcrlock"`
 		} `json:"tokens"`
 	}
 	if err := json.Unmarshal(raw, &header); err != nil {
@@ -68,6 +76,8 @@ func ParseKeyslots(raw []byte) (Keyslots, error) {
 				k.TPM2Token[slot] = tokenID
 				k.TPM2PIN = k.TPM2PIN || token.TPM2PIN
 				k.TPM2NoSRK = k.TPM2NoSRK || token.TPM2SRK == ""
+				k.TPM2NoPolicy = k.TPM2NoPolicy || !token.Pcrlock
+				k.TPM2Policy = k.TPM2Policy || token.Pcrlock
 			case "systemd-recovery":
 				k.Recovery = append(k.Recovery, slot)
 			}
@@ -199,6 +209,23 @@ func TestTPM2Token(ctx context.Context, device, tokenID, pin string) error {
 		return fmt.Errorf("security chip unlock test: %w: %s", err, strings.TrimSpace(string(out)))
 	}
 	return nil
+}
+
+// TestTPM2PIN is TestTPM2Token for a PIN the caller clears after use.
+// Its error never carries cryptsetup's output.
+func TestTPM2PIN(ctx context.Context, device, tokenID string, pin []byte) error {
+	cmd := exec.CommandContext(ctx, "cryptsetup", "open", "--test-passphrase", "--token-only", "--token-id", tokenID, device)
+	cmd.Env = append(os.Environ(), "LD_LIBRARY_PATH="+tokenPluginDir)
+	cmd.Stdin = bytes.NewReader(pin)
+	return cmd.Run()
+}
+
+// TestKeySlot checks that key opens keyslot slot of device. Nothing is
+// unlocked: --test-passphrase only runs the key derivation.
+func TestKeySlot(ctx context.Context, device string, slot int, key []byte) error {
+	cmd := exec.CommandContext(ctx, "cryptsetup", "open", "--test-passphrase", "--key-slot", strconv.Itoa(slot), "--key-file=-", device)
+	cmd.Stdin = bytes.NewReader(key)
+	return cmd.Run()
 }
 
 // RefreshTPM2KeyslotRecord rewrites the record the first-boot enrollment

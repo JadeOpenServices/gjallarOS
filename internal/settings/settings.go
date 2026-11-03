@@ -55,6 +55,9 @@ type Change struct {
 	// Local is set instead of Keys for a new developer-mode folder.
 	Local *LocalChange `json:"local,omitempty"`
 	Asked time.Time    `json:"asked"`
+	// Proof is how the caller proved a developer channel or developer
+	// mode (Plane 283): "pin" or "recovery", never the secret itself.
+	Proof string `json:"proof,omitempty"`
 }
 
 // LocalChange replaces root's copy of the developer-mode folder.
@@ -116,9 +119,9 @@ func Plan(data []byte, values map[string]json.RawMessage) (Change, error) {
 	if err != nil {
 		return Change{}, fmt.Errorf("the current configuration does not load: %w", err)
 	}
-	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(data, &fields); err != nil {
-		return Change{}, fmt.Errorf("parse user configuration: %w", err)
+	fields, err := Effective(data)
+	if err != nil {
+		return Change{}, err
 	}
 
 	change := Change{Tier: config.TierEveryday}
@@ -131,7 +134,7 @@ func Plan(data []byte, values map[string]json.RawMessage) (Change, error) {
 		if tier == config.TierInstaller {
 			return Change{}, fmt.Errorf("%s only applies while installing and cannot be changed here", key)
 		}
-		if current.EndpointManagedDevice && tier != config.TierEveryday {
+		if current.Management.Enable && tier != config.TierEveryday {
 			return Change{}, fmt.Errorf("%s is a %s setting; JODS manages it on this device", key, tier)
 		}
 		newValue, err := compact(value)
@@ -222,6 +225,13 @@ func tightens(key string, oldValue, newValue json.RawMessage) bool {
 	case "developerMode":
 		// Turning developer mode off returns to the official system.
 		return string(newValue) == "false"
+	case "usbguardEnable", "usbTrustEnforce", "firewallEnable", "virusScanEnable":
+		// gjallarHorn switches: turning a protection back on applies at
+		// once; turning it off waits.
+		return string(newValue) == "true"
+	case "aarch64Emulation":
+		// Turning emulation off removes the qemu-user handler.
+		return string(newValue) == "false"
 	case "releaseChannel":
 		// stable takes new code last, and update never goes back to an
 		// older commit, so moving to it only slows what arrives.
@@ -254,9 +264,9 @@ func (c Change) Apply(data []byte) ([]byte, error) {
 	if c.Local != nil {
 		return nil, fmt.Errorf("a local change writes the developer-mode folder, not the configuration")
 	}
-	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(data, &fields); err != nil {
-		return nil, fmt.Errorf("parse user configuration: %w", err)
+	fields, err := Effective(data)
+	if err != nil {
+		return nil, err
 	}
 	values := make(map[string]json.RawMessage, len(c.Keys))
 	for _, key := range c.Keys {
@@ -421,6 +431,34 @@ func Shown(value json.RawMessage, limit int) string {
 		b.WriteString(strings.Trim(strconv.QuoteRuneToASCII(r), "'"))
 	}
 	return b.String()
+}
+
+// Effective returns every key with the value the system uses: the file's
+// own value, or the default config.Parse gives a key an older file does not
+// hold yet. Without the defaults, a protection that is on would look unset.
+func Effective(data []byte) (map[string]json.RawMessage, error) {
+	user, err := config.Parse(data)
+	if err != nil {
+		return nil, fmt.Errorf("the current configuration does not load: %w", err)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return nil, fmt.Errorf("parse user configuration: %w", err)
+	}
+	parsed, err := json.Marshal(user)
+	if err != nil {
+		return nil, err
+	}
+	var defaults map[string]json.RawMessage
+	if err := json.Unmarshal(parsed, &defaults); err != nil {
+		return nil, err
+	}
+	for key, value := range defaults {
+		if _, ok := fields[key]; !ok {
+			fields[key] = value
+		}
+	}
+	return fields, nil
 }
 
 func compact(value json.RawMessage) (json.RawMessage, error) {

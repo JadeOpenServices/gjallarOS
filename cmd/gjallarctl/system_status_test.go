@@ -107,6 +107,33 @@ func TestSystemStatusShowsPendingAndDifferentFolder(t *testing.T) {
 	}
 }
 
+// Without the settings service (here: run as root) the status cannot know
+// whether the next rebuild takes the system copy, so it must not promise it.
+func TestSystemStatusUnknownModeMakesNoPromise(t *testing.T) {
+	bus := &fakeSettingsBus{}
+	useLocalFolder(t, bus, false, statusFolder)
+	old := settingsEUID
+	settingsEUID = func() int { return 0 }
+	t.Cleanup(func() { settingsEUID = old })
+	tree, err := localchanges.Check(map[string][]byte{"system/other.nix": []byte("{ }\n")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	useRootCopy(t, tree)
+	useBuildSource(t, `{"revision":"b1a07ba98fe16fe03d6e08e57f7276aff13cb272"}`)
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"system", "status"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("code %d, stderr %s", code, stderr.String())
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "Developer mode: unknown") || !strings.Contains(out, "only if developer mode is on") {
+		t.Errorf("stdout:\n%s", out)
+	}
+	if strings.Contains(out, "not built yet; the next rebuild builds it") {
+		t.Errorf("unknown mode promises a build:\n%s", out)
+	}
+}
+
 func TestSystemApplyCreatesMissingFolder(t *testing.T) {
 	bus := &fakeSettingsBus{}
 	useLocalFolder(t, bus, true, nil)
