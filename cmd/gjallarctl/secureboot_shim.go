@@ -32,6 +32,9 @@ func chooseShimPath(ctx context.Context, user config.User, ownKeys bool, out io.
 	if ownKeys {
 		return false, nil
 	}
+	// The key files and the ownership record are root-only; say so before
+	// sudo asks, so the password prompt does not come out of nowhere.
+	fmt.Fprintln(out, "Checking the Secure Boot keys and records (root-only files) before showing the plan.")
 	inspection, err := secureboot.Inspect(ctx)
 	if err != nil {
 		return false, fmt.Errorf("inspect Secure Boot ownership: %w", err)
