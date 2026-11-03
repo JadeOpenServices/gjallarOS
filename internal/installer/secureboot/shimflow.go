@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"syscall"
 )
@@ -234,7 +235,12 @@ func mokHolds(f firmwareFiles, name string, der []byte) (bool, error) {
 	var err error
 	if name == "MokNew" {
 		// A request is an EFI variable only; shim never mirrors it.
+		// mokutil writes it root-only (mode 0600, mokutil 0.7.2,
+		// e2e-fw13 2026-11-03), so a user process reads it through root.
 		raw, present, err = f.efivar(name, shimLockGUID)
+		if errors.Is(err, fs.ErrPermission) {
+			raw, present, err = f.rootEfivar(name, shimLockGUID)
+		}
 	} else {
 		raw, present, err = f.shimVar(name)
 	}

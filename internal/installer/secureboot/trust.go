@@ -2,6 +2,7 @@ package secureboot
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/binary"
@@ -148,12 +149,16 @@ type TrustFinding struct {
 
 type firmwareFiles struct {
 	efivars, mokvars, attributes string
+	// rootRead reads a file only root may read; nil when there is no way
+	// to ask for root.
+	rootRead func(path string) ([]byte, error)
 }
 
 var liveFirmware = firmwareFiles{
 	efivars:    "/sys/firmware/efi/efivars",
 	mokvars:    "/sys/firmware/efi/mok-variables",
 	attributes: "/sys/class/firmware-attributes",
+	rootRead:   sudoRead,
 }
 
 // ReadFirmwareTrust reads the running firmware.
@@ -257,6 +262,54 @@ func (f firmwareFiles) efivar(name, guid string) ([]byte, bool, error) {
 		return nil, false, fmt.Errorf("EFI variable %s is shorter than its attribute header", name)
 	}
 	return raw[4:], true, nil
+}
+
+// rootEfivar reads one root-only variable through rootRead, without its
+// 4-byte attribute header.
+func (f firmwareFiles) rootEfivar(name, guid string) ([]byte, bool, error) {
+	if f.rootRead == nil {
+		return nil, false, fmt.Errorf("EFI variable %s is readable by root only", name)
+	}
+	raw, err := f.rootRead(filepath.Join(f.efivars, name+"-"+guid))
+	if err != nil {
+		return nil, false, fmt.Errorf("read EFI variable %s as root: %w", name, err)
+	}
+	if len(raw) > maxVariable {
+		return nil, false, fmt.Errorf("EFI variable %s is larger than %d bytes", name, maxVariable)
+	}
+	if len(raw) < 4 {
+		return nil, false, fmt.Errorf("EFI variable %s is shorter than its attribute header", name)
+	}
+	return raw[4:], true, nil
+}
+
+// sudoRead reads path as root through sudo, capped like readCapped.
+func sudoRead(path string) ([]byte, error) {
+	cmd := commandContext(context.Background(), "sudo", privilegedTool("cat"), "--", path)
+	cmd.Stdin = os.Stdin
+	cmd.Stderr = os.Stderr
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, err
+	}
+	if err := cmd.Start(); err != nil {
+		return nil, err
+	}
+	raw, readErr := io.ReadAll(io.LimitReader(stdout, maxVariable+1))
+	if len(raw) > maxVariable {
+		cmd.Process.Kill()
+	}
+	waitErr := cmd.Wait()
+	if len(raw) > maxVariable {
+		return nil, fmt.Errorf("%s is larger than %d bytes", path, maxVariable)
+	}
+	if readErr != nil {
+		return nil, readErr
+	}
+	if waitErr != nil {
+		return nil, waitErr
+	}
+	return raw, nil
 }
 
 // shimVar reads a variable shim leaves for the running system: from the

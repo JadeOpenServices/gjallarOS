@@ -255,6 +255,42 @@ func TestMokHolds(t *testing.T) {
 	}
 }
 
+func TestMokHoldsRootOnlyRequest(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root reads a mode-0000 file")
+	}
+	ours, _ := synthCert(t, "SYNTHETIC GjallarOS db", nil, nil)
+	f := newFakeFirmware(t)
+	path := filepath.Join(f.root.efivars, "MokNew-"+shimLockGUID)
+	raw := append([]byte{0x07, 0, 0, 0}, x509SignatureList(ours.Raw)...)
+	// mokutil leaves the request mode 0600 for root.
+	if err := os.WriteFile(path, raw, 0); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := mokHolds(f.root, "MokNew", ours.Raw); got || err == nil {
+		t.Fatalf("no root reader: %v %v, want an error", got, err)
+	}
+	var asked string
+	f.root.rootRead = func(p string) ([]byte, error) {
+		asked = p
+		return raw, nil
+	}
+	if got, err := mokHolds(f.root, "MokNew", ours.Raw); !got || err != nil {
+		t.Fatalf("root reader: %v %v", got, err)
+	}
+	if asked != path {
+		t.Fatalf("root read %q, want %q", asked, path)
+	}
+	f.root.rootRead = func(string) ([]byte, error) { return nil, errors.New("sudo refused") }
+	if got, err := mokHolds(f.root, "MokNew", ours.Raw); got || err == nil {
+		t.Fatalf("refused root read: %v %v, want an error", got, err)
+	}
+	f.root.rootRead = func(string) ([]byte, error) { return make([]byte, maxVariable+1), nil }
+	if _, err := mokHolds(f.root, "MokNew", ours.Raw); err == nil {
+		t.Fatal("oversized root read accepted")
+	}
+}
+
 func TestEFISpaceFor(t *testing.T) {
 	dir := t.TempDir()
 	if err := efiSpaceFor(dir, 1024); err != nil {
