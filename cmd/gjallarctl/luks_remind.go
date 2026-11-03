@@ -17,6 +17,7 @@ import (
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/diskcrypto"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/oddc"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/oddcvalidation"
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/secureboot"
 	"github.com/JadeOpenServices/gjallarOS/internal/installercheck"
 )
 
@@ -234,10 +235,11 @@ func diskProtectionState(r luksRecord, kind diskcrypto.TPMKind, chipPossible fun
 	return diskProtectionRecoveryKey
 }
 
-// chipUnlockPossible: the chip unlocks the disk only with Secure Boot on
-// and on models whose firmware ODDC knows (gjallarctl secure-boot setup
-// asks the same). Anything unknown counts as no, so a generic model is
-// never sent into a setup that refuses it.
+// chipUnlockPossible: the chip unlocks the disk only with Secure Boot on,
+// so it is possible where gjallarctl secure-boot setup can turn that on:
+// through shim when the firmware would start it, or with GjallarOS keys on
+// models whose firmware ODDC knows. Anything unknown counts as no, so a
+// generic model is never sent into a setup that refuses it.
 func chipUnlockPossible() bool {
 	repo, err := installercheck.DiscoverRepository("")
 	if err != nil {
@@ -250,12 +252,30 @@ func chipUnlockPossible() bool {
 	if user.SecureBootEnable {
 		return true
 	}
+	if shimPathPossible() {
+		return true
+	}
 	device, err := oddcvalidation.LoadDeviceContext(repo)
 	if err != nil {
 		return false
 	}
 	firmware, err := oddc.ResolveSecureBootFirmwarePolicy(device.Resolved)
 	return err == nil && device.Resolved.ModelID != "" && firmware.SourceEntity != "" && firmware.Policy.Supported
+}
+
+// shimPathPossible reads only what any user may read (db, dbx, shim's
+// mirrors): the reminder runs in the session and never asks for root.
+func shimPathPossible() bool {
+	facts, err := secureboot.LoadShimFacts(secureboot.ShimFactsPath)
+	if err != nil {
+		return false
+	}
+	trust, err := secureboot.ReadFirmwareTrust()
+	if err != nil {
+		return false
+	}
+	choice, err := secureboot.ChoosePath(trust, facts, nil)
+	return err == nil && choice.Path == secureboot.PathShim
 }
 
 type diskProtectionText struct {

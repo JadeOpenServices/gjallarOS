@@ -7,6 +7,9 @@
   gjallarSecureBootOwnershipVerifier,
   ...
 }:
+let
+  shim = settings.secureBootEnable && (settings.secureBootShim or false);
+in
 {
   systemd.services.secure-boot-enrollment = lib.mkIf settings.secureBootEnable {
     description = "Apply trusted Secure Boot firmware policy";
@@ -65,7 +68,8 @@
       pkgs.gnugrep
       gjallarSecureBootArtifactVerifier
       gjallarSecureBootOwnershipVerifier
-    ];
+    ]
+    ++ lib.optional shim gjallarctlPackage;
 
     script = ''
               set -euo pipefail
@@ -92,6 +96,11 @@
               fi
 
               gjallar-verify-secure-boot-artifacts
+              ${lib.optionalString shim ''
+                # First Secure Boot start through shim: shim now enforces
+                # MokList, so the pending switch becomes "enrolled" (Plane 293).
+                gjallarctl installer secure-boot-record-shim
+              ''}
               gjallar-verify-secure-boot-ownership enrolled
 
               rm -f -- "$marker"

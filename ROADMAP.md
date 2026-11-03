@@ -740,6 +740,17 @@ setup existed) can only get it by running the whole installer again.
       command call the same code for steps 2, 3 and 5; nothing is copied.
       zsh completion like every other command. gjallarctl asks for sudo
       itself.
+- [x] **Shim on maker keys (Plane 293 step 4, Jade Q189).** `setup`
+      defaults to shim when the firmware keeps its maker's keys: db holds
+      the CA that signed the pinned shim, and dbx and shim's SBAT level do
+      not revoke its chain, its distro key, its files or our key. Our db
+      certificate goes into MOK through `mokutil --import` and MokManager,
+      and the firmware keys stay as they are. The ownership record carries
+      stage `pending-mok` until the first Secure Boot start through shim,
+      which `secure-boot-verification` records as `enrolled`. Own keys:
+      `--own-keys`, Setup Mode, or db/dbx ruling shim out. Neither flow
+      continues a switch the other one started. Firmware variable writes
+      check free variable storage first.
 - [x] **Restore dbx before enrolling.** HP's "Clear Secure Boot Keys" also
       empties dbx, the list of revoked boot files. Without it, Secure Boot
       starts boot loaders that are known to be exploitable. Rule: in Setup

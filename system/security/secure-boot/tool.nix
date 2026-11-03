@@ -1,4 +1,5 @@
 {
+  lib,
   pkgs,
   gjallarctlPackage,
   gjallarSecureBootArtifactVerifier,
@@ -42,8 +43,20 @@ let
   };
 in
 {
+  # What the pinned shim is (signer CAs, Authenticode hashes, SBAT), so
+  # `gjallarctl secure-boot setup` can check db and dbx before it picks the
+  # shim path, also while Secure Boot is still off (Plane 293).
+  environment.etc."gjallar/shim.json" = lib.mkIf pkgs.stdenv.hostPlatform.isx86_64 {
+    source = "${(pkgs.callPackage ../../../pkgs/gjallar-shim { }).facts}/share/shim/shim.json";
+  };
+
   environment.systemPackages = [
     secureBootTool
+    # `gjallarctl secure-boot setup` creates and archives the keys while
+    # Secure Boot is still off, before any of the gated services exist; it
+    # finds these through PATH (privilegedTool).
+    pkgs.sbctl
+    pkgs.openssl
     (pkgs.writeTextDir "share/zsh/site-functions/_gjallar-secure-boot" ''
       #compdef gjallar-secure-boot
       local -a cmds=(
