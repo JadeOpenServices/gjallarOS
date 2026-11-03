@@ -56,7 +56,7 @@ let
           '  gjallar-recover repair-boot ROOT' \
           '  gjallar-recover rebuild ROOT FLAKE#HOST' \
           '  gjallar-recover developer-off' \
-          '  gjallar-recover jods {repair|reinstall|fresh}' \
+          '  gjallar-recover guided {repair|reinstall|fresh}' \
           '  gjallar-recover install'
       }
 
@@ -554,36 +554,36 @@ let
           # It prints PASS only when the next boot holds no local files.
           exec gjallarctl system developer-off
           ;;
-        jods-execute)
+        managed-execute)
           require_root
           contract="''${2:?CONTRACT required}"
           artifact="''${3:?ARTIFACT required}"
           exec gjallar-recovery-execute "$contract" "$artifact"
           ;;
-        jods)
+        guided)
           mode="''${2:-}"
           case "$mode" in
             repair)
               printf '%s\n' \
-                'JODS mode: REPAIR EXISTING INSTALLATION' \
+                'Guided mode: REPAIR EXISTING INSTALLATION' \
                 'Disk formatting is forbidden. Unlock with a human recovery credential, then use repair-boot or rebuild.'
               ;;
             reinstall)
               printf '%s\n' \
-                'JODS mode: REINSTALL EXISTING INSTALLATION' \
+                'Guided mode: REINSTALL EXISTING INSTALLATION' \
                 'Existing partitions and encrypted data must be detected before any installer runs.'
               confirm_phrase REINSTALL-EXISTING
               run_installer --recovery --accept-existing
               ;;
             fresh)
               printf '%s\n' \
-                'DANGER: JODS FRESH INSTALL MODE' \
+                'DANGER: GUIDED FRESH INSTALL MODE' \
                 'Select the target disk in the installer and confirm its destructive plan.'
               confirm_phrase ERASE-FOR-FRESH-INSTALL
               run_installer --recovery
               ;;
             *)
-              printf '%s\n' 'Usage: gjallar-recover jods {repair|reinstall|fresh}' >&2
+              printf '%s\n' 'Usage: gjallar-recover guided {repair|reinstall|fresh}' >&2
               exit 2
               ;;
           esac
@@ -632,7 +632,7 @@ let
       'repair-boot:write the boot entries of a mounted root again'
       'rebuild:rebuild a mounted root from FLAKE#HOST'
       'developer-off:turn developer mode off and go back to the official system'
-      'jods:JODS repair, reinstall or fresh install'
+      'guided:guided repair, reinstall or fresh install'
       'install:run the installer after the recovery console erased the disk'
     )
     if (( CURRENT == 2 )); then
@@ -653,7 +653,7 @@ let
       generations|rollback|repair-boot|rebuild|snapshots|snapshot-rollback|snapshot-drop)
         (( CURRENT == 3 )) && _directories
         ;;
-      jods)
+      guided)
         (( CURRENT == 3 )) && compadd repair reinstall fresh
         ;;
     esac

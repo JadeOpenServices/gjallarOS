@@ -506,7 +506,7 @@ func TestCollectUSBTrustLapse(t *testing.T) {
 func TestCollectJODSManagementSkippedWithoutSecureBootSupport(t *testing.T) {
 	var output bytes.Buffer
 	u := config.User{Management: config.ManagementIntent{Enable: true}}
-	blocker := jodsManagementBlocker(false, true)
+	blocker := managementBlocker(false, true)
 	if err := collectJODSManagement(context.Background(), prompt.New(strings.NewReader("yes\n"), &output), blocker, nil, &u); err != nil {
 		t.Fatal(err)
 	}
@@ -517,10 +517,10 @@ func TestCollectJODSManagementSkippedWithoutSecureBootSupport(t *testing.T) {
 }
 
 func TestJODSManagementBlockerNamesTPM2(t *testing.T) {
-	if got := jodsManagementBlocker(true, false); !strings.Contains(got, "TPM2") {
+	if got := managementBlocker(true, false); !strings.Contains(got, "TPM2") {
 		t.Fatalf("blocker = %q", got)
 	}
-	if got := jodsManagementBlocker(true, true); got != "" {
+	if got := managementBlocker(true, true); got != "" {
 		t.Fatalf("supported machine blocked: %q", got)
 	}
 }

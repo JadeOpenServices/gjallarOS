@@ -15,18 +15,18 @@ def require(condition, message):
 print("=== RECOVERY SURFACE CHECK ===")
 
 require(
-    "gjallar-recover jods {repair|reinstall|fresh}" in text,
+    "gjallar-recover guided {repair|reinstall|fresh}" in text,
     "canonical recovery usage text changed",
 )
 
-start = text.find("      jods)")
-require(start >= 0, "jods recovery case missing")
+start = text.find("      guided)")
+require(start >= 0, "guided recovery case missing")
 
 case_start = text.find('case "$mode" in', start)
-require(case_start >= 0, "jods mode dispatcher missing")
+require(case_start >= 0, "guided mode dispatcher missing")
 
 case_end = text.find("      esac", case_start)
-require(case_end >= 0, "jods mode dispatcher terminator missing")
+require(case_end >= 0, "guided mode dispatcher terminator missing")
 
 block = text[case_start:case_end]
 
