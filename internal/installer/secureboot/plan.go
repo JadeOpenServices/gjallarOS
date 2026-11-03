@@ -82,3 +82,46 @@ func FirmwareLockSteps(firmwareLock bool) []string {
 		"Store that password offline. Changing firmware settings, including Secure Boot, requires it from now on.",
 	}
 }
+
+// ShimPlan explains the shim path before anything changes: the firmware
+// keeps its maker's keys, shim (signed by the maker's CA) starts first and
+// trusts the GjallarOS key once the user confirms it in MokManager.
+func ShimPlan(firmwareName string, luksTPM2 bool) string {
+	firmwareName = strings.TrimSpace(firmwareName)
+	if firmwareName == "" {
+		firmwareName = "system firmware"
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, `GJALLAROS SECURE BOOT - WHAT WILL CHANGE
+
+Firmware: %s
+
+- PK, KEK, db, dbx: not changed. The maker's keys stay.
+- shim, signed by a certificate the firmware already trusts, starts first and
+  starts GjallarOS only when it is signed with the GjallarOS key.
+- The GjallarOS key goes into shim's list (MOK) after you confirm it once.
+
+Steps:
+1. GjallarOS makes its key and rebuilds with shim. Restart.
+2. Run this again: it queues the key. Restart; a blue screen (MokManager)
+   asks you to confirm it with a one-time password you choose.
+3. Run this again: restart into firmware setup, turn Secure Boot on, save.
+
+What you need:
+- access to firmware setup (know its password if one is already set)
+- the Secure Boot recovery archive and passphrase shown next; store both
+  offline, they restore the GjallarOS signing keys
+`, firmwareName)
+	if luksTPM2 {
+		b.WriteString(`- your disk recovery key: the TPM opens the disk automatically only while
+  Secure Boot and the signed boot chain are unchanged; after the switch it
+  may ask for the recovery key once
+`)
+	}
+	b.WriteString(`
+Firmware setup itself stays open unless it has a supervisor password: anyone
+at the machine could then turn Secure Boot off. Use a new password, not a
+disk key, and store it offline.
+`)
+	return b.String()
+}

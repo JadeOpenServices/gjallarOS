@@ -98,6 +98,10 @@ type SignatureList struct {
 	// Hashes counts file and certificate hashes (SHA-256 and X.509 SHA-256
 	// entries); Other counts every other entry type.
 	Hashes, Other int
+	// FileSums are the SHA-256 entries (Authenticode hashes of single
+	// files), TBSSums the X.509 SHA-256 entries (hashes of a certificate's
+	// signed part), both as lower-case hex.
+	FileSums, TBSSums []string
 	// Malformed is set when the variable does not parse; it is then
 	// treated as holding unknown entries.
 	Malformed bool
@@ -130,7 +134,10 @@ type FirmwareTrust struct {
 	MokList           SignatureList
 	ShimValidationOff bool
 	ShimSBATLevel     string
-	AdminPassword     PasswordState
+	// ShimSBAT holds every line of shim's SBAT level ("shim,4"), for the
+	// revocation check; empty when no shim started this boot.
+	ShimSBAT      []string
+	AdminPassword PasswordState
 }
 
 // TrustFinding is one line the user should know about.
@@ -216,6 +223,7 @@ func (f firmwareFiles) read() (FirmwareTrust, error) {
 	}
 	if present {
 		t.ShimSBATLevel = sbatLevel(sbat)
+		t.ShimSBAT = sbatLines(sbat)
 	}
 
 	if t.AdminPassword, err = readAdminPassword(f.attributes); err != nil {
@@ -256,6 +264,16 @@ func (f firmwareFiles) efivar(name, guid string) ([]byte, bool, error) {
 // else from the EFI variable shim also sets.
 func (f firmwareFiles) shimVar(name string) ([]byte, bool, error) {
 	raw, present, err := readCapped(filepath.Join(f.mokvars, name))
+	if errors.Is(err, fs.ErrPermission) {
+		// The kernel keeps its mirror root-only; shim also sets the same
+		// variable, which any user may read. Without it the answer stays
+		// the permission error, never "not there".
+		raw, present, efiErr := f.efivar(name, shimLockGUID)
+		if efiErr != nil || !present {
+			return nil, false, err
+		}
+		return raw, true, nil
+	}
 	if err != nil || present {
 		return raw, present, err
 	}
@@ -310,6 +328,17 @@ func parseSignatureList(raw []byte, present bool) SignatureList {
 					der:    bytes.Clone(data),
 				})
 			case sha256SignatureType, x509SHA256SignatureType:
+				// An X.509 SHA-256 entry is the hash followed by a
+				// 16-byte revocation time.
+				if len(data) < sha256.Size {
+					return SignatureList{Present: true, Malformed: true}
+				}
+				sum := hex.EncodeToString(data[:sha256.Size])
+				if kind == sha256SignatureType {
+					list.FileSums = append(list.FileSums, sum)
+				} else {
+					list.TBSSums = append(list.TBSSums, sum)
+				}
 				list.Hashes++
 			default:
 				list.Other++
@@ -405,6 +434,25 @@ func sbatLevel(raw []byte) string {
 		}
 	}
 	return string(line)
+}
+
+// sbatLines splits shim's SBAT level into its lines; lines that are not
+// printable text become "unreadable", and the check fails closed on them.
+func sbatLines(raw []byte) []string {
+	var out []string
+	for _, line := range bytes.Split(bytes.TrimRight(raw, "\x00"), []byte("\n")) {
+		line = bytes.TrimRight(line, "\r")
+		ok := len(line) > 0 && len(line) <= 256
+		for _, b := range line {
+			ok = ok && b >= 0x20 && b <= 0x7e
+		}
+		if ok {
+			out = append(out, string(line))
+		} else if len(line) > 0 {
+			out = append(out, "unreadable")
+		}
+	}
+	return out
 }
 
 // readAdminPassword reads the firmware setup password state from the

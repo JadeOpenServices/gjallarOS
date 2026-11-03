@@ -791,7 +791,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 		!s.user.SecureBootEnable &&
 		!s.user.Management.Enable {
 		fmt.Fprint(out, noSecureBootPolicyNotice(resolvedDevice.ModelID))
-		fmt.Fprint(out, secureBootDeclinedNotice("Once ODDC has a Secure Boot setup for this machine, gjallarctl secure-boot setup turns it on."))
+		fmt.Fprint(out, secureBootDeclinedNotice("After the install, gjallarctl secure-boot setup turns it on through shim where this firmware allows it."))
 	} else if s.user.SecureBootEnable &&
 		s.secureBootFirmware.Policy.Supported {
 		// user.config.json or endpoint management already decided; still

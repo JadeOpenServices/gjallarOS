@@ -178,6 +178,17 @@ func runInstaller(args []string, stdout, stderr io.Writer) int {
 	if args[0] == "secure-boot-enroll" {
 		return runSecureBootEnroll(args[1:], stdout, stderr)
 	}
+	if args[0] == "secure-boot-record-shim" {
+		if len(args) != 1 {
+			fmt.Fprintln(stderr, "Usage: gjallarctl installer secure-boot-record-shim")
+			return 2
+		}
+		if err := secureboot.RecordShimEnrollment(context.Background(), stdout); err != nil {
+			fmt.Fprintf(stderr, "ERROR: record Secure Boot through shim: %v\n", err)
+			return 1
+		}
+		return 0
+	}
 	if args[0] == "secure-boot-verify-ownership" {
 		return runSecureBootVerifyOwnership(args[1:], stdout, stderr)
 	}
@@ -1857,7 +1868,7 @@ func printUsage(out io.Writer) {
 	fmt.Fprintln(out, "       gjallarctl settings {list|get|set|pending|apply|cancel|export|import|pair}")
 	fmt.Fprintln(out, "       gjallarctl snapshots {list|restore PATH}")
 	fmt.Fprintln(out, "       gjallarctl wine {list|set|add|install|program|run|remove|reset|repair|undo|import|menu} (gjallarctl wine for more)")
-	fmt.Fprintln(out, "       gjallarctl secure-boot {status|setup|update-dbx} [--repo PATH]")
+	fmt.Fprintln(out, "       gjallarctl secure-boot {status|setup|update-dbx} [--repo PATH] [--own-keys]")
 	fmt.Fprintln(out, "       gjallarctl security {notice|oddc-notice|status [--json]|scan PATH [--json]|fix ID|switch ID on|off|apply ID|cancel ID}")
 	fmt.Fprintln(out, "       gjallarctl hyprland-render-gpu")
 	fmt.Fprintln(out, "       gjallarctl media notice")

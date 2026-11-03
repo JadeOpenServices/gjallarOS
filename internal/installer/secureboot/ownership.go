@@ -34,11 +34,14 @@ const (
 )
 
 type Inspection struct {
-	State       State
-	SetupMode   bool
-	SecureBoot  bool
-	Recorded    bool
-	OwnerGUID   string
+	State      State
+	SetupMode  bool
+	SecureBoot bool
+	Recorded   bool
+	OwnerGUID  string
+	// Stage is the stage of a valid ownership record ("pending-enrollment",
+	// "pending-mok", "enrolled"); empty without one.
+	Stage       string
 	Description string
 }
 
@@ -63,7 +66,7 @@ type localKeys struct {
 	dbHash    string
 }
 
-func Inspect(ctx context.Context) (Inspection, error) {
+func Inspect(ctx context.Context) (inspection Inspection, err error) {
 	setupMode, err := efivarBool("SetupMode")
 	if err != nil {
 		return Inspection{}, fmt.Errorf("read UEFI SetupMode: %w", err)
@@ -93,6 +96,13 @@ func Inspect(ctx context.Context) (Inspection, error) {
 				record.PKSHA256 == keys.pkHash &&
 				record.KEKSHA256 == keys.kekHash &&
 				record.DbSHA256 == keys.dbHash
+	}
+	if recordValid {
+		defer func() {
+			if err == nil {
+				inspection.Stage = record.Stage
+			}
+		}()
 	}
 
 	if recorded && !recordValid {

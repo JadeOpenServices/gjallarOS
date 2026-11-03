@@ -752,12 +752,32 @@ cannot manage the machine. A system installed without it gets it with:
 gjallarctl secure-boot setup
 ```
 
-It takes the installer's steps: it checks the firmware state, creates the keys
-and shows their recovery archive, turns on `secureBootEnable`, rebuilds and
-offers to restart into firmware setup. After the restart the boot services
-enroll the keys and verify them. Run the command again after a step was
-interrupted; it picks up where it stopped. `gjallarctl secure-boot status`
-shows the current state.
+On a machine that still has its maker's keys, `setup` goes through shim and
+leaves the firmware keys alone. The firmware starts shim, which is signed by
+Microsoft, and shim checks GjallarOS's own key, which you confirm once in
+MokManager. This works on any model whose firmware trusts the pinned shim,
+also without an ODDC entry. The command checks that first: db must hold the
+certificate that signed shim, and dbx and shim's SBAT level must not revoke
+it. Each run does one step and says which restart comes next:
+
+1. Create the key, turn on `secureBootEnable` and `secureBootShim`, rebuild,
+   restart.
+2. Queue the key for MokManager (`mokutil --import`, with a one-time
+   password), restart and confirm it on the blue MokManager screen.
+3. Turn on Secure Boot in the firmware setup. The first Secure Boot start
+   records the switch and verifies it.
+
+`gjallarctl secure-boot setup --own-keys` replaces the firmware keys with
+GjallarOS keys instead. It needs an ODDC Secure Boot setup for the model. The
+command also takes this path on its own when the firmware is already in Setup
+Mode, or when db or dbx would stop shim.
+
+The own-keys path takes the installer's steps: it checks the firmware state,
+creates the keys and shows their recovery archive, turns on
+`secureBootEnable`, rebuilds and offers to restart into firmware setup. After
+the restart the boot services enroll the keys and verify them. On both paths,
+run the command again after a step was interrupted; it picks up where it
+stopped. `gjallarctl secure-boot status` shows the current state.
 
 Some firmware empties its revocation list (dbx) along with its keys. When the
 ODDC setup wants dbx kept, the firmware's own default list is written back
