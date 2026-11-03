@@ -67,7 +67,7 @@ func TestCheckUpdateReportsMovedBranch(t *testing.T) {
 	CheckUpdate(repo, &out)
 
 	want := "ODDC update available: " + short(lockedODDC) + " -> " + short(head)
-	if !strings.Contains(out.String(), want) || !strings.Contains(out.String(), "rebuild --hardware-update") {
+	if !strings.Contains(out.String(), want) || !strings.Contains(out.String(), "gjallarctl rebuild --hardware-update") {
 		t.Fatalf("output = %q, want %q and the apply hint", out.String(), want)
 	}
 }

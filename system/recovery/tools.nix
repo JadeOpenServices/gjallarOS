@@ -475,7 +475,7 @@ let
               "$target is in use, so this boot still sees the old files; changes made now end up in the kept copy."
           fi
           if [ "$kind" = config ]; then
-            printf '%s\n' 'The settings are back; the system built from them is not. Run rebuild once the system is up.'
+            printf '%s\n' 'The settings are back; the system built from them is not. Run gjallarctl rebuild once the system is up.'
           fi
           ;;
         snapshot-drop)

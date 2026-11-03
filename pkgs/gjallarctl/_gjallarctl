@@ -1,4 +1,4 @@
-#compdef gjallarctl rebuild helpme cleanup cleanup-old-generations thermal-status thermal-test check-installer gjallar-preflight gjallar-system-rebuild
+#compdef gjallarctl helpme cleanup cleanup-old-generations thermal-status thermal-test check-installer gjallar-preflight gjallar-system-rebuild
 
 # Hand-written: gjallarctl parses its own arguments, so nothing can be
 # generated. Keep in step with printUsage in cmd/gjallarctl/main.go. The
@@ -431,7 +431,6 @@ _gjallarctl_oddc() {
 
 _gjallarctl() {
   case $service in
-    rebuild) _gjallarctl_rebuild; return ;;
     gjallar-system-rebuild) _gjallarctl_system_rebuild; return ;;
     helpme) _arguments '--text[print instead of opening a window]'; return ;;
     cleanup) _arguments '(-k --keep)'{-k,--keep}'[generations to keep]:count:'; return ;;
