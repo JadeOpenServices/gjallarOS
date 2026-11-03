@@ -3,11 +3,13 @@ package secureboot
 import (
 	"bytes"
 	"context"
+	"crypto/sha1"
 	"errors"
 	"fmt"
 	"io"
 	"io/fs"
 	"os"
+	"strings"
 	"syscall"
 )
 
@@ -179,21 +181,48 @@ func ContinueShim(
 	} else {
 		fmt.Fprintln(out, "The GjallarOS key already waits for MokManager.")
 	}
-	fmt.Fprint(out, mokManagerSteps)
+	fmt.Fprint(out, mokManagerSteps(keys.dbDER, queued))
 	return ContinuationReboot, nil
 }
 
-const mokManagerSteps = `
+// mokManagerSteps is the walk through MokManager. MokManager opens on
+// "Continue boot", and names the key only by its certificate subject, so the
+// steps carry the SHA-1 fingerprint that MokManager's "View key" shows.
+func mokManagerSteps(der []byte, reused bool) string {
+	password := "Type the password you just chose"
+	if reused {
+		password = "Type the password chosen when the key was first queued"
+	}
+	return fmt.Sprintf(`
 At the next start a blue screen (MokManager) asks to confirm the key.
-It waits 10 seconds; press a key before it runs out:
-  1. Enroll MOK
-  2. Continue
-  3. Yes
-  4. Type the password you just chose
-  5. Reboot
+It waits 10 seconds; press the down arrow before it runs out:
+  1. Enroll MOK (the menu starts on Continue boot; press down, then Enter)
+  2. View key 0; under [Fingerprint] it must read
+     %s
+     Press Enter to go back. If it differs, choose Continue boot instead.
+  3. Continue
+  4. Yes
+  5. %s
+  6. Reboot
 If the 10 seconds ran out, run gjallarctl secure-boot setup again.
 After the restart, run gjallarctl secure-boot setup again for the last step.
-`
+`, sha1Fingerprint(der), password)
+}
+
+// sha1Fingerprint formats der the way MokManager's "View key" prints it
+// under [Fingerprint]: SHA-1 of the DER, ten bytes per line, space-separated
+// (MokManager.c show_x509_info, shim 16.1).
+func sha1Fingerprint(der []byte) string {
+	sum := sha1.Sum(der)
+	line := func(b []byte) string {
+		parts := make([]string, len(b))
+		for i, v := range b {
+			parts[i] = fmt.Sprintf("%02x", v)
+		}
+		return strings.Join(parts, " ")
+	}
+	return line(sum[:10]) + "\n     " + line(sum[10:])
+}
 
 // queueMOK asks shim, through mokutil, to show der in MokManager at the next
 // start. mokutil asks for a one-time password that MokManager asks again.

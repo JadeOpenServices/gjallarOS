@@ -1,11 +1,13 @@
 package secureboot
 
 import (
+	"crypto/sha1"
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -301,5 +303,21 @@ func TestEFISpaceFor(t *testing.T) {
 	}
 	if err := efiSpaceFor(filepath.Join(dir, "missing"), 1); err == nil {
 		t.Fatal("missing store allowed")
+	}
+}
+
+func TestMokManagerStepsFingerprint(t *testing.T) {
+	der := []byte("EXAMPLE certificate bytes")
+	got := mokManagerSteps(der, false)
+	h := sha1.Sum(der)
+	first := fmt.Sprintf("% x", h[:10])
+	second := fmt.Sprintf("% x", h[10:])
+	for _, want := range []string{first, second, "Enroll MOK", "press down", "the password you just chose"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("steps miss %q:\n%s", want, got)
+		}
+	}
+	if reused := mokManagerSteps(der, true); !strings.Contains(reused, "first queued") {
+		t.Errorf("reused steps should name the earlier password:\n%s", reused)
 	}
 }

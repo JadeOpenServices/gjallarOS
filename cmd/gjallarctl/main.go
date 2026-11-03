@@ -674,6 +674,10 @@ func runSecureBootVerifyOwnership(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
+	if viaShim {
+		fmt.Fprintln(stdout, "PASS: shim trusts the GjallarOS key and the firmware starts shim.")
+		return 0
+	}
 	fmt.Fprintln(
 		stdout,
 		"PASS: active GjallarOS PK/KEK/db ownership verified.",
