@@ -463,6 +463,8 @@ _gjallarctl() {
     'thunderbolt:Thunderbolt and USB4 device authorization'
     'vpn:VPN and trusted Wi-Fi'
     'network:network diagnostics'
+    'register-key:register a security key and set its PIN'
+    'management:device management (JODS) status'
     'addons:Firefox add-ons'
     'apps:install or remove catalogue apps'
     'settings:change GjallarOS settings'
@@ -498,6 +500,8 @@ _gjallarctl() {
         thunderbolt) _gjallarctl_thunderbolt ;;
         vpn) _gjallarctl_vpn ;;
         network) _gjallarctl_network ;;
+        register-key) _arguments '1:link from the registration page:_urls' ;;
+        management) _arguments '1:management command:((status\:"show the enrollment state"))' ;;
         addons) _gjallarctl_addons ;;
         apps) _gjallarctl_apps ;;
         settings) _gjallarctl_settings ;;

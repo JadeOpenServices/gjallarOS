@@ -96,6 +96,14 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return oddccli.Run(args[1:], stdout, stderr)
 	case "network":
 		return forwardSystemHelper("gjallar-network-diagnostics", "network diagnostics", args[1:], stderr)
+	case "register-key":
+		return forwardSystemHelper("gjallar-register-key", "security key registration", args[1:], stderr)
+	case "management":
+		if len(args) != 2 || args[1] != "status" {
+			fmt.Fprintln(stderr, "usage: gjallarctl management status")
+			return 2
+		}
+		return forwardSystemHelper("gjallar-management-status", "device management", nil, stderr)
 	case "device-probe":
 		return runDeviceProbe(args[1:], stdout, stderr)
 	case "fan":
@@ -1912,6 +1920,8 @@ func printUsage(out io.Writer) {
 	fmt.Fprintln(out, "       gjallarctl luks {status|recovery-key|pin [--remove]|setup|remind [--open|--refresh]}")
 	fmt.Fprintln(out, "       gjallarctl vpn status")
 	fmt.Fprintln(out, "       gjallarctl network [summary|interfaces|sockets|dns NAME|route IP|tools]")
+	fmt.Fprintln(out, "       gjallarctl register-key [https://LINK]")
+	fmt.Fprintln(out, "       gjallarctl management status")
 	fmt.Fprintln(out, "       gjallarctl addons {list|set|pin|update} [--repo PATH]")
 	fmt.Fprintln(out, "       gjallarctl apps {list [--json]|add ID|remove ID} [--window]")
 	fmt.Fprintln(out, "       gjallarctl settings {list|get|set|pending|apply|cancel|export|import|pair}")

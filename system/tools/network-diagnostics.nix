@@ -1,13 +1,10 @@
-{ pkgs, ... }:
+{ lib, pkgs, ... }:
 let
+  libexec = import ../../pkgs/lib/libexec.nix { inherit lib pkgs; };
+
   # gjallarctl network starts this from the system profile's libexec
   # (Plane 282); it is not on PATH.
-  networkDiagnostics = pkgs.writeTextFile {
-    name = "gjallar-network-diagnostics";
-    destination = "/libexec/gjallar-network-diagnostics";
-    executable = true;
-    checkPhase = "${pkgs.stdenv.shellDryRun} \"$target\"";
-    text = "#!${pkgs.runtimeShell}\n" + ''
+  networkDiagnostics = pkgs.writeShellScriptBin "gjallar-network-diagnostics" ''
     section() {
       printf '\n=== %s ===\n' "$1"
     }
@@ -168,7 +165,6 @@ EOF
         ;;
     esac
   '';
-  };
 in
 {
   # Operator-facing network diagnostics and traffic-inspection toolkit.
@@ -221,6 +217,6 @@ in
           whois
     ])
     ++ [
-      networkDiagnostics
+      (libexec networkDiagnostics)
     ];
 }

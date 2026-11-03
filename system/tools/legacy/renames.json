@@ -113,6 +113,30 @@
       ]
     },
     {
+      "kind": "command",
+      "old": "gjallar-register-key",
+      "new": "gjallarctl register-key",
+      "removedIn": "dev merge of one-cli-282",
+      "deleteAfter": "2026-12-03",
+      "item": "282",
+      "match": [
+        "`gjallar-register-key",
+        "#compdef gjallar-register-key",
+        "exec = \"gjallar-register-key"
+      ]
+    },
+    {
+      "kind": "command",
+      "old": "gjallar-management-status",
+      "new": "gjallarctl management status",
+      "removedIn": "dev merge of one-cli-282",
+      "deleteAfter": "2026-12-03",
+      "item": "282",
+      "match": [
+        "`gjallar-management-status"
+      ]
+    },
+    {
       "kind": "config-field",
       "old": "endpointManagedDevice",
       "new": "management.enable",
