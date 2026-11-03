@@ -2740,7 +2740,13 @@ func configureRecoveryProvisioning(ctx context.Context, ui prompt.UI, opt option
 	s.recoverySigningKey = opt.recoverySigningKey
 	s.recoverySigningPublicKey = opt.recoverySigningPublicKey
 	if s.recoveryPartition == "" {
-		s.recoveryPartition = findRecoveryPartition(ctx)
+		found, err := findRecoveryPartition(ctx)
+		// Without Secure Boot the partition is only named in a notice, so
+		// a lookup that fails must not stop the rebuild.
+		if err != nil && (s.user.SecureBootEnable || explicitTarget) {
+			return fmt.Errorf("find the recovery partition: %w", err)
+		}
+		s.recoveryPartition = found
 	}
 	// Without GjallarOS Secure Boot there is no recovery partition, even
 	// one an older installer already made (e2e-genluks 2026-10-19: the
@@ -3181,18 +3187,15 @@ func prepareInstalledRecoveryStorage(
 	}
 }
 
-var findRecoveryPartition = func(ctx context.Context) string {
-	out, err := exec.CommandContext(ctx, "lsblk", "-pnro", "PATH,PARTLABEL").Output()
+// findRecoveryPartition finds the recovery partition of the running system:
+// only on the disk under /, so a second disk or a stick with the same GPT
+// name is never picked (Plane 307). "" means that disk has none.
+var findRecoveryPartition = func(ctx context.Context) (string, error) {
+	disk, err := targetdisk.MountedDisk(ctx, "/")
 	if err != nil {
-		return ""
+		return "", fmt.Errorf("find the system disk: %w", err)
 	}
-	for _, line := range strings.Split(string(out), "\n") {
-		fields := strings.Fields(line)
-		if len(fields) >= 2 && fields[1] == diskplan.RecoveryPartLabel {
-			return fields[0]
-		}
-	}
-	return ""
+	return targetdisk.PartitionByLabel(ctx, disk, diskplan.RecoveryPartLabel)
 }
 
 // needsRecoveryStorage says whether the rebuild still has to find or make
@@ -3216,10 +3219,14 @@ func provisionRecoveryPartition(ctx context.Context, root string, s state) error
 		if err := attached(ctx, "sudo", createScript, s.recoveryDisk); err != nil {
 			return fmt.Errorf("create recovery partition: %w", err)
 		}
-		s.recoveryPartition = findRecoveryPartition(ctx)
-		if s.recoveryPartition == "" {
-			return errors.New("recovery partition creation completed but the partition was not detected")
+		found, err := targetdisk.PartitionByLabel(ctx, s.recoveryDisk, diskplan.RecoveryPartLabel)
+		if err != nil {
+			return fmt.Errorf("find the new recovery partition: %w", err)
 		}
+		if found == "" {
+			return fmt.Errorf("recovery partition creation completed but %s has no %s partition", s.recoveryDisk, diskplan.RecoveryPartLabel)
+		}
+		s.recoveryPartition = found
 	}
 	// The recovery configuration imports untracked generated/state.nix, so a
 	// git+file build never evaluates; build from the staged source as
