@@ -94,6 +94,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runPreflight(args[1:], stdout, stderr)
 	case "oddc":
 		return oddccli.Run(args[1:], stdout, stderr)
+	case "network":
+		return forwardSystemHelper("gjallar-network-diagnostics", "network diagnostics", args[1:], stderr)
 	case "device-probe":
 		return runDeviceProbe(args[1:], stdout, stderr)
 	case "fan":
@@ -1909,6 +1911,7 @@ func printUsage(out io.Writer) {
 	fmt.Fprintln(out, "       gjallarctl tpm2 reenroll")
 	fmt.Fprintln(out, "       gjallarctl luks {status|recovery-key|pin [--remove]|setup|remind [--open|--refresh]}")
 	fmt.Fprintln(out, "       gjallarctl vpn status")
+	fmt.Fprintln(out, "       gjallarctl network [summary|interfaces|sockets|dns NAME|route IP|tools]")
 	fmt.Fprintln(out, "       gjallarctl addons {list|set|pin|update} [--repo PATH]")
 	fmt.Fprintln(out, "       gjallarctl apps {list [--json]|add ID|remove ID} [--window]")
 	fmt.Fprintln(out, "       gjallarctl settings {list|get|set|pending|apply|cancel|export|import|pair}")
@@ -2875,6 +2878,7 @@ var helpmeTools = [][2]string{
 	{"gjallarctl thermal-test", "Pause/resume processes for troubleshooting."},
 	{"gjallarctl check", "Check installer configuration."},
 	{"gjallarctl preflight", "Run fast repository wiring checks."},
+	{"gjallarctl network", "Show network state: links, routes, DNS, sockets."},
 }
 
 func runHelpme(args []string, stdout, stderr io.Writer) int {

@@ -430,6 +430,24 @@ _gjallarctl_oddc() {
   esac
 }
 
+_gjallarctl_network() {
+  local -a cmds=(
+    'summary:link, address, route, DNS, NetworkManager and socket state'
+    'interfaces:interface, address, Wi-Fi and link information'
+    'sockets:listening TCP/UDP sockets'
+    'dns:query a name'
+    'route:show the route to an address'
+    'tools:list the diagnostic tools'
+  )
+  if (( CURRENT == 2 )); then
+    _describe -t commands 'gjallarctl network command' cmds
+  elif (( CURRENT == 3 )) && [[ $words[2] == dns ]]; then
+    _hosts
+  elif (( CURRENT == 3 )) && [[ $words[2] == route ]]; then
+    _message 'IPv4 or IPv6 address'
+  fi
+}
+
 _gjallarctl() {
   case $service in
     gjallar-system-rebuild) _gjallarctl_system_rebuild; return ;;
@@ -444,6 +462,7 @@ _gjallarctl() {
     'usb:USB trust enforcement'
     'thunderbolt:Thunderbolt and USB4 device authorization'
     'vpn:VPN and trusted Wi-Fi'
+    'network:network diagnostics'
     'addons:Firefox add-ons'
     'apps:install or remove catalogue apps'
     'settings:change GjallarOS settings'
@@ -478,6 +497,7 @@ _gjallarctl() {
         usb) _gjallarctl_usb ;;
         thunderbolt) _gjallarctl_thunderbolt ;;
         vpn) _gjallarctl_vpn ;;
+        network) _gjallarctl_network ;;
         addons) _gjallarctl_addons ;;
         apps) _gjallarctl_apps ;;
         settings) _gjallarctl_settings ;;

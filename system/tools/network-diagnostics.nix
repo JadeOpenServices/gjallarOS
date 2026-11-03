@@ -1,6 +1,13 @@
 { pkgs, ... }:
 let
-  networkDiagnostics = pkgs.writeShellScriptBin "network-diagnostics" ''
+  # gjallarctl network starts this from the system profile's libexec
+  # (Plane 282); it is not on PATH.
+  networkDiagnostics = pkgs.writeTextFile {
+    name = "gjallar-network-diagnostics";
+    destination = "/libexec/gjallar-network-diagnostics";
+    executable = true;
+    checkPhase = "${pkgs.stdenv.shellDryRun} \"$target\"";
+    text = "#!${pkgs.runtimeShell}\n" + ''
     section() {
       printf '\n=== %s ===\n' "$1"
     }
@@ -8,12 +15,12 @@ let
     usage() {
       cat <<'EOF'
 Usage:
-  network-diagnostics [summary]
-  network-diagnostics interfaces
-  network-diagnostics sockets
-  network-diagnostics dns NAME
-  network-diagnostics route IP
-  network-diagnostics tools
+  gjallarctl network [summary]
+  gjallarctl network interfaces
+  gjallarctl network sockets
+  gjallarctl network dns NAME
+  gjallarctl network route IP
+  gjallarctl network tools
 
 Commands:
   summary     Local link, address, route, DNS, NetworkManager and socket state.
@@ -161,6 +168,7 @@ EOF
         ;;
     esac
   '';
+  };
 in
 {
   # Operator-facing network diagnostics and traffic-inspection toolkit.
@@ -214,23 +222,5 @@ in
     ])
     ++ [
       networkDiagnostics
-      (pkgs.writeTextDir "share/zsh/site-functions/_network-diagnostics" ''
-        #compdef network-diagnostics
-        local -a cmds=(
-          'summary:link, address, route, DNS, NetworkManager and socket state'
-          'interfaces:interface, address, Wi-Fi and link information'
-          'sockets:listening TCP/UDP sockets'
-          'dns:query a name'
-          'route:show the route to an address'
-          'tools:list the diagnostic tools'
-        )
-        if (( CURRENT == 2 )); then
-          _describe -t commands 'network-diagnostics command' cmds
-        elif (( CURRENT == 3 )) && [[ $words[2] == dns ]]; then
-          _hosts
-        elif (( CURRENT == 3 )) && [[ $words[2] == route ]]; then
-          _message 'IPv4 or IPv6 address'
-        fi
-      '')
     ];
 }
