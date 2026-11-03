@@ -162,7 +162,7 @@ func TestProjectToolsRemainIndependentFromJODS(t *testing.T) {
 		planeEnable        bool
 		planeHost          string
 		teamsEnable        bool
-		jodsEnable         bool
+		managementEnable   bool
 		wantProjectToolErr bool
 	}{
 		{
@@ -195,15 +195,15 @@ func TestProjectToolsRemainIndependentFromJODS(t *testing.T) {
 			teamsEnable: true,
 		},
 		{
-			name:       "JODS enabled with project tools disabled",
-			jodsEnable: true,
+			name:             "JODS enabled with project tools disabled",
+			managementEnable: true,
 		},
 		{
-			name:        "JODS enabled with project tools enabled",
-			planeEnable: true,
-			planeHost:   "https://plane.example.test",
-			teamsEnable: true,
-			jodsEnable:  true,
+			name:             "JODS enabled with project tools enabled",
+			planeEnable:      true,
+			planeHost:        "https://plane.example.test",
+			teamsEnable:      true,
+			managementEnable: true,
 		},
 	}
 
@@ -217,7 +217,7 @@ func TestProjectToolsRemainIndependentFromJODS(t *testing.T) {
 				u.WebApplications = append(u.WebApplications, WebApplicationIntent{ID: WebApplicationTeams})
 			}
 
-			if tt.jodsEnable {
+			if tt.managementEnable {
 				jods := validJODSProjectToolTestUser()
 				u.Management.Enable = jods.Management.Enable
 				u.Management.Endpoint = jods.Management.Endpoint

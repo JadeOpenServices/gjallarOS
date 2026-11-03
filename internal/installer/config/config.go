@@ -496,7 +496,7 @@ func ValidateProjectTools(user User) error {
 	return NormalizeProjectTools(&user)
 }
 
-var jodsPublicKeyPattern = regexp.MustCompile(`^[0-9a-fA-F]{64}$`)
+var managementKeyPattern = regexp.MustCompile(`^[0-9a-fA-F]{64}$`)
 var desktopProfilePattern = regexp.MustCompile(`^[A-Za-z0-9._+:-]{1,64}$`)
 
 func ValidateJODS(user User) error {
@@ -519,10 +519,10 @@ func ValidateJODS(user User) error {
 	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil {
 		return fmt.Errorf("JODS endpoint must be an HTTPS URL without embedded credentials")
 	}
-	if !jodsPublicKeyPattern.MatchString(user.Management.PolicySigningPublicKey) {
+	if !managementKeyPattern.MatchString(user.Management.PolicySigningPublicKey) {
 		return fmt.Errorf("JODS policy-signing public key must be exactly 64 hexadecimal characters")
 	}
-	if !jodsPublicKeyPattern.MatchString(user.Management.RecoveryCommandSigningPublicKey) {
+	if !managementKeyPattern.MatchString(user.Management.RecoveryCommandSigningPublicKey) {
 		return fmt.Errorf("JODS recovery-command signing public key must be exactly 64 hexadecimal characters")
 	}
 	if strings.EqualFold(user.Management.PolicySigningPublicKey, user.Management.RecoveryCommandSigningPublicKey) {

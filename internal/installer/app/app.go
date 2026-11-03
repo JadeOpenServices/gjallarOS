@@ -625,7 +625,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 		if s.user.USBGuardEnable && s.user.USBTrustTPMHandle == "" && diskcrypto.TPMAvailable() {
 			s.user.USBTrustTPMHandle = config.DefaultUSBTrustTPMHandle
 		}
-	} else if err := collectInteractive(ctx, ui, root, partitionable, usbSystemDisk, resolvedDevice.ModelID != "", diskcrypto.TPMAvailable(), jodsManagementBlocker(s.secureBootFirmware.Policy.Supported, diskcrypto.TPMAvailable()), hardware, choices, running, &s.user); err != nil {
+	} else if err := collectInteractive(ctx, ui, root, partitionable, usbSystemDisk, resolvedDevice.ModelID != "", diskcrypto.TPMAvailable(), managementBlocker(s.secureBootFirmware.Policy.Supported, diskcrypto.TPMAvailable()), hardware, choices, running, &s.user); err != nil {
 		return fail(errOut, err)
 	}
 	if !s.existing {
@@ -2879,9 +2879,9 @@ func collectJODSManagement(ctx context.Context, ui prompt.UI, blocker string, ru
 	return err
 }
 
-// jodsManagementBlocker names why this machine cannot be a managed
+// managementBlocker names why this machine cannot be a managed
 // endpoint, or returns "" when it can.
-func jodsManagementBlocker(secureBootSupported, tpm2 bool) string {
+func managementBlocker(secureBootSupported, tpm2 bool) string {
 	switch {
 	case !tpm2:
 		return "a managed machine needs TPM2, and none was detected."
