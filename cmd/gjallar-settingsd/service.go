@@ -617,7 +617,7 @@ func (s *service) Apply(ctx context.Context, sender, id, colors string) error {
 	delete(s.pending, id)
 	log.Printf("uid %d applied %s change %s: %s", who.UID, change.Tier, id, change.KeyNames())
 	if err := s.sys.StartRebuild(ctx, colors); err != nil {
-		return fmt.Errorf("the change is written, but the rebuild did not start: %w; run rebuild", err)
+		return fmt.Errorf("the change is written, but the rebuild did not start: %w; run gjallarctl rebuild", err)
 	}
 	return nil
 }

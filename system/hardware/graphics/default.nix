@@ -32,7 +32,7 @@ in
       assertion = !hybrid || (settings.graphicsBusId != "" && settings.graphicsIntegratedBusId != "");
       message = ''
         ODDC model ${settings.oddcModel or "(none)"} has integrated + NVIDIA graphics, but the hardware scan did not find both GPUs (NVIDIA "${settings.graphicsBusId}", integrated "${settings.graphicsIntegratedBusId}").
-        Turn the NVIDIA GPU on in firmware setup (hybrid graphics mode), then run the installer or `rebuild --hardware-update` again.'';
+        Turn the NVIDIA GPU on in firmware setup (hybrid graphics mode), then run the installer or `gjallarctl rebuild --hardware-update` again.'';
     }
   ];
 

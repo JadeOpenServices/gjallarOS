@@ -9,7 +9,7 @@ import (
 )
 
 // CheckUpdate tells whether ODDC's branch moved past the commit flake.lock
-// pins. It only reports: the pin moves with `rebuild --hardware-update`.
+// pins. It only reports: the pin moves with `gjallarctl rebuild --hardware-update`.
 // Offline or on any error it stays quiet, so a rebuild never waits on it.
 func CheckUpdate(repo string, stdout io.Writer) {
 	pinned, ref, err := oddc.LockedInput(repo)
@@ -24,7 +24,7 @@ func CheckUpdate(repo string, stdout io.Writer) {
 
 	fmt.Fprintf(
 		stdout,
-		"[GjallarOS] ODDC update available: %s -> %s. Apply with: rebuild --hardware-update\n",
+		"[GjallarOS] ODDC update available: %s -> %s. Apply with: gjallarctl rebuild --hardware-update\n",
 		short(pinned),
 		short(upstream),
 	)
