@@ -223,16 +223,33 @@ in
       device=${lib.escapeShellArg luksDevice}
       state=/var/lib/gjallarOS
       keyfile="$(mktemp /run/gjallar-luks-key.XXXXXX)"
-      trap 'rm -f -- "$keyfile"' EXIT
+      trap 'rm -f -- "$keyfile" "$keyfile.meta"' EXIT
 
       [ ! -e "$state/secure-boot-enable-required" ] || exit 0
       gjallar-verify-secure-boot-artifacts
       gjallar-verify-secure-boot-ownership enrolled
 
-      if cryptsetup luksDump --dump-json-metadata "$device" | grep -q 'systemd-tpm2'; then
-        printf '%s\n' 'ERROR: an existing TPM2 token must be replaced with: sudo gjallarctl tpm2 reenroll; no slot was changed.' >&2
-        exit 1
-      fi
+      # A chip slot without a startup policy (first installers, or made by
+      # hand) opens the disk for any start; the enrollment below replaces
+      # it in the same call that adds the bound slot (loophole 40/41). A
+      # slot GjallarOS enrolled stays: only its finished enrollment may
+      # replace it.
+      cryptsetup luksDump --dump-json-metadata "$device" >"$keyfile.meta"
+      chip="$(gjallarctl installer tpm2-metadata-policy "$keyfile.meta")"
+      rm -f -- "$keyfile.meta"
+      wipe=()
+      case "$chip" in
+        none) ;;
+        unbound)
+          wipe=(--wipe-slot=tpm2)
+          printf '%s\n' 'Replacing the security chip slot GjallarOS did not set up; it has no startup policy.'
+          ;;
+        *)
+          printf 'ERROR: %s has a GjallarOS security chip slot, but its enrollment did not finish; no slot was changed. Remove it with systemd-cryptenroll --wipe-slot=tpm2 %s and restart to enroll again.\n' \
+            "$device" "$device" >&2
+          exit 1
+          ;;
+      esac
       # The policy from the first boot locks the PCR 7 of the time before
       # Secure Boot was enabled, and make-policy cannot rewrite its NV index
       # (e2e-fw13, 2026-10-07: AuthorizeNV policy mismatch). No token uses
@@ -256,7 +273,8 @@ in
         newpin="$(gjallarctl luks new-pin)"
         pin_arg=--tpm2-with-pin=yes
       ''}
-      NEWPIN="$newpin" systemd-cryptenroll --unlock-key-file="$keyfile" --tpm2-device=auto \
+      # systemd-cryptenroll wipes only after the new slot is enrolled.
+      NEWPIN="$newpin" systemd-cryptenroll "''${wipe[@]}" --unlock-key-file="$keyfile" --tpm2-device=auto \
         --tpm2-pcrlock=/var/lib/systemd/pcrlock.json "$pin_arg" "$device"
 
       ${recordEnrollment}

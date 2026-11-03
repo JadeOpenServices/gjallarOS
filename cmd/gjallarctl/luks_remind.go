@@ -43,10 +43,13 @@ type luksRecord struct {
 	// nothing about the next start. The record lives in /run, so this ends
 	// with the boot.
 	BoundThisBoot bool
+	// A chip keyslot has no pcrlock policy, so nothing ties it to how the
+	// device starts (diskcrypto.Keyslots.TPM2NoPolicy).
+	ChipNoPolicy bool
 }
 
 func newLUKSRecord(s diskcrypto.Keyslots) luksRecord {
-	return luksRecord{Encrypted: true, TPM2: len(s.TPM2), Recovery: len(s.Recovery), Passphrase: len(s.Passphrase), PINKnown: true, PIN: s.TPM2PIN}
+	return luksRecord{Encrypted: true, TPM2: len(s.TPM2), Recovery: len(s.Recovery), Passphrase: len(s.Passphrase), PINKnown: true, PIN: s.TPM2PIN, ChipNoPolicy: s.TPM2NoPolicy}
 }
 
 func boolDigit(b bool) int {
@@ -96,6 +99,9 @@ func writeLUKSRecord(path string, r luksRecord) error {
 	if r.BoundThisBoot {
 		data += "bound=1\n"
 	}
+	if r.ChipNoPolicy {
+		data += "nopolicy=1\n"
+	}
 	tmp, err := os.CreateTemp(filepath.Dir(path), ".keyslots-*")
 	if err != nil {
 		return err
@@ -143,7 +149,7 @@ func readLUKSRecord(path string) (luksRecord, error) {
 			r.Recovery = n
 		case "passphrase":
 			r.Passphrase = n
-		case "pin", "chipunlock", "pcr4", "bound":
+		case "pin", "chipunlock", "pcr4", "bound", "nopolicy":
 			if n > 1 {
 				return luksRecord{}, fmt.Errorf("%s: bad %s", path, key)
 			}
@@ -154,6 +160,8 @@ func readLUKSRecord(path string) (luksRecord, error) {
 				r.ChipUnlockKnown, r.ChipUnlock = true, n == 1
 			case "bound":
 				r.BoundThisBoot = n == 1
+			case "nopolicy":
+				r.ChipNoPolicy = n == 1
 			default:
 				r.PCR4Known, r.PCR4Locked = true, n == 1
 			}
@@ -186,6 +194,10 @@ const (
 	// firmware tried another boot entry first. Re-enroll refuses until one
 	// clean restart; card only.
 	diskProtectionRestart = "restart"
+	// A chip keyslot GjallarOS did not set up opens the disk for any start
+	// (first installers, or by hand). Secure Boot with the chip unlock
+	// replaces it; until then the card points to luks status.
+	diskProtectionChipNoPolicy = "chip-no-policy"
 )
 
 // diskProtectionState says what is missing. chipPossible reports whether
@@ -196,6 +208,9 @@ func diskProtectionState(r luksRecord, kind diskcrypto.TPMKind, chipPossible fun
 	case !r.Encrypted:
 		return diskProtectionUnencrypted
 	case r.TPM2 > 0:
+		if r.ChipNoPolicy {
+			return diskProtectionChipNoPolicy
+		}
 		if r.Recovery == 0 || r.Passphrase > 0 {
 			return diskProtectionSetup
 		}
@@ -300,6 +315,13 @@ func diskProtectionTexts(state string, r luksRecord) diskProtectionText {
 			body:    body,
 			command: []string{"tpm2", "reenroll"},
 		}
+	case diskProtectionChipNoPolicy:
+		return diskProtectionText{
+			summary: "Disk not protected at startup",
+			body:    "The security chip opens your disk for any start. GjallarOS did not set it up.",
+			risk:    "anyone who has this device can get to your files",
+			command: []string{"luks", "status"},
+		}
 	case diskProtectionRestart:
 		return diskProtectionText{
 			summary: "Security chip did not unlock your disk",
@@ -373,6 +395,8 @@ func runLUKSRemind(args []string, stderr io.Writer) int {
 			label = "Add PIN"
 		case diskProtectionReenroll:
 			label = "Re-enroll"
+		case diskProtectionChipNoPolicy:
+			label = "Details"
 		}
 		// A click on the card itself starts setup, like the button.
 		actions = append(actions, noticeAction{"default", label}, noticeAction{"open", label})

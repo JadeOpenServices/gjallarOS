@@ -17,6 +17,7 @@ func TestLUKSRecordRoundTrip(t *testing.T) {
 		{Encrypted: true, Passphrase: 2},
 		{Encrypted: true, TPM2: 1, Recovery: 1, PINKnown: true},
 		{Encrypted: true, TPM2: 1, Recovery: 1, PINKnown: true, PIN: true},
+		{Encrypted: true, TPM2: 1, Recovery: 1, PINKnown: true, ChipNoPolicy: true},
 	} {
 		if err := writeLUKSRecord(path, want); err != nil {
 			t.Fatal(err)
@@ -75,6 +76,8 @@ func TestDiskProtectionState(t *testing.T) {
 		{"Secure Boot off on a known model", luksRecord{Encrypted: true, Recovery: 1, Passphrase: 1}, yes, diskProtectionSecureBoot},
 		{"generic model with key", luksRecord{Encrypted: true, Recovery: 1, Passphrase: 1}, no, diskProtectionDone},
 		{"generic model without key", luksRecord{Encrypted: true, Passphrase: 1}, no, diskProtectionRecoveryKey},
+		{"chip slot without policy", luksRecord{Encrypted: true, TPM2: 1, Recovery: 1, ChipNoPolicy: true}, asked(t), diskProtectionChipNoPolicy},
+		{"no policy comes before the passphrase", luksRecord{Encrypted: true, TPM2: 1, Passphrase: 1, ChipNoPolicy: true}, asked(t), diskProtectionChipNoPolicy},
 	}
 	for _, c := range cases {
 		if got := diskProtectionState(c.record, diskcrypto.TPMFirmware, c.chip); got != c.want {
@@ -110,7 +113,7 @@ func TestDiskProtectionStateSuggestsPIN(t *testing.T) {
 
 func TestDiskProtectionTextsNameACommandWhereSetupExists(t *testing.T) {
 	r := luksRecord{Encrypted: true, TPM2: 1, Passphrase: 1}
-	for _, state := range []string{diskProtectionSetup, diskProtectionSecureBoot, diskProtectionRecoveryKey, diskProtectionPIN} {
+	for _, state := range []string{diskProtectionSetup, diskProtectionSecureBoot, diskProtectionRecoveryKey, diskProtectionPIN, diskProtectionChipNoPolicy} {
 		text := diskProtectionTexts(state, r)
 		if text.summary == "" || text.body == "" || text.risk == "" || text.command == nil {
 			t.Errorf("%s: incomplete %+v", state, text)
@@ -129,7 +132,7 @@ func TestDiskProtectionBodiesFitTheCard(t *testing.T) {
 		{Encrypted: true, TPM2: 1},
 		{Encrypted: true, TPM2: 1, Recovery: 1, Passphrase: 1},
 	}
-	states := []string{diskProtectionSecureBoot, diskProtectionRecoveryKey, diskProtectionUnencrypted, diskProtectionPIN}
+	states := []string{diskProtectionSecureBoot, diskProtectionRecoveryKey, diskProtectionUnencrypted, diskProtectionPIN, diskProtectionChipNoPolicy}
 	for _, r := range records {
 		if body := diskProtectionTexts(diskProtectionSetup, r).body; len(body) > 80 {
 			t.Errorf("setup %+v: %d characters", r, len(body))
@@ -154,6 +157,7 @@ func TestPrintLUKSStatusTPMHints(t *testing.T) {
 		{"separate chip with PIN", diskcrypto.Keyslots{TPM2: []int{0}, TPM2PIN: true, Recovery: []int{1}}, diskcrypto.TPMSeparate, false, false, "separate chip"},
 		{"firmware TPM, no PIN", diskcrypto.Keyslots{TPM2: []int{0}, Recovery: []int{1}}, diskcrypto.TPMFirmware, false, false, "inside the processor"},
 		{"old token", diskcrypto.Keyslots{TPM2: []int{0}, TPM2PIN: true, TPM2NoSRK: true, Recovery: []int{1}}, diskcrypto.TPMFirmware, false, true, "inside the processor"},
+		{"token without policy", diskcrypto.Keyslots{TPM2: []int{0}, TPM2NoSRK: true, TPM2NoPolicy: true, Recovery: []int{1}}, diskcrypto.TPMUnknown, false, false, "not confirmed"},
 	}
 	for _, c := range cases {
 		var out strings.Builder
@@ -164,6 +168,9 @@ func TestPrintLUKSStatusTPMHints(t *testing.T) {
 		}
 		if strings.Contains(got, "gjallarctl luks pin") != c.pinHint {
 			t.Errorf("%s: PIN hint %t, want %t:\n%s", c.name, !c.pinHint, c.pinHint, got)
+		}
+		if strings.Contains(got, "not tied to") != c.slots.TPM2NoPolicy {
+			t.Errorf("%s: no-policy hint %t, want %t:\n%s", c.name, !c.slots.TPM2NoPolicy, c.slots.TPM2NoPolicy, got)
 		}
 		if strings.Contains(got, "gjallarctl tpm2 reenroll") != c.srk {
 			t.Errorf("%s: reenroll hint %t, want %t:\n%s", c.name, !c.srk, c.srk, got)

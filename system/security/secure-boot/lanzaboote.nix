@@ -202,9 +202,11 @@ in
   systemd.tmpfiles.rules = lib.mkIf keepBooted (
     map (component: "r! ${componentDir component}/${bootedVariant}") bootedComponents
   );
-  systemd.services.systemd-pcrlock-make-policy.after = lib.mkIf keepBooted [
-    "systemd-tmpfiles-setup.service"
-  ];
+  # The whole unit under mkIf: a bare .after = mkIf … still defines the
+  # service and leaves an empty unit file without ExecStart= behind.
+  systemd.services.systemd-pcrlock-make-policy = lib.mkIf keepBooted {
+    after = [ "systemd-tmpfiles-setup.service" ];
+  };
 
   # lanzaboote turns fwupd's shim use off, which is right when the firmware
   # takes our key. Under shim the capsule loader has to start through
