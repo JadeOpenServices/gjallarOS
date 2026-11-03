@@ -32,7 +32,9 @@ func mountedDisk(ctx context.Context, mountpoint string, runner commandRunner) (
 	if !strings.HasPrefix(source, "/dev/") {
 		return "", fmt.Errorf("%s is not mounted from a device under /dev: %q", mountpoint, source)
 	}
-	raw, err = runner.Output(ctx, "lsblk", "-J", "-p", "-s", "-o", "PATH,TYPE", "--", source)
+	// --list: every device under source is one flat entry, so the walk
+	// below sees the disk whether or not lsblk nests the output.
+	raw, err = runner.Output(ctx, "lsblk", "-J", "-l", "-p", "-s", "-o", "PATH,TYPE", "--", source)
 	if err != nil {
 		return "", fmt.Errorf("inspect %s with lsblk: %w", source, err)
 	}
@@ -68,7 +70,10 @@ func partitionByLabel(ctx context.Context, disk, label string, runner commandRun
 	if !strings.HasPrefix(disk, "/dev/") {
 		return "", fmt.Errorf("not a device under /dev: %q", disk)
 	}
-	raw, err := runner.Output(ctx, "lsblk", "-J", "-p", "-o", "PATH,TYPE,PARTLABEL", "--", disk)
+	// Without NAME among the columns lsblk -J lists partitions as flat
+	// siblings of the disk, so --list makes that explicit and PKNAME names
+	// each partition's own disk.
+	raw, err := runner.Output(ctx, "lsblk", "-J", "-l", "-p", "-o", "PATH,TYPE,PARTLABEL,PKNAME", "--", disk)
 	if err != nil {
 		return "", fmt.Errorf("inspect %s with lsblk: %w", disk, err)
 	}
@@ -76,15 +81,21 @@ func partitionByLabel(ctx context.Context, disk, label string, runner commandRun
 	if err != nil {
 		return "", err
 	}
-	if len(devices) != 1 || devices[0].Path != disk || strings.TrimSpace(devices[0].Type) != "disk" {
-		return "", fmt.Errorf("%s is not a whole disk", disk)
-	}
+	whole := false
 	var found []string
-	walkBlockDevices(devices[0].Children, func(device blockDevice) {
-		if strings.TrimSpace(device.Type) == "part" && device.PartLabel == label {
-			found = append(found, device.Path)
+	walkBlockDevices(devices, func(device blockDevice) {
+		switch strings.TrimSpace(device.Type) {
+		case "disk":
+			whole = whole || device.Path == disk
+		case "part":
+			if device.PkName == disk && device.PartLabel == label {
+				found = append(found, device.Path)
+			}
 		}
 	})
+	if !whole {
+		return "", fmt.Errorf("%s is not a whole disk", disk)
+	}
 	switch len(found) {
 	case 0:
 		return "", nil

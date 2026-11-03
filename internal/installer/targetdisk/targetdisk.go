@@ -187,6 +187,7 @@ type blockDevice struct {
 	Size        uint64        `json:"size"`
 	Label       string        `json:"label"`
 	PartLabel   string        `json:"partlabel"`
+	PkName      string        `json:"pkname"`
 	MountPoints []string      `json:"mountpoints"`
 	Children    []blockDevice `json:"children"`
 }
