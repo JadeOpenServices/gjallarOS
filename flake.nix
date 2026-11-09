@@ -157,6 +157,7 @@
           chrony
           ghostty
           hyprland
+          libreoffice-fresh
           plymouth
           udiskie
           usbguard
@@ -187,6 +188,7 @@
             dolphin
             ghostty
             hyprland
+            libreoffice-fresh
             plymouth
             udiskie
             usbguard
