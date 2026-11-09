@@ -62,8 +62,8 @@ That checkout only runs the installer. The installed system gets its own
 clone of the official repository in `/etc/gjallar/system`, owned by root,
 at the commit the installer was built from, with this machine's
 `generated/` and `user.config.json` copied in. An installer built from a
-commit that is not pushed to `main`, or with local changes, stops before
-the clone.
+commit that is on none of the release branches (`stable`, `staging`,
+`dev`), or with local changes, stops before the clone.
 
 For automated non-secret answers:
 
@@ -645,7 +645,7 @@ come with it, and others), so cache.nixos.org does not have them and every
 machine compiled them itself. For each `v*` release tag,
 `.github/workflows/cache.yml` builds them (flake package `prebuilt`), signs
 them and uploads them as files of the `nix-cache` release. Those files are a
-plain Nix binary cache. Each tag adds to it, so a machine on `main` downloads a
+plain Nix binary cache. Each tag adds to it, so a machine on any channel downloads a
 package whenever it matches one built for any tag. Anything missing still
 builds locally. The workflow itself downloads from the same cache, so a tag
 builds only the packages that changed since the tags before it.
