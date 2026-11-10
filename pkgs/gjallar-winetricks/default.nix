@@ -4,7 +4,10 @@
 
 # The setup run's own winetricks (Q74). In unattended mode winetricks keeps
 # going after a SHA256 mismatch when it has no dialog to ask, and accepts
-# files with no checksum. Both stop the step here instead. The Wayback
+# files with no checksum. Both stop the step here instead. --force (used by
+# gjallar-wine repair to install a verb again) also skips both checksum
+# checks, for a cached file and a fresh download; those stop the step too,
+# so force only means "install again" (loophole 45). The Wayback
 # Machine retry stays, since the hash still has to match. aka.ms always
 # points at the newest VC runtime; the versioned URL it redirects to is
 # named by the hash winetricks pins. A winetricks update that changes
@@ -31,6 +34,10 @@ winetricks.overrideAttrs (old: {
         'HKLM\\Software\\Wow6432Node\\Microsoft\\.NETFramework' \
       --replace-fail 'w_askpermission "SHA256 mismatch!' \
         'w_die "SHA256 mismatch for ''${_W_url}"; w_askpermission "SHA256 mismatch!' \
+      --replace-fail 'w_warn "sha256sum mismatch! However --force was used, so trying anyway. Caveat emptor."' \
+        'w_die "SHA256 mismatch for ''${_W_url}"' \
+      --replace-fail 'w_warn "Checksum for ''${_W_cache}/''${_W_file} did not match, but --force was used, so ignoring and trying anyway."' \
+        'w_die "Checksum for ''${_W_cache}/''${_W_file} did not match"' \
       --replace-fail '    w_get_shatype "''${_W_sum}"' \
         '    w_get_shatype "''${_W_sum}"; test -n "''${_W_sum}" || w_die "No checksum for ''${_W_url}"' \
       --replace-fail \
