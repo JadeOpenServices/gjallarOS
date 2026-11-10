@@ -676,3 +676,28 @@ func TestDefaultDotfilesDirFollowsNewUser(t *testing.T) {
 		}
 	}
 }
+
+// Recovery through shim is not tested yet: the boot entry stays, the
+// partition is not offered (Plane 293).
+func TestShimInstallGetsNoRecoveryPartition(t *testing.T) {
+	var output bytes.Buffer
+	u := config.User{SecureBootEnable: true, SecureBootShim: true}
+	if err := collectRecovery(context.Background(), prompt.New(strings.NewReader("yes\n"), &output), true, true, &u); err != nil {
+		t.Fatal(err)
+	}
+	if !u.RecoveryEnable || u.RecoveryPartitionEnable {
+		t.Fatalf("recovery entry=%v partition=%v", u.RecoveryEnable, u.RecoveryPartitionEnable)
+	}
+	if !strings.Contains(output.String(), shimNoRecoveryPartitionNotice) {
+		t.Fatalf("output misses the shim notice:\n%s", output.String())
+	}
+}
+
+func TestLockedFirmwareStop(t *testing.T) {
+	got := lockedFirmwareStop("EXAMPLE reason.")
+	for _, want := range []string{"locked", "EXAMPLE reason.", "stopped before anything was installed"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("stop text misses %q:\n%s", want, got)
+		}
+	}
+}

@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"io"
 	"strconv"
 	"strings"
 
@@ -201,12 +202,58 @@ func firmwareTrustReport(t secureboot.FirmwareTrust) string {
 	return b.String()
 }
 
-// lockedFirmwareNotice ends the install on firmware whose setup the user
-// cannot open: turning Secure Boot off and installing own keys both need it.
-const lockedFirmwareNotice = `The firmware setup is locked, so Secure Boot cannot be turned off and GjallarOS cannot install its own keys here.
-GjallarOS cannot start on this machine yet. Support for locked firmware is being built: a boot loader signed for the keys this firmware already trusts.
-Installation stopped before anything was installed.
-`
+// lockedFirmwareStop ends the install on locked firmware where shim cannot
+// help: Secure Boot cannot be turned off and own keys cannot go in.
+func lockedFirmwareStop(why string) string {
+	return "The firmware setup is locked, so Secure Boot cannot be turned off and GjallarOS cannot install its own keys here.\n" +
+		why + "\n" +
+		"Installation stopped before anything was installed.\n"
+}
+
+// chooseLockedShim decides an install on locked firmware (Plane 293). With
+// Secure Boot on and the firmware keys fixed, GjallarOS can start only
+// through shim, and only if a shim already starts this system: its MOK list
+// is where the GjallarOS key goes. ok=false means the install stopped and
+// the reason is printed.
+func chooseLockedShim(ctx context.Context, ui prompt.UI, out io.Writer, root string, trust secureboot.FirmwareTrust, luksTPM2 bool) (secureboot.ShimFacts, bool, error) {
+	started, err := secureboot.ShimStarted()
+	if err != nil {
+		return secureboot.ShimFacts{}, false, err
+	}
+	if !started {
+		fmt.Fprint(out, lockedFirmwareStop("shim does not start this system, so there is no list GjallarOS could add its key to."))
+		return secureboot.ShimFacts{}, false, nil
+	}
+	if trust.ShimValidationOff {
+		fmt.Fprint(out, lockedFirmwareStop("shim's own check is switched off in MokManager; turn it back on there and run the installer again."))
+		return secureboot.ShimFacts{}, false, nil
+	}
+	fmt.Fprintln(out, "shim starts this system. Building the pinned GjallarOS shim to check it against the firmware...")
+	facts, err := buildShimFacts(ctx, root)
+	if err != nil {
+		return secureboot.ShimFacts{}, false, err
+	}
+	choice, err := secureboot.ChoosePath(trust, facts, nil)
+	if err != nil {
+		return secureboot.ShimFacts{}, false, err
+	}
+	if choice.Path != secureboot.PathShim {
+		fmt.Fprint(out, lockedFirmwareStop("The GjallarOS shim cannot start here: "+choice.Reason+"."))
+		return secureboot.ShimFacts{}, false, nil
+	}
+	if err := ui.SecureBootOwnershipPlan(ctx, secureboot.LockedShimPlan(luksTPM2)); err != nil {
+		return secureboot.ShimFacts{}, false, err
+	}
+	yes, err := ui.Confirm(ctx, "Install GjallarOS with Secure Boot through shim?", true)
+	if err != nil {
+		return secureboot.ShimFacts{}, false, err
+	}
+	if !yes {
+		fmt.Fprintln(out, "Installation stopped before anything was installed.")
+		return secureboot.ShimFacts{}, false, nil
+	}
+	return facts, true, nil
+}
 
 // askFirmwareLocked asks whether the firmware setup is locked, when the
 // firmware enforces Secure Boot outside Setup Mode and its setup may have a

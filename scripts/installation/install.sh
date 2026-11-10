@@ -185,6 +185,8 @@ probe_tools=(
     # Provided by the prerequisite rebuild on installed hosts; live media
     # skips that rebuild and the minimal ISO ships none of them.
     nixpkgs#sbctl
+    # Queues the GjallarOS key for shim on locked firmware (Plane 293).
+    nixpkgs#mokutil
     nixpkgs#openssl
     nixpkgs#age
     nixpkgs#sops

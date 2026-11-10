@@ -71,7 +71,7 @@ let
 
     gjallarAI = "gjallar-ai";
 
-    libreoffice = "${lib.getExe gjallarRun} ${lib.getExe pkgs.libreoffice}";
+    libreoffice = "${lib.getExe gjallarRun} ${lib.getExe pkgs.libreoffice-fresh}";
     teams = "${lib.getExe gjallarRun} gjallar-teams";
 
     screenshot = shell.screenshot;
