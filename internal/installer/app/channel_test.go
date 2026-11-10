@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -112,5 +113,25 @@ func TestStableOnUnencryptedDisk(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "The dev channel and developer mode need an encrypted disk") {
 		t.Fatalf("why text: %q", out.String())
+	}
+	// Preset accepted: the file says stable, so the rebuild agrees.
+	path := filepath.Join(t.TempDir(), "user.config.json")
+	user, err = config.Defaults()
+	if err != nil {
+		t.Fatal(err)
+	}
+	user.ReleaseChannel, user.DeveloperMode, user.Hostname = "staging", true, "example"
+	if err := config.WriteAtomic(path, user); err != nil {
+		t.Fatal(err)
+	}
+	if err := stableOnUnencryptedDisk(ctx, &fakeConfirm{answer: true}, &out, false, &user, true, path); err != nil {
+		t.Fatalf("preset accept: %v", err)
+	}
+	saved, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if saved.ReleaseChannel != "stable" || saved.DeveloperMode || saved.Hostname != "example" {
+		t.Fatalf("preset file left %+v", saved)
 	}
 }

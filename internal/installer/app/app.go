@@ -3796,7 +3796,8 @@ func applyChannelFlag(user *config.User, channel string, preset bool, presetPath
 // needs the security chip PIN or the disk recovery key; a plain disk has
 // neither, so every system rebuild after the install would be refused
 // (e2e-shim run 9, 2026-11-10). A fresh disk is always encrypted, so this
-// only stops in-place runs. The person may switch to stable instead.
+// only stops in-place runs. The person may switch to stable instead; a
+// preset then says stable too.
 func stableOnUnencryptedDisk(ctx context.Context, ui confirmer, out io.Writer, encrypted bool, user *config.User, preset bool, presetPath string) error {
 	need := devgate.Needs(user.Channel(), user.DeveloperMode)
 	if encrypted || need.Empty() {
@@ -3825,6 +3826,15 @@ func stableOnUnencryptedDisk(ctx context.Context, ui confirmer, out io.Writer, e
 	}
 	user.ReleaseChannel = "stable"
 	user.DeveloperMode = false
+	// The system rebuild reads the channel from the preset, not from
+	// this run (e2e-shim, 2026-11-11).
+	if preset {
+		if err := config.WriteAtomic(presetPath, *user); err != nil {
+			return fmt.Errorf("save the stable channel to %s: %w", presetPath, err)
+		}
+		fmt.Fprintf(out, "Following the stable channel; developer mode is off. Saved in %s.\n", presetPath)
+		return nil
+	}
 	fmt.Fprintln(out, "Following the stable channel; developer mode is off.")
 	return nil
 }
