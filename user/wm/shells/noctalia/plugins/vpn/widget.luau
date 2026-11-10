@@ -8,6 +8,8 @@ local blockedText = {
   ["exit-node-offline"] = "the exit node is offline",
   ["no-exit-node"] = "no exit node can be set",
   ["tailscale-down"] = "Tailscale is not running",
+  ["tailscale-signed-out"] = "Tailscale is not signed in",
+  ["tailscale-needs-approval"] = "this device waits for approval",
 }
 
 local shown = false
