@@ -88,6 +88,9 @@ type state struct {
 	deviceGate               string
 	// oddcModel is the ODDC model id once resolved, "" when none matches.
 	oddcModel string
+	// oddcChecked is true once the ODDC lookup ran, so a report about an
+	// earlier failure does not claim that no model matches.
+	oddcChecked bool
 }
 
 const (
@@ -300,12 +303,13 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 	defer func() {
 		if code == 1 && recorder.err != nil && reportAllowed(in, s.user) {
 			offerInstallReport(ctx, ui, out, reportInput{
-				reason:    installreport.ReasonFailed,
-				repo:      root,
-				recovery:  opt.recovery,
-				user:      s.user,
-				oddcModel: s.oddcModel,
-				failure:   recorder.err,
+				reason:      installreport.ReasonFailed,
+				repo:        root,
+				recovery:    opt.recovery,
+				user:        s.user,
+				oddcModel:   s.oddcModel,
+				oddcChecked: s.oddcChecked,
+				failure:     recorder.err,
 			})
 		}
 	}()
@@ -556,16 +560,18 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 		reportBestEffort(out)
 		if reportAllowed(in, s.user) {
 			offerInstallReport(ctx, ui, out, reportInput{
-				reason:   installreport.ReasonUnknown,
-				repo:     root,
-				recovery: opt.recovery,
-				user:     s.user,
+				reason:      installreport.ReasonUnknown,
+				repo:        root,
+				recovery:    opt.recovery,
+				user:        s.user,
+				oddcChecked: true,
 			})
 		}
 	} else {
 		fmt.Fprintf(out, "ODDC canonical model: %s\n", resolvedDevice.ModelID)
 	}
 	s.oddcModel = resolvedDevice.ModelID
+	s.oddcChecked = true
 
 	if needsDeviceRebind {
 		if s.user.UnattendedInstall || s.user.Management.Enable {

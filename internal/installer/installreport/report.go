@@ -50,9 +50,12 @@ type Report struct {
 	Kernel    string
 	Firmware  Firmware
 	ODDCModel string
-	Machine   portable.MachineIdentity
-	Devices   map[string][]string
-	Error     string
+	// ODDCChecked is false when the install stopped before the ODDC
+	// lookup; ODDCModel "" then says nothing about the machine.
+	ODDCChecked bool
+	Machine     portable.MachineIdentity
+	Devices     map[string][]string
+	Error       string
 }
 
 const (
@@ -85,7 +88,11 @@ func (r Report) Render() []byte {
 	line("Release channel", field(r.Channel))
 	line("Live kernel", field(r.Kernel))
 	line("Firmware", r.Firmware.text())
-	line("ODDC model", orNone(only(r.ODDCModel, modelPattern)))
+	if r.ODDCChecked {
+		line("ODDC model", orNone(only(r.ODDCModel, modelPattern)))
+	} else {
+		line("ODDC model", "not checked (the install stopped before the ODDC step)")
+	}
 
 	b.WriteString("\nMachine\n")
 	for _, f := range []struct{ label, value string }{

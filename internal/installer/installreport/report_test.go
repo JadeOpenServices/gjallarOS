@@ -16,11 +16,12 @@ import (
 // syntheticReport holds SYNTHETIC values only.
 func syntheticReport() Report {
 	return Report{
-		Reason:  ReasonFailed,
-		Date:    time.Date(2026, 11, 10, 3, 4, 5, 0, time.UTC),
-		Commit:  "2aa66ac7dd24a0900983ccfc6841d50c5e04663d",
-		Channel: "stable",
-		Kernel:  "6.12.57",
+		Reason:      ReasonFailed,
+		ODDCChecked: true,
+		Date:        time.Date(2026, 11, 10, 3, 4, 5, 0, time.UTC),
+		Commit:      "2aa66ac7dd24a0900983ccfc6841d50c5e04663d",
+		Channel:     "stable",
+		Kernel:      "6.12.57",
 		Firmware: Firmware{
 			UEFI: true, SecureBoot: "off", SetupMode: "on", TPM: 2,
 		},
@@ -59,6 +60,15 @@ func TestRenderLayout(t *testing.T) {
 		if strings.Contains(got, gone) {
 			t.Errorf("report holds %q:\n%s", gone, got)
 		}
+	}
+}
+
+func TestRenderFailureBeforeODDCStep(t *testing.T) {
+	r := syntheticReport()
+	r.ODDCChecked = false
+	got := string(r.Render())
+	if !strings.Contains(got, "ODDC model:        not checked (the install stopped before the ODDC step)\n") {
+		t.Fatalf("early failure claims an ODDC answer:\n%s", got)
 	}
 }
 

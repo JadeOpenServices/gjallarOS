@@ -44,12 +44,13 @@ func reportAllowed(in io.Reader, user config.User) bool {
 
 // reportInput is what run knows when it offers a report.
 type reportInput struct {
-	reason    installreport.Reason
-	repo      string
-	recovery  bool
-	user      config.User
-	oddcModel string
-	failure   error
+	reason      installreport.Reason
+	repo        string
+	recovery    bool
+	user        config.User
+	oddcModel   string
+	oddcChecked bool
+	failure     error
 }
 
 // offerInstallReport shows the report and saves it only after two yes
@@ -102,6 +103,7 @@ func buildReport(input reportInput, now time.Time) installreport.Report {
 	report.Commit, _ = sourcerevision.Resolve(input.repo, input.recovery)
 	report.Channel = input.user.Channel()
 	report.ODDCModel = input.oddcModel
+	report.ODDCChecked = input.oddcChecked
 	if input.failure != nil {
 		host, _ := os.Hostname()
 		known := installreport.Known{
