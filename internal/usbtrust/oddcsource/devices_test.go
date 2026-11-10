@@ -2,6 +2,7 @@ package oddcsource
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"strings"
 	"testing"
@@ -161,8 +162,31 @@ func TestParseDevicesNotProvenIsDebug(t *testing.T) {
 	}
 }
 
-func TestParseDevicesNeedsModel(t *testing.T) {
-	if _, err := ParseDevices([]byte(`{"devices": []}`)); err == nil {
-		t.Fatal("want error for missing model")
+// A machine no ODDC model matches gets "model": null and a best-effort
+// parts list (Plane 295). The broker must refuse it as its own case and
+// never turn those parts into built-in USB expectations.
+func TestParseDevicesNullModelIsBestEffort(t *testing.T) {
+	for name, input := range map[string]string{
+		"null":    `{"model": null, "devices": [{"id": "example/part", "bus": "usb", "deviceId": "ffff:0001"}]}`,
+		"missing": `{"devices": []}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			got, err := ParseDevices([]byte(input))
+			if !errors.Is(err, ErrNoModel) {
+				t.Fatalf("err = %v, want ErrNoModel", err)
+			}
+			if got.Model != "" || len(got.Expected) != 0 {
+				t.Fatalf("best-effort output gave expectations: %+v", got)
+			}
+		})
+	}
+}
+
+func TestParseDevicesEmptyModelFails(t *testing.T) {
+	for _, model := range []string{`""`, `"  "`} {
+		_, err := ParseDevices([]byte(`{"model": ` + model + `, "devices": []}`))
+		if err == nil || errors.Is(err, ErrNoModel) {
+			t.Fatalf("model %s: err = %v, want a plain error", model, err)
+		}
 	}
 }

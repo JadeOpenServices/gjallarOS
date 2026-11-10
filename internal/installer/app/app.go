@@ -533,6 +533,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 
 	if resolvedDevice.ModelID == "" {
 		fmt.Fprintln(out, "ODDC canonical model: none (unsupported by ODDC; installing the hardware-neutral baseline)")
+		reportBestEffort(out)
 	} else {
 		fmt.Fprintf(out, "ODDC canonical model: %s\n", resolvedDevice.ModelID)
 	}

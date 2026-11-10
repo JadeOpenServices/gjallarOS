@@ -3,6 +3,7 @@ package oddcsource
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"regexp"
 	"sort"
@@ -18,7 +19,7 @@ type Devices struct {
 }
 
 type devicesDocument struct {
-	Model   string         `json:"model"`
+	Model   *string        `json:"model"`
 	Devices []deviceRecord `json:"devices"`
 }
 
@@ -46,6 +47,13 @@ type usbIdentityRec struct {
 	Anchor string `json:"anchor"`
 }
 
+// ErrNoModel is `oddc devices --json` for a machine no ODDC model
+// matches ("model": null, Plane 295). Its parts list is best effort: no
+// part in it has a fixed USB port anyone proved, so none of it may become
+// a built-in expectation. The broker only reads devices output made for a
+// selected model; getting this one means the file is not for this machine.
+var ErrNoModel = errors.New("ODDC devices output has no model (best effort, no built-in USB parts)")
+
 var pciID = regexp.MustCompile(`^[0-9a-f]{4}:[0-9a-f]{4}$`)
 
 // ParseDevices reads `oddc devices --json`. Only parts with a usbPort
@@ -63,9 +71,12 @@ func ParseDevices(data []byte) (Devices, error) {
 		return Devices{}, fmt.Errorf("parse ODDC devices: %w", err)
 	}
 
-	model := strings.TrimSpace(document.Model)
+	if document.Model == nil {
+		return Devices{}, ErrNoModel
+	}
+	model := strings.TrimSpace(*document.Model)
 	if model == "" {
-		return Devices{}, fmt.Errorf("ODDC devices output has no model")
+		return Devices{}, fmt.Errorf("ODDC devices output has an empty model")
 	}
 
 	result := Devices{Model: model}
