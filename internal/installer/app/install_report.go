@@ -80,22 +80,22 @@ func offerInstallReport(ctx context.Context, ui prompt.UI, out io.Writer, input 
 	out.Write(data)
 	fmt.Fprintln(out, "----- install report: end -----")
 
-	home, err := os.UserHomeDir()
+	dest, err := installreport.SaveDestination()
 	if err != nil {
 		fmt.Fprintf(out, "WARNING: install report not saved: %v\n", err)
 		return
 	}
-	save, err := ui.Confirm(ctx, fmt.Sprintf("Save this report as %s in %s?", installreport.FileName(now), home), false)
+	save, err := ui.Confirm(ctx, fmt.Sprintf("Save this report as %s in %s?", installreport.FileName(now), dest.Dir), false)
 	if err != nil || !save {
 		fmt.Fprintln(out, "Install report not saved.")
 		return
 	}
-	path, err := installreport.Save(home, data, now)
+	path, err := installreport.Save(dest, data, now)
 	if err != nil {
 		fmt.Fprintf(out, "WARNING: install report not saved: %v\n", err)
 		return
 	}
-	fmt.Fprintf(out, "Install report saved to %s (readable by you only).\n"+
+	fmt.Fprintf(out, "Install report saved to %s (readable by its owner only).\n"+
 		"Copy it to a USB stick or another computer, read it once more, and send it to %s.\n",
 		path, installreport.Contact)
 }

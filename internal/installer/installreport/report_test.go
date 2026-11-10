@@ -104,7 +104,7 @@ func TestSaveWritesOwnerOnlyFile(t *testing.T) {
 	dir := t.TempDir()
 	now := time.Date(2026, 11, 10, 3, 4, 5, 0, time.UTC)
 	data := syntheticReport().Render()
-	path, err := Save(dir, data, now)
+	path, err := Save(Destination{Dir: dir, UID: -1, GID: -1}, data, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -122,7 +122,7 @@ func TestSaveWritesOwnerOnlyFile(t *testing.T) {
 	if !bytes.Equal(saved, data) {
 		t.Fatal("saved bytes differ from the shown report")
 	}
-	if _, err := Save(dir, data, now); err == nil || !strings.Contains(err.Error(), "already exists") {
+	if _, err := Save(Destination{Dir: dir, UID: -1, GID: -1}, data, now); err == nil || !strings.Contains(err.Error(), "already exists") {
 		t.Fatalf("second save = %v, want refusal", err)
 	}
 }
@@ -134,7 +134,7 @@ func TestSaveRefusesPlantedLink(t *testing.T) {
 	if err := os.Symlink(target, filepath.Join(dir, FileName(now))); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Save(dir, []byte("report"), now); err == nil {
+	if _, err := Save(Destination{Dir: dir, UID: -1, GID: -1}, []byte("report"), now); err == nil {
 		t.Fatal("save followed a planted link")
 	}
 	if _, err := os.Lstat(target); !os.IsNotExist(err) {
@@ -143,7 +143,7 @@ func TestSaveRefusesPlantedLink(t *testing.T) {
 }
 
 func TestSaveRefusesOversize(t *testing.T) {
-	if _, err := Save(t.TempDir(), make([]byte, MaxSize+1), time.Now()); err == nil {
+	if _, err := Save(Destination{Dir: t.TempDir(), UID: -1, GID: -1}, make([]byte, MaxSize+1), time.Now()); err == nil {
 		t.Fatal("oversize report saved")
 	}
 }
@@ -208,5 +208,53 @@ func TestFirmwareWithoutSecureBoot(t *testing.T) {
 	f := Firmware{UEFI: true, SecureBoot: string(secureboot.FlagMissing), SetupMode: string(secureboot.FlagMissing), TPM: 2}
 	if got, want := f.text(), "UEFI, no Secure Boot in the firmware, TPM 2"; got != want {
 		t.Fatalf("firmware = %q, want %q", got, want)
+	}
+}
+
+func TestSaveRefusesFolderOfAnotherUser(t *testing.T) {
+	dir := t.TempDir()
+	other := os.Getuid() + 1
+	if _, err := Save(Destination{Dir: dir, UID: other, GID: other}, []byte("report"), time.Now()); err == nil ||
+		!strings.Contains(err.Error(), "does not belong") {
+		t.Fatalf("save into a folder of another user = %v, want refusal", err)
+	}
+}
+
+func TestSaveRefusesLinkedFolder(t *testing.T) {
+	dir := t.TempDir()
+	link := filepath.Join(t.TempDir(), "home")
+	if err := os.Symlink(dir, link); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Save(Destination{Dir: link, UID: -1, GID: -1}, []byte("report"), time.Now()); err == nil {
+		t.Fatal("save followed a linked folder")
+	}
+}
+
+func TestSaveChownsForOwnUser(t *testing.T) {
+	// Chown to the running user works without root and goes through the
+	// same path root takes for the sudo user.
+	dir := t.TempDir()
+	path, err := Save(Destination{Dir: dir, UID: os.Getuid(), GID: os.Getgid()}, []byte("report"), time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info, err := os.Stat(path); err != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("stat = %v, %v", info, err)
+	}
+}
+
+func TestSaveDestinationIgnoresSudoForUsers(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("runs as root")
+	}
+	t.Setenv("SUDO_UID", "12345")
+	dest, err := SaveDestination()
+	if err != nil {
+		t.Fatal(err)
+	}
+	home, _ := os.UserHomeDir()
+	if dest.Dir != home || dest.UID != -1 {
+		t.Fatalf("dest = %+v, want own home without owner change", dest)
 	}
 }
