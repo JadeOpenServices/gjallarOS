@@ -639,12 +639,21 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 	// A fresh install picks its disk before the questions, so USB blocking
 	// knows whether the system will run from a USB drive (wiki 752 Q11).
 	freshTarget := ""
-	if !persistentInstalledHost && !opt.noRebuild && (!s.preset || s.user.RunRebuild || opt.forceRedeploy) {
-		// The install ends with a clone of this commit; an unpushed one
-		// stops here, before a disk is wiped.
+	mayInstall := !opt.noRebuild && (!s.preset || s.user.RunRebuild || opt.forceRedeploy)
+	if mayInstall && !s.existing {
+		// A first install clones this commit into the system checkout,
+		// fresh and in place (Plane 313); an unpushed commit or a folder
+		// already in the way stops here, before anything is changed.
 		if err := checkReleasedRevision(ctx, sourceRevision); err != nil {
 			return fail(errOut, fmt.Errorf("the installer cannot set up %s: %w", systemcheckout.Path, err))
 		}
+		if persistentInstalledHost {
+			if err := checkoutFree(installedRoot); err != nil {
+				return fail(errOut, err)
+			}
+		}
+	}
+	if !persistentInstalledHost && mayInstall {
 		freshTarget, err = selectFreshTargetDisk(ctx, ui, out, opt.targetDisk)
 		if err != nil {
 			return fail(errOut, fmt.Errorf("select fresh installation target: %w", err))
@@ -1431,7 +1440,16 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 					target,
 				)
 
-				if err := deploy.Apply(ctx, root, s.user.Hostname); err != nil {
+				if err := deployInPlace(
+					ctx,
+					root,
+					installedRoot,
+					s.user.Hostname,
+					sourceRevision,
+					s.user.Channel(),
+					!s.existing,
+					out,
+				); err != nil {
 					return fail(errOut, err)
 				}
 				if resolvedDevice.ModelID == "" {
