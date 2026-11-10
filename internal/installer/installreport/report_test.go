@@ -203,3 +203,10 @@ func TestRenderErrorCannotFakeTheEndMarker(t *testing.T) {
 		}
 	}
 }
+
+func TestFirmwareWithoutSecureBoot(t *testing.T) {
+	f := Firmware{UEFI: true, SecureBoot: string(secureboot.FlagMissing), SetupMode: string(secureboot.FlagMissing), TPM: 2}
+	if got, want := f.text(), "UEFI, no Secure Boot in the firmware, TPM 2"; got != want {
+		t.Fatalf("firmware = %q, want %q", got, want)
+	}
+}

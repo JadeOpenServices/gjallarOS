@@ -15,6 +15,8 @@ import (
 	"unicode"
 
 	portable "github.com/JadeOpenServices/oddc/pkg/oddc"
+
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/secureboot"
 )
 
 // Contact is where a saved report goes. Shown as text only.
@@ -146,8 +148,14 @@ func (f Firmware) text() string {
 		return "legacy BIOS"
 	}
 	parts := []string{"UEFI"}
-	parts = append(parts, "Secure Boot "+orUnknown(f.SecureBoot))
-	parts = append(parts, "Setup Mode "+orUnknown(f.SetupMode))
+	if f.SecureBoot == string(secureboot.FlagMissing) {
+		// The firmware has no Secure Boot variable at all, as firmware
+		// built without Secure Boot. Setup Mode is then missing too.
+		parts = append(parts, "no Secure Boot in the firmware")
+	} else {
+		parts = append(parts, "Secure Boot "+orUnknown(f.SecureBoot))
+		parts = append(parts, "Setup Mode "+orUnknown(f.SetupMode))
+	}
 	if f.TPM > 0 {
 		parts = append(parts, fmt.Sprintf("TPM %d", f.TPM))
 	} else {
