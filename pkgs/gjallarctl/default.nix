@@ -41,6 +41,7 @@ buildGoModule {
       ../../internal/settings
       ../../internal/snapshots
       ../../internal/sshsig
+      ../../internal/tty
       ../../internal/usbtrust
       ../../internal/winesandbox
     ];

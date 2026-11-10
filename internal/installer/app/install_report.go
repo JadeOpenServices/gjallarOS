@@ -7,13 +7,12 @@ import (
 	"os"
 	"time"
 
-	"golang.org/x/sys/unix"
-
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/config"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/installreport"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/prompt"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/secureboot"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/sourcerevision"
+	"github.com/JadeOpenServices/gjallarOS/internal/tty"
 )
 
 // failureRecorder is run's error writer. fail() leaves the error it
@@ -40,10 +39,7 @@ func reportAllowed(in io.Reader, user config.User) bool {
 	if !ok {
 		return false
 	}
-	// A character device is not enough: /dev/null is one (e2e-r292,
-	// 2026-11-10). Only a terminal answers TCGETS.
-	_, err := unix.IoctlGetTermios(int(file.Fd()), unix.TCGETS)
-	return err == nil
+	return tty.Is(file)
 }
 
 // reportInput is what run knows when it offers a report.

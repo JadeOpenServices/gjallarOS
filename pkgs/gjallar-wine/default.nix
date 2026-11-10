@@ -35,6 +35,7 @@ buildGoModule {
       ../../internal/nettrust
       ../../internal/settings
       ../../internal/sshsig
+      ../../internal/tty
       ../../internal/winefix
       ../../internal/winesandbox
       ../../internal/winicon

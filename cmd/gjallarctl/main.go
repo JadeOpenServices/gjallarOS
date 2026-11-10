@@ -61,6 +61,7 @@ import (
 	"github.com/JadeOpenServices/gjallarOS/internal/localchanges"
 	"github.com/JadeOpenServices/gjallarOS/internal/oddccli"
 	"github.com/JadeOpenServices/gjallarOS/internal/preset"
+	"github.com/JadeOpenServices/gjallarOS/internal/tty"
 )
 
 const (
@@ -1175,9 +1176,12 @@ func runAIApprove(args []string, stdout, stderr io.Writer) int {
 	if err := f.Parse(args); err != nil || f.NArg() < 1 || *grant == "" {
 		return 2
 	}
-	info, err := os.Stdin.Stat()
-	if err != nil || info.Mode()&os.ModeCharDevice == 0 {
+	if !tty.Is(os.Stdin) || !tty.Is(os.Stderr) {
 		fmt.Fprintln(stderr, "ERROR: approval requires a trusted interactive terminal")
+		return 1
+	}
+	if inAISession("/proc/self/cgroup") {
+		fmt.Fprintln(stderr, "ERROR: approval must come from your own terminal, not from inside the AI session")
 		return 1
 	}
 	fmt.Fprintf(stderr, "Approve exact action %q with arguments %q? [y/N] ", f.Arg(0), f.Args()[1:])
@@ -1192,6 +1196,19 @@ func runAIApprove(args []string, stdout, stderr io.Writer) int {
 	}
 	fmt.Fprintln(stdout, "Exact one-use approval created; expires in five minutes.")
 	return 0
+}
+
+// inAISession reports whether this process runs in an ai-session@ unit, or
+// whether its cgroup cannot be read. The agent can open its own pty, so a
+// terminal check alone lets it approve itself (loophole 42). The kernel puts
+// every process the session starts in the unit's cgroup, and the unit
+// cannot move out of it (ProtectControlGroups, no capabilities).
+func inAISession(cgroupFile string) bool {
+	data, err := os.ReadFile(cgroupFile)
+	if err != nil {
+		return true
+	}
+	return strings.Contains(string(data), "/ai-session@")
 }
 
 func runAIResearchServe(args []string, stdout, stderr io.Writer) int {
@@ -2864,7 +2881,7 @@ func runRebuildQuiet(stdout, stderr io.Writer, host string, messages []string, s
 	}()
 
 	terminal, ok := stdout.(*os.File)
-	interactive := ok && isTerminal(terminal)
+	interactive := ok && tty.Is(terminal)
 	stop := make(chan struct{})
 	var ui sync.WaitGroup
 	if interactive {
@@ -3510,11 +3527,6 @@ func loadRebuildMessages(path, host string) ([]string, error) {
 		return nil, fmt.Errorf("no rebuild messages found in %s", path)
 	}
 	return messages, nil
-}
-
-func isTerminal(file *os.File) bool {
-	info, err := file.Stat()
-	return err == nil && info.Mode()&os.ModeCharDevice != 0
 }
 
 func terminalWidth(file *os.File) int {

@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/JadeOpenServices/gjallarOS/internal/tty"
 )
 
 var ErrCancelled = errors.New("prompt cancelled")
@@ -292,7 +294,7 @@ func (u UI) secretOut() (io.Writer, func(), error) {
 	if !ok {
 		return u.Out, func() {}, nil
 	}
-	if info, err := file.Stat(); err == nil && info.Mode()&os.ModeCharDevice != 0 {
+	if tty.Is(file) {
 		return u.Out, func() {}, nil
 	}
 	tty, err := os.OpenFile("/dev/tty", os.O_WRONLY, 0)
