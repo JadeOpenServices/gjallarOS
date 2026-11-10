@@ -43,3 +43,20 @@ func writeODDCDraft(ctx context.Context, destination string, out io.Writer) erro
 	fmt.Fprintf(out, "ODDC draft %s written to %s (not deployed)\n", id, destination)
 	return nil
 }
+
+// reportBestEffort shows the owner of a machine no ODDC model matches what
+// ODDC knows of its parts (Plane 295). It only reports: the install takes
+// the hardware-neutral baseline either way, and a missing list only warns.
+func reportBestEffort(out io.Writer) {
+	parts, err := oddcdraft.BestEffort(
+		oddcdraft.Catalog,
+		portable.ReadFacts("/sys"),
+		portable.ReadDrivers("/sys"),
+	)
+	if err != nil {
+		fmt.Fprintln(out, "Machine support: best effort. No ODDC model matches this machine; nothing optional is switched on.")
+		fmt.Fprintf(out, "WARNING: no ODDC parts list for this machine: %v\n", err)
+		return
+	}
+	oddcdraft.WriteBestEffort(out, parts)
+}
