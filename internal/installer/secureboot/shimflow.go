@@ -311,7 +311,7 @@ It waits 10 seconds; press the down arrow before it runs out:
      %s
      Press Enter to go back. If it differs, choose Continue boot instead.
   3. Continue
-  4. Yes
+  4. Yes (the screen starts on No; press down, then Enter)
   5. %s
   6. Reboot
 If the 10 seconds ran out, run %[3]s again.
