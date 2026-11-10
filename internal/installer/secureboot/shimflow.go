@@ -51,6 +51,10 @@ func PrepareShim(ctx context.Context, out io.Writer) error {
 
 	switch inspection.State {
 	case StateGjallarShim:
+		if inspection.Stage == StagePendingMOK {
+			fmt.Fprintln(out, "shim already lists the GjallarOS key; reusing the prepared key set.")
+			return nil
+		}
 		fmt.Fprintln(out, "This system already boots through shim with the GjallarOS key.")
 		return nil
 
@@ -63,7 +67,17 @@ func PrepareShim(ctx context.Context, out io.Writer) error {
 
 	case StateOEMFactoryDerived:
 		if inspection.SecureBoot {
-			return errors.New("Secure Boot is on, but this system does not boot through shim yet; turn Secure Boot off in the firmware setup and run this again")
+			// Locked firmware (Plane 293): another system's shim starts
+			// this one, so the GjallarOS key can go into the same MOK list
+			// before the boot chain changes. Without shim there is no way
+			// in with Secure Boot on.
+			started, err := ShimStarted()
+			if err != nil {
+				return err
+			}
+			if !started {
+				return errors.New("Secure Boot is on, but this system does not boot through shim yet; turn Secure Boot off in the firmware setup and run this again")
+			}
 		}
 		fmt.Fprintln(out, "The firmware keeps its maker's keys; preparing the GjallarOS key for shim.")
 		recovery, err := Provision(ctx)
@@ -181,14 +195,110 @@ func ContinueShim(
 	} else {
 		fmt.Fprintln(out, "The GjallarOS key already waits for MokManager.")
 	}
-	fmt.Fprint(out, mokManagerSteps(keys.dbDER, queued))
+	fmt.Fprint(out, mokManagerSteps(keys.dbDER, queued, "gjallarctl secure-boot setup"))
+	return ContinuationReboot, nil
+}
+
+// ShimStarted tells whether shim started this boot: shim leaves MokListRT
+// for the running system, and nothing else sets it.
+func ShimStarted() (bool, error) {
+	_, present, err := liveFirmware.shimVar("MokListRT")
+	return present, err
+}
+
+// QueueShimKey runs before an install rebuilds a system that shim already
+// starts with Secure Boot on (locked firmware, Plane 293). The rebuild puts
+// the GjallarOS boot chain first, which shim starts only once its MOK list
+// holds the GjallarOS key; before that, the old boot chain must stay. It
+// reports whether shim lists the key. If not, it queues the key for
+// MokManager and prints the steps; the caller stops, the user restarts,
+// confirms the key and runs again ("again" names what to run).
+func QueueShimKey(ctx context.Context, out io.Writer, facts ShimFacts, again string) (bool, error) {
+	keys, ok, err := readLocalKeys(ctx)
+	if err != nil {
+		return false, err
+	}
+	if !ok {
+		return false, errors.New("the GjallarOS Secure Boot keys are incomplete")
+	}
+	trust, err := ReadFirmwareTrust()
+	if err != nil {
+		return false, fmt.Errorf("read firmware trust: %w", err)
+	}
+	if trust.ShimValidationOff {
+		return false, errors.New("shim's own check is switched off in MokManager; turn it back on there first")
+	}
+	choice, err := ChoosePath(trust, facts, keys.dbDER)
+	if err != nil {
+		return false, err
+	}
+	if choice.Path != PathShim {
+		return false, fmt.Errorf("this firmware would not start shim with the GjallarOS key: %s", choice.Reason)
+	}
+	enrolled, err := mokHolds(liveFirmware, "MokListRT", keys.dbDER)
+	if err != nil {
+		return false, err
+	}
+	if enrolled {
+		fmt.Fprintln(out, "shim lists the GjallarOS key; building GjallarOS with shim.")
+		return true, nil
+	}
+	queued, err := mokHolds(liveFirmware, "MokNew", keys.dbDER)
+	if err != nil {
+		return false, err
+	}
+	if !queued {
+		if err := queueMOK(ctx, keys.dbDER, out); err != nil {
+			return false, err
+		}
+	} else {
+		fmt.Fprintln(out, "The GjallarOS key already waits for MokManager.")
+	}
+	fmt.Fprint(out, mokManagerSteps(keys.dbDER, queued, again))
+	return false, nil
+}
+
+// ContinueShimInstall runs after the install rebuilt a system that shim
+// already starts with Secure Boot on. Secure Boot stays on, so a plain
+// restart is the last step: the first start through the new boot chain
+// records the enrollment (secure-boot-verification) and the installer's
+// final checks run. verifier is the new generation's
+// gjallar-verify-secure-boot-artifacts; the running system has none.
+func ContinueShimInstall(ctx context.Context, ui UI, out io.Writer, verifier string) (Continuation, error) {
+	inspection, err := Inspect(ctx)
+	if err != nil {
+		return "", fmt.Errorf("inspect Secure Boot state before continuation: %w", err)
+	}
+	switch {
+	case inspection.State == StateGjallarShim && inspection.Stage == "enrolled":
+		fmt.Fprintln(out, "Secure Boot is on; shim checks this system against the GjallarOS key.")
+		return ContinuationNone, nil
+	case inspection.State != StateGjallarShim || inspection.Stage != StagePendingMOK:
+		return "", fmt.Errorf("shim does not list the GjallarOS key (state %q): %s", inspection.State, inspection.Description)
+	}
+	trust, err := ReadFirmwareTrust()
+	if err != nil {
+		return "", fmt.Errorf("read firmware trust: %w", err)
+	}
+	if trust.ShimValidationOff {
+		return "", errors.New("shim's own check is switched off in MokManager; turn it back on there first")
+	}
+	if err := run(ctx, "sudo", verifier); err != nil {
+		return "", fmt.Errorf("verify signed boot files: %w", err)
+	}
+	if err := recoveryGate(ctx, ui, out); err != nil {
+		return "", err
+	}
+	if err := run(ctx, "sudo", "install", "-m", "0600", "/dev/null", FinalMarkerPath); err != nil {
+		return "", fmt.Errorf("arm final Secure Boot verification: %w", err)
+	}
 	return ContinuationReboot, nil
 }
 
 // mokManagerSteps is the walk through MokManager. MokManager opens on
 // "Continue boot", and names the key only by its certificate subject, so the
 // steps carry the SHA-1 fingerprint that MokManager's "View key" shows.
-func mokManagerSteps(der []byte, reused bool) string {
+func mokManagerSteps(der []byte, reused bool, again string) string {
 	password := "Type the password you just chose"
 	if reused {
 		password = "Type the password chosen when the key was first queued"
@@ -204,9 +314,9 @@ It waits 10 seconds; press the down arrow before it runs out:
   4. Yes
   5. %s
   6. Reboot
-If the 10 seconds ran out, run gjallarctl secure-boot setup again.
-After the restart, run gjallarctl secure-boot setup again for the last step.
-`, sha1Fingerprint(der), password)
+If the 10 seconds ran out, run %[3]s again.
+After the restart, run %[3]s again for the next step.
+`, sha1Fingerprint(der), password, again)
 }
 
 // sha1Fingerprint formats der the way MokManager's "View key" prints it
