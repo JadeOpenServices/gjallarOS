@@ -239,3 +239,34 @@ func TestSaveTPM2OffLeavesAnOffRequestAlone(t *testing.T) {
 		t.Fatalf("output although nothing changed:\n%s", out.String())
 	}
 }
+
+func TestKeptHardwareDropsTPM2WithoutLUKS(t *testing.T) {
+	dir := t.TempDir()
+	plain := filepath.Join(dir, "plain.nix")
+	luks := filepath.Join(dir, "luks.nix")
+	// SYNTHETIC hardware.nix files.
+	if err := os.WriteFile(plain, []byte("{\n  fileSystems.\"/\".device = \"/dev/disk/by-uuid/example\";\n}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(luks, []byte("{\n  boot.initrd.luks.devices.\"cryptroot\".device = \"/dev/disk/by-uuid/example\";\n}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		name                       string
+		requested, managed, exists bool
+		path                       string
+		want                       bool
+	}{
+		{"installed host, no LUKS", true, false, true, plain, true},
+		{"installed host, LUKS", true, false, true, luks, false},
+		{"not requested", false, false, true, plain, false},
+		{"managed keeps the contract", true, true, true, plain, false},
+		{"fresh install keeps the request", true, false, false, plain, false},
+		{"unreadable file says nothing", true, false, true, filepath.Join(dir, "missing.nix"), false},
+	}
+	for _, c := range cases {
+		if got := keptHardwareDropsTPM2(c.requested, c.managed, c.exists, c.path); got != c.want {
+			t.Errorf("%s: got %v, want %v", c.name, got, c.want)
+		}
+	}
+}

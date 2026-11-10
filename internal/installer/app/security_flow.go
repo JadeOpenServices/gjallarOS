@@ -56,6 +56,25 @@ func tpm2FollowsRequest(endpointManaged, persistentInstalledHost bool) bool {
 	return endpointManaged || !persistentInstalledHost
 }
 
+// noLUKSMapping reports whether hardware.nix maps no encrypted system disk,
+// so TPM2 unlock can never work. An unreadable file says nothing.
+func noLUKSMapping(hardwarePath string) bool {
+	mapping, err := diskcrypto.MappingDetails(hardwarePath)
+	return err == nil && mapping.Name == ""
+}
+
+// keptHardwareDropsTPM2 reports whether a kept hardware.nix turns a TPM2
+// request off. Only the read-only check runs here: installer tpm2 also
+// writes TPM2 settings into hardware.nix, which a kept file must not get.
+// Before this, a kept file rendered the request as is (e2e-shim, 2026-11-10:
+// in place on an unencrypted disk, luksTpm2Enable = true and every rebuild
+// stopped at "requires exactly one LUKS device").
+func keptHardwareDropsTPM2(requested, endpointManaged, persistentInstalledHost bool, hardwarePath string) bool {
+	return requested &&
+		!tpm2FollowsRequest(endpointManaged, persistentInstalledHost) &&
+		noLUKSMapping(hardwarePath)
+}
+
 // saveTPM2Off turns TPM2 unlock off in user.config.json too. The file is
 // saved before the TPM2 decision; left at true, the next gjallarctl rebuild
 // rendered TPM2 unlock again and failed its assertions (e2e-shim run 9,
