@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"io"
 	"os"
 	"os/exec"
@@ -272,5 +273,146 @@ func TestCheckReleasedRevision(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), "pushed commit") {
 			t.Fatalf("%s: %v", name, err)
 		}
+	}
+}
+
+// withProfile points systemProfile at a link in a temp folder and returns a
+// function that moves it to a new generation.
+func withProfile(t *testing.T) func() {
+	t.Helper()
+	dir := t.TempDir()
+	link := filepath.Join(dir, "system")
+	if err := os.Symlink("system-1-link", link); err != nil {
+		t.Fatal(err)
+	}
+	previous := systemProfile
+	systemProfile = link
+	t.Cleanup(func() { systemProfile = previous })
+	return func() {
+		_ = os.Remove(link)
+		if err := os.Symlink("system-2-link", link); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func withDeployApply(t *testing.T, apply func(context.Context, string, string) error) {
+	t.Helper()
+	previous := deployApply
+	deployApply = apply
+	t.Cleanup(func() { deployApply = previous })
+}
+
+func TestDeployInPlaceClonesBeforeFirstInstall(t *testing.T) {
+	repo, target, revision := cloneFixture(t)
+	withProfile(t)
+	dest := filepath.Join(target, "etc", "gjallar", "system")
+	withDeployApply(t, func(_ context.Context, gotRepo, host string) error {
+		if gotRepo != repo || host != "example-host" {
+			t.Fatalf("apply(%s, %s)", gotRepo, host)
+		}
+		if got := runGit(t, dest, "rev-parse", "HEAD"); got != revision {
+			t.Fatalf("checkout at %s before the build, want %s", got, revision)
+		}
+		return nil
+	})
+	if err := deployInPlace(context.Background(), repo, target, "example-host", revision, "staging", true, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if got := runGit(t, dest, "rev-parse", "--abbrev-ref", "HEAD@{upstream}"); got != "origin/staging" {
+		t.Fatalf("upstream = %s", got)
+	}
+}
+
+func TestDeployInPlaceLeavesExistingInstallsAlone(t *testing.T) {
+	_, target, _ := cloneFixture(t)
+	calls := withPrivilegedCommand(t, nil)
+	applied := false
+	withDeployApply(t, func(context.Context, string, string) error { applied = true; return nil })
+	if err := deployInPlace(context.Background(), "/nonexistent", target, "example-host", "not-a-commit", "stable", false, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if !applied || len(*calls) != 0 {
+		t.Fatalf("applied = %v, privileged calls = %v", applied, *calls)
+	}
+	if _, err := os.Lstat(filepath.Join(target, "etc", "gjallar", "system")); !os.IsNotExist(err) {
+		t.Fatalf("existing install got a checkout: %v", err)
+	}
+}
+
+func TestDeployInPlaceStopsWhenCloneFails(t *testing.T) {
+	repo, target, _ := cloneFixture(t)
+	withProfile(t)
+	withDeployApply(t, func(context.Context, string, string) error {
+		t.Fatal("built without a checkout")
+		return nil
+	})
+	if err := deployInPlace(context.Background(), repo, target, "example-host", "git:"+strings.Repeat("e", 40), "stable", true, io.Discard); err == nil {
+		t.Fatal("unpushed commit accepted")
+	}
+}
+
+func TestDeployInPlaceRemovesCloneWhenNothingWasInstalled(t *testing.T) {
+	repo, target, revision := cloneFixture(t)
+	withProfile(t)
+	withDeployApply(t, func(context.Context, string, string) error { return errors.New("validation failed") })
+	var out strings.Builder
+	if err := deployInPlace(context.Background(), repo, target, "example-host", revision, "stable", true, &out); err == nil || !strings.Contains(err.Error(), "validation failed") {
+		t.Fatalf("err = %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(target, "etc", "gjallar", "system")); !os.IsNotExist(err) {
+		t.Fatalf("clone left behind: %v", err)
+	}
+	if err := checkoutFree(target); err != nil {
+		t.Fatalf("rerun blocked: %v", err)
+	}
+	if !strings.Contains(out.String(), "removed again") {
+		t.Fatalf("output = %q", out.String())
+	}
+}
+
+func TestDeployInPlaceKeepsCloneWhenGenerationMoved(t *testing.T) {
+	repo, target, revision := cloneFixture(t)
+	move := withProfile(t)
+	withDeployApply(t, func(context.Context, string, string) error {
+		move()
+		return errors.New("boot generation failed")
+	})
+	if err := deployInPlace(context.Background(), repo, target, "example-host", revision, "stable", true, io.Discard); err == nil {
+		t.Fatal("failure hidden")
+	}
+	if _, err := os.Stat(filepath.Join(target, "etc", "gjallar", "system", "flake.nix")); err != nil {
+		t.Fatalf("clone removed although a generation may use it: %v", err)
+	}
+}
+
+func TestDeployInPlaceKeepsCloneWhenProfileUnreadable(t *testing.T) {
+	repo, target, revision := cloneFixture(t)
+	previous := systemProfile
+	systemProfile = filepath.Join(t.TempDir(), "missing")
+	t.Cleanup(func() { systemProfile = previous })
+	withDeployApply(t, func(context.Context, string, string) error { return errors.New("boot generation failed") })
+	if err := deployInPlace(context.Background(), repo, target, "example-host", revision, "stable", true, io.Discard); err == nil {
+		t.Fatal("failure hidden")
+	}
+	if _, err := os.Stat(filepath.Join(target, "etc", "gjallar", "system", "flake.nix")); err != nil {
+		t.Fatalf("clone removed without proof: %v", err)
+	}
+}
+
+func TestCheckoutFree(t *testing.T) {
+	target := t.TempDir()
+	if err := checkoutFree(target); err != nil {
+		t.Fatal(err)
+	}
+	dest := filepath.Join(target, "etc", "gjallar", "system")
+	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("/nonexistent", dest); err != nil {
+		t.Fatal(err)
+	}
+	if err := checkoutFree(target); err == nil || !strings.Contains(err.Error(), "nothing was changed") {
+		t.Fatalf("dangling link accepted: %v", err)
 	}
 }
