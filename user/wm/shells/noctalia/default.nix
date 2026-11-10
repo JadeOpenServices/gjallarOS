@@ -449,11 +449,12 @@ in
         };
         # Noctalia picks one of eleven lock effects at random (pixel,
         # honeycomb, stripes, ...) and runs it for 1.5 s. Lock and unlock
-        # use a plain cross-fade instead, short enough to feel instant but
-        # still soft. 100 ms is the shortest Noctalia accepts.
+        # use a plain cross-fade instead, 500 ms on the house curve like
+        # every other OpenJade open (themebrain motion rule). Noctalia uses
+        # one value for lock and unlock.
         lockscreen = {
           transition = [ "fade" ];
-          transition_duration = 200;
+          transition_duration = 500;
         };
         wallpaper = {
           directory = "${config.home.homeDirectory}/Pictures";

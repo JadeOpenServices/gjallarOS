@@ -98,6 +98,16 @@
 # shows squares instead of dots. Applied last so it sits on top of the
 # patches above.
 #
+# openjade-motion.patch (ours, local design choice) applies the OpenJade
+# motion rule: the ease-out and ease-in-out curves all become the house
+# curve, cubic-bezier(0.16, 1, 0.3, 1), so every move and fade settles the
+# same way. Small moves and closes take 150 ms (animFast and animNormal);
+# panel and launcher opens and theme changes take 500 ms (new
+# Style::animPanel). Linear stays for progress and spinners, ease-in for the
+# few closing slides. The lock screen fade is a setting (lockscreen
+# transition_duration in user/wm/shells/noctalia). Applied after
+# openjade-shape.patch.
+#
 # libqalculate 5.10 frees its random state on exit even when nothing ever
 # created it, so the shell crashes every time it stops. Upstream fixed that in
 # 931c2aa9 (5.11); drop the patch once nixpkgs ships libqalculate 5.11 or newer.
@@ -129,5 +139,6 @@
       ./greeter-sync-polkit-ready.patch
       ./greeter-sync-on-start.patch
       ./openjade-shape.patch
+      ./openjade-motion.patch
     ];
   })
