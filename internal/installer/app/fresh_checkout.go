@@ -225,6 +225,9 @@ func deployInPlace(
 	out io.Writer,
 ) error {
 	if !first {
+		if repo == systemcheckout.Path {
+			return systemRebuild(ctx, out)
+		}
 		return deployApply(ctx, repo, hostname)
 	}
 	before, beforeErr := os.Readlink(systemProfile)
@@ -247,4 +250,25 @@ func deployInPlace(
 	}
 	fmt.Fprintf(out, "%s removed again; no system generation uses it.\n", systemcheckout.Path)
 	return err
+}
+
+// systemRebuildCommand is the rebuild every installed host with a system
+// checkout runs; tests point it elsewhere.
+var systemRebuildCommand = "/run/current-system/sw/bin/gjallar-system-rebuild"
+
+// systemRebuild updates an installed host that builds from the system
+// checkout (wiki 752 Q214): gjallar-system-rebuild --update moves
+// /etc/gjallar/system to the channel in its user.config.json under the same
+// checks gjallarctl rebuild runs (developer grant, official origin, owner),
+// builds it and switches to it. Its output is the user's to read.
+var systemRebuild = func(ctx context.Context, out io.Writer) error {
+	fmt.Fprintf(out, "STAGE: updating %s and building it\n", systemcheckout.Path)
+	cmd := exec.CommandContext(ctx, systemRebuildCommand, "--update")
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = out
+	cmd.Stderr = out
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("gjallar-system-rebuild --update: %w", err)
+	}
+	return nil
 }

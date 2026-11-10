@@ -279,6 +279,11 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 	if err := requireNixOS("/etc/os-release"); err != nil {
 		return fail(errOut, err)
 	}
+	if !opt.recovery {
+		if err := requireSystemCheckoutRun(installercheck.SystemRepositoryFile, root, geteuid()); err != nil {
+			return fail(errOut, err)
+		}
+	}
 	// A previous run as root may have left root-owned files in the checkout
 	// (generated/hardware.nix 0600 and its backups); hand them back first,
 	// and hand back whatever this run writes when it runs as root itself.
@@ -1157,17 +1162,30 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 
 	case hardwareRetain:
 		fmt.Fprintln(out, "Existing hardware configuration retained:", hardwarePath)
-		if keptHardwareDropsTPM2(
+		kept, err := keptHardwareTPM2(
+			ctx,
 			s.render.LUKSTPM2Enable,
 			s.render.Management.Enable,
 			persistentInstalledHost,
+			s.render.SecureBootEnable,
 			hardwarePath,
-		) {
+		)
+		if err != nil {
+			return fail(errOut, err)
+		}
+		switch kept {
+		case keptTPM2Enrolled:
+			fmt.Fprintln(out, "GjallarOS Secure Boot is not set up on this install; the TPM2 disk unlock already enrolled stays, and a new enrollment waits for Secure Boot.")
+		case keptTPM2NoLUKS, keptTPM2NoSecureBoot:
 			s.render.LUKSTPM2Enable = false
 			if err := saveTPM2Off(&s.user, presetPath, out); err != nil {
 				return fail(errOut, err)
 			}
-			fmt.Fprintln(out, "No encrypted system disk in the kept hardware configuration; TPM2 disk unlock stays off.")
+			if kept == keptTPM2NoLUKS {
+				fmt.Fprintln(out, "No encrypted system disk in the kept hardware configuration; TPM2 disk unlock stays off.")
+			} else {
+				fmt.Fprintln(out, "GjallarOS Secure Boot is not set up on this install; TPM2 disk unlock stays off.")
+			}
 			if err := nixrender.WriteAtomic(settingsPath, s.render); err != nil {
 				return fail(errOut, err)
 			}

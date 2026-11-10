@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/systemcheckout"
 )
 
 // SYNTHETIC repository contents, not taken from any machine.
@@ -337,6 +339,48 @@ func TestDeployInPlaceLeavesExistingInstallsAlone(t *testing.T) {
 	}
 	if _, err := os.Lstat(filepath.Join(target, "etc", "gjallar", "system")); !os.IsNotExist(err) {
 		t.Fatalf("existing install got a checkout: %v", err)
+	}
+}
+
+func TestDeployInPlaceRebuildsTheSystemCheckout(t *testing.T) {
+	_, target, _ := cloneFixture(t)
+	calls := withPrivilegedCommand(t, nil)
+	applied := false
+	withDeployApply(t, func(context.Context, string, string) error { applied = true; return nil })
+	rebuilt := 0
+	previous := systemRebuild
+	systemRebuild = func(context.Context, io.Writer) error { rebuilt++; return nil }
+	t.Cleanup(func() { systemRebuild = previous })
+	if err := deployInPlace(context.Background(), systemcheckout.Path, target, "example-host", "not-a-commit", "stable", false, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if applied || rebuilt != 1 || len(*calls) != 0 {
+		t.Fatalf("applied = %v, rebuilt = %d, privileged calls = %v", applied, rebuilt, *calls)
+	}
+}
+
+func TestSystemRebuildRunsUpdate(t *testing.T) {
+	// SYNTHETIC stand-in for gjallar-system-rebuild: records its arguments.
+	dir := t.TempDir()
+	record := filepath.Join(dir, "args")
+	script := filepath.Join(dir, "gjallar-system-rebuild")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nprintf '%s\\n' \"$@\" > "+record+"\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	previous := systemRebuildCommand
+	systemRebuildCommand = script
+	t.Cleanup(func() { systemRebuildCommand = previous })
+	if err := systemRebuild(context.Background(), io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if data, err := os.ReadFile(record); err != nil || string(data) != "--update\n" {
+		t.Fatalf("arguments %q, %v", data, err)
+	}
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nexit 3\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := systemRebuild(context.Background(), io.Discard); err == nil {
+		t.Fatal("a failed rebuild was reported as done")
 	}
 }
 
