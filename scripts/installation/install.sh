@@ -70,6 +70,39 @@ case "$channel" in
         ;;
 esac
 
+# An installed GjallarOS that builds from the root-owned system checkout
+# runs the installer there, as root (wiki 752 Q214): settings written to any
+# other checkout are never built. gjallar-system-rebuild --update moves the
+# system checkout to the chosen channel, under the same checks as
+# gjallarctl rebuild, so this script leaves its branch alone. The installer
+# refuses any other checkout on such a host by itself; this only takes the
+# user there. GJALLAR_SYSTEM_REPOSITORY_FILE is for the bootstrap tests.
+system_checkout=/etc/gjallar/system
+system_repository_file="${GJALLAR_SYSTEM_REPOSITORY_FILE:-/etc/gjallar/repository}"
+system_install=0
+if [[ -r "$system_repository_file" ]]; then
+    system_repository="$(head -n 1 "$system_repository_file")"
+    [[ "${system_repository%/}" != "$system_checkout" ]] || system_install=1
+fi
+if (( system_install )); then
+    [[ -f "$system_checkout/scripts/installation/install.sh" ]] || {
+        printf 'ERROR: this GjallarOS builds from %s, but that checkout is missing; nothing was changed.\n' "$system_checkout" >&2
+        exit 1
+    }
+    self="$(realpath -e -- "${BASH_SOURCE[0]:-/dev/stdin}" 2>/dev/null || true)"
+    if (( EUID != 0 )) || [[ "$self" != "$system_checkout/scripts/installation/install.sh" ]]; then
+        printf 'This GjallarOS builds from %s; the installer runs there as root.\n' "$system_checkout"
+        (exec </dev/tty) 2>/dev/null || {
+            printf 'ERROR: the installer is interactive and needs a terminal.\n' >&2
+            exit 1
+        }
+        if (( EUID == 0 )); then
+            exec bash "$system_checkout/scripts/installation/install.sh" "$@" </dev/tty
+        fi
+        exec sudo bash "$system_checkout/scripts/installation/install.sh" "$@" </dev/tty
+    fi
+fi
+
 # Moves a checkout onto the channel branch. Only a fast-forward: local
 # commits or edits to tracked files stop the install instead of being lost.
 sync_channel() {
@@ -132,7 +165,7 @@ repo="$(cd "$script_dir/../.." && pwd)"
 # Run from a checkout with a channel: move it to that branch first, then run
 # the script from the updated tree, since the branch may change this script
 # and the installer.
-if [[ -n "$channel" && "${GJALLAR_CHANNEL_SYNCED:-0}" != 1 ]]; then
+if [[ -n "$channel" && "${GJALLAR_CHANNEL_SYNCED:-0}" != 1 ]] && (( ! system_install )); then
     sync_channel "$repo"
     GJALLAR_CHANNEL_SYNCED=1 exec bash "$repo/scripts/installation/install.sh" "$@"
 fi
