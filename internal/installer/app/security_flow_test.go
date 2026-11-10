@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -193,6 +195,107 @@ func TestKeyboardOnlyAtStartup(t *testing.T) {
 	} {
 		if got := keyboardOnlyAtStartup(tc.chassis, tc.touch); got != tc.want {
 			t.Errorf("chassis %q touch %t: %t, want %t", tc.chassis, tc.touch, got, tc.want)
+		}
+	}
+}
+
+// An install that turned TPM2 unlock off must say so in user.config.json,
+// or the next gjallarctl rebuild renders it again (e2e-shim run 9,
+// 2026-11-10).
+func TestSaveTPM2OffWritesTheOutcome(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "user.config.json")
+	user, err := config.Defaults()
+	if err != nil {
+		t.Fatal(err)
+	}
+	user.Username = "example"
+	user.LUKSTPM2Enable = true
+	var out bytes.Buffer
+	if err := saveTPM2Off(&user, path, &out); err != nil {
+		t.Fatal(err)
+	}
+	saved, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if user.LUKSTPM2Enable || saved.LUKSTPM2Enable {
+		t.Fatalf("luksTpm2Enable after save: in memory %t, in file %t; want false", user.LUKSTPM2Enable, saved.LUKSTPM2Enable)
+	}
+	if !strings.Contains(out.String(), "luksTpm2Enable=false") {
+		t.Fatalf("output does not name the change:\n%s", out.String())
+	}
+}
+
+func TestSaveTPM2OffLeavesAnOffRequestAlone(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "user.config.json")
+	var out bytes.Buffer
+	if err := saveTPM2Off(&config.User{}, path, &out); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("user.config.json written although nothing changed (stat: %v)", err)
+	}
+	if out.Len() != 0 {
+		t.Fatalf("output although nothing changed:\n%s", out.String())
+	}
+}
+
+func TestKeptHardwareTPM2(t *testing.T) {
+	dir := t.TempDir()
+	plain := filepath.Join(dir, "plain.nix")
+	luks := filepath.Join(dir, "luks.nix")
+	// SYNTHETIC hardware.nix files.
+	if err := os.WriteFile(plain, []byte("{\n  fileSystems.\"/\".device = \"/dev/disk/by-uuid/example\";\n}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(luks, []byte("{\n  boot.initrd.luks.devices.\"cryptroot\".device = \"/dev/disk/by-uuid/example\";\n}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// SYNTHETIC LUKS2 headers: slot 0 recovery, slot 1 TPM2 or a passphrase.
+	const withTPM2 = `{"keyslots":{"0":{},"1":{}},"tokens":{"0":{"type":"systemd-recovery","keyslots":["0"]},"1":{"type":"systemd-tpm2","keyslots":["1"],"tpm2_pcrlock":true}}}`
+	const withoutTPM2 = `{"keyslots":{"0":{},"1":{}},"tokens":{"0":{"type":"systemd-recovery","keyslots":["0"]}}}`
+	cases := []struct {
+		name                           string
+		requested, managed, exists, sb bool
+		path                           string
+		header                         string
+		dumpErr                        error
+		want                           keptTPM2
+		wantErr                        bool
+		wantDump                       bool
+	}{
+		{"installed host, no LUKS", true, false, true, true, plain, "", nil, keptTPM2NoLUKS, false, false},
+		{"installed host, LUKS, Secure Boot", true, false, true, true, luks, "", nil, keptTPM2AsRequested, false, false},
+		{"not requested", false, false, true, false, plain, "", nil, keptTPM2AsRequested, false, false},
+		{"managed keeps the contract", true, true, true, false, plain, "", nil, keptTPM2AsRequested, false, false},
+		{"fresh install keeps the request", true, false, false, false, plain, "", nil, keptTPM2AsRequested, false, false},
+		{"unreadable file says nothing about LUKS", true, false, true, true, filepath.Join(dir, "missing.nix"), "", nil, keptTPM2AsRequested, false, false},
+		{"no Secure Boot, enrolled token stays", true, false, true, false, luks, withTPM2, nil, keptTPM2Enrolled, false, true},
+		{"no Secure Boot, no token turns off", true, false, true, false, luks, withoutTPM2, nil, keptTPM2NoSecureBoot, false, true},
+		{"no Secure Boot, unreadable header fails", true, false, true, false, luks, "", errors.New("SYNTHETIC luksDump failure"), keptTPM2AsRequested, true, true},
+		{"no Secure Boot, unreadable hardware.nix fails", true, false, true, false, filepath.Join(dir, "missing.nix"), "", nil, keptTPM2AsRequested, true, false},
+	}
+	for _, c := range cases {
+		var calls [][]string
+		previous := privilegedCommand
+		privilegedCommand = func(_ context.Context, args ...string) ([]byte, error) {
+			calls = append(calls, args)
+			return []byte(c.header), c.dumpErr
+		}
+		got, err := keptHardwareTPM2(context.Background(), c.requested, c.managed, c.exists, c.sb, c.path)
+		privilegedCommand = previous
+		if (err != nil) != c.wantErr {
+			t.Errorf("%s: error %v, want error %v", c.name, err, c.wantErr)
+		}
+		if got != c.want {
+			t.Errorf("%s: got %v, want %v", c.name, got, c.want)
+		}
+		want := [][]string(nil)
+		if c.wantDump {
+			want = [][]string{{"cryptsetup", "luksDump", "--dump-json-metadata", "/dev/disk/by-uuid/example"}}
+		}
+		if !slices.EqualFunc(calls, want, slices.Equal[[]string]) {
+			t.Errorf("%s: privileged calls %q, want %q", c.name, calls, want)
 		}
 	}
 }

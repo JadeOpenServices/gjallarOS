@@ -88,6 +88,40 @@
 # behind the same wait. The privilege helper (system/wm/common/wayland.nix)
 # only asks for a password when the look differs from the last answer.
 #
+# openjade-shape.patch (ours, kept as a local design choice) applies the
+# OpenJade shape rule: base radii 2/4/6/6 instead of 3/6/9/12, and the UI
+# scale no longer grows corners, so a 6 px panel stays 6 px at
+# ui_scale 1.4. Radio marks, toggle and slider knobs, select and menu marks,
+# workspace marks and the notification dot get 2 px corners instead of
+# circles; slider tracks, progress bars and scrollbars get square ends. The
+# lock screen box and keys default to 6 and 4 px, and the password mask
+# shows squares instead of dots. Applied last so it sits on top of the
+# patches above.
+#
+# openjade-motion.patch (ours, local design choice) applies the OpenJade
+# motion rule: the ease-out and ease-in-out curves all become the house
+# curve, cubic-bezier(0.16, 1, 0.3, 1), so every move and fade settles the
+# same way. Small moves and closes take 150 ms (animFast and animNormal);
+# panel and launcher opens and theme changes take 500 ms (new
+# Style::animPanel). Linear stays for progress and spinners, ease-in for the
+# few closing slides. The lock screen fade is a setting (lockscreen
+# transition_duration in user/wm/shells/noctalia). Applied after
+# openjade-shape.patch.
+#
+# openjade-artwork.patch (ours, local design choice) applies the OpenJade
+# artwork rule: the launcher avatar gets 4 px corners (the control centre
+# avatar is a setting, control_center circular_avatar), cover art in the bar
+# and on the lock screen 6 px, the dock count badge 4 px (at most a quarter
+# of its height), and the battery nub, colour picker thumbs and screen-time
+# legend swatches lose their round ends. The analogue desktop clock gets a
+# square 6 px face with square-ended ticks, hands and hub. Running markers in
+# the dock and taskbar, focus_hint workspace marks, calendar day marks and
+# the event stripe become 2 px square-ended bars; the focused app's bar is
+# longer in both dock and taskbar, and a minimized task's taskbar bar fades
+# instead of showing an outline. Unlock is a close, so the lock screen fades
+# out in the close time (150 ms) while transition_duration only times the
+# lock. The spinner arc stays round. Applied after openjade-motion.patch.
+#
 # libqalculate 5.10 frees its random state on exit even when nothing ever
 # created it, so the shell crashes every time it stops. Upstream fixed that in
 # 931c2aa9 (5.11); drop the patch once nixpkgs ships libqalculate 5.11 or newer.
@@ -118,5 +152,8 @@
       ./notification-app-name.patch
       ./greeter-sync-polkit-ready.patch
       ./greeter-sync-on-start.patch
+      ./openjade-shape.patch
+      ./openjade-motion.patch
+      ./openjade-artwork.patch
     ];
   })

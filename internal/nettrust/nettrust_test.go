@@ -334,6 +334,35 @@ func TestTailnetWaitsForStartingTailscaled(t *testing.T) {
 	}
 }
 
+// A stuck tailscaled answers no CLI call. Each call ends on its own limit,
+// so the verdict keeps the time it needs for the block (loophole 43).
+func TestStuckTailscaledCannotUseUpTheVerdict(t *testing.T) {
+	oldCall, oldSettle := tailscaleCall, tailnetSettle
+	tailscaleCall, tailnetSettle = 50*time.Millisecond, 0
+	defer func() { tailscaleCall, tailnetSettle = oldCall, oldSettle }()
+	s := System{run: func(ctx context.Context, name string, _ ...string) ([]byte, error) {
+		if name == "systemctl" {
+			return []byte("active\n"), nil
+		}
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	begin := time.Now()
+	tn, err := s.Tailnet(ctx)
+	if err != nil || tn.Running {
+		t.Fatalf("tailnet = %+v, %v", tn, err)
+	}
+	tn = Tailnet{Running: true, Peers: []Peer{{HostName: "synthetic-exit", IPs: []netip.Addr{netip.MustParseAddr("100.64.0.9")}, ExitNodeOption: true}}}
+	if changed, err := s.ApplyExitNode(ctx, tn, "synthetic-exit"); changed || err == nil {
+		t.Fatalf("stuck tailscale set: changed %v, err %v", changed, err)
+	}
+	if took := time.Since(begin); took > time.Second || ctx.Err() != nil {
+		t.Fatalf("took %v, verdict context %v", took, ctx.Err())
+	}
+}
+
 func TestGatewayOwnsProbesOutsideTheTunnel(t *testing.T) {
 	var calls []string
 	s := System{run: func(_ context.Context, name string, args ...string) ([]byte, error) {

@@ -17,6 +17,7 @@ import (
 	"github.com/godbus/dbus/v5"
 
 	"github.com/JadeOpenServices/gjallarOS/internal/settings"
+	"github.com/JadeOpenServices/gjallarOS/internal/tty"
 	"github.com/JadeOpenServices/gjallarOS/internal/winesandbox"
 )
 
@@ -191,7 +192,7 @@ func addApp(args []string, stdout, stderr io.Writer) error {
 		fmt.Fprintf(stdout, "Next: gjallarctl wine install %s INSTALLER, or gjallarctl wine program %s D:\\PROGRAM.exe for a program in the files folder.\n", id, id)
 		return nil
 	}
-	return installApp(id, installer, os.Stdin, stdinIsTerminal(), stdout, stderr)
+	return installApp(id, installer, os.Stdin, tty.Is(os.Stdin), stdout, stderr)
 }
 
 // setupLog is where Wine's one-time setup writes what it did.
@@ -334,7 +335,7 @@ func installCmd(args []string, stdout, stderr io.Writer) error {
 		return err
 	}
 	defer lock.Close()
-	return installApp(args[0], installer, os.Stdin, stdinIsTerminal(), stdout, stderr)
+	return installApp(args[0], installer, os.Stdin, tty.Is(os.Stdin), stdout, stderr)
 }
 
 // installApp runs installer in app id's sandbox and picks the program it
@@ -443,7 +444,7 @@ func programCmd(args []string, stdout io.Writer) error {
 	if len(args) == 2 {
 		choice = args[1]
 	}
-	return chooseProgram(args[0], choice, os.Stdin, stdinIsTerminal(), stdout, os.Stderr)
+	return chooseProgram(args[0], choice, os.Stdin, tty.Is(os.Stdin), stdout, os.Stderr)
 }
 
 // chooseProgram sets the program app id starts. choice is a number from
@@ -587,9 +588,4 @@ func removeCmd(args []string, stdout io.Writer) error {
 		fmt.Fprintf(stdout, "Removed %s.\n", shown)
 	}
 	return nil
-}
-
-func stdinIsTerminal() bool {
-	info, err := os.Stdin.Stat()
-	return err == nil && info.Mode()&os.ModeCharDevice != 0
 }

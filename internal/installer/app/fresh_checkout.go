@@ -3,6 +3,7 @@ package app
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -12,6 +13,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/deploy"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/flakesource"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/systemcheckout"
 )
@@ -178,4 +180,95 @@ func sameFile(a, b string) bool {
 	ad, aErr := os.ReadFile(a)
 	bd, bErr := os.ReadFile(b)
 	return aErr == nil && bErr == nil && bytes.Equal(ad, bd)
+}
+
+// systemProfile is the link nixos-rebuild moves to each new system
+// generation. Tests replace it.
+var systemProfile = "/nix/var/nix/profiles/system"
+
+// deployApply installs the boot generation; tests replace it.
+var deployApply = deploy.Apply
+
+// checkoutFree fails when the system checkout under targetRoot already
+// exists. A first install clones into an empty place only; an old folder is
+// never merged into or removed.
+func checkoutFree(targetRoot string) error {
+	_, err := os.Lstat(filepath.Join(targetRoot, systemcheckout.Path))
+	switch {
+	case err == nil:
+		return fmt.Errorf(
+			"%s already exists, but GjallarOS is not installed on this system; "+
+				"nothing was changed. Move %s away and run the installer again",
+			systemcheckout.Path, systemcheckout.Path,
+		)
+	case errors.Is(err, fs.ErrNotExist):
+		return nil
+	default:
+		return fmt.Errorf("check %s: %w", systemcheckout.Path, err)
+	}
+}
+
+// deployInPlace installs the boot generation of an in-place install from
+// repo. A first install (Plane 313) clones the system checkout first, so the
+// new generation never names a checkout that is missing. When the build
+// fails and the system profile still points where it pointed before, no
+// generation uses the clone and it is removed again, so a rerun starts
+// clean. If the profile moved, or cannot be read, the clone stays.
+func deployInPlace(
+	ctx context.Context,
+	repo string,
+	targetRoot string,
+	hostname string,
+	revision string,
+	channel string,
+	first bool,
+	out io.Writer,
+) error {
+	if !first {
+		if repo == systemcheckout.Path {
+			return systemRebuild(ctx, out)
+		}
+		return deployApply(ctx, repo, hostname)
+	}
+	before, beforeErr := os.Readlink(systemProfile)
+	fmt.Fprintln(out, "STAGE: cloning the system checkout")
+	if err := cloneSystemCheckout(ctx, repo, targetRoot, revision, channel, out); err != nil {
+		return err
+	}
+	err := deployApply(ctx, repo, hostname)
+	if err == nil {
+		return nil
+	}
+	after, afterErr := os.Readlink(systemProfile)
+	if beforeErr != nil || afterErr != nil || before != after {
+		fmt.Fprintf(out, "%s is kept: a new system generation may use it.\n", systemcheckout.Path)
+		return err
+	}
+	dest := filepath.Join(targetRoot, systemcheckout.Path)
+	if _, rmErr := privilegedCommand(context.WithoutCancel(ctx), "rm", "-rf", "--", dest); rmErr != nil {
+		return fmt.Errorf("%w; removing %s again also failed: %v", err, systemcheckout.Path, rmErr)
+	}
+	fmt.Fprintf(out, "%s removed again; no system generation uses it.\n", systemcheckout.Path)
+	return err
+}
+
+// systemRebuildCommand is the rebuild every installed host with a system
+// checkout runs; tests point it elsewhere.
+var systemRebuildCommand = "/run/current-system/sw/bin/gjallar-system-rebuild"
+
+// systemRebuild updates an installed host that builds from the system
+// checkout (wiki 752 Q214): gjallar-system-rebuild --update moves
+// /etc/gjallar/system to the channel in its user.config.json under the same
+// checks gjallarctl rebuild runs (developer grant, official origin, owner),
+// builds it and switches to it. Its output is the user's to read.
+var systemRebuild = func(ctx context.Context, out io.Writer) error {
+	fmt.Fprintf(out, "STAGE: updating %s and building it\n", systemcheckout.Path)
+	cmd := exec.CommandContext(ctx, systemRebuildCommand, "--update")
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = out
+	cmd.Stderr = out
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("gjallar-system-rebuild --update: %w", err)
+	}
+	return nil
 }

@@ -5,7 +5,8 @@ in
 {
   # A Claim that arrives while the reader still closes for the previous
   # holder waits for the close instead of failing with AlreadyInUse, so a
-  # second sudo right after a fingerprint match can scan again; see
+  # lock screen that locks again right after a fingerprint unlock can scan
+  # again; see
   # tests/nix/fprintd-claim-after-close.nix.
   fprintd =
     assert lib.assertMsg (prev.fprintd.version == "1.94.5")

@@ -19,7 +19,7 @@ NixOS 26.05 · Hyprland · Noctalia · ODDC hardware policy · TPM2 disk encrypt
 
 <br><br>
 
-<img src="docs/screenshots/desktop.webp" alt="GjallarOS desktop with the Noctalia bar" width="100%">
+<img src="docs/screenshots/desktop.webp" alt="gjallarOS desktop with the Noctalia bar" width="100%">
 
 </div>
 
@@ -94,14 +94,14 @@ settings, generated hardware data and backups are excluded from Git.
   </tr>
   <tr>
     <td width="50%"><img src="docs/screenshots/greeter.webp" alt="Login greeter"></td>
-    <td width="50%"><img src="docs/screenshots/lock-screen.webp" alt="Lock screen with weather"></td>
+    <td width="50%"><img src="docs/screenshots/lock-screen.webp" alt="Lock screen"></td>
   </tr>
   <tr>
-    <td colspan="2" align="center"><img src="docs/screenshots/boot-unlock.webp" alt="Boot splash asking for the disk PIN" width="50%"></td>
+    <td colspan="2" align="center"><img src="docs/screenshots/boot-unlock.webp" alt="Boot splash at disk unlock" width="50%"></td>
   </tr>
 </table>
 
-<sub>Tiling · launcher · control center · greeter · lock screen · TPM2+PIN disk unlock at boot.<br>
+<sub>Tiling · launcher · control center · greeter · lock screen · disk unlock at boot.<br>
 Taken in a QEMU test VM at 1920×1080.</sub>
 </div>
 
@@ -488,13 +488,15 @@ GjallarOS asks about the new USB device.
 Every rename lives in one table, `system/tools/legacy/renames.json`:
 commands, settings keys, config fields, partition labels, units and
 paths. A row holds the old name, the new name, where it was removed, the
-date after which it can go (`deleteAfter`) and the Plane or JODS item.
+release after which it can go (`deleteAfter`, a tag like `v2026.10.70`)
+and the Plane or JODS item.
 
 - An old command is not run. The shell prints the new name and stops,
   for example: GjallarOS: rebuild was removed; use gjallarctl rebuild
 - The flake check `legacy-names` fails while an old name is still used
-  outside `system/tools/legacy/`, and once a row is past its
-  `deleteAfter` date. Then the row and the last traces are removed.
+  outside `system/tools/legacy/`, and once the release in `system/release`
+  is newer than a row's `deleteAfter` tag. Then the row and the last traces
+  are removed. A revision gives the same answer on every machine and day.
 - The system does not build when an old command name is a real command
   again.
 
@@ -655,6 +657,10 @@ plain Nix binary cache. Each tag adds to it, so a machine on any channel downloa
 package whenever it matches one built for any tag. Anything missing still
 builds locally. The workflow itself downloads from the same cache, so a tag
 builds only the packages that changed since the tags before it.
+
+`system/release` holds the name of the last release tag. The commit that gets
+a new tag sets it to that tag first; the workflow stops when the two differ.
+Commits after a tag keep the last release name until the next one.
 
 `deployment/binary-cache.json` names the cache and its public key:
 

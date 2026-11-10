@@ -61,6 +61,7 @@ import (
 	"github.com/JadeOpenServices/gjallarOS/internal/localchanges"
 	"github.com/JadeOpenServices/gjallarOS/internal/oddccli"
 	"github.com/JadeOpenServices/gjallarOS/internal/preset"
+	"github.com/JadeOpenServices/gjallarOS/internal/tty"
 )
 
 const (
@@ -107,8 +108,6 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runNormalize(args[1:], stdout, stderr)
 	case "preset":
 		return runPreset(args[1:], stdout, stderr)
-	case "auth":
-		return runAuth(args[1:], stderr)
 	case "rebuild":
 		return runRebuild(args[1:], stdout, stderr)
 	case "system":
@@ -1175,9 +1174,12 @@ func runAIApprove(args []string, stdout, stderr io.Writer) int {
 	if err := f.Parse(args); err != nil || f.NArg() < 1 || *grant == "" {
 		return 2
 	}
-	info, err := os.Stdin.Stat()
-	if err != nil || info.Mode()&os.ModeCharDevice == 0 {
+	if !tty.Is(os.Stdin) || !tty.Is(os.Stderr) {
 		fmt.Fprintln(stderr, "ERROR: approval requires a trusted interactive terminal")
+		return 1
+	}
+	if inAISession("/proc/self/cgroup") {
+		fmt.Fprintln(stderr, "ERROR: approval must come from your own terminal, not from inside the AI session")
 		return 1
 	}
 	fmt.Fprintf(stderr, "Approve exact action %q with arguments %q? [y/N] ", f.Arg(0), f.Args()[1:])
@@ -1192,6 +1194,19 @@ func runAIApprove(args []string, stdout, stderr io.Writer) int {
 	}
 	fmt.Fprintln(stdout, "Exact one-use approval created; expires in five minutes.")
 	return 0
+}
+
+// inAISession reports whether this process runs in an ai-session@ unit, or
+// whether its cgroup cannot be read. The agent can open its own pty, so a
+// terminal check alone lets it approve itself (loophole 42). The kernel puts
+// every process the session starts in the unit's cgroup, and the unit
+// cannot move out of it (ProtectControlGroups, no capabilities).
+func inAISession(cgroupFile string) bool {
+	data, err := os.ReadFile(cgroupFile)
+	if err != nil {
+		return true
+	}
+	return strings.Contains(string(data), "/ai-session@")
 }
 
 func runAIResearchServe(args []string, stdout, stderr io.Writer) int {
@@ -1850,7 +1865,6 @@ func printUsage(out io.Writer) {
 	fmt.Fprintln(out, "Usage: gjallarctl check [--repo PATH] [--timeout DURATION]")
 	fmt.Fprintln(out, "       gjallarctl preflight [--repo PATH]")
 	oddccli.Usage(out)
-	fmt.Fprintln(out, "       gjallarctl auth")
 	fmt.Fprintln(out, "       gjallarctl rebuild [--repo PATH] [--host HOST] [-d|--debug] [-n|--no-cleanup] [--update] [--update-inputs] [--hardware-update [--channel stable|staging] [--switch 0|1]] [NIXOS-REBUILD-ARGS...]")
 	fmt.Fprintln(out, "       gjallarctl system {check|rebuild}   (root; rebuild starts it for the system checkout)")
 	fmt.Fprintln(out, "       gjallarctl system apply              (developer mode: build ~/GjallarOS-local)")
@@ -2864,7 +2878,7 @@ func runRebuildQuiet(stdout, stderr io.Writer, host string, messages []string, s
 	}()
 
 	terminal, ok := stdout.(*os.File)
-	interactive := ok && isTerminal(terminal)
+	interactive := ok && tty.Is(terminal)
 	stop := make(chan struct{})
 	var ui sync.WaitGroup
 	if interactive {
@@ -3195,23 +3209,6 @@ func resolveExecutable(path string) (string, error) {
 	return resolved, nil
 }
 
-func privilegeFingerprintCommand(
-	ctx context.Context,
-	tty *os.File,
-	authHelper string,
-) *exec.Cmd {
-	cmd := exec.CommandContext(ctx, "sudo", authHelper)
-
-	// The command-specific sudo policy selects a fingerprint-only PAM service.
-	// Keep stdin detached so this phase itself never owns shell input.
-	cmd.Stdin = nil
-	cmd.Stdout = tty
-	cmd.Stderr = tty
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-
-	return cmd
-}
-
 func privilegePasswordCommand(
 	ctx context.Context,
 	tty *os.File,
@@ -3275,26 +3272,6 @@ func authenticationCommandStatus(
 
 	fmt.Fprintf(stderr, "ERROR: %s: %v\n", label, err)
 	return 1
-}
-
-// runAuth refreshes the sudo timestamp through the GjallarOS fingerprint-first
-// flow so a following plain sudo does not start its own PAM conversation.
-func runAuth(args []string, stderr io.Writer) int {
-	if len(args) != 0 {
-		fmt.Fprintln(stderr, "Usage: gjallarctl auth")
-		return 2
-	}
-	if os.Geteuid() == 0 {
-		return 0
-	}
-
-	cached := exec.Command("sudo", "-n", "-v")
-	cached.Stdin, cached.Stdout, cached.Stderr = nil, nil, nil
-	if cached.Run() == nil {
-		return 0
-	}
-
-	return authenticatePrivilege(context.Background(), stderr)
 }
 
 // A gjallarctl operation always asks for authentication and leaves no sudo
@@ -3398,29 +3375,6 @@ func authenticatePrivilege(ctx context.Context, stderr io.Writer) int {
 		"[GjallarOS] Authenticate for privileged operation.",
 	)
 
-	if probe := probeFingerprint(ctx); probe.State != fingerprintReady {
-		fmt.Fprintln(tty, "[GjallarOS] "+probe.Message())
-	} else {
-		fingerprint := privilegeFingerprintCommand(ctx, tty, authHelper)
-		fingerprintStatus := authenticationCommandStatus(
-			ctx,
-			fingerprint,
-			stderr,
-			"fingerprint authentication",
-		)
-		if fingerprintStatus == 0 {
-			return reportAuthentication(tty, 0)
-		}
-		if fingerprintStatus == 130 {
-			return 130
-		}
-
-		fmt.Fprintln(
-			tty,
-			"[GjallarOS] Fingerprint did not match, timed out or was skipped; using password.",
-		)
-	}
-
 	password := privilegePasswordCommand(
 		ctx,
 		tty,
@@ -3510,11 +3464,6 @@ func loadRebuildMessages(path, host string) ([]string, error) {
 		return nil, fmt.Errorf("no rebuild messages found in %s", path)
 	}
 	return messages, nil
-}
-
-func isTerminal(file *os.File) bool {
-	info, err := file.Stat()
-	return err == nil && info.Mode()&os.ModeCharDevice != 0
 }
 
 func terminalWidth(file *os.File) int {

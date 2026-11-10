@@ -632,7 +632,7 @@ func TestExistingHostOverlayCommitsAfterDeployment(t *testing.T) {
 	)
 	normalDeploy := strings.Index(
 		recoveryBody,
-		"deploy.Apply(ctx, root, s.user.Hostname)",
+		"deployInPlace(",
 	)
 
 	if recoveryInstall < 0 ||

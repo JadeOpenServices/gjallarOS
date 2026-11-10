@@ -2,6 +2,7 @@
   config,
   settings,
   lib,
+  pkgs,
   ...
 }:
 let
@@ -10,6 +11,23 @@ let
 in
 {
   home.pointerCursor.enable = true;
+
+  # OpenJade shape rule (6 px windows and cards, 4 px controls, 2 px marks,
+  # square bars, a 1 px line instead of shadows). Stylix writes one gtk.css
+  # for both GTK versions with an @import of openjade-shape.css (in
+  # stylix.targets.gtk.extraCss below), so each toolkit gets its own copy:
+  # GTK4 / libadwaita syntax under gtk-4.0, the GTK3 file generated from
+  # adw-gtk3 6.5 under gtk-3.0. Regenerate the GTK3 file when adw-gtk3
+  # changes.
+  xdg.configFile."gtk-4.0/openjade-shape.css".source = ./openjade-shape.css;
+  xdg.configFile."gtk-3.0/openjade-shape.css".source = ./openjade-shape-gtk3.css;
+  assertions = [
+    {
+      assertion = pkgs.adw-gtk3.version == "6.5";
+      message = "adw-gtk3 is ${pkgs.adw-gtk3.version}, but themes/lib/openjade-shape-gtk3.css was generated from 6.5. Regenerate it with the themebrain make-gtk3-shape.py and update this check.";
+    }
+  ];
+
   xdg.userDirs.setSessionVariables = true;
 
   gtk = {
@@ -53,6 +71,8 @@ in
       *:focus-visible {
         outline-color: #${semanticTheme.fallback.selection};
       }
+
+      @import url("openjade-shape.css");
     '';
 
     targets.blender.enable = false;

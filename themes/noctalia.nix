@@ -28,8 +28,8 @@
   shell = "noctalia";
   palette = "Obsidian";
 
-  opacity = 0.8;
-  rounding = 25;
+  opacity = 1.0;
+  rounding = 6;
   shadow = false;
   bordersPlusPlus = false;
 

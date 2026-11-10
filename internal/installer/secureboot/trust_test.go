@@ -318,3 +318,25 @@ func TestShimTrustsKey(t *testing.T) {
 		})
 	}
 }
+
+func TestModeFlagsNeedNoRoot(t *testing.T) {
+	f := newFakeFirmware(t)
+	f.root.rootRead = func(path string) ([]byte, error) {
+		t.Fatalf("mode flags asked root for %s", path)
+		return nil, nil
+	}
+	f.set("SecureBoot", efiGlobalGUID, []byte{1})
+
+	secureBoot, setupMode, err := f.root.modeFlags()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if secureBoot != FlagOn || setupMode != FlagMissing {
+		t.Fatalf("flags = %s, %s; want on, missing", secureBoot, setupMode)
+	}
+
+	f.set("SetupMode", efiGlobalGUID, []byte{7})
+	if _, _, err := f.root.modeFlags(); err == nil {
+		t.Fatal("a bad SetupMode value was accepted")
+	}
+}

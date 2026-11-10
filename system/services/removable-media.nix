@@ -186,7 +186,7 @@ let
       --entry \
       --hide-text \
       --title="Authorize USB device" \
-      --text="Fingerprint authentication was unavailable, failed, or timed out.\nEnter your password to authorize this USB decision."
+      --text="Enter your password to authorize this USB decision."
   '';
   start = pkgs.writeShellScript "gjallar-usbtrustd-start" ''
     ownerUID="$(${pkgs.coreutils}/bin/id -u ${lib.escapeShellArg settings.username})"

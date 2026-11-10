@@ -215,6 +215,9 @@ type Verdict struct {
 	// Blocked says why the internet is cut off on this network: an exit
 	// node is wanted here but cannot carry the traffic. Empty when not.
 	Blocked string `json:"blocked,omitempty"`
+	// BlockError is why the block Blocked asks for could not be installed.
+	// The network then carries traffic outside the tunnel.
+	BlockError string `json:"blockError,omitempty"`
 	// Network is the NetworkKey of the network this verdict is for.
 	Network string `json:"network,omitempty"`
 	// Paused is set while a pause lets this network carry the traffic

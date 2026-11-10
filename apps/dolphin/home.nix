@@ -163,6 +163,9 @@ lib.mkIf config.gjallar.apps.dolphin.enable {
       source = dolphinNextcloudIcons.localSource;
     };
 
+  # Darkly has no settings page here; the shape comes from the theme.
+  xdg.configFile."darklyrc".source = ini.generate "darklyrc" dolphinTheme.config;
+
   # Seed once: Dolphin owns its live settings so UI changes survive rebuilds.
   home.activation.dolphinDefaults = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
     dolphin_config=${lib.escapeShellArg "${config.xdg.configHome}/dolphinrc"}

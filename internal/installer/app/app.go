@@ -40,6 +40,7 @@ import (
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/flakesource"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/geolocation"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/hardwareconfig"
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/installreport"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/installstate"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/localgit"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/nixrender"
@@ -85,6 +86,11 @@ type state struct {
 	secureBootFirmware       oddc.EffectiveSecureBootFirmwarePolicy
 	shimFacts                *secureboot.ShimFacts
 	deviceGate               string
+	// oddcModel is the ODDC model id once resolved, "" when none matches.
+	oddcModel string
+	// oddcChecked is true once the ODDC lookup ran, so a report about an
+	// earlier failure does not claim that no model matches.
+	oddcChecked bool
 }
 
 const (
@@ -228,7 +234,7 @@ func maintenanceArgs(args []string, forceRedeploy bool) []string {
 	return append(out, mode)
 }
 
-func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer) int {
+func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer) (code int) {
 	if os.Getenv("GJALLAR_INSTALLER_RESUMED") == "1" {
 		fmt.Fprintf(
 			out,
@@ -273,6 +279,11 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 	if err := requireNixOS("/etc/os-release"); err != nil {
 		return fail(errOut, err)
 	}
+	if !opt.recovery {
+		if err := requireSystemCheckoutRun(installercheck.SystemRepositoryFile, root, geteuid()); err != nil {
+			return fail(errOut, err)
+		}
+	}
 	// A previous run as root may have left root-owned files in the checkout
 	// (generated/hardware.nix 0600 and its backups); hand them back first,
 	// and hand back whatever this run writes when it runs as root itself.
@@ -289,6 +300,24 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 	}()
 	ui := prompt.New(in, out)
 	s := state{control: controlBinary()}
+	// A failure from here on may become an install report the user saves
+	// (Plane 292). Failures before this point are about the checkout, not
+	// the machine, and get no report.
+	recorder := &failureRecorder{Writer: errOut}
+	errOut = recorder
+	defer func() {
+		if code == 1 && recorder.err != nil && reportAllowed(in, s.user) {
+			offerInstallReport(ctx, ui, out, reportInput{
+				reason:      installreport.ReasonFailed,
+				repo:        root,
+				recovery:    opt.recovery,
+				user:        s.user,
+				oddcModel:   s.oddcModel,
+				oddcChecked: s.oddcChecked,
+				failure:     recorder.err,
+			})
+		}
+	}()
 	installedRoot := "/"
 	presetRoot := root
 	if opt.recovery && opt.acceptExisting {
@@ -534,9 +563,20 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 	if resolvedDevice.ModelID == "" {
 		fmt.Fprintln(out, "ODDC canonical model: none (unsupported by ODDC; installing the hardware-neutral baseline)")
 		reportBestEffort(out)
+		if reportAllowed(in, s.user) {
+			offerInstallReport(ctx, ui, out, reportInput{
+				reason:      installreport.ReasonUnknown,
+				repo:        root,
+				recovery:    opt.recovery,
+				user:        s.user,
+				oddcChecked: true,
+			})
+		}
 	} else {
 		fmt.Fprintf(out, "ODDC canonical model: %s\n", resolvedDevice.ModelID)
 	}
+	s.oddcModel = resolvedDevice.ModelID
+	s.oddcChecked = true
 
 	if needsDeviceRebind {
 		if s.user.UnattendedInstall || s.user.Management.Enable {
@@ -604,12 +644,21 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 	// A fresh install picks its disk before the questions, so USB blocking
 	// knows whether the system will run from a USB drive (wiki 752 Q11).
 	freshTarget := ""
-	if !persistentInstalledHost && !opt.noRebuild && (!s.preset || s.user.RunRebuild || opt.forceRedeploy) {
-		// The install ends with a clone of this commit; an unpushed one
-		// stops here, before a disk is wiped.
+	mayInstall := !opt.noRebuild && (!s.preset || s.user.RunRebuild || opt.forceRedeploy)
+	if mayInstall && !s.existing {
+		// A first install clones this commit into the system checkout,
+		// fresh and in place (Plane 313); an unpushed commit or a folder
+		// already in the way stops here, before anything is changed.
 		if err := checkReleasedRevision(ctx, sourceRevision); err != nil {
 			return fail(errOut, fmt.Errorf("the installer cannot set up %s: %w", systemcheckout.Path, err))
 		}
+		if persistentInstalledHost {
+			if err := checkoutFree(installedRoot); err != nil {
+				return fail(errOut, err)
+			}
+		}
+	}
+	if !persistentInstalledHost && mayInstall {
 		freshTarget, err = selectFreshTargetDisk(ctx, ui, out, opt.targetDisk)
 		if err != nil {
 			return fail(errOut, fmt.Errorf("select fresh installation target: %w", err))
@@ -1113,6 +1162,34 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 
 	case hardwareRetain:
 		fmt.Fprintln(out, "Existing hardware configuration retained:", hardwarePath)
+		kept, err := keptHardwareTPM2(
+			ctx,
+			s.render.LUKSTPM2Enable,
+			s.render.Management.Enable,
+			persistentInstalledHost,
+			s.render.SecureBootEnable,
+			hardwarePath,
+		)
+		if err != nil {
+			return fail(errOut, err)
+		}
+		switch kept {
+		case keptTPM2Enrolled:
+			fmt.Fprintln(out, "GjallarOS Secure Boot is not set up on this install; the TPM2 disk unlock already enrolled stays, and a new enrollment waits for Secure Boot.")
+		case keptTPM2NoLUKS, keptTPM2NoSecureBoot:
+			s.render.LUKSTPM2Enable = false
+			if err := saveTPM2Off(&s.user, presetPath, out); err != nil {
+				return fail(errOut, err)
+			}
+			if kept == keptTPM2NoLUKS {
+				fmt.Fprintln(out, "No encrypted system disk in the kept hardware configuration; TPM2 disk unlock stays off.")
+			} else {
+				fmt.Fprintln(out, "GjallarOS Secure Boot is not set up on this install; TPM2 disk unlock stays off.")
+			}
+			if err := nixrender.WriteAtomic(settingsPath, s.render); err != nil {
+				return fail(errOut, err)
+			}
+		}
 
 	case hardwareGenerate:
 		if s.existing && !hardwareResult.existed {
@@ -1133,7 +1210,9 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 		}
 		if !tpm2AllowedForSecureBoot(s.render.SecureBootEnable) {
 			s.render.LUKSTPM2Enable = false
-			s.user.LUKSTPM2Enable = false
+			if err := saveTPM2Off(&s.user, presetPath, out); err != nil {
+				return fail(errOut, err)
+			}
 			fmt.Fprintln(
 				out,
 				"GjallarOS Secure Boot is not set up on this install; TPM2 disk unlock stays off.",
@@ -1150,6 +1229,13 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 			}
 			fmt.Fprint(out, tpmOut)
 			s.render.LUKSTPM2Enable = strings.Contains(tpmOut, "luks_tpm2_enable=true")
+			// Without a LUKS mapping the request can never work here. A
+			// missing TPM keeps the saved request, as before.
+			if noLUKSMapping(hardwarePath) {
+				if err := saveTPM2Off(&s.user, presetPath, out); err != nil {
+					return fail(errOut, err)
+				}
+			}
 		}
 		if err := nixrender.WriteAtomic(settingsPath, s.render); err != nil {
 			return fail(errOut, err)
@@ -1396,7 +1482,16 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 					target,
 				)
 
-				if err := deploy.Apply(ctx, root, s.user.Hostname); err != nil {
+				if err := deployInPlace(
+					ctx,
+					root,
+					installedRoot,
+					s.user.Hostname,
+					sourceRevision,
+					s.user.Channel(),
+					!s.existing,
+					out,
+				); err != nil {
 					return fail(errOut, err)
 				}
 				if resolvedDevice.ModelID == "" {
@@ -3661,6 +3756,7 @@ func fail(out io.Writer, err error) int {
 		}
 		return 130
 	}
+	recordFailure(out, err)
 	fmt.Fprintln(out, "ERROR:", err)
 	return 1
 }
