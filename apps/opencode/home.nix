@@ -257,7 +257,7 @@ lib.mkIf (config.gjallar.apps.opencode.enable && aiEnabled) {
         --mode ${lib.escapeShellArg agentMode} \
         --approval "''${XDG_RUNTIME_DIR}/gjallar-ai/approval.json" \
         --audit "''${XDG_STATE_HOME:-$HOME/.local/state}/gjallar-ai/audit.jsonl" \
-        "$@"
+        -- "$@"
     '')
 
     (pkgs.writeShellScriptBin "opencode-local" ''

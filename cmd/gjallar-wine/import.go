@@ -11,6 +11,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/JadeOpenServices/gjallarOS/internal/tty"
 	"github.com/JadeOpenServices/gjallarOS/internal/winesandbox"
 )
 
@@ -105,7 +106,7 @@ func importCmd(args []string, stdout, stderr io.Writer) error {
 		fmt.Fprintf(stdout, "App %s starts %s. It is in the app menu, and gjallarctl wine run %s starts it.\n", id, a.Exe, id)
 		return nil
 	}
-	return chooseProgram(id, "", os.Stdin, stdinIsTerminal(), stdout, stderr)
+	return chooseProgram(id, "", os.Stdin, tty.Is(os.Stdin), stdout, stderr)
 }
 
 // checkPrefix resolves the prefix to import and checks it is one: a folder
