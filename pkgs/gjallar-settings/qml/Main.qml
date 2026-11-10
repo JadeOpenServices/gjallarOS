@@ -222,8 +222,8 @@ ApplicationWindow {
         Layout.rightMargin: window.gap
         padding: window.gap
         background: Rectangle {
-            radius: 12
-            color: row.hovered ? Qt.lighter(palette.alternateBase, 1.2) : palette.alternateBase
+            radius: 6
+            color: row.hovered ? Qt.tint(palette.alternateBase, Qt.rgba(palette.highlight.r, palette.highlight.g, palette.highlight.b, 0.12)) : palette.alternateBase
         }
         contentItem: RowLayout {
             spacing: window.gap

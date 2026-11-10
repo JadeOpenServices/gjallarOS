@@ -295,7 +295,7 @@ Page {
         Pane {
             Layout.fillWidth: true
             padding: page.gap
-            background: Rectangle { radius: 12; color: palette.alternateBase }
+            background: Rectangle { radius: 6; color: palette.alternateBase }
             contentItem: ColumnLayout {
                 id: card
                 spacing: page.gap / 2
