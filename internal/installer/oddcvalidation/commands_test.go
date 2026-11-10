@@ -4,7 +4,10 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
+
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/systemcheckout"
 )
 
 type commandCall struct {
@@ -163,28 +166,27 @@ func TestRealMachineRebuildUsesGjallarctl(t *testing.T) {
 	result := runRealMachineRebuild(
 		context.Background(),
 		runner,
-		"/repo",
+		systemcheckout.Path,
 		"/usr/bin/gjallarctl",
-		"gjallarOS",
 	)
 	if !result.Passed {
 		t.Fatalf("rebuild gate failed: %+v", result)
 	}
 
 	want := commandCall{
-		dir:  "/repo",
+		dir:  systemcheckout.Path,
 		name: "/usr/bin/gjallarctl",
-		args: []string{
-			"rebuild",
-			"--repo",
-			"/repo",
-			"--host",
-			"gjallarOS",
-			"--no-cleanup",
-		},
+		args: []string{"rebuild", "--no-cleanup"},
 	}
 
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("command=%#v want %#v", got, want)
+	}
+
+	// Any other checkout fails without running anything (Q199).
+	got = commandCall{}
+	result = runRealMachineRebuild(context.Background(), runner, "/home/someone/gjallarOS", "/usr/bin/gjallarctl")
+	if result.Passed || got.name != "" || !strings.Contains(result.Details, "only the system checkout") {
+		t.Fatalf("user checkout: %+v, ran %#v", result, got)
 	}
 }

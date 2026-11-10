@@ -23,12 +23,11 @@ import (
 var systemRebuildCommand = "/run/current-system/sw/bin/gjallar-system-rebuild"
 
 type rebuildOptions struct {
-	repo, host           string
-	debug, cleanup       bool
-	hardwareUpdate       bool
-	channel, switchNow   string
-	update, updateInputs bool
-	rebuildArgs          []string
+	debug, cleanup     bool
+	hardwareUpdate     bool
+	update             bool
+	channel, switchNow string
+	rebuildArgs        []string
 }
 
 // localChangesPath is root's copy of the developer-mode folder.
@@ -55,10 +54,7 @@ var devproofSocketPath = "/etc/systemd/system/gjallar-devproof.socket"
 // refusing there would keep it on the old version for good. Such a system
 // has no gate to keep, so it builds the version that brings the gate,
 // and from then on the check applies.
-func checkDeveloperGrant(system bool, cfg config.User, stderr io.Writer) int {
-	if !system {
-		return 0
-	}
+func checkDeveloperGrant(cfg config.User, stderr io.Writer) int {
 	if err := devgate.Check(developerGrantPath, cfg.Channel(), cfg.DeveloperMode); err != nil {
 		if _, statErr := os.Stat(devproofSocketPath); errors.Is(statErr, os.ErrNotExist) {
 			fmt.Fprintln(stderr, "[GjallarOS] Notice: the running system cannot check the startup PIN or the recovery key yet; building the version that can. Afterwards run gjallarctl settings confirm-developer once")
@@ -87,10 +83,7 @@ func inRecoveryEntry() bool {
 // system rebuild with developer mode on and records it in facts; the caller
 // stages the returned tree next to the source. Development checkouts change
 // the repository itself and build no local folder.
-func stageLocalChanges(system, developerMode bool, facts *flakesource.BuildSource, stdout, stderr io.Writer) (localchanges.Tree, int) {
-	if !system {
-		return localchanges.Tree{}, 0
-	}
+func stageLocalChanges(developerMode bool, facts *flakesource.BuildSource, stdout, stderr io.Writer) (localchanges.Tree, int) {
 	// With developer mode off the folder is not read, so a broken copy never
 	// stops the way back to the official system.
 	if !developerMode {
@@ -118,14 +111,6 @@ func stageLocalChanges(system, developerMode bool, facts *flakesource.BuildSourc
 // list of the root side. The checkout, host and nixos-rebuild arguments are
 // not the user's to choose; only a checked oddc commit passes.
 func systemRebuildArgs(opts rebuildOptions) ([]string, error) {
-	switch {
-	case opts.repo != "":
-		return nil, fmt.Errorf("this system builds %s; --repo is not used", systemcheckout.Path)
-	case opts.host != "":
-		return nil, fmt.Errorf("this system builds the host in its configuration; --host is not used")
-	case opts.updateInputs:
-		return nil, fmt.Errorf("--update-inputs is for development checkouts, not %s", systemcheckout.Path)
-	}
 	args := []string{}
 	if opts.update {
 		args = append(args, "--update")
@@ -234,7 +219,7 @@ func runSystem(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "ERROR: %v\n", err)
 		return 2
 	}
-	return rebuildCheckout(systemcheckout.Path, opts, true, stdout, stderr)
+	return rebuildCheckout(systemcheckout.Path, opts, stdout, stderr)
 }
 
 // parseSystemRebuildArgs reads the fixed argument list systemRebuildArgs

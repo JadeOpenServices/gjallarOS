@@ -39,6 +39,12 @@ func upstreamRemote(t *testing.T) string {
 	return git("rev-parse", "HEAD")
 }
 
+// lockedODDC is the real ODDC commit flake.lock pins.
+const lockedODDC = "2aa66ac7dd24a0900983ccfc6841d50c5e04663d"
+
+// realLock is this repository's flake.lock, resolved before tests chdir.
+var realLock, _ = filepath.Abs("../../flake.lock")
+
 // lockedRepo is a checkout with this repository's flake.lock, its ODDC
 // input moved to rev.
 func lockedRepo(t *testing.T, rev string) string {

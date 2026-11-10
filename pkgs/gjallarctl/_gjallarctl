@@ -7,16 +7,13 @@
 _gjallarctl_rebuild() {
   _arguments -S \
     '(- *)'{-h,--help}'[show help]' \
-    '--repo[GjallarOS checkout]:checkout:_files -/' \
-    '--host[host name]:host:' \
     '(-d --debug)'{-d,--debug}'[show the full build output]' \
     '(-n --no-cleanup)'{-n,--no-cleanup}'[keep old generations]' \
     '--update[update the checkout first]' \
-    '--update-inputs[update the flake inputs first]' \
     '--hardware-update[move the ODDC hardware catalogue pin first]' \
     '--channel[ODDC channel]:channel:(stable staging)' \
     '--switch[switch after the hardware update]:switch:(0 1)' \
-    '*::nixos-rebuild argument:'
+    '*::override (-- --override-input oddc COMMIT):'
 }
 
 # The root side of rebuild: the options systemRebuildArgs passes on.
@@ -411,7 +408,6 @@ _gjallarctl_snapshots() {
 _gjallarctl_oddc() {
   local -a cmds=(
     'validate-device:check this machine against its ODDC model'
-    'update:move the ODDC pin'
   )
   if (( CURRENT == 2 )); then
     _describe -t commands 'oddc command' cmds
@@ -422,11 +418,6 @@ _gjallarctl_oddc() {
   case $words[1] in
     validate-device)
       _arguments '--repo[GjallarOS checkout]:checkout:_files -/' ;;
-    update)
-      _arguments '--repo[GjallarOS checkout]:checkout:_files -/' \
-        '--rebuild[rebuild after the update]' \
-        '(--debug)--simple[print only the result line]' \
-        '(--simple)--debug[print the ODDC state before and after]' ;;
   esac
 }
 

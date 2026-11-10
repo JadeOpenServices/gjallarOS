@@ -51,7 +51,6 @@ func runDeviceStage(
 			runner,
 			repo,
 			executable,
-			device.Hostname,
 		),
 	}
 

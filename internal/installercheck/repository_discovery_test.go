@@ -38,46 +38,7 @@ func TestDiscoverRepositoryWalksUp(t *testing.T) {
 		"",
 		"",
 		"",
-		"",
 		filepath.Join(root, "internal", "installercheck"),
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if got != root {
-		t.Fatalf("repository = %q, want %q", got, root)
-	}
-}
-
-func TestDiscoverRepositoryUsesRememberedCheckout(t *testing.T) {
-	root := repositoryRootForTest(t)
-
-	got, err := discoverRepository(
-		"",
-		"",
-		root,
-		"/definitely/not/a/repository",
-		t.TempDir(),
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if got != root {
-		t.Fatalf("repository = %q, want %q", got, root)
-	}
-}
-
-func TestDiscoverRepositoryEnvironmentWinsRemembered(t *testing.T) {
-	root := repositoryRootForTest(t)
-
-	got, err := discoverRepository(
-		"",
-		root,
-		"/definitely/not/a/repository",
-		"/definitely/not/a/repository",
-		t.TempDir(),
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -94,7 +55,6 @@ func TestDiscoverRepositoryExplicitWins(t *testing.T) {
 	got, err := discoverRepository(
 		root,
 		"/definitely/not/a/repository",
-		"/also/not/a/repository",
 		"/also/not/a/repository",
 		t.TempDir(),
 	)
@@ -113,7 +73,6 @@ func TestDiscoverRepositoryUsesSystemCheckout(t *testing.T) {
 	got, err := discoverRepository(
 		"",
 		"",
-		"/definitely/not/a/repository",
 		root+"\n",
 		t.TempDir(),
 	)
@@ -126,54 +85,6 @@ func TestDiscoverRepositoryUsesSystemCheckout(t *testing.T) {
 	}
 }
 
-func TestDiscoverRepositoryRememberedWinsSystem(t *testing.T) {
-	root := repositoryRootForTest(t)
-	other := t.TempDir()
-
-	got, err := discoverRepository("", "", root, other, t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if got != root {
-		t.Fatalf("repository = %q, want %q", got, root)
-	}
-}
-
-func TestRememberRepository(t *testing.T) {
-	root := repositoryRootForTest(t)
-
-	t.Setenv("XDG_STATE_HOME", t.TempDir())
-
-	if err := RememberRepository(root); err != nil {
-		t.Fatal(err)
-	}
-
-	got, err := readRememberedRepository()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if got != root {
-		t.Fatalf("remembered = %q, want %q", got, root)
-	}
-
-	path := filepath.Join(
-		os.Getenv("XDG_STATE_HOME"),
-		"gjallarOS",
-		"repository",
-	)
-
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if strings.TrimSpace(string(data)) != root {
-		t.Fatalf("state file = %q", string(data))
-	}
-}
-
 func TestDiscoverRepositorySystemCheckoutWinsClones(t *testing.T) {
 	root := repositoryRootForTest(t)
 	clone := t.TempDir()
@@ -181,7 +92,7 @@ func TestDiscoverRepositorySystemCheckoutWinsClones(t *testing.T) {
 	systemCheckoutPath = root
 	t.Cleanup(func() { systemCheckoutPath = old })
 
-	got, err := discoverRepository("", clone, clone, root+"\n", clone)
+	got, err := discoverRepository("", clone, root+"\n", clone)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -198,7 +109,7 @@ func TestDiscoverRepositoryMissingSystemCheckoutFails(t *testing.T) {
 	systemCheckoutPath = missing
 	t.Cleanup(func() { systemCheckoutPath = old })
 
-	got, err := discoverRepository("", "", root, missing, root)
+	got, err := discoverRepository("", root, missing, root)
 	if err == nil || !strings.Contains(err.Error(), "the system checkout "+missing+" is missing or broken") ||
 		!strings.Contains(err.Error(), "sudo gjallarctl system clone --from DIR") {
 		t.Fatalf("repository = %q, %v", got, err)
@@ -208,11 +119,11 @@ func TestDiscoverRepositoryMissingSystemCheckoutFails(t *testing.T) {
 func TestDiscoverRepositoryNamesStaleSystemPointer(t *testing.T) {
 	missing := filepath.Join(t.TempDir(), "gjallarOS")
 	start := t.TempDir()
-	_, err := discoverRepository("", "", "", missing, start)
+	_, err := discoverRepository("", "", missing, start)
 	if err == nil || !strings.Contains(err.Error(), "the checkout at "+missing+" that this system was built from is missing or empty") {
 		t.Fatalf("err = %v", err)
 	}
-	if _, err := discoverRepository("", "", "", "", start); err == nil || !strings.Contains(err.Error(), "no GjallarOS repository found") {
+	if _, err := discoverRepository("", "", "", start); err == nil || !strings.Contains(err.Error(), "no GjallarOS repository found") {
 		t.Fatalf("no pointer: %v", err)
 	}
 }

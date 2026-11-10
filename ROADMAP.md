@@ -1019,7 +1019,7 @@ way to root.
       script starts from `env -i`, runs the installed `gjallarctl system
       check`, builds `gjallarctl` from the checkout and runs `gjallarctl
       system rebuild`. The root side never reads `GJALLAROS_REPO`, the
-      remembered state file, the working directory or `--repo`; `--host`,
+      working directory or `--repo`; `--host`,
       `--update-inputs` and nixos-rebuild arguments are refused, except
       `--override-input oddc <commit>`. Before building it checks: origin is
       the official URL, HEAD is on one of its branches, no tracked file

@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"github.com/JadeOpenServices/gjallarOS/internal/binarycache"
 	"github.com/JadeOpenServices/gjallarOS/internal/hardware/deviceprobe"
-	"github.com/JadeOpenServices/gjallarOS/internal/installer/repojson"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/systemcheckout"
 	"io"
 	"math"
@@ -1903,7 +1902,7 @@ func printUsage(out io.Writer) {
 	fmt.Fprintln(out, "Usage: gjallarctl check [--repo PATH] [--timeout DURATION]")
 	fmt.Fprintln(out, "       gjallarctl preflight [--repo PATH]")
 	oddccli.Usage(out)
-	fmt.Fprintln(out, "       gjallarctl rebuild [--repo PATH] [--host HOST] [-d|--debug] [-n|--no-cleanup] [--update] [--update-inputs] [--hardware-update [--channel stable|staging] [--switch 0|1]] [NIXOS-REBUILD-ARGS...]")
+	fmt.Fprintln(out, "       gjallarctl rebuild [-d|--debug] [-n|--no-cleanup] [--update] [--hardware-update [--channel stable|staging] [--switch 0|1]] [-- --override-input oddc COMMIT]")
 	fmt.Fprintln(out, "       gjallarctl system {check|rebuild}   (root; rebuild starts it for the system checkout)")
 	fmt.Fprintln(out, "       gjallarctl system apply              (developer mode: build ~/GjallarOS-local)")
 	fmt.Fprintln(out, "       gjallarctl system status             (what the running system was built from)")
@@ -1954,10 +1953,9 @@ func normalizeRebuildUserIntent(user *config.User, repo string) (bool, error) {
 }
 
 func runRebuild(args []string, stdout, stderr io.Writer) int {
-	repo, host := "", ""
 	debug, cleanup := false, true
 	hardwareUpdate, channel, switchNow := false, "", ""
-	update, updateInputs := false, false
+	update := false
 	var rebuildArgs []string
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
@@ -1966,8 +1964,6 @@ func runRebuild(args []string, stdout, stderr io.Writer) int {
 			return 0
 		case "--update":
 			update = true
-		case "--update-inputs":
-			updateInputs = true
 		case "--hardware-update":
 			hardwareUpdate = true
 		case "--channel":
@@ -1987,17 +1983,6 @@ func runRebuild(args []string, stdout, stderr io.Writer) int {
 			}
 			i++
 			switchNow = args[i]
-		case "--repo", "--host":
-			if i+1 >= len(args) {
-				fmt.Fprintf(stderr, "ERROR: %s requires a value\n", args[i])
-				return 2
-			}
-			i++
-			if args[i-1] == "--repo" {
-				repo = args[i]
-			} else {
-				host = args[i]
-			}
 		case "-d", "--debug":
 			debug = true
 		case "-n", "--no-cleanup":
@@ -2009,72 +1994,44 @@ func runRebuild(args []string, stdout, stderr io.Writer) int {
 			rebuildArgs = append(rebuildArgs, args[i])
 		}
 	}
-	opts := rebuildOptions{
-		repo: repo, host: host, debug: debug, cleanup: cleanup,
-		hardwareUpdate: hardwareUpdate, channel: channel, switchNow: switchNow,
-		update: update, updateInputs: updateInputs, rebuildArgs: rebuildArgs,
-	}
-	if systemcheckout.Active(installercheck.SystemRepositoryFile) {
-		return startSystemRebuild(opts, stdout, stderr)
-	}
-
-	resolvedRepo, err := installercheck.DiscoverRepository(repo)
-	if err != nil {
-		fmt.Fprintf(stderr, "ERROR: resolve GjallarOS repository: %v\n", err)
+	if (channel != "" || switchNow != "") && !hardwareUpdate {
+		fmt.Fprintln(stderr, "ERROR: --channel and --switch require --hardware-update")
 		return 2
 	}
-	repo = resolvedRepo
-
-	// A root rebuild or installer run leaves root-owned files in the
-	// checkout that this user's flake staging cannot read; hand them back.
-	if err := checkoutowner.Ensure(context.Background(), repo, func(ctx context.Context, args ...string) error {
-		if status := runPrivilegedCommand(ctx, stdout, stderr, args...); status != 0 {
-			return fmt.Errorf("%s exited %d", args[0], status)
-		}
-		return nil
-	}); err != nil {
-		fmt.Fprintf(stderr, "[GjallarOS] Error: %v\n", err)
+	opts := rebuildOptions{
+		debug: debug, cleanup: cleanup,
+		hardwareUpdate: hardwareUpdate, channel: channel, switchNow: switchNow,
+		update: update, rebuildArgs: rebuildArgs,
+	}
+	// Only the root-owned system checkout is built (Q199); a system still
+	// built from a user's checkout moves first.
+	if !systemcheckout.Active(installercheck.SystemRepositoryFile) {
+		fmt.Fprintf(stderr, "[GjallarOS] Error: this system is not built from %s; run gjallarctl system move, it shows the one root step. Nothing rebuilt\n", systemcheckout.Path)
 		return 1
 	}
-	defer func() {
-		if err := checkoutowner.Repair(repo); err != nil {
-			fmt.Fprintf(stderr, "[GjallarOS] Warning: %v\n", err)
-		}
-	}()
-	return rebuildCheckout(repo, opts, false, stdout, stderr)
+	return startSystemRebuild(opts, stdout, stderr)
 }
 
-// rebuildCheckout pulls, refreshes and builds repo. system is set for the
-// root side of a system checkout rebuild: the checkout is then checked
-// before anything in it is evaluated, and nothing is written back for the
-// user.
-func rebuildCheckout(repo string, opts rebuildOptions, system bool, stdout, stderr io.Writer) int {
-	host, debug, cleanup := opts.host, opts.debug, opts.cleanup
+// rebuildCheckout is the root side of a rebuild: it pulls, refreshes and
+// builds the system checkout repo. The checkout is checked before anything
+// in it is evaluated.
+func rebuildCheckout(repo string, opts rebuildOptions, stdout, stderr io.Writer) int {
+	debug, cleanup := opts.debug, opts.cleanup
 	hardwareUpdate, channel, switchNow := opts.hardwareUpdate, opts.channel, opts.switchNow
-	update, updateInputs, rebuildArgs := opts.update, opts.updateInputs, opts.rebuildArgs
+	update, rebuildArgs := opts.update, opts.rebuildArgs
 
 	// The channel pull below follows the configuration, so the grant is
 	// checked before anything is fetched (Plane 283).
-	if system {
-		user, err := config.Load(filepath.Join(repo, "user.config.json"))
-		if err != nil {
-			fmt.Fprintf(stderr, "[GjallarOS] Error: %v; nothing rebuilt\n", err)
-			return 1
-		}
-		if code := checkDeveloperGrant(system, user, stderr); code != 0 {
-			return code
-		}
+	user, err := config.Load(filepath.Join(repo, "user.config.json"))
+	if err != nil {
+		fmt.Fprintf(stderr, "[GjallarOS] Error: %v; nothing rebuilt\n", err)
+		return 1
+	}
+	if code := checkDeveloperGrant(user, stderr); code != 0 {
+		return code
 	}
 	if update {
 		if code := pullCheckout(repo, stdout, stderr); code != 0 {
-			return code
-		}
-	}
-	// Moves every flake input past what upstream tested; for development
-	// checkouts, not endpoints.
-	if updateInputs {
-		if code := runCommand(context.Background(), stdout, stderr, "nix", "flake", "update", "--flake", repo); code != 0 {
-			fmt.Fprintf(stderr, "[GjallarOS] Error: nix flake update failed (exit %d); nothing rebuilt\n", code)
 			return code
 		}
 	}
@@ -2098,20 +2055,11 @@ func rebuildCheckout(repo string, opts rebuildOptions, system bool, stdout, stde
 
 	// The system checkout must match a reviewed commit, so it is checked,
 	// not rewritten.
-	revision := ""
-	if system {
-		checked, status := inspectSystemSource(repo, stdout, stderr)
-		if status != 0 {
-			return status
-		}
-		revision = checked.Revision
-	} else if _, err := repojson.CanonicalizeChangedTracked(
-		context.Background(),
-		repo,
-	); err != nil {
-		fmt.Fprintf(stderr, "ERROR: canonicalize changed JSON: %v\n", err)
-		return 1
+	checked, code := inspectSystemSource(repo, stdout, stderr)
+	if code != 0 {
+		return code
 	}
+	revision := checked.Revision
 
 	// Rebuild consumes the same typed user intent as the installer and only
 	// refreshes direct user-owned generated-state assignments. Hardware, AI
@@ -2129,7 +2077,7 @@ func rebuildCheckout(repo string, opts rebuildOptions, system bool, stdout, stde
 	}
 	// Checked again on the configuration this build reads, which may have
 	// changed since the check above.
-	if code := checkDeveloperGrant(system, userConfig, stderr); code != 0 {
+	if code := checkDeveloperGrant(userConfig, stderr); code != 0 {
 		return code
 	}
 	legacyWebApplications := config.HasLegacyWebApplications(rawConfig)
@@ -2156,15 +2104,13 @@ func rebuildCheckout(repo string, opts rebuildOptions, system bool, stdout, stde
 		fmt.Fprintf(stdout, "[GjallarOS] Removed %s from user.config.json; GjallarOS no longer ships it (one-time).\n", strings.Join(retiredEntries, ", "))
 	}
 
+	host := strings.TrimSpace(userConfig.Hostname)
 	if host == "" {
-		host = strings.TrimSpace(userConfig.Hostname)
-		if host == "" {
-			fmt.Fprintln(
-				stderr,
-				"[GjallarOS] Error: user configuration has no hostname",
-			)
-			return 1
-		}
+		fmt.Fprintln(
+			stderr,
+			"[GjallarOS] Error: user configuration has no hostname",
+		)
+		return 1
 	}
 
 	messagesPath := filepath.Join(
@@ -2229,89 +2175,22 @@ func rebuildCheckout(repo string, opts rebuildOptions, system bool, stdout, stde
 		return status
 	}
 
-	// Managed JODS endpoints deliberately remove the desktop user from
-	// wheel. Rebuilds on those systems therefore cross the explicit root
-	// authentication boundary instead of attempting sudo.
+	// Managed JODS endpoints: JODS moves the pin; elsewhere the user decides.
 	managedDevice := userConfig.Management.Enable
-
-	// JODS moves the pin on managed endpoints; elsewhere the user decides.
 	if !hardwareUpdate && !managedDevice {
 		oddccli.CheckUpdate(repo, stdout)
-	}
-
-	if managedDevice && os.Geteuid() != 0 {
-		executable, err := os.Executable()
-		if err != nil {
-			fmt.Fprintf(stderr, "[GjallarOS] Error: resolve gjallarctl executable: %v\n", err)
-			return 1
-		}
-
-		rootArgs := []string{
-			executable,
-			"rebuild",
-			"--repo",
-			repo,
-			"--host",
-			host,
-		}
-
-		if debug {
-			rootArgs = append(rootArgs, "--debug")
-		}
-		if !cleanup {
-			rootArgs = append(rootArgs, "--no-cleanup")
-		}
-
-		rootArgs = append(rootArgs, rebuildArgs...)
-		if colors := rebuildColors(stderr); colors != "" {
-			rootArgs = append([]string{"env", noctaliaColorsEnv + "=" + colors}, rootArgs...)
-		}
-
-		fmt.Fprintln(
-			stdout,
-			"[GjallarOS] Managed endpoint: authenticating as root for rebuild.",
-		)
-
-		status := runCommand(
-			context.Background(),
-			stdout,
-			stderr,
-			"su",
-			"-l",
-			"-c",
-			shellJoin(rootArgs),
-			"root",
-		)
-		// Root's login has its own home; the user remembers the checkout.
-		if status == 0 {
-			if err := installercheck.RememberRepository(repo); err != nil {
-				fmt.Fprintf(stderr, "WARN: remember GjallarOS repository: %v\n", err)
-			}
-		}
-		return status
-	}
-	if os.Geteuid() != 0 {
-		if status := runPrivilegeAuthentication(
-			context.Background(),
-			stderr,
-		); status != 0 {
-			return status
-		}
 	}
 
 	started := time.Now()
 	colors := rebuildColors(stderr)
 	// Evaluate a staged copy: path: on the checkout copies .git (gigabytes of
-	// history) and ignored scratch such as .vm into the store on every rebuild.
-	if !system {
-		revision = checkoutRevision(repo)
-	}
+	// history) into the store on every rebuild.
 	facts := &flakesource.BuildSource{Revision: revision, ODDC: lockedODDC, ODDCPinned: lockedODDC}
 	if overrideRev != "" {
 		facts.ODDC = overrideRev
 		fmt.Fprintf(stdout, "[GjallarOS] oddc %s is a commit, not a release; a plain rebuild returns to %s\n", overrideRev[:12], lockedODDC[:12])
 	}
-	local, localStatus := stageLocalChanges(system, userConfig.DeveloperMode, facts, stdout, stderr)
+	local, localStatus := stageLocalChanges(userConfig.DeveloperMode, facts, stdout, stderr)
 	if localStatus != 0 {
 		return localStatus
 	}
@@ -2341,16 +2220,6 @@ func rebuildCheckout(repo string, opts rebuildOptions, system bool, stdout, stde
 	} else {
 		status = runRebuildQuiet(stdout, stderr, host, messages, started, plan)
 	}
-	if status == 0 && !system {
-		if err := installercheck.RememberRepository(repo); err != nil {
-			fmt.Fprintf(
-				stderr,
-				"WARN: remember GjallarOS repository: %v\n",
-				err,
-			)
-		}
-	}
-
 	if status == 0 && cleanup {
 		if cleanupStatus := runCleanupOld(nil, stdout, stderr); cleanupStatus != 0 {
 			fmt.Fprintln(
@@ -2643,55 +2512,32 @@ func pullCheckout(repo string, stdout, stderr io.Writer) int {
 }
 
 func printRebuildHelp(out io.Writer) {
-	fmt.Fprint(out, `Usage: gjallarctl rebuild [OPTIONS] [NIXOS-REBUILD-ARGS...]
+	fmt.Fprint(out, `Usage: gjallarctl rebuild [OPTIONS] [-- --override-input oddc COMMIT]
 
-Apply the GjallarOS configuration in the system checkout.
+Apply the GjallarOS configuration in the system checkout
+(/etc/gjallar/system). Root builds it as it is on the official origin;
+developer mode also builds local changes in it. A system still built from a user's checkout moves first: run
+gjallarctl system move, it shows the one root step.
 
   --update              Update the checkout from its release channel first
                         (releaseChannel in user.config.json: dev, staging
                         or stable). Fast-forward only; local commits or
                         edits stop it.
-  --update-inputs       Move every flake input to its newest version first.
-                        For development checkouts, not normal installs.
   --hardware-update     Move the ODDC hardware catalogue pin first.
     --channel stable|staging
                           ODDC channel to follow (default stable).
     --switch 0|1          0 moves the pin without rebuilding.
-  --repo PATH           Use this checkout instead of the system one.
-  --host HOST           Build this host instead of the configured one.
   -d, --debug           Show the full nixos-rebuild output.
   -n, --no-cleanup      Keep old system generations.
   -h, --help            Show this help.
 
-Arguments after -- go to nixos-rebuild. --override-input oddc must name a
-commit (github:JadeOpenServices/oddc/<commit>); the ODDC answer for this
-machine is fetched at that commit too. Such a commit is not a release, so
-a notice comes at every login until a plain gjallarctl rebuild returns to
-the pin.
-
-When /etc/gjallar/system is the system checkout, root builds it as it is
-on the official origin: --repo, --host, --update-inputs and other
-nixos-rebuild arguments are refused, and an oddc override must be a commit
-of an official ODDC branch.
+Only --override-input oddc may follow --. It must name a commit of an
+official ODDC branch (github:JadeOpenServices/oddc/<commit>); the ODDC
+answer for this machine is fetched at that commit too. Such a commit is not
+a release, so a notice comes at every login until a plain gjallarctl
+rebuild returns to the pin. Developer mode also builds local changes in
+the system checkout.
 `)
-}
-
-// checkoutRevision is HEAD of a development checkout, with -dirty when a
-// tracked file differs from it, or "" when git cannot tell.
-func checkoutRevision(repo string) string {
-	out, err := exec.Command("git", "-C", repo, "rev-parse", "--verify", "HEAD^{commit}").Output()
-	if err != nil {
-		return ""
-	}
-	revision := strings.TrimSpace(string(out))
-	status, err := exec.Command("git", "-C", repo, "status", "--porcelain", "--untracked-files=no").Output()
-	if err != nil {
-		return ""
-	}
-	if len(bytes.TrimSpace(status)) > 0 {
-		revision += "-dirty"
-	}
-	return revision
 }
 
 func gitHead(repo string) string {
