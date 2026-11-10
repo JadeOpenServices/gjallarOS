@@ -245,8 +245,8 @@ Page {
                     // Buttons take their own clicks; the rest of the row
                     // opens the detail page.
                     background: Rectangle {
-                        radius: 12
-                        color: open.containsMouse ? Qt.lighter(palette.alternateBase, 1.2) : palette.alternateBase
+                        radius: 6
+                        color: open.containsMouse ? Qt.tint(palette.alternateBase, Qt.rgba(palette.highlight.r, palette.highlight.g, palette.highlight.b, 0.12)) : palette.alternateBase
                         MouseArea {
                             id: open
                             anchors.fill: parent

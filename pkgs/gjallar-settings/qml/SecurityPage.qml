@@ -83,7 +83,7 @@ Page {
                     Layout.leftMargin: page.gap
                     Layout.rightMargin: page.gap
                     padding: page.gap
-                    background: Rectangle { radius: 12; color: palette.alternateBase }
+                    background: Rectangle { radius: 6; color: palette.alternateBase }
 
                     RowLayout {
                         anchors.fill: parent
@@ -94,7 +94,7 @@ Page {
                             Layout.topMargin: 6
                             implicitWidth: 10
                             implicitHeight: 10
-                            radius: 5
+                            radius: 2
                             color: page.stateColour(row.modelData.state)
                         }
 

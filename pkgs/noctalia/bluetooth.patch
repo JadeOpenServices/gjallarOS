@@ -2,6 +2,15 @@ diff --git a/assets/translations/de.json b/assets/translations/de.json
 index e4c34d9e2d..f5619917aa 100644
 --- a/assets/translations/de.json
 +++ b/assets/translations/de.json
+@@ -202,7 +202,7 @@
+     "bluetooth": {
+       "accept": "Annehmen",
+       "address": "Adresse",
+-      "auto-reconnect": "Automatisch wiederverbinden",
++      "auto-reconnect": "Automatisch verbinden",
+       "bluetooth": "Bluetooth",
+       "enter-code": "Code eingeben",
+       "no-devices": "Keine Geräte gefunden. Starte den Scan, um nahegelegene Bluetooth-Geräte zu finden.",
 @@ -224,6 +224,7 @@
          "connected": "Verbunden",
          "paired": "Gekoppelt"

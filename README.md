@@ -19,7 +19,7 @@ NixOS 26.05 · Hyprland · Noctalia · ODDC hardware policy · TPM2 disk encrypt
 
 <br><br>
 
-<img src="docs/screenshots/desktop.webp" alt="GjallarOS desktop with the Noctalia bar" width="100%">
+<img src="docs/screenshots/desktop.webp" alt="gjallarOS desktop with the Noctalia bar" width="100%">
 
 </div>
 
@@ -94,14 +94,14 @@ settings, generated hardware data and backups are excluded from Git.
   </tr>
   <tr>
     <td width="50%"><img src="docs/screenshots/greeter.webp" alt="Login greeter"></td>
-    <td width="50%"><img src="docs/screenshots/lock-screen.webp" alt="Lock screen with weather"></td>
+    <td width="50%"><img src="docs/screenshots/lock-screen.webp" alt="Lock screen"></td>
   </tr>
   <tr>
-    <td colspan="2" align="center"><img src="docs/screenshots/boot-unlock.webp" alt="Boot splash asking for the disk PIN" width="50%"></td>
+    <td colspan="2" align="center"><img src="docs/screenshots/boot-unlock.webp" alt="Boot splash at disk unlock" width="50%"></td>
   </tr>
 </table>
 
-<sub>Tiling · launcher · control center · greeter · lock screen · TPM2+PIN disk unlock at boot.<br>
+<sub>Tiling · launcher · control center · greeter · lock screen · disk unlock at boot.<br>
 Taken in a QEMU test VM at 1920×1080.</sub>
 </div>
 

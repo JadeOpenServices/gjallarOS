@@ -148,7 +148,14 @@ in
           ++ [ "gjallar/time" ];
         shell = {
           clipboard_enabled = false;
-          corner_radius_scale = 2.0;
+          # OpenJade shape rule: 6 px panels and cards, 4 px buttons and
+          # inputs, 2 px marks. pkgs/noctalia/openjade-shape.patch sets those
+          # as Noctalia's base radii and keeps the UI scale off them, so this
+          # stays 1.0.
+          corner_radius_scale = 1.0;
+          # No drop shadows: popups and panels get the 1 px outline instead
+          # (panel.borders and border_width keep their defaults).
+          popup_shadows = false;
           font_family = themeDetails.uiFont or themeDetails.font;
           polkit_agent = true;
           # No "Welcome to Noctalia" wizard: its choices are saved as overrides
@@ -169,6 +176,7 @@ in
             directory = "${config.home.homeDirectory}/Pictures/Screenshots";
           };
           panel = {
+            shadow = false;
             clipboard_placement = "attached";
             open_near_click_clipboard = true;
             open_near_click_control_center = true;
@@ -263,8 +271,9 @@ in
             interactive = false;
           };
 
-          # Dots for the other used workspaces; the focused one grows into a
-          # pill with the active app's icon, so no separate window widget.
+          # Short 2 px bars for the other used workspaces; the focused one
+          # grows into a block with the active app's icon, so no separate
+          # window widget.
           workspaces = {
             style = "focus_hint";
             show_labels = false;
@@ -387,13 +396,17 @@ in
 
           padding = 14;
 
-          radius = 12;
-          radius_top_left = 20;
-          radius_top_right = 20;
+          # The bar hangs from the top edge: square where it meets the
+          # screen, 6 px below, no flared corners. Widget capsules and the
+          # focused workspace get 2 px corners instead of a pill.
+          radius = 6;
+          radius_top_left = 0;
+          radius_top_right = 0;
 
-          radius_bottom_left = 12;
-          radius_bottom_right = 12;
-          concave_edge_corners = true;
+          radius_bottom_left = 6;
+          radius_bottom_right = 6;
+          concave_edge_corners = false;
+          capsule_radius = 2;
           background_opacity = 0.94;
           shadow = false;
 
@@ -436,11 +449,16 @@ in
         };
         # Noctalia picks one of eleven lock effects at random (pixel,
         # honeycomb, stripes, ...) and runs it for 1.5 s. Lock and unlock
-        # use a plain cross-fade instead, short enough to feel instant but
-        # still soft. 100 ms is the shortest Noctalia accepts.
+        # use a plain cross-fade instead, 500 ms on the house curve like
+        # every other OpenJade open (themebrain motion rule). Noctalia uses
+        # one value for lock and unlock.
+        # OpenJade artwork rule: avatars are rounded squares (6 px at this
+        # size), not circles.
+        control_center.circular_avatar = false;
         lockscreen = {
           transition = [ "fade" ];
-          transition_duration = 200;
+          # Times the lock only; unlock fades out in 150 ms (openjade-artwork.patch).
+          transition_duration = 500;
         };
         wallpaper = {
           directory = "${config.home.homeDirectory}/Pictures";
