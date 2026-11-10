@@ -20,7 +20,7 @@ import (
 )
 
 // Contact is where a saved report goes. Shown as text only.
-const Contact = "contact@openjade.de"
+const Contact = "report@openjade.de"
 
 // Format is the report layout version.
 const Format = 1
