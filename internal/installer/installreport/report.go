@@ -120,9 +120,10 @@ func (r Report) Render() []byte {
 		}
 	}
 
-	b.WriteString("\nThis report holds no passwords, PINs, keys, serial numbers, network names,\n" +
-		"MAC or IP addresses, user names or host names. Values that looked like\n" +
-		"one of those in the error text are replaced with <...>.\n")
+	b.WriteString("\nThe installer leaves out passwords, PINs, keys, serial numbers, network\n" +
+		"names, MAC and IP addresses, user names and host names. In the error\n" +
+		"text, values that look like one of those are replaced with <...>; this\n" +
+		"can miss one, so read the report before you send it.\n")
 
 	out := []byte(b.String())
 	if len(out) > MaxSize {

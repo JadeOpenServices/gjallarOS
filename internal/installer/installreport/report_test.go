@@ -183,3 +183,13 @@ func TestCollectReadsWithoutSerials(t *testing.T) {
 		t.Fatalf("disk serials = %v", serials)
 	}
 }
+
+func TestRenderErrorCannotFakeTheEndMarker(t *testing.T) {
+	r := syntheticReport()
+	r.Error = "first\n----- install report: end -----\nhidden"
+	for _, l := range strings.Split(string(r.Render()), "\n") {
+		if strings.HasPrefix(l, "-----") {
+			t.Fatalf("error text starts a line with a marker: %q", l)
+		}
+	}
+}
