@@ -34,10 +34,10 @@ index b73a158..f146dc6 100644
      m_art->setVisible(false);
      m_art->setSize(0.0F, 0.0F);
 diff --git a/src/shell/bar/widgets/taskbar_widget.cpp b/src/shell/bar/widgets/taskbar_widget.cpp
-index 315a431..c1c95b6 100644
+index 315a431..f0cb0e2 100644
 --- a/src/shell/bar/widgets/taskbar_widget.cpp
 +++ b/src/shell/bar/widgets/taskbar_widget.cpp
-@@ -43,6 +43,10 @@
+@@ -43,6 +43,13 @@
  namespace {
  
    constexpr auto kDragHoldDelay = std::chrono::milliseconds(300);
@@ -45,10 +45,13 @@ index 315a431..c1c95b6 100644
 +  // bars, twice as long as the old dot.
 +  constexpr float kMarkerThickness = 2.0F;
 +  constexpr float kMarkerLengthRatio = 2.0F;
++  // The focused app's bar is longer, as in the dock, so focus is not shown by
++  // colour alone.
++  constexpr float kActiveMarkerLengthRatio = 3.0F;
    // Lifts the dragged tile above the rest of the strip while it follows the pointer.
    constexpr std::int32_t kDragTileZIndex = 200;
  
-@@ -1222,7 +1226,7 @@ void TaskbarWidget::buildTaskButtons(Renderer& renderer) {
+@@ -1222,7 +1229,7 @@ void TaskbarWidget::buildTaskButtons(Renderer& renderer) {
          .fill = colorSpecFromRole(ColorRole::Surface),
          .border = colorSpecFromRole(ColorRole::Secondary),
          .borderWidth = m_contentScale,
@@ -57,7 +60,7 @@ index 315a431..c1c95b6 100644
          .width = markerWidth,
          .height = markerHeight,
          .visible = windowCount > 0 && minimizedCount == windowCount,
-@@ -1233,7 +1237,7 @@ void TaskbarWidget::buildTaskButtons(Renderer& renderer) {
+@@ -1233,7 +1240,7 @@ void TaskbarWidget::buildTaskButtons(Renderer& renderer) {
      minimizeIndicator->setHitTestVisible(false);
      auto minus = ui::box({
          .fill = colorSpecFromRole(ColorRole::OnSurface),
@@ -66,7 +69,7 @@ index 315a431..c1c95b6 100644
          .width = minusWidth,
          .height = minusHeight,
          .participatesInLayout = false,
-@@ -1264,21 +1268,23 @@ void TaskbarWidget::buildTaskButtons(Renderer& renderer) {
+@@ -1264,21 +1271,23 @@ void TaskbarWidget::buildTaskButtons(Renderer& renderer) {
        const std::size_t dotCount = badgeCount >= 4 ? 3U : (badgeCount == 3 ? 2U : 1U);
        const float dotSize = std::round(std::max(2.0F, Style::baseGlyphSize * 0.16F * m_contentScale));
        const float dotGap = std::round(std::max(1.0F, dotSize * 0.55F));
@@ -97,7 +100,7 @@ index 315a431..c1c95b6 100644
          area->addChild(std::move(dot));
        }
      }
-@@ -1293,7 +1299,7 @@ void TaskbarWidget::buildTaskButtons(Renderer& renderer) {
+@@ -1293,7 +1302,7 @@ void TaskbarWidget::buildTaskButtons(Renderer& renderer) {
          const float lineThickness = d * 0.5F;
          auto indicator = ui::box({
              .fill = m_activeIndicatorColor,
@@ -106,7 +109,7 @@ index 315a431..c1c95b6 100644
              .width = tileWidthWithTitle - tilePadding * 2,
              .height = lineThickness,
          });
-@@ -1302,15 +1308,19 @@ void TaskbarWidget::buildTaskButtons(Renderer& renderer) {
+@@ -1302,15 +1311,19 @@ void TaskbarWidget::buildTaskButtons(Renderer& renderer) {
          indicator->setPosition(tilePadding, std::round(tileSize));
          area->addChild(std::move(indicator));
        } else {
@@ -130,20 +133,36 @@ index 315a431..c1c95b6 100644
          area->addChild(std::move(indicator));
        }
      }
-@@ -1528,9 +1538,11 @@ void TaskbarWidget::buildTaskButtons(Renderer& renderer) {
+@@ -1528,10 +1541,20 @@ void TaskbarWidget::buildTaskButtons(Renderer& renderer) {
        }
  
        const std::size_t visibleCount = visibleDots.size();
-+      const float pipLength = dotSize * kMarkerLengthRatio;
 +      const float pipThickness = std::round(kMarkerThickness * m_contentScale);
++      const auto pipHighlighted = [this](const TaskModel* task) {
++        return task != nullptr && task->active && m_showActiveIndicator;
++      };
++      const auto pipLengthFor = [&](const TaskModel* task) {
++        return std::round(dotSize * (pipHighlighted(task) ? kActiveMarkerLengthRatio : kMarkerLengthRatio));
++      };
++      float pipsLength = 0.0F;
++      for (const TaskModel* task : visibleDots) {
++        pipsLength += pipLengthFor(task);
++      }
        const float dotsRun = visibleCount == 0
            ? 0.0F
 -          : (dotSize * static_cast<float>(visibleCount)
-+          : (pipLength * static_cast<float>(visibleCount)
-              + dotGap * static_cast<float>(visibleCount > 1 ? visibleCount - 1 : 0));
+-             + dotGap * static_cast<float>(visibleCount > 1 ? visibleCount - 1 : 0));
++          : (pipsLength + dotGap * static_cast<float>(visibleCount > 1 ? visibleCount - 1 : 0));
        const float overflowRun = overflow > 0 ? (dotGap + overflowLabelWidth) : 0.0F;
        const float run = dotsRun + overflowRun;
-@@ -1554,15 +1566,15 @@ void TaskbarWidget::buildTaskButtons(Renderer& renderer) {
+       const float mainExtent = std::max(tileSize, run + Style::spaceXs * m_contentScale);
+@@ -1550,19 +1573,20 @@ void TaskbarWidget::buildTaskButtons(Renderer& renderer) {
+       ColorSpec activeDotFill = m_activeIndicatorColor;
+       activeDotFill.alpha = 0.95F;
+       for (const TaskModel* task : visibleDots) {
+-        const bool highlight = task != nullptr && task->active && m_showActiveIndicator;
++        const bool highlight = pipHighlighted(task);
++        const float pipLength = pipLengthFor(task);
          const ColorSpec fill =
              highlight ? activeDotFill : colorSpecFromRole(ColorRole::OnSurface, anyActive ? 0.55F : 0.35F);
          const bool minimized = task != nullptr && allWindowsMinimized(*task);
@@ -166,6 +185,91 @@ index 315a431..c1c95b6 100644
          content->addChild(std::move(dot));
        }
        if (overflow > 0) {
+diff --git a/src/shell/bar/widgets/workspaces_widget.cpp b/src/shell/bar/widgets/workspaces_widget.cpp
+index 07ab344..254fb85 100644
+--- a/src/shell/bar/widgets/workspaces_widget.cpp
++++ b/src/shell/bar/widgets/workspaces_widget.cpp
+@@ -34,6 +34,10 @@ namespace {
+   constexpr float kWorkspaceGap = Style::spaceXs;
+   constexpr float kWorkspacePillDefaultHeight = Style::baseGlyphSize;
+   constexpr float kWorkspaceAnimDurationMs = static_cast<float>(Style::animNormal);
++  // OpenJade artwork rule: focus_hint marks for the other workspaces are short
++  // straight bars, 2 px thick with square ends, twice the old dot long.
++  constexpr float kFocusHintMarkLengthRatio = 2.0F;
++  constexpr float kFocusHintMarkThickness = 2.0F;
+ 
+   [[nodiscard]] constexpr float workspaceLabelFontSize(bool minimal) {
+     return minimal ? Style::fontSizeBody : Style::fontSizeMini;
+@@ -508,13 +512,13 @@ void WorkspacesWidget::rebuild(Renderer& renderer) {
+     }
+ 
+     if (isFocusHint()) {
+-      const float dotSize = focusedPillDotSize();
++      const float markLength = std::round(focusedPillDotSize() * kFocusHintMarkLengthRatio);
+       const bool hasIcon = m_showIcons && entry.workspace.active && !activeWindowAppId().empty();
+       if (!entry.workspace.active) {
+-        slot.inactiveWidth = dotSize;
+-        slot.activeWidth = dotSize;
++        slot.inactiveWidth = markLength;
++        slot.activeWidth = markLength;
+       } else {
+-        slot.inactiveWidth = dotSize;
++        slot.inactiveWidth = markLength;
+         slot.activeWidth =
+             focusedPillActiveMainAxisSize(slot.textWidth, slot.textHeight, entry.showLabel, hasIcon, baseSize, padding);
+       }
+@@ -882,13 +886,13 @@ void WorkspacesWidget::recalculateItemMetrics(
+       item.activeWidth = item.inactiveWidth;
+     }
+   } else if (isFocusHint()) {
+-    const float dotSize = focusedPillDotSize();
++    const float markLength = std::round(focusedPillDotSize() * kFocusHintMarkLengthRatio);
+     const bool hasIcon = m_showIcons && workspace.active && !activeWindowAppId().empty();
+     if (!workspace.active) {
+-      item.inactiveWidth = dotSize;
+-      item.activeWidth = dotSize;
++      item.inactiveWidth = markLength;
++      item.activeWidth = markLength;
+     } else {
+-      item.inactiveWidth = dotSize;
++      item.inactiveWidth = markLength;
+       item.activeWidth =
+           focusedPillActiveMainAxisSize(textWidth, textHeight, item.showLabel, hasIcon, baseSize, padding);
+     }
+@@ -1119,12 +1123,13 @@ void WorkspacesWidget::applyItemLayout(Item& it) {
+   it.area->setFrameSize(itemW, itemH);
+   if (it.indicator != nullptr) {
+     if (isFocusHint() && !it.workspace.active) {
+-      const float dotSize = focusedPillDotSize();
+-      const float dotX = (itemW - dotSize) * 0.5F;
+-      const float dotY = (itemH - dotSize) * 0.5F;
+-      it.indicator->setPosition(dotX, dotY);
+-      it.indicator->setFrameSize(dotSize, dotSize);
+-      it.indicator->setRadius(Style::scaledRadiusSm());
++      const float markLength = std::round(focusedPillDotSize() * kFocusHintMarkLengthRatio);
++      const float markThickness = std::max(1.0F, std::round(kFocusHintMarkThickness * m_contentScale));
++      const float markW = m_isVertical ? markThickness : markLength;
++      const float markH = m_isVertical ? markLength : markThickness;
++      it.indicator->setPosition(std::round((itemW - markW) * 0.5F), std::round((itemH - markH) * 0.5F));
++      it.indicator->setFrameSize(markW, markH);
++      it.indicator->setRadius(0.0F);
+     } else {
+       it.indicator->setPosition(0.0F, 0.0F);
+       it.indicator->setFrameSize(itemW, itemH);
+diff --git a/src/shell/control_center/tabs/screen_time_tab.cpp b/src/shell/control_center/tabs/screen_time_tab.cpp
+index 6c1d454..281ac67 100644
+--- a/src/shell/control_center/tabs/screen_time_tab.cpp
++++ b/src/shell/control_center/tabs/screen_time_tab.cpp
+@@ -391,7 +391,8 @@ std::unique_ptr<Flex> ScreenTimeTab::create() {
+       row->addChild(
+           ui::box({
+               .out = &m_appRows[i].chartSwatch,
+-              .radius = kLegendSwatch * scale * 0.5F,
++              // OpenJade artwork rule: small marks have 2 px corners.
++              .radius = std::min(Style::scaledRadiusSm(scale), kLegendSwatch * scale * 0.5F),
+               .width = kLegendSwatch * scale,
+               .height = kLegendSwatch * scale,
+               .visible = false,
 diff --git a/src/shell/desktop/widgets/desktop_clock_widget.cpp b/src/shell/desktop/widgets/desktop_clock_widget.cpp
 index ced19b7..cf430e5 100644
 --- a/src/shell/desktop/widgets/desktop_clock_widget.cpp
@@ -244,7 +348,7 @@ index ced19b7..cf430e5 100644
    }
  
 diff --git a/src/shell/dock/dock_items.cpp b/src/shell/dock/dock_items.cpp
-index 8b627d8..2ef28c4 100644
+index 8b627d8..ce37dab 100644
 --- a/src/shell/dock/dock_items.cpp
 +++ b/src/shell/dock/dock_items.cpp
 @@ -39,6 +39,11 @@ namespace {
@@ -294,7 +398,18 @@ index 8b627d8..2ef28c4 100644
                .width = vert ? kMinimizedIndicatorThickness : kMinimizedIndicatorLength,
                .height = vert ? kMinimizedIndicatorLength : kMinimizedIndicatorThickness,
                .visible = false,
-@@ -880,8 +886,11 @@ namespace shell::dock {
+@@ -650,7 +656,9 @@ namespace shell::dock {
+         areaNode->addChild(
+             ui::box({
+                 .out = &item.badge,
+-                .radius = bd * 0.5F,
++                // OpenJade artwork rule: a badge has 4 px corners, never near
++                // half its height.
++                .radius = std::min(Style::scaledRadiusMd(), bd * 0.25F),
+                 .width = bd,
+                 .height = bd,
+                 .visible = false,
+@@ -880,8 +888,11 @@ namespace shell::dock {
          const auto iSize = static_cast<float>(cfg.iconSize);
          const float cellMain = iSize + 2.0F * kCellPad;
          const float dot = std::max(kDotMinSize, std::round(iSize * kDotSizeRatio));
@@ -308,7 +423,7 @@ index 8b627d8..2ef28c4 100644
          const float groupStart = std::round((cellMain - groupLength) * 0.5F);
          const bool verticalDots = shell::dock::isVerticalEdge(edge);
  
-@@ -894,12 +903,14 @@ namespace shell::dock {
+@@ -894,12 +905,14 @@ namespace shell::dock {
            dotNode->setVisible(visible);
            dotNode->setFill(colorSpecFromRole(model.active ? ColorRole::Primary : ColorRole::Secondary));
            if (visible) {
@@ -339,6 +454,41 @@ index b94dbe9..6f2fd7d 100644
              .width = kLauncherAvatarSize * scale,
              .height = kLauncherAvatarSize * scale,
              .visible = false,
+diff --git a/src/shell/lockscreen/lock_surface.cpp b/src/shell/lockscreen/lock_surface.cpp
+index 6417059..3c535e2 100644
+--- a/src/shell/lockscreen/lock_surface.cpp
++++ b/src/shell/lockscreen/lock_surface.cpp
+@@ -290,7 +290,8 @@ LockSurface::LockSurface(WaylandConnection& connection, ConfigService* config) :
+       ui::image({
+           .out = &m_mediaArt,
+           .fit = ImageFit::Cover,
+-          .radius = kMediaArtSize * 0.5F,
++          // OpenJade artwork rule: cover art is a 6 px rounded square, not a disc.
++          .radius = std::min(Style::scaledRadiusLg(), kMediaArtSize * 0.5F),
+           .width = kMediaArtSize,
+           .height = kMediaArtSize,
+           .visible = false,
+@@ -1175,7 +1176,10 @@ void LockSurface::startExitTransition() {
+ 
+   m_transitionPhase = TransitionPhase::Exiting;
+   syncTransitionCover();
+-  const float durationMs = m_transitionDurationMs * m_transitionProgress;
++  // OpenJade motion rule: unlock is a close, so it takes the close time
++  // (Style::animFast) and only the lock itself uses transition_duration.
++  const float exitDurationMs = std::min(m_transitionDurationMs, static_cast<float>(Style::animFast));
++  const float durationMs = exitDurationMs * m_transitionProgress;
+   m_transitionAnimation = m_animations.animateTimer(
+       m_transitionProgress, 0.0F, durationMs, Easing::EaseInOutCubic,
+       [this](float progress) {
+@@ -1703,7 +1707,7 @@ void LockSurface::layoutScene(std::uint32_t width, std::uint32_t height) {
+ 
+   if (m_mediaArt != nullptr) {
+     m_mediaArt->setSize(mediaArtSize, mediaArtSize);
+-    m_mediaArt->setRadius(mediaArtSize * 0.5F);
++    m_mediaArt->setRadius(std::min(Style::scaledRadiusLg(contentScale), mediaArtSize * 0.5F));
+   }
+   if (m_mediaFallbackGlyph != nullptr) {
+     m_mediaFallbackGlyph->setGlyphSize(18.0F * contentScale);
 diff --git a/src/ui/controls/calendar_view.cpp b/src/ui/controls/calendar_view.cpp
 index c5500f4..23385e7 100644
 --- a/src/ui/controls/calendar_view.cpp

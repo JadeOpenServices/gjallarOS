@@ -271,7 +271,7 @@ in
             interactive = false;
           };
 
-          # Small square marks for the other used workspaces; the focused one
+          # Short 2 px bars for the other used workspaces; the focused one
           # grows into a block with the active app's icon, so no separate
           # window widget.
           workspaces = {
@@ -457,6 +457,7 @@ in
         control_center.circular_avatar = false;
         lockscreen = {
           transition = [ "fade" ];
+          # Times the lock only; unlock fades out in 150 ms (openjade-artwork.patch).
           transition_duration = 500;
         };
         wallpaper = {
