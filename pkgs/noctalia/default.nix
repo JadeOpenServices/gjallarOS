@@ -108,6 +108,17 @@
 # transition_duration in user/wm/shells/noctalia). Applied after
 # openjade-shape.patch.
 #
+# openjade-artwork.patch (ours, local design choice) applies the OpenJade
+# artwork rule: the launcher avatar gets 4 px corners (the control centre
+# avatar is a setting, control_center circular_avatar), bar cover art 6 px,
+# the battery nub and colour picker thumbs lose their round ends, and the
+# analogue desktop clock gets a square 6 px face with square-ended ticks,
+# hands and hub. Running markers in the dock and taskbar, calendar day marks
+# and the event stripe become 2 px square-ended bars; the focused app's dock
+# bars are longer, and a minimized task's taskbar bar fades instead of
+# showing an outline. The spinner arc stays round. Applied after
+# openjade-motion.patch.
+#
 # libqalculate 5.10 frees its random state on exit even when nothing ever
 # created it, so the shell crashes every time it stops. Upstream fixed that in
 # 931c2aa9 (5.11); drop the patch once nixpkgs ships libqalculate 5.11 or newer.
@@ -140,5 +151,6 @@
       ./greeter-sync-on-start.patch
       ./openjade-shape.patch
       ./openjade-motion.patch
+      ./openjade-artwork.patch
     ];
   })

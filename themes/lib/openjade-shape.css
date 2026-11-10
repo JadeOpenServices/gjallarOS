@@ -1,6 +1,6 @@
 /* Copied from the OpenJade themebrain (code/gtk/openjade-adwaita.css,
- * owner baka-80) on 2026-11-10. Changes go back to baka-80 so both copies
- * stay the same. */
+ * owner baka-80) on 2026-11-10, with the THEME-30 focus block. Changes go
+ * back to baka-80 so both copies stay the same. */
 
 /* OpenJade hard corners for GTK4 / libadwaita (checked against libadwaita 1.9.4).
  *
@@ -17,8 +17,17 @@
  * Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION. Without it an app gets stock
  * libadwaita, which still works.
  *
- * Not touched on purpose: keyboard focus outlines (open question, see
- * THEMEBRAIN 13.4) and avatars.
+ * Keyboard focus (Jade, 2026-11-10, THEMEBRAIN 13.4): no outlines. Small
+ * things zoom 108 % from their middle, wide things get a faint fill, fields
+ * get a 2 px bar along the bottom. Widgets not listed keep the outline.
+ *
+ * Where libadwaita joins or flattens things (linked groups, split buttons,
+ * spin button arrows, tables, maximized and tiled windows) this file puts the
+ * square edges back, because user CSS outranks the theme's own context rules.
+ *
+ * Avatars are squares with 4 px corners like Mado (Jade, 2026-11-10). GTK CSS
+ * cannot see the size, so big avatars get 4 px too. Left round on purpose: the
+ * spinner, whose arc is the content.
  */
 
 /* 6 px: windows, cards, panels, popovers, dialogs */
@@ -50,7 +59,7 @@ window.messagedialog .response-area > button, dialog.alert .response-area > butt
 window.dialog.message.csd .dialog-action-area > button,
 entry, spinbutton, switch, toggle-group, toggle-group.round,
 popover.menu modelbutton, popover.menu list > row, popover.menu listview > row,
-.view:selected, .view:selected:focus, window.assistant .sidebar > label {
+.view:selected, .view:selected:focus, window.assistant .sidebar > label, avatar {
   border-radius: 4px;
 }
 toggle-group > toggle, toggle-group.round toggle { border-radius: 2px; }
@@ -80,10 +89,127 @@ scrollbar > range > trough, scrollbar > range > trough > slider {
   border-radius: 0;
 }
 
+/* Joins and flush edges. User CSS wins over the theme whatever the selector,
+   so the plain sizes above would also round the places where libadwaita
+   squares things off. These put libadwaita's square edges back, at our sizes. */
+
+/* Maximized, tiled and fullscreen windows have square corners */
+window.csd.tiled, window.csd.tiled-top, window.csd.tiled-left,
+window.csd.tiled-right, window.csd.tiled-bottom,
+window.csd.maximized, window.csd.fullscreen, window.solid-csd {
+  --window-radius: 0px;
+}
+
+/* Linked groups: inner edges square, outer edges keep 4 px */
+.linked:not(.vertical) > *:dir(ltr):not(:first-child),
+.linked:not(.vertical) > *:dir(ltr):not(:first-child) > button,
+.linked:not(.vertical) > *:dir(ltr):not(:first-child) > box > button.combo,
+.linked:not(.vertical) > *:dir(rtl):not(:last-child),
+.linked:not(.vertical) > *:dir(rtl):not(:last-child) > button,
+.linked:not(.vertical) > *:dir(rtl):not(:last-child) > box > button.combo {
+  border-top-left-radius: 0; border-bottom-left-radius: 0;
+}
+.linked:not(.vertical) > *:dir(ltr):not(:last-child),
+.linked:not(.vertical) > *:dir(ltr):not(:last-child) > button,
+.linked:not(.vertical) > *:dir(ltr):not(:last-child) > box > button.combo,
+.linked:not(.vertical) > *:dir(rtl):not(:first-child),
+.linked:not(.vertical) > *:dir(rtl):not(:first-child) > button,
+.linked:not(.vertical) > *:dir(rtl):not(:first-child) > box > button.combo {
+  border-top-right-radius: 0; border-bottom-right-radius: 0;
+}
+.linked.vertical > *:not(:first-child),
+.linked.vertical > *:not(:first-child) > button,
+.linked.vertical > *:not(:first-child) > box > button.combo {
+  border-top-left-radius: 0; border-top-right-radius: 0;
+}
+.linked.vertical > *:not(:last-child),
+.linked.vertical > *:not(:last-child) > button,
+.linked.vertical > *:not(:last-child) > box > button.combo {
+  border-bottom-left-radius: 0; border-bottom-right-radius: 0;
+}
+
+/* Split buttons: the two halves meet flat */
+splitbutton > button:dir(ltr), splitbutton > menubutton > button:dir(rtl) {
+  border-top-right-radius: 0; border-bottom-right-radius: 0;
+}
+splitbutton > button:dir(rtl), splitbutton > menubutton > button:dir(ltr) {
+  border-top-left-radius: 0; border-bottom-left-radius: 0;
+}
+
+/* Spin button arrows sit flush inside the field, only the outer end rounds */
+spinbutton > button.image-button:not(.flat):not(.raised):not(.suggested-action):not(.destructive-action):not(.opaque) {
+  border-radius: 0;
+}
+spinbutton:not(.vertical) > button.image-button:not(.flat):not(.raised):not(.suggested-action):not(.destructive-action):not(.opaque):dir(ltr):last-child {
+  border-radius: 0 4px 4px 0;
+}
+spinbutton:not(.vertical) > button.image-button:not(.flat):not(.raised):not(.suggested-action):not(.destructive-action):not(.opaque):dir(rtl):first-child {
+  border-radius: 4px 0 0 4px;
+}
+spinbutton.vertical > button.image-button:not(.flat):not(.raised):not(.suggested-action):not(.destructive-action):not(.opaque):last-child {
+  border-radius: 0 0 4px 4px;
+}
+spinbutton.vertical > button.image-button:not(.flat):not(.raised):not(.suggested-action):not(.destructive-action):not(.opaque):first-child {
+  border-radius: 4px 4px 0 0;
+}
+
+/* Flat and in-table controls stay square */
+entry.flat, spinbutton.flat, treeview entry, treeview spinbutton:not(.vertical),
+calendar > header > button, columnview > header > button,
+treeview.view > header > button, notebook > header > tabs > arrow {
+  border-radius: 0;
+}
+
+/* Rows inside 6 px lists follow the list corner; sidebar rows are controls */
+list.boxed-list > row:first-child, list.content > row:first-child,
+list.boxed-list > row:first-child.expander row.header,
+list.content > row:first-child.expander row.header,
+list.boxed-list-separate > row.expander row.header {
+  border-top-left-radius: 6px; border-top-right-radius: 6px;
+}
+list.boxed-list > row:last-child, list.content > row:last-child,
+list.boxed-list > row:last-child.expander:not(:checked) row.header,
+list.content > row:last-child.expander:not(:checked) row.header,
+list.boxed-list > row:last-child.expander:checked list.nested,
+list.content > row:last-child.expander:checked list.nested,
+list.boxed-list > row:last-child.expander:checked list.nested > row:last-child,
+list.content > row:last-child.expander:checked list.nested > row:last-child,
+list.boxed-list-separate > row.expander:not(:checked) row.header,
+list.boxed-list-separate > row.expander:checked list.nested,
+list.boxed-list-separate > row.expander:checked list.nested > row:last-child {
+  border-bottom-left-radius: 6px; border-bottom-right-radius: 6px;
+}
+.navigation-sidebar > row { border-radius: 4px; }
+bottom-sheet > sheet, bottom-sheet > sheet > outline, bottom-sheet > sheet > stack > widget,
+bottom-sheet > sheet > stack > button, bottom-sheet > sheet > stack > button > widget {
+  border-top-left-radius: 6px; border-top-right-radius: 6px;
+}
+
 /* No drop shadows: libadwaita's own 1 px border line instead */
 window.csd, window.csd:backdrop,
 window.csd.dialog.message, window.csd.messagedialog,
 popover > contents {
   box-shadow: 0 0 0 1px color-mix(in srgb, currentColor var(--border-opacity), transparent);
 }
+window.csd.maximized, window.csd.fullscreen { box-shadow: none; }
 popover > arrow { box-shadow: none; }
+
+/* Keyboard focus: zoom what is small, fill what is wide, underline what you type in.
+   The zoom does not change the layout size, so neighbours stay put. */
+button, menubutton > button, switch, check, radio, .tile {
+  transition: transform 150ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+button:focus-visible, menubutton > button:focus-visible,
+switch:focus-visible, checkbutton:focus-visible check,
+checkbutton:focus-visible radio, .tile:focus-visible {
+  outline: none;
+  transform: scale(1.08);
+}
+row:focus-visible, .card:focus-visible {
+  outline: none;
+  background-color: color-mix(in srgb, currentColor 7%, transparent);
+}
+entry:focus-within, spinbutton:focus-within {
+  outline: none;
+  box-shadow: inset 0 -2px @accent_color;
+}

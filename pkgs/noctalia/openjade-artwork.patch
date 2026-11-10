@@ -1,0 +1,389 @@
+diff --git a/src/shell/bar/widgets/battery_widget.cpp b/src/shell/bar/widgets/battery_widget.cpp
+index 57f89a6..f57a6f1 100644
+--- a/src/shell/bar/widgets/battery_widget.cpp
++++ b/src/shell/bar/widgets/battery_widget.cpp
+@@ -287,7 +287,7 @@ void BatteryWidget::layoutGraphicMode(Renderer& renderer) {
+   m_bodyBg->setPosition(bodyX, bodyY);
+   m_bodyBg->setSize(batteryW, batteryH);
+ 
+-  m_terminalNub->setRadius(cornerR * 0.5F);
++  m_terminalNub->setRadius(0.0F);
+   if (m_isVertical) {
+     m_terminalNub->setPosition(bodyX + std::round((batteryW - termH) * 0.5F), 0.0F);
+     m_terminalNub->setSize(termH, termW);
+diff --git a/src/shell/bar/widgets/media_widget.cpp b/src/shell/bar/widgets/media_widget.cpp
+index b73a158..f146dc6 100644
+--- a/src/shell/bar/widgets/media_widget.cpp
++++ b/src/shell/bar/widgets/media_widget.cpp
+@@ -64,7 +64,7 @@ void MediaWidget::create() {
+       ui::image({
+           .out = &m_art,
+           .fit = ImageFit::Cover,
+-          .radius = resolvedBarCapsuleRadius(artSize, artSize),
++          .radius = std::min(Style::scaledRadiusLg(m_contentScale), artSize * 0.5F),
+           .width = artSize,
+           .height = artSize,
+       })
+@@ -136,7 +136,7 @@ void MediaWidget::doLayout(Renderer& renderer, float containerWidth, float conta
+     artSize = artOnly ? requestedArtSize : std::min(requestedArtSize, m_label->height());
+     m_art->setVisible(true);
+     m_art->setSize(artSize, artSize);
+-    m_art->setRadius(resolvedBarCapsuleRadius(artSize, artSize));
++    m_art->setRadius(std::min(Style::scaledRadiusLg(m_contentScale), artSize * 0.5F));
+   } else {
+     m_art->setVisible(false);
+     m_art->setSize(0.0F, 0.0F);
+diff --git a/src/shell/bar/widgets/taskbar_widget.cpp b/src/shell/bar/widgets/taskbar_widget.cpp
+index 315a431..c1c95b6 100644
+--- a/src/shell/bar/widgets/taskbar_widget.cpp
++++ b/src/shell/bar/widgets/taskbar_widget.cpp
+@@ -43,6 +43,10 @@
+ namespace {
+ 
+   constexpr auto kDragHoldDelay = std::chrono::milliseconds(300);
++  // OpenJade artwork rule: running and active markers are 2 px square-ended
++  // bars, twice as long as the old dot.
++  constexpr float kMarkerThickness = 2.0F;
++  constexpr float kMarkerLengthRatio = 2.0F;
+   // Lifts the dragged tile above the rest of the strip while it follows the pointer.
+   constexpr std::int32_t kDragTileZIndex = 200;
+ 
+@@ -1222,7 +1226,7 @@ void TaskbarWidget::buildTaskButtons(Renderer& renderer) {
+         .fill = colorSpecFromRole(ColorRole::Surface),
+         .border = colorSpecFromRole(ColorRole::Secondary),
+         .borderWidth = m_contentScale,
+-        .radius = markerHeight * 0.5F,
++        .radius = 0.0F,
+         .width = markerWidth,
+         .height = markerHeight,
+         .visible = windowCount > 0 && minimizedCount == windowCount,
+@@ -1233,7 +1237,7 @@ void TaskbarWidget::buildTaskButtons(Renderer& renderer) {
+     minimizeIndicator->setHitTestVisible(false);
+     auto minus = ui::box({
+         .fill = colorSpecFromRole(ColorRole::OnSurface),
+-        .radius = minusHeight * 0.5F,
++        .radius = 0.0F,
+         .width = minusWidth,
+         .height = minusHeight,
+         .participatesInLayout = false,
+@@ -1264,21 +1268,23 @@ void TaskbarWidget::buildTaskButtons(Renderer& renderer) {
+       const std::size_t dotCount = badgeCount >= 4 ? 3U : (badgeCount == 3 ? 2U : 1U);
+       const float dotSize = std::round(std::max(2.0F, Style::baseGlyphSize * 0.16F * m_contentScale));
+       const float dotGap = std::round(std::max(1.0F, dotSize * 0.55F));
+-      const float runHeight =
+-          dotSize * static_cast<float>(dotCount) + dotGap * static_cast<float>(dotCount > 0 ? dotCount - 1 : 0);
++      const float markerThickness = std::round(kMarkerThickness * m_contentScale);
++      const float markerLength = dotSize * kMarkerLengthRatio;
++      const float runHeight = markerLength * static_cast<float>(dotCount) +
++                              dotGap * static_cast<float>(dotCount > 0 ? dotCount - 1 : 0);
+       const float iconRightInset = std::round(std::max(1.0F, iconSize * 0.08F));
+-      const float dotX = std::round(centeredOffset(tileSize, iconSize) + iconSize - dotSize - iconRightInset);
++      const float dotX = std::round(centeredOffset(tileSize, iconSize) + iconSize - markerThickness - iconRightInset);
+       const float startY = std::round(centeredOffset(tileSize, iconSize) + (iconSize - runHeight) * 0.5F);
+       const ColorSpec dotColor = colorSpecFromRole(ColorRole::Primary, 0.9F);
+ 
+       for (std::size_t i = 0; i < dotCount; ++i) {
+         auto dot = ui::box({
+             .fill = dotColor,
+-            .radius = resolvedBarCapsuleRadius(dotSize, dotSize),
+-            .width = dotSize,
+-            .height = dotSize,
++            .radius = 0.0F,
++            .width = markerThickness,
++            .height = markerLength,
+         });
+-        dot->setPosition(dotX, std::round(startY + static_cast<float>(i) * (dotSize + dotGap)));
++        dot->setPosition(dotX, std::round(startY + static_cast<float>(i) * (markerLength + dotGap)));
+         area->addChild(std::move(dot));
+       }
+     }
+@@ -1293,7 +1299,7 @@ void TaskbarWidget::buildTaskButtons(Renderer& renderer) {
+         const float lineThickness = d * 0.5F;
+         auto indicator = ui::box({
+             .fill = m_activeIndicatorColor,
+-            .radius = lineThickness * 0.5F,
++            .radius = 0.0F,
+             .width = tileWidthWithTitle - tilePadding * 2,
+             .height = lineThickness,
+         });
+@@ -1302,15 +1308,19 @@ void TaskbarWidget::buildTaskButtons(Renderer& renderer) {
+         indicator->setPosition(tilePadding, std::round(tileSize));
+         area->addChild(std::move(indicator));
+       } else {
++        const float barWidth = d * kMarkerLengthRatio;
++        const float barHeight = std::round(kMarkerThickness * m_contentScale);
+         auto indicator = ui::box({
+             .fill = m_activeIndicatorColor,
+-            .radius = resolvedBarCapsuleRadius(d, d),
+-            .width = d,
+-            .height = d,
++            .radius = 0.0F,
++            .width = barWidth,
++            .height = barHeight,
+         });
+         indicatorPtr = indicator.get();
+         indicator->setVisible(task.active);
+-        indicator->setPosition(std::round((tileSize - d) * 0.5F), std::round(tileSize - d - bottomInset));
++        indicator->setPosition(
++            std::round((tileSize - barWidth) * 0.5F), std::round(tileSize - barHeight - bottomInset)
++        );
+         area->addChild(std::move(indicator));
+       }
+     }
+@@ -1528,9 +1538,11 @@ void TaskbarWidget::buildTaskButtons(Renderer& renderer) {
+       }
+ 
+       const std::size_t visibleCount = visibleDots.size();
++      const float pipLength = dotSize * kMarkerLengthRatio;
++      const float pipThickness = std::round(kMarkerThickness * m_contentScale);
+       const float dotsRun = visibleCount == 0
+           ? 0.0F
+-          : (dotSize * static_cast<float>(visibleCount)
++          : (pipLength * static_cast<float>(visibleCount)
+              + dotGap * static_cast<float>(visibleCount > 1 ? visibleCount - 1 : 0));
+       const float overflowRun = overflow > 0 ? (dotGap + overflowLabelWidth) : 0.0F;
+       const float run = dotsRun + overflowRun;
+@@ -1554,15 +1566,15 @@ void TaskbarWidget::buildTaskButtons(Renderer& renderer) {
+         const ColorSpec fill =
+             highlight ? activeDotFill : colorSpecFromRole(ColorRole::OnSurface, anyActive ? 0.55F : 0.35F);
+         const bool minimized = task != nullptr && allWindowsMinimized(*task);
++        // A 2 px bar has no room for an outline, so a minimized task's bar fades.
++        ColorSpec minimizedFill = fill;
++        minimizedFill.alpha = fill.alpha * 0.4F;
+         auto dot = ui::box({
+-            .fill = minimized ? clearColorSpec() : fill,
+-            .radius = resolvedBarCapsuleRadius(dotSize, dotSize),
+-            .width = dotSize,
+-            .height = dotSize,
++            .fill = minimized ? minimizedFill : fill,
++            .radius = 0.0F,
++            .width = m_vertical ? pipThickness : pipLength,
++            .height = m_vertical ? pipLength : pipThickness,
+         });
+-        if (minimized) {
+-          dot->setBorder(fill, std::max(1.0F, m_contentScale));
+-        }
+         content->addChild(std::move(dot));
+       }
+       if (overflow > 0) {
+diff --git a/src/shell/desktop/widgets/desktop_clock_widget.cpp b/src/shell/desktop/widgets/desktop_clock_widget.cpp
+index ced19b7..cf430e5 100644
+--- a/src/shell/desktop/widgets/desktop_clock_widget.cpp
++++ b/src/shell/desktop/widgets/desktop_clock_widget.cpp
+@@ -9,6 +9,7 @@
+ #include "ui/palette.h"
+ #include "ui/style.h"
+ 
++#include <algorithm>
+ #include <chrono>
+ #include <cmath>
+ #include <ctime>
+@@ -117,7 +118,7 @@ namespace {
+     hand->setPosition(-width * 0.5F, -length);
+     RoundedRectStyle style;
+     style.fill = color;
+-    style.radius = width * 0.5F;
++    style.radius = 0.0F;
+     hand->setStyle(style);
+     return static_cast<RectNode*>(pivot.addChild(std::move(hand)));
+   }
+@@ -146,7 +147,7 @@ namespace {
+     mark->setPosition(-width * 0.5F, -dialRadius);
+     RoundedRectStyle style;
+     style.fill = color;
+-    style.radius = width * 0.5F;
++    style.radius = 0.0F;
+     mark->setStyle(style);
+     pivotPtr->addChild(std::move(mark));
+   }
+@@ -178,7 +179,7 @@ namespace {
+       mark->setPosition(-width * 0.5F, -metrics.dialRadius);
+       RoundedRectStyle style = mark->style();
+       style.fill = color;
+-      style.radius = width * 0.5F;
++      style.radius = 0.0F;
+       mark->setStyle(style);
+     }
+   }
+@@ -189,7 +190,9 @@ namespace {
+     RoundedRectStyle faceStyle = face.style();
+     faceStyle.border = borderColor;
+     faceStyle.borderWidth = metrics.borderWidth;
+-    faceStyle.radius = metrics.dialRadius;
++    // OpenJade artwork rule: square face with 6 px corners, bar ticks,
++    // square-ended hands and hub.
++    faceStyle.radius = std::min(::Style::scaledRadiusLg(metrics.scale), metrics.dialRadius);
+     face.setStyle(faceStyle);
+   }
+ 
+@@ -264,7 +267,7 @@ void DesktopClockWidget::create() {
+   hub->setPosition(metrics.center - hubSize * 0.5F, metrics.center - hubSize * 0.5F);
+   RoundedRectStyle hubStyle;
+   hubStyle.fill = handColor;
+-  hubStyle.radius = hubSize * 0.5F;
++  hubStyle.radius = 0.0F;
+   hub->setStyle(hubStyle);
+   m_analogRoot->addChild(std::move(hub));
+ 
+@@ -386,7 +389,7 @@ void DesktopClockWidget::layoutAnalog(Renderer& /*renderer*/, float size) {
+     hand->setSize(width, length);
+     hand->setPosition(-width * 0.5F, -length);
+     RoundedRectStyle style = hand->style();
+-    style.radius = width * 0.5F;
++    style.radius = 0.0F;
+     hand->setStyle(style);
+   };
+   resizeHand(m_hourPivot, hourWidth, metrics.dialRadius * kHourHandReach);
+@@ -399,7 +402,7 @@ void DesktopClockWidget::layoutAnalog(Renderer& /*renderer*/, float size) {
+     m_hub->setPosition(metrics.center - hubSize * 0.5F, metrics.center - hubSize * 0.5F);
+     RoundedRectStyle hubStyle = m_hub->style();
+     hubStyle.fill = handColor;
+-    hubStyle.radius = hubSize * 0.5F;
++    hubStyle.radius = 0.0F;
+     m_hub->setStyle(hubStyle);
+   }
+ 
+diff --git a/src/shell/dock/dock_items.cpp b/src/shell/dock/dock_items.cpp
+index 8b627d8..2ef28c4 100644
+--- a/src/shell/dock/dock_items.cpp
++++ b/src/shell/dock/dock_items.cpp
+@@ -39,6 +39,11 @@ namespace {
+   constexpr float kDotSizeRatio = 0.09F;
+   constexpr float kDotMinSize = 4.0F;
+   constexpr float kDotGap = 3.0F;
++  // OpenJade artwork rule: running markers are 2 px square-ended bars; the
++  // focused app's bars are longer.
++  constexpr float kMarkerThickness = 2.0F;
++  constexpr float kMarkerLengthRatio = 2.0F;
++  constexpr float kActiveMarkerLengthRatio = 3.0F;
+   constexpr float kMinimizedIndicatorLength = 12.0F;
+   constexpr float kMinimizedIndicatorThickness = 2.0F;
+   constexpr float kCellPad = 6.0F;
+@@ -608,17 +613,18 @@ namespace shell::dock {
+           dotIndicator = static_cast<Box*>(areaNode->addChild(
+               ui::box({
+                   .fill = colorSpecFromRole(ColorRole::Secondary),
+-                  .radius = dot * 0.5F,
+-                  .width = dot,
+-                  .height = dot,
++                  .radius = 0.0F,
++                  .width = verticalDots ? kMarkerThickness : dot * kMarkerLengthRatio,
++                  .height = verticalDots ? dot * kMarkerLengthRatio : kMarkerThickness,
+                   .visible = false,
+                   .configure = [verticalDots, edge, cellMain, dot](Box& box) {
++                    const float length = dot * kMarkerLengthRatio;
+                     if (verticalDots) {
+-                      const float x = edge == DockEdge::Left ? 1.0F : std::round(cellMain - dot - 1.0F);
+-                      box.setPosition(x, std::round((cellMain - dot) * 0.5F));
++                      const float x = edge == DockEdge::Left ? 1.0F : std::round(cellMain - kMarkerThickness - 1.0F);
++                      box.setPosition(x, std::round((cellMain - length) * 0.5F));
+                     } else {
+-                      const float y = edge == DockEdge::Bottom ? std::round(cellMain - dot - 1.0F) : 1.0F;
+-                      box.setPosition(std::round((cellMain - dot) * 0.5F), y);
++                      const float y = edge == DockEdge::Bottom ? std::round(cellMain - kMarkerThickness - 1.0F) : 1.0F;
++                      box.setPosition(std::round((cellMain - length) * 0.5F), y);
+                     }
+                   },
+               })
+@@ -630,7 +636,7 @@ namespace shell::dock {
+           ui::box({
+               .out = &item.minimizedIndicator,
+               .fill = colorSpecFromRole(ColorRole::Secondary),
+-              .radius = kMinimizedIndicatorThickness * 0.5F,
++              .radius = 0.0F,
+               .width = vert ? kMinimizedIndicatorThickness : kMinimizedIndicatorLength,
+               .height = vert ? kMinimizedIndicatorLength : kMinimizedIndicatorThickness,
+               .visible = false,
+@@ -880,8 +886,11 @@ namespace shell::dock {
+         const auto iSize = static_cast<float>(cfg.iconSize);
+         const float cellMain = iSize + 2.0F * kCellPad;
+         const float dot = std::max(kDotMinSize, std::round(iSize * kDotSizeRatio));
+-        const float groupLength =
+-            dotCount == 0 ? dot : dot * static_cast<float>(dotCount) + kDotGap * static_cast<float>(dotCount - 1);
++        const float barLength = std::round(dot * (model.active ? kActiveMarkerLengthRatio : kMarkerLengthRatio));
++        const float groupLength = dotCount == 0
++                                      ? barLength
++                                      : barLength * static_cast<float>(dotCount) +
++                                            kDotGap * static_cast<float>(dotCount - 1);
+         const float groupStart = std::round((cellMain - groupLength) * 0.5F);
+         const bool verticalDots = shell::dock::isVerticalEdge(edge);
+ 
+@@ -894,12 +903,14 @@ namespace shell::dock {
+           dotNode->setVisible(visible);
+           dotNode->setFill(colorSpecFromRole(model.active ? ColorRole::Primary : ColorRole::Secondary));
+           if (visible) {
+-            const float main = groupStart + static_cast<float>(dotIndex) * (dot + kDotGap);
++            const float main = groupStart + static_cast<float>(dotIndex) * (barLength + kDotGap);
+             if (verticalDots) {
+-              const float x = edge == DockEdge::Left ? 1.0F : std::round(cellMain - dot - 1.0F);
++              const float x = edge == DockEdge::Left ? 1.0F : std::round(cellMain - kMarkerThickness - 1.0F);
++              dotNode->setSize(kMarkerThickness, barLength);
+               dotNode->setPosition(x, main);
+             } else {
+-              const float y = edge == DockEdge::Bottom ? std::round(cellMain - dot - 1.0F) : 1.0F;
++              const float y = edge == DockEdge::Bottom ? std::round(cellMain - kMarkerThickness - 1.0F) : 1.0F;
++              dotNode->setSize(barLength, kMarkerThickness);
+               dotNode->setPosition(main, y);
+             }
+           }
+diff --git a/src/shell/launcher/launcher_panel.cpp b/src/shell/launcher/launcher_panel.cpp
+index b94dbe9..6f2fd7d 100644
+--- a/src/shell/launcher/launcher_panel.cpp
++++ b/src/shell/launcher/launcher_panel.cpp
+@@ -1847,7 +1847,7 @@ void LauncherPanel::create() {
+         ui::image({
+             .out = &m_launcherAvatar,
+             .fit = ImageFit::Cover,
+-            .radius = kLauncherAvatarSize * 0.5F * scale,
++            .radius = Style::scaledRadiusMd(scale),
+             .width = kLauncherAvatarSize * scale,
+             .height = kLauncherAvatarSize * scale,
+             .visible = false,
+diff --git a/src/ui/controls/calendar_view.cpp b/src/ui/controls/calendar_view.cpp
+index c5500f4..23385e7 100644
+--- a/src/ui/controls/calendar_view.cpp
++++ b/src/ui/controls/calendar_view.cpp
+@@ -347,9 +347,10 @@ namespace calendar_view {
+           dots->addChild(
+               ui::box({
+                   .fill = color,
+-                  .radius = layout.dotDiameter * 0.5F,
+-                  .width = layout.dotDiameter,
+-                  .height = layout.dotDiameter,
++                  // OpenJade artwork rule: day marks are 2 px square-ended bars.
++                  .radius = 0.0F,
++                  .width = layout.dotDiameter * 2.0F,
++                  .height = std::min(layout.dotDiameter, 2.0F * options.scale),
+               })
+           );
+         }
+@@ -613,7 +614,7 @@ namespace calendar_view {
+             {.out = &eventRow, .align = FlexAlign::Stretch, .gap = rowGap},
+             ui::box({
+                 .fill = eventColor(event, eventAlpha),
+-                .radius = dotWidth * 0.5F,
++                .radius = 0.0F,
+                 .width = dotWidth,
+                 .flexGrow = 0.0F,
+             }),
+diff --git a/src/ui/controls/color_picker.cpp b/src/ui/controls/color_picker.cpp
+index 6882e76..525dacf 100644
+--- a/src/ui/controls/color_picker.cpp
++++ b/src/ui/controls/color_picker.cpp
+@@ -271,13 +271,13 @@ void ColorPicker::applyStyle() {
+   m_copyButton->setControlHeight(controlHeight);
+   const float svThumb = kSvThumbSize * m_scale;
+   m_svThumb->setSize(svThumb, svThumb);
+-  m_svThumb->setRadius(svThumb * 0.5F);
++  m_svThumb->setRadius(Style::scaledRadiusSm(m_scale));
+   m_svThumb->setBorder(rgba(1.0F, 1.0F, 1.0F, 1.0F), 2.5F * m_scale);
+   const float hueThumb = kHueThumbSize * m_scale;
+   m_hueThumb->setSize(hueThumb, hueThumb);
+-  m_hueThumb->setRadius(hueThumb * 0.5F);
++  m_hueThumb->setRadius(Style::scaledRadiusSm(m_scale));
+   m_alphaThumb->setSize(hueThumb, hueThumb);
+-  m_alphaThumb->setRadius(hueThumb * 0.5F);
++  m_alphaThumb->setRadius(Style::scaledRadiusSm(m_scale));
+   for (Box* swatch : m_swatchBoxes) {
+     swatch->setBorder(colorSpecFromRole(ColorRole::OutlineVariant), Style::borderWidth * m_scale);
+   }

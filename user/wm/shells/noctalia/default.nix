@@ -452,6 +452,9 @@ in
         # use a plain cross-fade instead, 500 ms on the house curve like
         # every other OpenJade open (themebrain motion rule). Noctalia uses
         # one value for lock and unlock.
+        # OpenJade artwork rule: avatars are rounded squares (6 px at this
+        # size), not circles.
+        control_center.circular_avatar = false;
         lockscreen = {
           transition = [ "fade" ];
           transition_duration = 500;
