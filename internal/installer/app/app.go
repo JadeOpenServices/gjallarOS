@@ -720,9 +720,11 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 	// Read before any Secure Boot question: turning Secure Boot off and
 	// installing own keys both need the firmware setup. On locked firmware
 	// the only way in is shim, which must already start this system.
+	var firmwareTrust *secureboot.FirmwareTrust
 	if trust, trustErr := secureboot.ReadFirmwareTrust(); trustErr != nil {
 		fmt.Fprintf(out, "What the firmware trusts could not be read (%v).\n", trustErr)
 	} else {
+		firmwareTrust = &trust
 		fmt.Fprint(out, firmwareTrustReport(trust))
 		if s.preset && s.user.SecureBootEnable && s.user.SecureBootShim {
 			fmt.Fprintln(out, "user.config.json: Secure Boot through shim; the firmware keys stay as they are.")
@@ -813,7 +815,26 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 		!s.user.SecureBootEnable &&
 		!s.user.Management.Enable {
 		fmt.Fprint(out, noSecureBootPolicyNotice(resolvedDevice.ModelID))
-		fmt.Fprint(out, secureBootDeclinedNotice("After the install, gjallarctl secure-boot setup turns it on through shim where this firmware allows it."))
+		shimOK := false
+		if !s.user.UnattendedInstall && installedRoot == "/" && firmwareTrust != nil {
+			facts, ok, err := offerUnknownModelShim(ctx, ui, out, root, *firmwareTrust, s.user.LUKSTPM2Enable)
+			if err != nil {
+				return fail(errOut, err)
+			}
+			if ok {
+				shimOK = true
+				s.shimFacts = &facts
+				s.user.SecureBootEnable = true
+				s.user.SecureBootShim = true
+				s.user.FirmwarePasswordLock = false
+				if err := collectStartupUnlock(ctx, ui, diskcrypto.ModelTPMKind(), s.chassisType, s.touchscreen, &s.user); err != nil {
+					return fail(errOut, err)
+				}
+			}
+		}
+		if !shimOK {
+			fmt.Fprint(out, secureBootDeclinedNotice("After the install, gjallarctl secure-boot setup turns it on through shim where this firmware allows it."))
+		}
 	} else if s.user.SecureBootEnable &&
 		!s.user.SecureBootShim &&
 		s.secureBootFirmware.Policy.Supported {
@@ -1187,13 +1208,35 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 			}
 			s.shimFacts = &facts
 		}
-		listed, err := secureboot.QueueShimKey(ctx, out, *s.shimFacts, "the installer")
+		sbOn, err := secureboot.FirmwareSecureBoot()
 		if err != nil {
-			return fail(errOut, err)
+			return fail(errOut, fmt.Errorf("read Secure Boot state: %w", err))
 		}
-		if !listed {
-			fmt.Fprintln(out, "Nothing about how this system starts has changed yet. Restart now; the installer keeps your answers.")
-			return 0
+		if sbOn {
+			listed, err := secureboot.QueueShimKey(ctx, out, *s.shimFacts, "the installer")
+			if err != nil {
+				return fail(errOut, err)
+			}
+			if !listed {
+				fmt.Fprintln(out, "Nothing about how this system starts has changed yet. Restart now; the installer keeps your answers.")
+				return 0
+			}
+		} else {
+			// Secure Boot off: the firmware starts any boot chain, so the
+			// rebuild may put shim first now. Only the GjallarOS shim can
+			// show MokManager, so the key is queued after the first start
+			// through it (gjallarctl secure-boot setup), not here.
+			trust, err := secureboot.ReadFirmwareTrust()
+			if err != nil {
+				return fail(errOut, fmt.Errorf("read firmware trust: %w", err))
+			}
+			choice, err := secureboot.ChoosePath(trust, *s.shimFacts, nil)
+			if err != nil {
+				return fail(errOut, err)
+			}
+			if choice.Path != secureboot.PathShim {
+				return fail(errOut, fmt.Errorf("this firmware would not start shim: %s", choice.Reason))
+			}
 		}
 	} else if s.render.SecureBootEnable {
 		if err := secureboot.Prepare(ctx, out); err != nil {
@@ -1540,7 +1583,26 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 	//
 	// -no-rebuild means "do not install another NixOS generation"; it must
 	// never mean "skip an already-started Secure Boot transaction".
+	shimSBOff := false
 	if s.render.SecureBootEnable && s.render.SecureBootShim {
+		sbOn, err := secureboot.FirmwareSecureBoot()
+		if err != nil {
+			return fail(errOut, fmt.Errorf("read Secure Boot state: %w", err))
+		}
+		shimSBOff = !sbOn
+	}
+	if shimSBOff {
+		// The rest of the switch runs from GjallarOS itself; until Secure
+		// Boot enforces, each start shows the next step.
+		if err := armSecureBootResume(ctx, out); err != nil {
+			return fail(errOut, err)
+		}
+		fmt.Fprintln(out, "Restarting into GjallarOS through shim. Then run gjallarctl secure-boot setup in a terminal: it puts the GjallarOS key into shim's list.")
+		if err := attached(ctx, "sudo", "systemctl", "reboot"); err != nil {
+			return fail(errOut, fmt.Errorf("restart: %w", err))
+		}
+		return 0
+	} else if s.render.SecureBootEnable && s.render.SecureBootShim {
 		next, err := secureboot.ContinueShimInstall(
 			ctx,
 			ui,
