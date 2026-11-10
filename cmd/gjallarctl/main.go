@@ -108,8 +108,6 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runNormalize(args[1:], stdout, stderr)
 	case "preset":
 		return runPreset(args[1:], stdout, stderr)
-	case "auth":
-		return runAuth(args[1:], stderr)
 	case "rebuild":
 		return runRebuild(args[1:], stdout, stderr)
 	case "system":
@@ -1867,7 +1865,6 @@ func printUsage(out io.Writer) {
 	fmt.Fprintln(out, "Usage: gjallarctl check [--repo PATH] [--timeout DURATION]")
 	fmt.Fprintln(out, "       gjallarctl preflight [--repo PATH]")
 	oddccli.Usage(out)
-	fmt.Fprintln(out, "       gjallarctl auth")
 	fmt.Fprintln(out, "       gjallarctl rebuild [--repo PATH] [--host HOST] [-d|--debug] [-n|--no-cleanup] [--update] [--update-inputs] [--hardware-update [--channel stable|staging] [--switch 0|1]] [NIXOS-REBUILD-ARGS...]")
 	fmt.Fprintln(out, "       gjallarctl system {check|rebuild}   (root; rebuild starts it for the system checkout)")
 	fmt.Fprintln(out, "       gjallarctl system apply              (developer mode: build ~/GjallarOS-local)")
@@ -3212,23 +3209,6 @@ func resolveExecutable(path string) (string, error) {
 	return resolved, nil
 }
 
-func privilegeFingerprintCommand(
-	ctx context.Context,
-	tty *os.File,
-	authHelper string,
-) *exec.Cmd {
-	cmd := exec.CommandContext(ctx, "sudo", authHelper)
-
-	// The command-specific sudo policy selects a fingerprint-only PAM service.
-	// Keep stdin detached so this phase itself never owns shell input.
-	cmd.Stdin = nil
-	cmd.Stdout = tty
-	cmd.Stderr = tty
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-
-	return cmd
-}
-
 func privilegePasswordCommand(
 	ctx context.Context,
 	tty *os.File,
@@ -3292,26 +3272,6 @@ func authenticationCommandStatus(
 
 	fmt.Fprintf(stderr, "ERROR: %s: %v\n", label, err)
 	return 1
-}
-
-// runAuth refreshes the sudo timestamp through the GjallarOS fingerprint-first
-// flow so a following plain sudo does not start its own PAM conversation.
-func runAuth(args []string, stderr io.Writer) int {
-	if len(args) != 0 {
-		fmt.Fprintln(stderr, "Usage: gjallarctl auth")
-		return 2
-	}
-	if os.Geteuid() == 0 {
-		return 0
-	}
-
-	cached := exec.Command("sudo", "-n", "-v")
-	cached.Stdin, cached.Stdout, cached.Stderr = nil, nil, nil
-	if cached.Run() == nil {
-		return 0
-	}
-
-	return authenticatePrivilege(context.Background(), stderr)
 }
 
 // A gjallarctl operation always asks for authentication and leaves no sudo
@@ -3414,29 +3374,6 @@ func authenticatePrivilege(ctx context.Context, stderr io.Writer) int {
 		tty,
 		"[GjallarOS] Authenticate for privileged operation.",
 	)
-
-	if probe := probeFingerprint(ctx); probe.State != fingerprintReady {
-		fmt.Fprintln(tty, "[GjallarOS] "+probe.Message())
-	} else {
-		fingerprint := privilegeFingerprintCommand(ctx, tty, authHelper)
-		fingerprintStatus := authenticationCommandStatus(
-			ctx,
-			fingerprint,
-			stderr,
-			"fingerprint authentication",
-		)
-		if fingerprintStatus == 0 {
-			return reportAuthentication(tty, 0)
-		}
-		if fingerprintStatus == 130 {
-			return 130
-		}
-
-		fmt.Fprintln(
-			tty,
-			"[GjallarOS] Fingerprint did not match, timed out or was skipped; using password.",
-		)
-	}
 
 	password := privilegePasswordCommand(
 		ctx,

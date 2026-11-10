@@ -441,7 +441,6 @@ _gjallarctl() {
 
   local -a cmds=(
     'rebuild:rebuild and switch the system'
-    'auth:authenticate sudo (fingerprint, then password)'
     'helpme:list the GjallarOS tools'
     'check:run the safe repository checks'
     'preflight:check the repository before a rebuild'

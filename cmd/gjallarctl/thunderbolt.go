@@ -541,7 +541,7 @@ func tbReviewDevice(ctx context.Context, executable string, d tbDevice, dma tbDM
 		// Dismissed or kept blocked: boltd already holds it back.
 		return false
 	}
-	output, err := usbAuthorize(ctx, tbDisplayName(d), []string{executable, "thunderbolt", picked, "--uid", d.UID})
+	output, err := usbAuthorize(ctx, []string{executable, "thunderbolt", picked, "--uid", d.UID})
 	if ctx.Err() != nil {
 		return false
 	}

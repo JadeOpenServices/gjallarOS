@@ -68,18 +68,6 @@
       # session's history but are not saved to the file.
       zshaddhistory() { (( ''${#1} <= 4096 )) || return 2; }
 
-      # Authenticate plain sudo through the GjallarOS flow: fingerprint
-      # first, then a terminal password prompt. Non-interactive and explicit
-      # authentication modes go straight to sudo.
-      sudo() {
-        case "$1" in
-          -n|-S|-A|-k|-K|-h|-V|--non-interactive|--stdin|--askpass|--help|--version) ;;
-          *) if (( $+commands[gjallarctl] )) && ! command sudo -n -v 2>/dev/null; then
-               command gjallarctl auth || return
-             fi ;;
-        esac
-        command sudo "$@"
-      }
       export PATH=$PATH:${config.home.homeDirectory}/.local/bin
     '';
   };
