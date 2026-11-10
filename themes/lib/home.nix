@@ -10,6 +10,18 @@ let
 in
 {
   home.pointerCursor.enable = true;
+
+  # OpenJade shape rule (6 px windows and cards, 4 px controls, 2 px marks,
+  # square bars, a 1 px line instead of shadows). Stylix writes one gtk.css
+  # for both GTK versions, and the rule uses GTK4 / libadwaita syntax, so
+  # the @import in stylix.targets.gtk.extraCss below finds the real file
+  # only under gtk-4.0. GTK3 gets an empty file and keeps adw-gtk3's shape.
+  xdg.configFile."gtk-4.0/openjade-shape.css".source = ./openjade-shape.css;
+  xdg.configFile."gtk-3.0/openjade-shape.css".text = ''
+    /* No GTK3 shape rule yet. GTK4 gets the OpenJade rule from the
+       file of the same name in gtk-4.0. */
+  '';
+
   xdg.userDirs.setSessionVariables = true;
 
   gtk = {
@@ -53,6 +65,8 @@ in
       *:focus-visible {
         outline-color: #${semanticTheme.fallback.selection};
       }
+
+      @import url("openjade-shape.css");
     '';
 
     targets.blender.enable = false;

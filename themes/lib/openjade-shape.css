@@ -1,0 +1,89 @@
+/* Copied from the OpenJade themebrain (code/gtk/openjade-adwaita.css,
+ * owner baka-80) on 2026-11-10. Changes go back to baka-80 so both copies
+ * stay the same. */
+
+/* OpenJade hard corners for GTK4 / libadwaita (checked against libadwaita 1.9.4).
+ *
+ * Shape only. No colours: every colour stays a libadwaita named colour, which
+ * stylix (and Noctalia's noctalia.css) fill from the palette, so this file
+ * follows every palette as it is.
+ *
+ * Rules (THEMEBRAIN section 13): 6 px windows, cards, panels, popovers;
+ * 4 px controls; 2 px small marks; no pills, no circles; bars are straight
+ * with square ends; no drop shadows (a 1 px line instead).
+ *
+ * Use: append to ~/.config/gtk-4.0/gtk.css (stylix targets.gtk.extraCss),
+ * or load it in one app with Gtk.CssProvider at
+ * Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION. Without it an app gets stock
+ * libadwaita, which still works.
+ *
+ * Not touched on purpose: keyboard focus outlines (open question, see
+ * THEMEBRAIN 13.4) and avatars.
+ */
+
+/* 6 px: windows, cards, panels, popovers, dialogs */
+window.csd { --window-radius: 6px; }
+list.boxed-list, list.content, list.boxed-list-separate > row, .card,
+menubutton.card > button, button.card, frame, tabthumbnail, tabthumbnail .card picture,
+filechooser gridview > child,
+popover > contents, menubar > item popover.menu popover.menu > contents,
+colorchooser .popover.osd, floating-sheet > sheet, .toolbar.osd,
+dialog-host > dialog.alert sheet,
+window.dialog.message.csd:not(.solid-csd),
+window.messagedialog.csd:not(.solid-csd),
+window.dialog-window.alert.csd:not(.solid-csd),
+toast, .app-notification, video image.osd {
+  border-radius: 6px;
+}
+.app-notification { border-top-left-radius: 0; border-top-right-radius: 0; }
+
+/* 4 px: controls. pill and circular become plain 4 px buttons. */
+button, menubutton > button, splitbutton > button, splitbutton > menubutton > button,
+button.pill, menubutton.pill > button, button.circular, menubutton.circular > button,
+menubutton.suggested-action.pill, menubutton.suggested-action.circular,
+menubutton.opaque.pill, menubutton.opaque.circular,
+button.sidebar-button, windowcontrols > button > image,
+infobar .close, searchbar > revealer > box .close,
+tabbar tab button.image-button, dnd tab button.image-button, tabthumbnail button,
+dialog.shortcuts .navigation-box > button,
+window.messagedialog .response-area > button, dialog.alert .response-area > button,
+window.dialog.message.csd .dialog-action-area > button,
+entry, spinbutton, switch, toggle-group, toggle-group.round,
+popover.menu modelbutton, popover.menu list > row, popover.menu listview > row,
+.view:selected, .view:selected:focus, window.assistant .sidebar > label {
+  border-radius: 4px;
+}
+toggle-group > toggle, toggle-group.round toggle { border-radius: 2px; }
+
+/* 2 px: small marks */
+check, radio, checkbutton.selection-mode check, checkbutton.selection-mode radio,
+switch > slider, scale > trough > slider,
+scale.horizontal.marks-before.marks-after > trough > slider,
+cursor-handle > contents, colorswatch#editor-color-sample > overlay,
+.accent-color-row color, view-switcher-sidebar .indicator,
+checkbutton.grouped, window.about .main-page .app-version,
+dialog.about .main-page .app-version, tabthumbnail button > image,
+tabthumbnail .needs-attention > widget,
+bottom-sheet > sheet > stack > widget > drag-handle {
+  border-radius: 2px;
+}
+
+/* Straight bars, square ends */
+progressbar > trough, progressbar > trough > progress,
+scale > trough, scale > trough > fill, scale > trough > highlight, scale.color > trough,
+levelbar.horizontal trough > block, levelbar.vertical trough > block,
+levelbar > trough > block, levelbar.horizontal.discrete > trough > block:first-child,
+levelbar.horizontal.discrete > trough > block:last-child,
+levelbar.vertical.discrete > trough > block:first-child,
+levelbar.vertical.discrete > trough > block:last-child,
+scrollbar > range > trough, scrollbar > range > trough > slider {
+  border-radius: 0;
+}
+
+/* No drop shadows: libadwaita's own 1 px border line instead */
+window.csd, window.csd:backdrop,
+window.csd.dialog.message, window.csd.messagedialog,
+popover > contents {
+  box-shadow: 0 0 0 1px color-mix(in srgb, currentColor var(--border-opacity), transparent);
+}
+popover > arrow { box-shadow: none; }
