@@ -411,6 +411,19 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 			"Force clean redeployment selected; preserving disk layout, credentials, encryption keys, and user data.",
 		)
 	}
+	// Before prepareHost: an in-place run changes /etc/nixos there, and a
+	// refusal has to leave the machine as it was.
+	encrypted := opt.recovery || !persistentInstalledHost
+	if !encrypted {
+		luks, err := diskcrypto.RootDevice(ctx)
+		if err != nil {
+			return fail(errOut, fmt.Errorf("check system disk encryption: %w", err))
+		}
+		encrypted = luks != ""
+	}
+	if err := stableOnUnencryptedDisk(ctx, ui, out, encrypted, &s.user, s.preset, presetPath); err != nil {
+		return fail(errOut, err)
+	}
 	if skip := liveHostPreparationSkip(
 		opt,
 		os.Getenv("GJALLAR_INSTALLER_RESUME_STATE"),
@@ -3776,6 +3789,55 @@ func applyChannelFlag(user *config.User, channel string, preset bool, presetPath
 	}
 	user.ReleaseChannel = channel
 	return nil
+}
+
+// stableOnUnencryptedDisk keeps staging, dev and developer mode off an
+// unencrypted system disk (Plane 283, wiki 752 Q212). Their confirmation
+// needs the security chip PIN or the disk recovery key; a plain disk has
+// neither, so every system rebuild after the install would be refused
+// (e2e-shim run 9, 2026-11-10). A fresh disk is always encrypted, so this
+// only stops in-place runs. The person may switch to stable instead.
+func stableOnUnencryptedDisk(ctx context.Context, ui confirmer, out io.Writer, encrypted bool, user *config.User, preset bool, presetPath string) error {
+	need := devgate.Needs(user.Channel(), user.DeveloperMode)
+	if encrypted || need.Empty() {
+		return nil
+	}
+	var what []string
+	if need.Channels {
+		what = append(what, "the "+user.Channel()+" channel")
+	}
+	if need.DeveloperMode {
+		what = append(what, "developer mode")
+	}
+	want := strings.Join(what, " and ")
+	needs := "needs"
+	if len(what) > 1 {
+		needs = "need"
+	}
+	fmt.Fprintf(out, "The system disk is not encrypted. %s %s an encrypted disk: confirming it takes the security chip PIN or the disk recovery key, and this disk has neither, so every system update would be refused.\n", upperFirst(want), needs)
+	ok, err := ui.Confirm(ctx, "Install with the stable channel and developer mode off instead?", true)
+	if err != nil || !ok {
+		fix := "run the installer again with --channel stable"
+		if preset {
+			fix = "set releaseChannel to stable and developerMode to false in " + presetPath + " and run the installer again"
+		}
+		return fmt.Errorf("%s %s an encrypted system disk; nothing was changed. Install on a fresh disk to get encryption, or %s", want, needs, fix)
+	}
+	user.ReleaseChannel = "stable"
+	user.DeveloperMode = false
+	fmt.Fprintln(out, "Following the stable channel; developer mode is off.")
+	return nil
+}
+
+type confirmer interface {
+	Confirm(ctx context.Context, message string, defaultYes bool) (bool, error)
+}
+
+func upperFirst(s string) string {
+	if s == "" {
+		return s
+	}
+	return strings.ToUpper(s[:1]) + s[1:]
 }
 
 // developerConfirmNotice says how a fresh install of a dev or staging
