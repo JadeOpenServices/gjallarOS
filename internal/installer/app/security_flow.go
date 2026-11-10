@@ -56,6 +56,23 @@ func tpm2FollowsRequest(endpointManaged, persistentInstalledHost bool) bool {
 	return endpointManaged || !persistentInstalledHost
 }
 
+// saveTPM2Off turns TPM2 unlock off in user.config.json too. The file is
+// saved before the TPM2 decision; left at true, the next gjallarctl rebuild
+// rendered TPM2 unlock again and failed its assertions (e2e-shim run 9,
+// 2026-11-10: in place on an unencrypted disk, every rebuild stopped at
+// "requires exactly one LUKS device").
+func saveTPM2Off(user *config.User, presetPath string, out io.Writer) error {
+	if !user.LUKSTPM2Enable {
+		return nil
+	}
+	user.LUKSTPM2Enable = false
+	if err := config.WriteAtomic(presetPath, *user); err != nil {
+		return fmt.Errorf("save luksTpm2Enable=false to user.config.json: %w", err)
+	}
+	fmt.Fprintln(out, "Updated user.config.json: luksTpm2Enable=false, as installed.")
+	return nil
+}
+
 // installerTPM2Args checks the running system for an installed host's TPM2
 // request: its LUKS mapping, the TPM and the disk behind it. The request is
 // the Startup unlock answer (or the saved one); the check asks nothing.

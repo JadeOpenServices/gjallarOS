@@ -1177,7 +1177,9 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 		}
 		if !tpm2AllowedForSecureBoot(s.render.SecureBootEnable) {
 			s.render.LUKSTPM2Enable = false
-			s.user.LUKSTPM2Enable = false
+			if err := saveTPM2Off(&s.user, presetPath, out); err != nil {
+				return fail(errOut, err)
+			}
 			fmt.Fprintln(
 				out,
 				"GjallarOS Secure Boot is not set up on this install; TPM2 disk unlock stays off.",
@@ -1194,6 +1196,13 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 			}
 			fmt.Fprint(out, tpmOut)
 			s.render.LUKSTPM2Enable = strings.Contains(tpmOut, "luks_tpm2_enable=true")
+			// Without a LUKS mapping the request can never work here. A
+			// missing TPM keeps the saved request, as before.
+			if mapping, err := diskcrypto.MappingDetails(hardwarePath); err == nil && mapping.Name == "" {
+				if err := saveTPM2Off(&s.user, presetPath, out); err != nil {
+					return fail(errOut, err)
+				}
+			}
 		}
 		if err := nixrender.WriteAtomic(settingsPath, s.render); err != nil {
 			return fail(errOut, err)

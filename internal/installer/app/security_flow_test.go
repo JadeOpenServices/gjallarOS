@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -194,5 +196,46 @@ func TestKeyboardOnlyAtStartup(t *testing.T) {
 		if got := keyboardOnlyAtStartup(tc.chassis, tc.touch); got != tc.want {
 			t.Errorf("chassis %q touch %t: %t, want %t", tc.chassis, tc.touch, got, tc.want)
 		}
+	}
+}
+
+// An install that turned TPM2 unlock off must say so in user.config.json,
+// or the next gjallarctl rebuild renders it again (e2e-shim run 9,
+// 2026-11-10).
+func TestSaveTPM2OffWritesTheOutcome(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "user.config.json")
+	user, err := config.Defaults()
+	if err != nil {
+		t.Fatal(err)
+	}
+	user.Username = "example"
+	user.LUKSTPM2Enable = true
+	var out bytes.Buffer
+	if err := saveTPM2Off(&user, path, &out); err != nil {
+		t.Fatal(err)
+	}
+	saved, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if user.LUKSTPM2Enable || saved.LUKSTPM2Enable {
+		t.Fatalf("luksTpm2Enable after save: in memory %t, in file %t; want false", user.LUKSTPM2Enable, saved.LUKSTPM2Enable)
+	}
+	if !strings.Contains(out.String(), "luksTpm2Enable=false") {
+		t.Fatalf("output does not name the change:\n%s", out.String())
+	}
+}
+
+func TestSaveTPM2OffLeavesAnOffRequestAlone(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "user.config.json")
+	var out bytes.Buffer
+	if err := saveTPM2Off(&config.User{}, path, &out); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("user.config.json written although nothing changed (stat: %v)", err)
+	}
+	if out.Len() != 0 {
+		t.Fatalf("output although nothing changed:\n%s", out.String())
 	}
 }
