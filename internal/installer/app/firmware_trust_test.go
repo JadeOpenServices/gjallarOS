@@ -55,3 +55,28 @@ func TestFirmwareTrustReport(t *testing.T) {
 		t.Errorf("warning after note:\n%s", got)
 	}
 }
+
+// EMULATED firmware states. Only the paths that stop before the shim build:
+// Setup Mode gets no offer, and the offer defaults to no.
+func TestOfferUnknownModelShim(t *testing.T) {
+	for _, c := range []struct {
+		name  string
+		trust secureboot.FirmwareTrust
+		input string
+		ask   bool
+	}{
+		{"setup mode", secureboot.FirmwareTrust{SecureBoot: secureboot.FlagOff, SetupMode: secureboot.FlagOn}, "", false},
+		{"secure boot off, default no", secureboot.FirmwareTrust{SecureBoot: secureboot.FlagOff, SetupMode: secureboot.FlagOff}, "\n", true},
+		{"secure boot off, no", secureboot.FirmwareTrust{SecureBoot: secureboot.FlagOff, SetupMode: secureboot.FlagOff}, "n\n", true},
+	} {
+		ui, out := validationTestUI(c.input)
+		_, ok, err := offerUnknownModelShim(context.Background(), ui, out, t.TempDir(), c.trust, false)
+		if err != nil {
+			t.Fatalf("%s: %v", c.name, err)
+		}
+		asked := strings.Contains(out.String(), "through shim anyway")
+		if ok || asked != c.ask {
+			t.Errorf("%s: ok=%v asked=%v\n%s", c.name, ok, asked, out)
+		}
+	}
+}

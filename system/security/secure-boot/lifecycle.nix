@@ -305,7 +305,7 @@ in
 
                       printf '%s\n' "$status" |
                         grep -Eq 'Secure Boot:.*Enabled' ||
-                        pause_visible "Secure Boot is not enforcing."
+                        pause_visible "Secure Boot is not enforcing.${lib.optionalString shim " To go on with the switch to shim, run in a terminal: gjallarctl secure-boot setup"}"
 
                       if printf '%s\n' "$status" |
                         grep -Eq 'Setup Mode:.*Enabled'; then
