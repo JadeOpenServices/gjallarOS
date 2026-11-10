@@ -5,10 +5,13 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"golang.org/x/sys/unix"
 
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/config"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/installreport"
@@ -40,15 +43,19 @@ func TestReportNeedsAPersonAtATerminal(t *testing.T) {
 	if reportAllowed(pipeRead, config.User{}) {
 		t.Fatal("a pipe counts as a terminal")
 	}
-
-	tty, err := os.Open("/dev/null")
+	null, err := os.Open("/dev/null")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer tty.Close()
-	// /dev/null is a character device, as a terminal is.
+	defer null.Close()
+	// /dev/null is a character device but no terminal (e2e-r292).
+	if reportAllowed(null, config.User{}) {
+		t.Fatal("/dev/null counts as a terminal")
+	}
+
+	tty := openPTY(t)
 	if !reportAllowed(tty, config.User{}) {
-		t.Fatal("character device not accepted")
+		t.Fatal("terminal not accepted")
 	}
 	if reportAllowed(tty, config.User{UnattendedInstall: true}) {
 		t.Fatal("unattended install offered a report")
@@ -60,6 +67,29 @@ func TestReportNeedsAPersonAtATerminal(t *testing.T) {
 	if reportAllowed(tty, config.User{}) {
 		t.Fatal("resumed run offered a report")
 	}
+}
+
+// openPTY returns the terminal side of a new pseudo-terminal.
+func openPTY(t *testing.T) *os.File {
+	t.Helper()
+	master, err := os.OpenFile("/dev/ptmx", os.O_RDWR|unix.O_NOCTTY, 0)
+	if err != nil {
+		t.Skipf("no pseudo-terminals here: %v", err)
+	}
+	t.Cleanup(func() { master.Close() })
+	if err := unix.IoctlSetPointerInt(int(master.Fd()), unix.TIOCSPTLCK, 0); err != nil {
+		t.Fatal(err)
+	}
+	n, err := unix.IoctlGetInt(int(master.Fd()), unix.TIOCGPTN)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tty, err := os.OpenFile(fmt.Sprintf("/dev/pts/%d", n), os.O_RDWR|unix.O_NOCTTY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { tty.Close() })
+	return tty
 }
 
 func reportUI(answers string) (prompt.UI, *bytes.Buffer) {

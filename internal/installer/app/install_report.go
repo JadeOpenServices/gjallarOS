@@ -7,6 +7,8 @@ import (
 	"os"
 	"time"
 
+	"golang.org/x/sys/unix"
+
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/config"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/installreport"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/prompt"
@@ -38,8 +40,10 @@ func reportAllowed(in io.Reader, user config.User) bool {
 	if !ok {
 		return false
 	}
-	info, err := file.Stat()
-	return err == nil && info.Mode()&os.ModeCharDevice != 0
+	// A character device is not enough: /dev/null is one (e2e-r292,
+	// 2026-11-10). Only a terminal answers TCGETS.
+	_, err := unix.IoctlGetTermios(int(file.Fd()), unix.TCGETS)
+	return err == nil
 }
 
 // reportInput is what run knows when it offers a report.
