@@ -431,13 +431,20 @@ func WriteStatus(path string, v Verdict) error {
 		return err
 	}
 	data = append(data, '\n')
-	// Unchanged verdicts are not rewritten: path units watch this file.
-	if old, err := os.ReadFile(path); err == nil && bytes.Equal(old, data) {
-		return nil
-	}
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return err
 	}
+	// Unchanged verdicts are not rewritten: path units watch this file.
+	// The stamp next to it says the verdict was checked again.
+	if old, err := os.ReadFile(path); err != nil || !bytes.Equal(old, data) {
+		if err := writeAtomic(path, data); err != nil {
+			return err
+		}
+	}
+	return writeAtomic(CheckedPath(path), checkedStamp(data))
+}
+
+func writeAtomic(path string, data []byte) error {
 	tmp := path + ".tmp"
 	if err := os.WriteFile(tmp, data, 0644); err != nil {
 		return err
