@@ -511,6 +511,12 @@ this repository or the machine. The `oddc` flake input supplies module code
 only, and the system configuration reads the answer as `oddc.catalog`. The
 installed system receives that model under `/etc/oddc`.
 
+When no ODDC model matches, the installer says the machine runs best effort.
+It lists the parts it found, checked against the ODDC catalog built into the
+installer, and names the parts ODDC marks as not working on Linux, with ODDC's
+reason. The machine gets the hardware-neutral base; nothing optional is
+switched on, and no part from that list becomes a built-in USB device.
+
 The answer comes from the ODDC commit `flake.lock` pins for the `oddc` input.
 Updating ODDC on a device is one operation:
 
