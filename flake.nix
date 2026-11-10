@@ -210,10 +210,7 @@
 
         local-changes = import ./tests/nix/local-changes.nix { inherit pkgs; };
 
-        legacy-names = import ./tests/nix/legacy-names.nix {
-          inherit pkgs;
-          today = self.lastModifiedDate;
-        };
+        legacy-names = import ./tests/nix/legacy-names.nix { inherit pkgs; };
 
         nextcloud-client-patches = import ./tests/nix/nextcloud-client-patches.nix { inherit pkgs; };
 

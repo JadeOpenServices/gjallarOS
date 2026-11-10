@@ -5,7 +5,7 @@
       "old": "rebuild",
       "new": "gjallarctl rebuild",
       "removedIn": "dev 2838248d",
-      "deleteAfter": "2026-12-01",
+      "deleteAfter": "v2026.10.70",
       "item": "311",
       "match": [
         "`rebuild`",
@@ -18,7 +18,7 @@
       "old": "endpointManagedDevice",
       "new": "management.enable",
       "removedIn": "dev 7f05cae7",
-      "deleteAfter": "2026-12-01",
+      "deleteAfter": "v2026.10.70",
       "item": "JODS-565",
       "allowedIn": [
         "internal/installer/nixrender/nixrender.go"
@@ -29,7 +29,7 @@
       "old": "jodsEndpoint",
       "new": "management.endpoint",
       "removedIn": "dev 7f05cae7",
-      "deleteAfter": "2026-12-01",
+      "deleteAfter": "v2026.10.70",
       "item": "JODS-565",
       "allowedIn": [
         "internal/installer/nixrender/nixrender.go"
@@ -40,7 +40,7 @@
       "old": "jodsPolicySigningPublicKey",
       "new": "management.policySigningPublicKey",
       "removedIn": "dev 7f05cae7",
-      "deleteAfter": "2026-12-01",
+      "deleteAfter": "v2026.10.70",
       "item": "JODS-565",
       "allowedIn": [
         "internal/installer/nixrender/nixrender.go"
@@ -51,7 +51,7 @@
       "old": "jodsRecoveryCommandSigningPublicKey",
       "new": "management.recoveryCommandSigningPublicKey",
       "removedIn": "dev 7f05cae7",
-      "deleteAfter": "2026-12-01",
+      "deleteAfter": "v2026.10.70",
       "item": "JODS-565",
       "allowedIn": [
         "internal/installer/nixrender/nixrender.go"
@@ -62,7 +62,7 @@
       "old": "jodsEnrollmentMode",
       "new": "management.enrollmentMode",
       "removedIn": "dev 7f05cae7",
-      "deleteAfter": "2026-12-01",
+      "deleteAfter": "v2026.10.70",
       "item": "JODS-565",
       "allowedIn": [
         "internal/installer/nixrender/nixrender.go"
@@ -73,7 +73,7 @@
       "old": "jodsAllowInsecureTls",
       "new": "management.allowInsecureTls",
       "removedIn": "dev 7f05cae7",
-      "deleteAfter": "2026-12-01",
+      "deleteAfter": "v2026.10.70",
       "item": "JODS-565",
       "allowedIn": [
         "internal/installer/nixrender/nixrender.go"
@@ -84,7 +84,7 @@
       "old": "jodsDeviceClass",
       "new": "management.deviceClass",
       "removedIn": "dev 7f05cae7",
-      "deleteAfter": "2026-12-01",
+      "deleteAfter": "v2026.10.70",
       "item": "JODS-565",
       "allowedIn": [
         "internal/installer/nixrender/nixrender.go"
@@ -95,7 +95,7 @@
       "old": "jodsDesktopProfile",
       "new": "management.desktopProfile",
       "removedIn": "dev 7f05cae7",
-      "deleteAfter": "2026-12-01",
+      "deleteAfter": "v2026.10.70",
       "item": "JODS-565",
       "allowedIn": [
         "internal/installer/nixrender/nixrender.go"
@@ -106,7 +106,7 @@
       "old": "jodsFingerprintEnrollmentAllowed",
       "new": "management.fingerprintEnrollmentAllowed",
       "removedIn": "dev 7f05cae7",
-      "deleteAfter": "2026-12-01",
+      "deleteAfter": "v2026.10.70",
       "item": "JODS-565",
       "allowedIn": [
         "internal/installer/nixrender/nixrender.go"
@@ -117,7 +117,7 @@
       "old": "jodsPrebootLockEnable",
       "new": "prebootLock.enable",
       "removedIn": "dev 7f05cae7",
-      "deleteAfter": "2026-12-01",
+      "deleteAfter": "v2026.10.70",
       "item": "JODS-565",
       "allowedIn": [
         "internal/installer/nixrender/nixrender.go"
@@ -128,7 +128,7 @@
       "old": "JODS-RECOVERY",
       "new": "GJALLAR-RECOVERY",
       "removedIn": "dev 7f05cae7",
-      "deleteAfter": "2026-12-01",
+      "deleteAfter": "v2026.10.70",
       "item": "JODS-565"
     },
     {
@@ -136,7 +136,7 @@
       "old": "JODS-REC",
       "new": "GJALLAR-REC",
       "removedIn": "dev 7f05cae7",
-      "deleteAfter": "2026-12-01",
+      "deleteAfter": "v2026.10.70",
       "item": "JODS-565"
     },
     {
@@ -144,7 +144,7 @@
       "old": "jods-mdm-agent.service",
       "new": "mdm-agent.service",
       "removedIn": "dev 7f05cae7",
-      "deleteAfter": "2026-12-01",
+      "deleteAfter": "v2026.10.70",
       "item": "JODS-565",
       "match": [
         "jods-mdm-agent"
@@ -155,7 +155,7 @@
       "old": "/var/lib/gjallarOS/jods-status.txt",
       "new": "/var/lib/gjallarOS/management-status.txt",
       "removedIn": "dev 7f05cae7",
-      "deleteAfter": "2026-12-01",
+      "deleteAfter": "v2026.10.70",
       "item": "JODS-565",
       "match": [
         "jods-status"
@@ -166,7 +166,7 @@
       "old": "/var/lib/gjallarOS/jods-enrollment-complete",
       "new": "/var/lib/gjallarOS/management-enrollment-complete",
       "removedIn": "dev 7f05cae7",
-      "deleteAfter": "2026-12-01",
+      "deleteAfter": "v2026.10.70",
       "item": "JODS-565",
       "match": [
         "jods-enrollment-complete"

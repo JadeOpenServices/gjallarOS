@@ -1,13 +1,13 @@
 # The legacy table (system/tools/legacy, Jade Q166) holds every rename. This
 # check fails when an old name is still used in the product outside that
-# folder, or when a row is past its deleteAfter date.
-#
-# `today` is the commit date of the checked tree, so a revision gives the
-# same answer on every machine and day.
-{ pkgs, today }:
+# folder, or when the tree's release (system/release) is past a row's
+# deleteAfter tag. A revision gives the same answer on every machine and day.
+{ pkgs }:
 let
   inherit (pkgs) lib;
-  inherit (import ../../system/tools/legacy/table.nix { inherit lib; }) rows;
+  inherit (import ../../system/tools/legacy/table.nix { inherit lib; }) rows releasePattern;
+  release = lib.fileContents ../../system/release;
+  version = tag: lib.removePrefix "v" tag;
   root = ../..;
   textFile =
     file:
@@ -39,8 +39,11 @@ let
       ]
     );
   };
-  day = date: lib.replaceStrings [ "-" ] [ "" ] date;
-  expired = lib.filter (row: day row.deleteAfter < builtins.substring 0 8 today) rows;
+  expired =
+    assert lib.assertMsg (
+      builtins.match releasePattern release != null
+    ) "system/release must hold one release tag like v2026.10.63, not ${release}";
+    lib.filter (row: builtins.compareVersions (version release) (version row.deleteAfter) > 0) rows;
   # Without an explicit list the old name is matched as a whole word, so
   # JODS-REC does not hit GJALLAR-RECOVERY or JODS-RECOVERY.
   scan =
@@ -67,7 +70,7 @@ pkgs.runCommand "gjallar-legacy-names-check" { } ''
   failed=0
   ${lib.concatMapStrings scan rows}
   ${lib.concatMapStrings (row: ''
-    printf '%s\n' ${lib.escapeShellArg "${row.old} (${row.item}): row is past deleteAfter ${row.deleteAfter}; remove the row and the last traces"}
+    printf '%s\n' ${lib.escapeShellArg "${row.old} (${row.item}): deleteAfter is ${row.deleteAfter} and this tree is release ${release}; remove the row and the last traces"}
     failed=1
   '') expired}
   [ "$failed" = 0 ]
