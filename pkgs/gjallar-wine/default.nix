@@ -42,7 +42,7 @@ buildGoModule {
     ];
   };
 
-  vendorHash = "sha256-Vt+uu24eoM6iJNbf1jUJePCghiTlQpy2q4CQOLQZN/g=";
+  vendorHash = "sha256-Mp0do2yse7kCCmyE2ACqdk0DMAX3bpF2KHjHsKDjG8o=";
   proxyVendor = true;
 
   subPackages = [ "cmd/gjallar-wine" ];
