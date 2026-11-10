@@ -20,6 +20,8 @@ func TestVPNNoticeStepOncePerJoin(t *testing.T) {
 	openB := nettrust.Verdict{Network: "synthetic-net-b", Device: "wlan0"}
 	offline := nettrust.Verdict{}
 	noKey := nettrust.Verdict{Blocked: nettrust.BlockTailscaleDown, Device: "eth0"}
+	failedA := blockedA
+	failedA.BlockError = "synthetic nft error"
 
 	seen := ""
 	steps := []struct {
@@ -35,6 +37,9 @@ func TestVPNNoticeStepOncePerJoin(t *testing.T) {
 		{offline, false},
 		{noKey, true},
 		{noKey, false},
+		{failedA, true},  // the block on a noticed network failed
+		{failedA, false}, // still failed
+		{blockedA, true}, // the block works again
 	}
 	for i, s := range steps {
 		show, next := vpnNoticeStep(s.v, seen)
@@ -57,10 +62,16 @@ func TestVPNNoticeText(t *testing.T) {
 	if !strings.HasPrefix(body, "Tailscale is not running.\n") || !strings.Contains(body, "cannot be paused") {
 		t.Fatalf("body %q", body)
 	}
+	// A block that failed never says blocking.
+	summary, body = vpnNoticeText(nettrust.Verdict{Blocked: nettrust.BlockNoExitNode, BlockError: "synthetic nft error", Network: "synthetic-net-a"})
+	if summary != "VPN cannot block this network" || !strings.Contains(body, "without the tunnel") || strings.Contains(body, "Pausing") {
+		t.Fatalf("summary %q body %q", summary, body)
+	}
 	// The popup cuts each line after three rows of about 33 characters.
 	for _, v := range []nettrust.Verdict{
 		{Blocked: nettrust.BlockNoExitNode, Network: "synthetic-net-a", SSID: "Synthetic Cafe Guest 5G"},
 		{Blocked: nettrust.BlockTailscaleDown},
+		{Blocked: nettrust.BlockNoExitNode, BlockError: "synthetic nft error", SSID: "Synthetic Cafe Guest 5G"},
 	} {
 		_, body = vpnNoticeText(v)
 		for _, line := range strings.Split(body, "\n") {
@@ -162,5 +173,17 @@ func TestVPNNoticeClosesWhenTheNetworkChanges(t *testing.T) {
 	}
 	if len(*posted) != 1 || readVPNNoticeSeen() != "" {
 		t.Fatalf("posted %d, seen %q", len(*posted), readVPNNoticeSeen())
+	}
+}
+
+// A failed block offers no pause: the network already carries the traffic.
+func TestVPNNoticeFailedBlockOnlyOK(t *testing.T) {
+	posted, _, paused := fakeVPNNotice(t, `{"trust":"untrusted","bypass":[],"blocked":"no-exit-node","blockError":"synthetic nft error","network":"synthetic-net-a","device":"wlan0"}`)
+	var errOut bytes.Buffer
+	if code := runVPNNotice(nil, &errOut); code != 0 {
+		t.Fatalf("code %d: %s", code, errOut.String())
+	}
+	if len(*posted) != 1 || len((*posted)[0].Actions) != 1 || (*posted)[0].Actions[0].Key != "ok" || *paused != 0 {
+		t.Fatalf("posted %+v, paused %d", *posted, *paused)
 	}
 }

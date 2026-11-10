@@ -1924,6 +1924,14 @@ Question 25 answered: `auto` blocks, and the pause is the way out. Built
   router and a client on its own LAN. It checks each blocked reason, that
   the internet is cut and the LAN still answers, that marked packets pass
   and that `exit-node off` lifts the block.
+- Loophole 43 (Plane 314, 2026-11-10): the block shared one 2-minute
+  deadline with the `tailscale` calls before it. A `tailscale set` that
+  never returned used it up, the block then failed, and the status and
+  the notice still said blocked. Each `tailscale` call now ends after
+  15 seconds, the block gets its own 30-second deadline, and a block that
+  fails is written as `blockError`: the status says NOT ACTIVE and the
+  notice says "VPN cannot block this network" with no pause button. The
+  VM test freezes tailscaled and checks the block is still in place.
 
 Security pass for step 1:
 

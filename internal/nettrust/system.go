@@ -202,6 +202,18 @@ func parseSubnets(data []byte) ([]netip.Prefix, error) {
 // node unmanaged until the next trigger.
 var tailnetSettle = 30 * time.Second
 
+// tailscaleCall bounds one tailscale CLI call. The CLI waits on tailscaled
+// without a limit of its own, and a stuck daemon must not use up the time
+// the rest of the verdict needs (loophole 43).
+var tailscaleCall = 15 * time.Second
+
+// tailscale runs one tailscale CLI call under tailscaleCall.
+func (s System) tailscale(ctx context.Context, args ...string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(ctx, tailscaleCall)
+	defer cancel()
+	return s.run(ctx, "tailscale", args...)
+}
+
 // tailscaledStarting reports whether systemd may still bring tailscaled up.
 // A stopped or failed unit has no start coming, so waiting for it only
 // delays the decision, a pause among them. Without an answer from systemd
@@ -218,7 +230,7 @@ func (s System) tailscaledStarting(ctx context.Context) bool {
 func (s System) Tailnet(ctx context.Context) (Tailnet, error) {
 	deadline := time.Now().Add(tailnetSettle)
 	for {
-		out, err := s.run(ctx, "tailscale", "status", "--json")
+		out, err := s.tailscale(ctx, "status", "--json")
 		state := ""
 		if len(out) > 0 {
 			var head struct{ BackendState string }
@@ -392,7 +404,7 @@ func (s System) ApplyExitNode(ctx context.Context, tn Tailnet, want string) (boo
 	case want != "" && current != nil && current.Matches(want):
 		return false, nil
 	case want == "":
-		_, err := s.run(ctx, "tailscale", "set", "--exit-node=")
+		_, err := s.tailscale(ctx, "set", "--exit-node=")
 		return err == nil, err
 	default:
 		// tailscale set takes an address or the MagicDNS name, not the
@@ -408,7 +420,7 @@ func (s System) ApplyExitNode(ctx context.Context, tn Tailnet, want string) (boo
 			return false, fmt.Errorf("exit node %q is not in this tailnet", want)
 		}
 		// LAN access keeps captive portals and local printers usable.
-		_, err := s.run(ctx, "tailscale", "set", "--exit-node="+peer.IPs[0].String(), "--exit-node-allow-lan-access=true")
+		_, err := s.tailscale(ctx, "set", "--exit-node="+peer.IPs[0].String(), "--exit-node-allow-lan-access=true")
 		return err == nil, err
 	}
 }
