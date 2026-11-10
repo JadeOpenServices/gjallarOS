@@ -8,8 +8,8 @@
   btopTheme = "gruvbox_dark_v2";
 
   opacity = 1.0;
-  rounding = 0;
-  shadow = true;
+  rounding = 6;
+  shadow = false;
   bordersPlusPlus = false;
 
   font = "IosevkaTerm NF"; # Selected font
