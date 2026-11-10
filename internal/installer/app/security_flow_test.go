@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -193,6 +195,78 @@ func TestKeyboardOnlyAtStartup(t *testing.T) {
 	} {
 		if got := keyboardOnlyAtStartup(tc.chassis, tc.touch); got != tc.want {
 			t.Errorf("chassis %q touch %t: %t, want %t", tc.chassis, tc.touch, got, tc.want)
+		}
+	}
+}
+
+// An install that turned TPM2 unlock off must say so in user.config.json,
+// or the next gjallarctl rebuild renders it again (e2e-shim run 9,
+// 2026-11-10).
+func TestSaveTPM2OffWritesTheOutcome(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "user.config.json")
+	user, err := config.Defaults()
+	if err != nil {
+		t.Fatal(err)
+	}
+	user.Username = "example"
+	user.LUKSTPM2Enable = true
+	var out bytes.Buffer
+	if err := saveTPM2Off(&user, path, &out); err != nil {
+		t.Fatal(err)
+	}
+	saved, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if user.LUKSTPM2Enable || saved.LUKSTPM2Enable {
+		t.Fatalf("luksTpm2Enable after save: in memory %t, in file %t; want false", user.LUKSTPM2Enable, saved.LUKSTPM2Enable)
+	}
+	if !strings.Contains(out.String(), "luksTpm2Enable=false") {
+		t.Fatalf("output does not name the change:\n%s", out.String())
+	}
+}
+
+func TestSaveTPM2OffLeavesAnOffRequestAlone(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "user.config.json")
+	var out bytes.Buffer
+	if err := saveTPM2Off(&config.User{}, path, &out); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("user.config.json written although nothing changed (stat: %v)", err)
+	}
+	if out.Len() != 0 {
+		t.Fatalf("output although nothing changed:\n%s", out.String())
+	}
+}
+
+func TestKeptHardwareDropsTPM2WithoutLUKS(t *testing.T) {
+	dir := t.TempDir()
+	plain := filepath.Join(dir, "plain.nix")
+	luks := filepath.Join(dir, "luks.nix")
+	// SYNTHETIC hardware.nix files.
+	if err := os.WriteFile(plain, []byte("{\n  fileSystems.\"/\".device = \"/dev/disk/by-uuid/example\";\n}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(luks, []byte("{\n  boot.initrd.luks.devices.\"cryptroot\".device = \"/dev/disk/by-uuid/example\";\n}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		name                       string
+		requested, managed, exists bool
+		path                       string
+		want                       bool
+	}{
+		{"installed host, no LUKS", true, false, true, plain, true},
+		{"installed host, LUKS", true, false, true, luks, false},
+		{"not requested", false, false, true, plain, false},
+		{"managed keeps the contract", true, true, true, plain, false},
+		{"fresh install keeps the request", true, false, false, plain, false},
+		{"unreadable file says nothing", true, false, true, filepath.Join(dir, "missing.nix"), false},
+	}
+	for _, c := range cases {
+		if got := keptHardwareDropsTPM2(c.requested, c.managed, c.exists, c.path); got != c.want {
+			t.Errorf("%s: got %v, want %v", c.name, got, c.want)
 		}
 	}
 }
