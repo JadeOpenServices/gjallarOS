@@ -83,6 +83,43 @@ func FirmwareLockSteps(firmwareLock bool) []string {
 	}
 }
 
+// LockedShimPlan explains the install-time shim path on locked firmware
+// (Plane 293): Secure Boot is already on, the firmware keys cannot change,
+// and shim from another system already starts this one.
+func LockedShimPlan(luksTPM2 bool) string {
+	var b strings.Builder
+	b.WriteString(`GJALLAROS SECURE BOOT ON LOCKED FIRMWARE - WHAT WILL CHANGE
+
+- PK, KEK, db, dbx and firmware settings: not changed.
+- shim already starts this system. The GjallarOS key goes into shim's list
+  (MOK); if it is not there yet, you confirm it once in MokManager.
+- Secure Boot stays on the whole time. Until shim lists the GjallarOS key,
+  the installer does not change how this system starts.
+
+Steps:
+1. The installer makes the GjallarOS key and checks shim's list.
+2. If the key is missing, it queues the key and stops. Restart; a blue screen
+   (MokManager) asks you to confirm it with a one-time password you choose.
+   Then run the installer again; it keeps your answers.
+3. The installer builds GjallarOS with shim and restarts once more.
+
+What you need:
+- the Secure Boot recovery archive and passphrase, shown after the build and
+  before the restart; store both
+  offline, they restore the GjallarOS signing keys
+`)
+	if luksTPM2 {
+		b.WriteString(`- your disk recovery key: the TPM opens the disk automatically only while
+  the signed boot chain is unchanged; a later shim or key change may ask for
+  the recovery key once
+`)
+	}
+	b.WriteString(`
+No recovery partition is set up on this path yet.
+`)
+	return b.String()
+}
+
 // ShimPlan explains the shim path before anything changes: the firmware
 // keeps its maker's keys, shim (signed by the maker's CA) starts first and
 // trusts the GjallarOS key once the user confirms it in MokManager.

@@ -308,7 +308,7 @@ func TestEFISpaceFor(t *testing.T) {
 
 func TestMokManagerStepsFingerprint(t *testing.T) {
 	der := []byte("EXAMPLE certificate bytes")
-	got := mokManagerSteps(der, false)
+	got := mokManagerSteps(der, false, "gjallarctl secure-boot setup")
 	h := sha1.Sum(der)
 	first := fmt.Sprintf("% x", h[:10])
 	second := fmt.Sprintf("% x", h[10:])
@@ -317,7 +317,39 @@ func TestMokManagerStepsFingerprint(t *testing.T) {
 			t.Errorf("steps miss %q:\n%s", want, got)
 		}
 	}
-	if reused := mokManagerSteps(der, true); !strings.Contains(reused, "first queued") {
+	if reused := mokManagerSteps(der, true, "gjallarctl secure-boot setup"); !strings.Contains(reused, "first queued") {
 		t.Errorf("reused steps should name the earlier password:\n%s", reused)
+	}
+}
+
+// shim leaves MokListRT for the system it started; nothing else does.
+func TestShimStarted(t *testing.T) {
+	f := newFakeFirmware(t)
+	saved := liveFirmware
+	t.Cleanup(func() { liveFirmware = saved })
+	liveFirmware = f.root
+	if started, err := ShimStarted(); err != nil || started {
+		t.Fatalf("no shim: started=%v err=%v", started, err)
+	}
+	if err := os.WriteFile(filepath.Join(f.root.mokvars, "MokListRT"), []byte("EXAMPLE list"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if started, err := ShimStarted(); err != nil || !started {
+		t.Fatalf("shim mirror: started=%v err=%v", started, err)
+	}
+}
+
+func TestLockedShimPlan(t *testing.T) {
+	plan := LockedShimPlan(false)
+	for _, want := range []string{"not changed", "MokManager", "Secure Boot stays on", "keeps your answers", "No recovery partition"} {
+		if !strings.Contains(plan, want) {
+			t.Errorf("plan misses %q:\n%s", want, plan)
+		}
+	}
+	if strings.Contains(plan, "disk recovery key") {
+		t.Errorf("plan without TPM unlock names the disk recovery key:\n%s", plan)
+	}
+	if !strings.Contains(LockedShimPlan(true), "disk recovery key") {
+		t.Error("plan with TPM unlock misses the disk recovery key")
 	}
 }
