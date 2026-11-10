@@ -40,6 +40,7 @@ import (
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/flakesource"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/geolocation"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/hardwareconfig"
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/installreport"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/installstate"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/localgit"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/nixrender"
@@ -85,6 +86,11 @@ type state struct {
 	secureBootFirmware       oddc.EffectiveSecureBootFirmwarePolicy
 	shimFacts                *secureboot.ShimFacts
 	deviceGate               string
+	// oddcModel is the ODDC model id once resolved, "" when none matches.
+	oddcModel string
+	// oddcChecked is true once the ODDC lookup ran, so a report about an
+	// earlier failure does not claim that no model matches.
+	oddcChecked bool
 }
 
 const (
@@ -228,7 +234,7 @@ func maintenanceArgs(args []string, forceRedeploy bool) []string {
 	return append(out, mode)
 }
 
-func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer) int {
+func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer) (code int) {
 	if os.Getenv("GJALLAR_INSTALLER_RESUMED") == "1" {
 		fmt.Fprintf(
 			out,
@@ -289,6 +295,24 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 	}()
 	ui := prompt.New(in, out)
 	s := state{control: controlBinary()}
+	// A failure from here on may become an install report the user saves
+	// (Plane 292). Failures before this point are about the checkout, not
+	// the machine, and get no report.
+	recorder := &failureRecorder{Writer: errOut}
+	errOut = recorder
+	defer func() {
+		if code == 1 && recorder.err != nil && reportAllowed(in, s.user) {
+			offerInstallReport(ctx, ui, out, reportInput{
+				reason:      installreport.ReasonFailed,
+				repo:        root,
+				recovery:    opt.recovery,
+				user:        s.user,
+				oddcModel:   s.oddcModel,
+				oddcChecked: s.oddcChecked,
+				failure:     recorder.err,
+			})
+		}
+	}()
 	installedRoot := "/"
 	presetRoot := root
 	if opt.recovery && opt.acceptExisting {
@@ -534,9 +558,20 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 	if resolvedDevice.ModelID == "" {
 		fmt.Fprintln(out, "ODDC canonical model: none (unsupported by ODDC; installing the hardware-neutral baseline)")
 		reportBestEffort(out)
+		if reportAllowed(in, s.user) {
+			offerInstallReport(ctx, ui, out, reportInput{
+				reason:      installreport.ReasonUnknown,
+				repo:        root,
+				recovery:    opt.recovery,
+				user:        s.user,
+				oddcChecked: true,
+			})
+		}
 	} else {
 		fmt.Fprintf(out, "ODDC canonical model: %s\n", resolvedDevice.ModelID)
 	}
+	s.oddcModel = resolvedDevice.ModelID
+	s.oddcChecked = true
 
 	if needsDeviceRebind {
 		if s.user.UnattendedInstall || s.user.Management.Enable {
@@ -3661,6 +3696,7 @@ func fail(out io.Writer, err error) int {
 		}
 		return 130
 	}
+	recordFailure(out, err)
 	fmt.Fprintln(out, "ERROR:", err)
 	return 1
 }

@@ -166,6 +166,24 @@ func ReadFirmwareTrust() (FirmwareTrust, error) {
 	return liveFirmware.read()
 }
 
+// ReadModeFlags reads only SecureBoot and SetupMode. Both are world
+// readable, so unlike ReadFirmwareTrust this never asks for root.
+func ReadModeFlags() (secureBoot, setupMode TriState, err error) {
+	return liveFirmware.modeFlags()
+}
+
+func (f firmwareFiles) modeFlags() (TriState, TriState, error) {
+	secureBoot, err := f.flag("SecureBoot", efiGlobalGUID)
+	if err != nil {
+		return "", "", err
+	}
+	setupMode, err := f.flag("SetupMode", efiGlobalGUID)
+	if err != nil {
+		return "", "", err
+	}
+	return secureBoot, setupMode, nil
+}
+
 // maxVariable caps one variable; real dbx lists are about 15 KiB.
 const maxVariable = 1 << 20
 
