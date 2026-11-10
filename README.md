@@ -511,6 +511,12 @@ this repository or the machine. The `oddc` flake input supplies module code
 only, and the system configuration reads the answer as `oddc.catalog`. The
 installed system receives that model under `/etc/oddc`.
 
+When no ODDC model matches, the installer says the machine runs best effort.
+It lists the parts it found, checked against the ODDC catalog built into the
+installer, and names the parts ODDC marks as not working on Linux, with ODDC's
+reason. The machine gets the hardware-neutral base; nothing optional is
+switched on, and no part from that list becomes a built-in USB device.
+
 The answer comes from the ODDC commit `flake.lock` pins for the `oddc` input.
 Updating ODDC on a device is one operation:
 
@@ -764,7 +770,11 @@ without Secure Boot there is no recovery partition and the disk is not shrunk
 for one. Saying no, or a model without an ODDC Secure Boot setup, shows what
 the install goes without: nothing checks the startup files, the disk
 passphrase is typed at every startup, repairs start from a USB stick, and JODS
-cannot manage the machine. A system installed without it gets it with:
+cannot manage the machine. On a model without an ODDC Secure Boot setup the
+installer then offers shim (below) as an untested try, with no as the
+default. Yes builds shim and checks that this firmware would start it
+before the final question. With Secure Boot already on, the offer comes only
+when shim already starts the running system. A system installed without it gets it with:
 
 ```bash
 gjallarctl secure-boot setup
@@ -784,6 +794,11 @@ it. Each run does one step and says which restart comes next:
    password), restart and confirm it on the blue MokManager screen.
 3. Turn on Secure Boot in the firmware setup. The first Secure Boot start
    records the switch and verifies it.
+
+That check refuses unsigned files in the GjallarOS folders of the EFI system
+partition (`EFI/nixos`, `EFI/BOOT`, `EFI/systemd`, `EFI/Linux`). Unsigned files
+in other folders, such as another system's boot loader, only give a warning:
+they stay where they are, and the firmware and shim decide whether they start.
 
 `gjallarctl secure-boot setup --own-keys` replaces the firmware keys with
 GjallarOS keys instead. It needs an ODDC Secure Boot setup for the model. The

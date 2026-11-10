@@ -88,7 +88,7 @@ func FirmwareLockSteps(firmwareLock bool) []string {
 // and shim from another system already starts this one.
 func LockedShimPlan(luksTPM2 bool) string {
 	var b strings.Builder
-	b.WriteString(`GJALLAROS SECURE BOOT ON LOCKED FIRMWARE - WHAT WILL CHANGE
+	b.WriteString(`GJALLAROS SECURE BOOT THROUGH THE SHIM THAT STARTS THIS SYSTEM - WHAT WILL CHANGE
 
 - PK, KEK, db, dbx and firmware settings: not changed.
 - shim already starts this system. The GjallarOS key goes into shim's list
@@ -140,9 +140,11 @@ Firmware: %s
 
 Steps:
 1. GjallarOS makes its key and rebuilds with shim. Restart.
-2. Run this again: it queues the key. Restart; a blue screen (MokManager)
-   asks you to confirm it with a one-time password you choose.
-3. Run this again: restart into firmware setup, turn Secure Boot on, save.
+2. Run gjallarctl secure-boot setup: it queues the key. Restart; a blue
+   screen (MokManager) asks you to confirm it with a one-time password you
+   choose.
+3. Run gjallarctl secure-boot setup again: restart into firmware setup, turn
+   Secure Boot on, save.
 
 What you need:
 - access to firmware setup (know its password if one is already set)

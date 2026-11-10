@@ -353,3 +353,17 @@ func TestLockedShimPlan(t *testing.T) {
 		t.Error("plan with TPM unlock misses the disk recovery key")
 	}
 }
+
+// The shim plan names the command for each later step: it is also shown by
+// the installer, where "this" would mean the installer.
+func TestShimPlanSteps(t *testing.T) {
+	plan := ShimPlan("", false)
+	for _, want := range []string{"Run gjallarctl secure-boot setup: it queues the key", "Run gjallarctl secure-boot setup again", "system firmware"} {
+		if !strings.Contains(plan, want) {
+			t.Errorf("plan misses %q:\n%s", want, plan)
+		}
+	}
+	if strings.Contains(plan, "Run this again") {
+		t.Errorf("plan still says \"Run this again\":\n%s", plan)
+	}
+}

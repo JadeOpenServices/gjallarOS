@@ -255,6 +255,55 @@ func chooseLockedShim(ctx context.Context, ui prompt.UI, out io.Writer, root str
 	return facts, true, nil
 }
 
+// offerUnknownModelShim offers Secure Boot through shim on a model ODDC has
+// no Secure Boot setup for (Jade Q200): best effort, default no. shim needs
+// nothing model-specific, only a firmware that keeps its maker's keys and
+// trusts the pinned shim. With Secure Boot on, shim must already start this
+// system: the GjallarOS key has to be in its MOK list before the boot chain
+// changes. ok=false means the install goes on without Secure Boot.
+func offerUnknownModelShim(ctx context.Context, ui prompt.UI, out io.Writer, root string, trust secureboot.FirmwareTrust, luksTPM2 bool) (secureboot.ShimFacts, bool, error) {
+	if trust.SetupMode == secureboot.FlagOn {
+		return secureboot.ShimFacts{}, false, nil
+	}
+	if trust.SecureBoot == secureboot.FlagOn {
+		started, err := secureboot.ShimStarted()
+		if err != nil {
+			return secureboot.ShimFacts{}, false, err
+		}
+		if !started || trust.ShimValidationOff {
+			return secureboot.ShimFacts{}, false, nil
+		}
+	}
+	try, err := ui.Confirm(ctx, "Try Secure Boot through shim anyway? Nobody has tested it on this model yet; the check builds shim first, which takes a few minutes.", false)
+	if err != nil || !try {
+		return secureboot.ShimFacts{}, false, err
+	}
+	facts, err := buildShimFacts(ctx, root)
+	if err != nil {
+		return secureboot.ShimFacts{}, false, err
+	}
+	choice, err := secureboot.ChoosePath(trust, facts, nil)
+	if err != nil {
+		return secureboot.ShimFacts{}, false, err
+	}
+	if choice.Path != secureboot.PathShim {
+		fmt.Fprintf(out, "Secure Boot through shim does not work here: %s. Installing without Secure Boot.\n", choice.Reason)
+		return secureboot.ShimFacts{}, false, nil
+	}
+	plan := secureboot.ShimPlan("", luksTPM2)
+	if trust.SecureBoot == secureboot.FlagOn {
+		plan = secureboot.LockedShimPlan(luksTPM2)
+	}
+	if err := ui.SecureBootOwnershipPlan(ctx, plan); err != nil {
+		return secureboot.ShimFacts{}, false, err
+	}
+	yes, err := ui.Confirm(ctx, "Install GjallarOS with Secure Boot through shim?", false)
+	if err != nil || !yes {
+		return secureboot.ShimFacts{}, false, err
+	}
+	return facts, true, nil
+}
+
 // askFirmwareLocked asks whether the firmware setup is locked, when the
 // firmware enforces Secure Boot outside Setup Mode and its setup may have a
 // password. A password the kernel reports set makes "locked" the default;

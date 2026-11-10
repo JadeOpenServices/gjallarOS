@@ -51,7 +51,26 @@ let
         done
       ''}
 
+      ${lib.optionalString shim ''
+        # The folders GjallarOS writes or a GjallarOS loader reads:
+        # nixos (kernels, lanzaboote, shim), BOOT (fallback path), systemd
+        # (systemd-boot) and Linux (UKIs systemd-boot lists). FAT ignores case.
+        foreign_folder() {
+          local rest=''${1#/boot/EFI/}
+          [ "$rest" != "$1" ] || return 1
+          case "$rest" in
+            */*) ;;
+            *) return 1 ;;
+          esac
+          case "''${rest%%/*}" in
+            [Nn][Ii][Xx][Oo][Ss] | [Bb][Oo][Oo][Tt] | [Ss][Yy][Ss][Tt][Ee][Mm][Dd] | [Ll][Ii][Nn][Uu][Xx]) return 1 ;;
+          esac
+          return 0
+        }
+      ''}
+
       unexpected=
+      foreign=
       allowed=0
       while IFS= read -r line; do
         case "$line" in
@@ -59,7 +78,8 @@ let
           *) continue ;;
         esac
         path="''${line% is not signed}"
-        path="''${path##* }"
+        # From the first slash on, so a path with spaces stays whole.
+        path="/''${path#*/}"
         case "$path" in
           /boot/EFI/nixos/kernel-*.efi)
             allowed=$((allowed + 1))
@@ -72,6 +92,16 @@ let
             continue
             ;;
         esac
+        ${lib.optionalString shim ''
+          # Under shim the firmware keeps its maker's keys: a file in a
+          # folder of another system starts only if a key the firmware
+          # already trusts signed it, whatever this check says. GjallarOS
+          # folders stay strict (Jade Q202).
+          if foreign_folder "$path"; then
+            foreign="$foreign$path"$'\n'
+            continue
+          fi
+        ''}
         unexpected="$unexpected$line"$'\n'
       done <<<"$output"
 
@@ -80,7 +110,11 @@ let
         exit 1
       fi
 
-      if [ "$rc" -ne 0 ] && [ "$allowed" -eq 0 ]; then
+      if [ -n "$foreign" ]; then
+        printf 'WARNING: unsigned EFI files outside the GjallarOS folders (left as they are; the firmware decides whether they start):\n%s' "$foreign" >&2
+      fi
+
+      if [ "$rc" -ne 0 ] && [ "$allowed" -eq 0 ] && [ -z "$foreign" ]; then
         printf '%s\n' 'ERROR: sbctl verify failed for an unexpected reason.' >&2
         exit "$rc"
       fi
