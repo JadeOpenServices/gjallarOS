@@ -33,6 +33,18 @@ jobs:
           submodules: true
           persist-credentials: false
 
+      # system/release names the release a tree belongs to (the legacy-names
+      # check reads it), so a tag must point at a commit that carries its name.
+      - name: Check system/release matches the tag
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          release=$(cat system/release)
+          if [ "$release" != "$TAG" ]; then
+            echo "system/release says $release, the tag is $TAG; bump system/release in the tagged commit" >&2
+            exit 1
+          fi
+
       # The job downloads what earlier tags already put into the cache, so a
       # tag builds only the packages it changed instead of all of them again
       # (that took 2.5 to 4.5 hours each). Nix accepts only files signed with

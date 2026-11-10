@@ -452,7 +452,9 @@ Plan agreed 2026-10-10. Channels decided 2026-10-20 (Q16): `main` became
       1. A branch bumps all flake inputs (nixpkgs, Home Manager, Noctalia,
          the ODDC pin and the rest).
       2. The full `.vm/installer-e2e/REGRESSION.md` runs in VMs.
-      3. Merge to `dev` and tag.
+      3. Merge to `dev`, set `system/release` to the new tag name in that
+         commit, and tag it (R28; the release cache workflow refuses a tag
+         that does not match).
       4. `staging` moves to the tag. The Framework 13 and the ZBook x2 G4
          run it for a while.
       5. `stable` moves to the same tag.
@@ -680,15 +682,16 @@ Wiki 752 "Answered 2026-11-01" has the answers word for word.
 - [x] **One legacy folder.** `system/tools/legacy/renames.json` holds one
       table for every rename: commands, settings keys, config fields,
       labels, units and paths. Each row has the old name, the new name,
-      where it was removed, the date after which it can be deleted
-      (`deleteAfter`) and the Plane or JODS item (281).
+      where it was removed, the release after which it can be deleted
+      (`deleteAfter`, a release tag, R28) and the Plane or JODS item (281).
 - [x] Old commands are not run. The zsh `command_not_found_handler` (and
       the bash `command_not_found_handle`) prints the new name and stops.
 - [x] Old settings keys and config fields: the JODS-565 keys are not read
       (Q195); generated state drops them once. A later rename that needs a
       translation adds it next to its row, after asking Jade.
 - [x] The flake check `legacy-names` fails when an old name is used outside
-      the legacy folder or a row is past its `deleteAfter` date. system-path
+      the legacy folder or the tree's release (`system/release`) is newer
+      than a row's `deleteAfter` tag. system-path
       fails to build when an old command is a real command again.
 - [x] The rule goes into README, the job rules (wiki 691) and memory.
 

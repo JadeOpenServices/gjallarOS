@@ -488,13 +488,15 @@ GjallarOS asks about the new USB device.
 Every rename lives in one table, `system/tools/legacy/renames.json`:
 commands, settings keys, config fields, partition labels, units and
 paths. A row holds the old name, the new name, where it was removed, the
-date after which it can go (`deleteAfter`) and the Plane or JODS item.
+release after which it can go (`deleteAfter`, a tag like `v2026.10.70`)
+and the Plane or JODS item.
 
 - An old command is not run. The shell prints the new name and stops,
   for example: GjallarOS: rebuild was removed; use gjallarctl rebuild
 - The flake check `legacy-names` fails while an old name is still used
-  outside `system/tools/legacy/`, and once a row is past its
-  `deleteAfter` date. Then the row and the last traces are removed.
+  outside `system/tools/legacy/`, and once the release in `system/release`
+  is newer than a row's `deleteAfter` tag. Then the row and the last traces
+  are removed. A revision gives the same answer on every machine and day.
 - The system does not build when an old command name is a real command
   again.
 
@@ -655,6 +657,10 @@ plain Nix binary cache. Each tag adds to it, so a machine on any channel downloa
 package whenever it matches one built for any tag. Anything missing still
 builds locally. The workflow itself downloads from the same cache, so a tag
 builds only the packages that changed since the tags before it.
+
+`system/release` holds the name of the last release tag. The commit that gets
+a new tag sets it to that tag first; the workflow stops when the two differ.
+Commits after a tag keep the last release name until the next one.
 
 `deployment/binary-cache.json` names the cache and its public key:
 
