@@ -482,7 +482,7 @@ func usbReviewDecision(ctx context.Context, executable string, d usbtrust.Decisi
 		}
 		request = append(request, "--portable="+value)
 	}
-	output, err := usbAuthorize(ctx, d.Identity.Name, append([]string{executable}, request...))
+	output, err := usbAuthorize(ctx, append([]string{executable}, request...))
 	if ctx.Err() != nil {
 		return usbReviewInterrupted
 	}
@@ -510,7 +510,7 @@ func usbReviewMedia(ctx context.Context, executable string, m usbtrust.MediaDeci
 	default:
 		return true
 	}
-	output, err := usbAuthorize(ctx, "the storage in "+usbMediaReader(m), []string{executable, "usb", "allow-media", "--media", m.ID, "--connection", m.Connection})
+	output, err := usbAuthorize(ctx, []string{executable, "usb", "allow-media", "--media", m.ID, "--connection", m.Connection})
 	if err == nil || ctx.Err() != nil {
 		return false
 	}
@@ -530,7 +530,7 @@ func usbReviewRenewal(ctx context.Context, executable string, l broker.TrustLaps
 	default:
 		return
 	}
-	output, err := usbAuthorize(ctx, usbRenewalName(l), []string{executable, "usb", "renew", "--trusted-id", l.TrustedID})
+	output, err := usbAuthorize(ctx, []string{executable, "usb", "renew", "--trusted-id", l.TrustedID})
 	if err == nil || ctx.Err() != nil {
 		return
 	}
@@ -1033,14 +1033,15 @@ func usbOrNone(value string) string {
 	return value
 }
 
-// usbAuthorize runs one USB trust mutation behind fresh authentication. The
-// fingerprint is tried first while a notice offers the password instead; a
-// failed or skipped scan opens the password prompt at once. The credential
-// cached for the command is dropped again afterwards.
+// usbAuthorize runs one USB trust mutation behind a fresh password. The
+// finger is not offered here: the scan would run in a sudo PAM service any
+// program of the user can start, so a touch could approve something else
+// (loophole 46). It comes back through the root dialog service of Q216 step 2.
+// The credential cached for the command is dropped again afterwards.
 // usbAuthMu keeps two prompts from sharing or dropping one sudo timestamp.
 var usbAuthMu sync.Mutex
 
-func usbAuthorize(ctx context.Context, name string, command []string) ([]byte, error) {
+func usbAuthorize(ctx context.Context, command []string) ([]byte, error) {
 	usbAuthMu.Lock()
 	defer usbAuthMu.Unlock()
 	const sudo = "/run/wrappers/bin/sudo"
@@ -1051,80 +1052,18 @@ func usbAuthorize(ctx context.Context, name string, command []string) ([]byte, e
 	_ = exec.CommandContext(ctx, sudo, "-k").Run()
 	defer func() { _ = exec.Command(sudo, "-k").Run() }()
 
-	if probeFingerprint(ctx).State != fingerprintReady || !usbFingerprintAuth(ctx, sudo, authHelper, name) {
-		// A scan that finished after "Use password" may have cached a
-		// timestamp; drop it so the password prompt really appears.
-		_ = exec.CommandContext(ctx, sudo, "-k").Run()
-		// pam_askpass_service limits this phase to the password. The askpass
-		// dialog is a child of sudo, so cancelling kills the whole group.
-		password := exec.CommandContext(ctx, sudo, "-A", authHelper)
-		password.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-		password.Cancel = func() error { return syscall.Kill(-password.Process.Pid, syscall.SIGKILL) }
-		// sudo and the askpass dialog report to the journal; their toolkit
-		// warnings mean nothing in the error shown to the user.
-		password.Stderr = os.Stderr
-		if err := password.Run(); err != nil {
-			return []byte("Authentication failed or was cancelled."), err
-		}
+	// pam_askpass_service limits this to the password. The askpass dialog is
+	// a child of sudo, so cancelling kills the whole group.
+	password := exec.CommandContext(ctx, sudo, "-A", authHelper)
+	password.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	password.Cancel = func() error { return syscall.Kill(-password.Process.Pid, syscall.SIGKILL) }
+	// sudo and the askpass dialog report to the journal; their toolkit
+	// warnings mean nothing in the error shown to the user.
+	password.Stderr = os.Stderr
+	if err := password.Run(); err != nil {
+		return []byte("Authentication failed or was cancelled."), err
 	}
 	return exec.CommandContext(ctx, sudo, append([]string{"-n", "--"}, command...)...).CombinedOutput()
-}
-
-// usbFingerprintAuth waits for the fingerprint-only sudo phase while a notice
-// explains what is happening. Choosing "Use password" cancels the scan.
-func usbFingerprintAuth(ctx context.Context, sudo, authHelper, name string) bool {
-	scanCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
-	// sudo ignores SIGTERM while pam_fprintd waits for a finger, so the
-	// scan has to be killed for "Use password" to take effect at once.
-	scan := exec.CommandContext(scanCtx, sudo, authHelper)
-	if err := scan.Start(); err != nil {
-		return false
-	}
-	scanned := make(chan error, 1)
-	go func() { scanned <- scan.Wait() }()
-
-	picked := make(chan string, 1)
-	var notice sync.WaitGroup
-	notice.Add(1)
-	go func() {
-		defer notice.Done()
-		key, _ := showNotice(scanCtx, usbFingerprintNotice(name))
-		picked <- key
-	}()
-	// The notice closes once the scan is over, however it ended.
-	defer func() {
-		cancel()
-		notice.Wait()
-	}()
-
-	select {
-	case err := <-scanned:
-		return err == nil
-	case key := <-picked:
-		if key == "password" {
-			cancel()
-			<-scanned
-			return false
-		}
-		// A dismissed notice leaves the scan running.
-		return <-scanned == nil
-	}
-}
-
-// usbFingerprintNotice builds the notice for the scan prompt.
-func usbFingerprintNotice(name string) desktopNotice {
-	if name == "" {
-		name = "this USB device"
-	}
-	return desktopNotice{
-		App:     "USB Guard",
-		Icon:    "fingerprint",
-		Summary: "Touch the fingerprint reader",
-		Body:    html.EscapeString("to authorize " + name),
-		Actions: []noticeAction{{"password", "Use password"}},
-	}
 }
 
 // usbReviewRequested reports whether the notice was answered with Review or a

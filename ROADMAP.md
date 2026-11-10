@@ -195,12 +195,12 @@ Security pass:
   and devices lapse. That fails closed, and the broker logs why.
 - **Re-allowing.** A lapsed device gets the same review as a changed one:
   keep blocked, allow once, or renew. Renewing keeps the record and its
-  first-accepted time and needs the same fingerprint or password as any
-  other trust change. Allowing it once does not renew it.
+  first-accepted time and needs the same password as any other trust
+  change. Allowing it once does not renew it.
 - **Renewing ahead.** The three-day notice renews a device that is not
   connected. The broker accepts that only inside the last three days before
-  the lapse, never after it, and only with the same fingerprint or password
-  as any other trust change. A device that has lapsed has to be connected
+  the lapse, never after it, and only with the same password as any other
+  trust change. A device that has lapsed has to be connected
   and reviewed, so its identity is checked again.
 - **Turning it off.** Switching lapse off or raising N lowers protection.
   The settings service holds that change like it holds turning blocking
@@ -238,14 +238,12 @@ Plan:
 ## 2. USB review UX
 
 - [x] Plain verdict with colour dots, and an optional technical view.
-- [x] Fingerprint first, with a "Use password" button.
-- [x] **Fixed:** "Use password" did nothing. sudo ignores SIGTERM while
-      pam_fprintd waits, so the password phase ran only after a finger touch,
-      and then silently on the fresh timestamp. The scan is now SIGKILLed and
-      the timestamp dropped before the askpass prompt.
+- [x] Password only (Q216 step 1, loophole 46). The fingerprint scan ran in
+      a sudo PAM service any user program can start, so a touch could approve
+      something else. The finger comes back through the root dialog of step 2.
 - [x] **Unplug closes prompts.** Each decision polls policy every second. When
-      the connection disappears, the notice (SIGINT), review dialog,
-      fingerprint scan and askpass group (SIGKILL on the process group) all
+      the connection disappears, the notice (SIGINT), review dialog
+      and askpass group (SIGKILL on the process group) all
       close, and no request is sent. The broker already rejects stale
       connection tokens (`sessions.Check`), so a stale entry can never
       authorize.
@@ -338,7 +336,7 @@ Next steps:
 | **NinjaOne** (RMM) | No deep native USB engine; uses Windows policies and scripts, or the device control of the bundled AV (e.g. Bitdefender GravityZone) | Depends on the AV module | Technician changes policy | AV-dependent | Technician or remote script |
 | **Ubuntu** (Landscape, Ubuntu Pro USG, Intune-for-Linux) | USG (CIS/STIG) disables `usb-storage`; USBGuard is available but not managed by Landscape; Intune on Ubuntu checks compliance only | Storage blocked by kernel module denylist; others allowed | None | n/a | Root or remote script |
 | **RHEL** | **USBGuard** in base since 7.4; rule language (`hash`, `serial`, `via-port`, `with-interface`); `usbguard-notifier` desktop notices; STIG requires it; rules distributed with Ansible or Satellite | `ImplicitPolicyTarget=block` | `usbguard-notifier` informs; allowing needs root or IPC ACL | Device IDs are per connection; a removed device's allow is gone | Root edits rules |
-| **GjallarOS** | USBGuard plus a TPM-signed trust store plus ODDC hardware model | Blocked (armed) or audit | Notice → review → fingerprint or password | Connection token; broker rejects stale; prompts close on unplug | Disk passphrase (`usb disarm`) |
+| **GjallarOS** | USBGuard plus a TPM-signed trust store plus ODDC hardware model | Blocked (armed) or audit | Notice → review → password | Connection token; broker rejects stale; prompts close on unplug | Disk passphrase (`usb disarm`) |
 
 Ideas worth taking:
 
@@ -633,7 +631,7 @@ Wiki 752 "Answered 2026-11-01" has the answers word for word.
 - [ ] **Prepare and install.** Prepare builds the new system in the
       background without a password: on mains power, not on a metered
       network, once per version. Install switches to it and always needs
-      the password or the fingerprint through polkit.
+      the password through polkit.
 - [ ] **The card** in gjallarHorn stays until it is answered or swiped away,
       like "set keys now". It never asks for a password itself; Prepare
       runs from the card, Install opens the Updates page. Its state is

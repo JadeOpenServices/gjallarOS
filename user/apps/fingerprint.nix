@@ -28,7 +28,7 @@ let
 
     [ ! -e "$marker" ] || exit 0
 
-    printf 'Set up a fingerprint for login and sudo? [Y/n] '
+    printf 'Set up a fingerprint to unlock the lock screen? [Y/n] '
     read -r answer
 
     case "$answer" in

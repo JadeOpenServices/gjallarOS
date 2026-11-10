@@ -16,9 +16,9 @@ let
     settings.management.fingerprintEnrollmentAllowed or false;
 
   # ODDC marks readers with no Linux driver (the ZBook x2's VFS495) as
-  # support.linux.status = "unsupported". Treat those as no reader, so sudo and
-  # the lock screen do not wait on a scan that never comes. A missing support
-  # entry makes no claim either way.
+  # support.linux.status = "unsupported". Treat those as no reader, so the lock
+  # screen does not wait on a scan that never comes. A missing support entry
+  # makes no claim either way.
   fingerprint = lib.attrByPath [
     "oddc"
     "resolved"
@@ -52,96 +52,89 @@ let
     fi
   '';
 in
-lib.mkMerge [
-  {
-    assertions = [
-      {
-        assertion = !managedEnrollmentAllowed || managed;
-        message =
-          "management.fingerprintEnrollmentAllowed is valid only on a managed device.";
+{
+  # A finger counts only on the lock screens (Q216 step 1, loophole 46).
+  # pam_fprintd alone cannot tell which action a touch approves: any program
+  # running as the user can start sudo, su or run0 and take a touch meant for
+  # something else. NixOS turns the finger on for every PAM service once
+  # fprintd runs; this flips that default, so services added later stay
+  # password-only too. Privileged actions get the finger back only through a
+  # root service that shows a dialog naming the action (Q216 step 2).
+  options.security.pam.services = lib.mkOption {
+    type = lib.types.attrsOf (
+      lib.types.submodule {
+        config.fprintAuth = lib.mkDefault false;
       }
-      {
-        assertion = !managedEnrollmentAllowed || fingerprintPresent;
-        message =
-          "management.fingerprintEnrollmentAllowed requires fingerprint hardware in the resolved ODDC device.";
-      }
-    ];
+    );
+  };
 
-    # GjallarOS privilege authentication intentionally splits biometric and
-    # password authentication into separate PAM transactions. The first
-    # service can never request a Unix password. The second can never invoke
-    # the fingerprint module.
-    security.pam.services = {
-      gjallar-sudo-fingerprint = {
-        unixAuth = false;
-        fprintAuth = fingerprintPresent;
-      };
+  config = lib.mkMerge [
+    {
+      assertions = [
+        {
+          assertion = !managedEnrollmentAllowed || managed;
+          message =
+            "management.fingerprintEnrollmentAllowed is valid only on a managed device.";
+        }
+        {
+          assertion = !managedEnrollmentAllowed || fingerprintPresent;
+          message =
+            "management.fingerprintEnrollmentAllowed requires fingerprint hardware in the resolved ODDC device.";
+        }
+      ];
 
-      gjallar-sudo-password = {
+      # gjallarctl authenticates through the no-op helper with sudo -A. This
+      # service only ever asks for the Unix password.
+      security.pam.services.gjallar-sudo-password = {
         unixAuth = true;
-        fprintAuth = false;
-        rules.auth.unix.args = lib.mkForce [ "likeauth" ];
-      };
-    };
-
-    # Scope the split PAM policy to the immutable no-op helper only. Normal
-    # sudo keeps its existing system policy.
-    security.sudo.extraConfig = lib.mkAfter ''
-      Defaults!${gjallarSudoAuth} pam_service=gjallar-sudo-fingerprint, pam_askpass_service=gjallar-sudo-password
-    '';
-  }
-
-  (lib.mkIf fingerprintPresent {
-    services.fprintd.enable = true;
-
-    security.pam.services = {
-      greetd.fprintAuth = false;
-      hyprlock.fprintAuth = true;
-      login.fprintAuth = false;
-
-      sudo = {
-        fprintAuth = true;
-
         rules.auth.unix.args = lib.mkForce [ "likeauth" ];
       };
 
-      polkit-1 = {
-        fprintAuth = false;
-        rules.auth.unix.args = lib.mkForce [ "likeauth" ];
+      # Scope the password-only service to the immutable helper. Normal sudo
+      # keeps its own policy.
+      security.sudo.extraConfig = lib.mkAfter ''
+        Defaults!${gjallarSudoAuth} pam_askpass_service=gjallar-sudo-password
+      '';
+    }
+
+    (lib.mkIf fingerprintPresent {
+      services.fprintd.enable = true;
+
+      security.pam.services = {
+        hyprlock.fprintAuth = true;
+        swaylock.fprintAuth = true;
       };
 
-      swaylock.fprintAuth = true;
-    };
+      security.polkit.extraConfig = lib.mkBefore ''
+        polkit.addRule(function(action, subject) {
+          if (action.id != "net.reactivated.fprint.device.enroll") {
+            return polkit.Result.NOT_HANDLED;
+          }
 
-    security.polkit.extraConfig = lib.mkBefore ''
-      polkit.addRule(function(action, subject) {
-        if (action.id != "net.reactivated.fprint.device.enroll") {
-          return polkit.Result.NOT_HANDLED;
-        }
-
-        if (!subject.active || !subject.local) {
-          return polkit.Result.NO;
-        }
-
-        if (${if managed then "true" else "false"}) {
-          // The management server owns enrollment policy. A local UI cannot grant itself access.
-          if (!${if managedEnrollmentAllowed then "true" else "false"}) {
+          if (!subject.active || !subject.local) {
             return polkit.Result.NO;
           }
 
-          return polkit.Result.AUTH_ADMIN;
-        }
+          if (${if managed then "true" else "false"}) {
+            // The management server owns enrollment policy. A local UI cannot grant itself access.
+            if (!${if managedEnrollmentAllowed then "true" else "false"}) {
+              return polkit.Result.NO;
+            }
 
-        var state =
-          polkit.spawn(["${fingerprintState}", subject.user]);
+            return polkit.Result.AUTH_ADMIN;
+          }
 
-        if (state.trim() == "enrolled") {
-          // Do not use *_KEEP: every later add/delete gets a fresh admin prompt.
-          return polkit.Result.AUTH_ADMIN;
-        }
+          var state =
+            polkit.spawn(["${fingerprintState}", subject.user]);
 
-        return polkit.Result.AUTH_SELF;
-      });
-    '';
-  })
-]
+          if (state.trim() == "enrolled") {
+            // Do not use *_KEEP: every later add/delete gets a fresh admin prompt.
+            return polkit.Result.AUTH_ADMIN;
+          }
+
+          return polkit.Result.AUTH_SELF;
+        });
+      '';
+    })
+  ];
+}

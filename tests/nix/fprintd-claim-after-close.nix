@@ -2,7 +2,7 @@
 # client claims the libfprint virtual reader and leaves without Release, as
 # pam_fprintd does after a match; the reader then takes 3 s to close, as the
 # fw13 Goodix reader takes a moment. A second client claims as soon as the
-# first is gone, as the next sudo does. The patched fprintd answers that
+# first is gone, as a lock screen that locks again does. The patched fprintd answers that
 # Claim once the close is done; the stock one refuses it with AlreadyInUse.
 # When the stock one answers it too, the test says to drop the patch.
 { pkgs, stockFprintd }:

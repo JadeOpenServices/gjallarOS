@@ -14,7 +14,7 @@ let
       --entry \
       --hide-text \
       --title="Authorize Thunderbolt device" \
-      --text="Fingerprint authentication was unavailable, failed, or timed out.\nEnter your password to let this Thunderbolt device in."
+      --text="Enter your password to let this Thunderbolt device in."
   '';
 in
 {
