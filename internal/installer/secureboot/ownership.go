@@ -504,6 +504,21 @@ func FirmwareSecureBoot() (bool, error) {
 	return efivarBool("SecureBoot")
 }
 
+// FirmwareHasSecureBoot reports whether the firmware offers Secure Boot at
+// all. UEFI firmware with Secure Boot keeps the SecureBoot and SetupMode
+// variables; with neither there is nothing to set up (plain OVMF, or a
+// system not started through UEFI). One without the other is not this case
+// and Inspect reports it.
+func FirmwareHasSecureBoot() (bool, error) {
+	for _, name := range []string{"SecureBoot", "SetupMode"} {
+		_, present, err := efivarPayload(name)
+		if err != nil || present {
+			return present, err
+		}
+	}
+	return false, nil
+}
+
 func efivarBool(name string) (bool, error) {
 	payload, present, err := efivarPayload(name)
 	if err != nil {
@@ -568,8 +583,11 @@ func signatureEntries(raw []byte) ([]string, bool) {
 	return entries, len(entries) > 0
 }
 
+// efivarsDir is where efivarfs is mounted; tests point it elsewhere.
+var efivarsDir = "/sys/firmware/efi/efivars"
+
 func efivarPayload(name string) ([]byte, bool, error) {
-	matches, err := filepath.Glob("/sys/firmware/efi/efivars/" + name + "-*")
+	matches, err := filepath.Glob(filepath.Join(efivarsDir, name+"-*"))
 	if err != nil {
 		return nil, false, err
 	}
