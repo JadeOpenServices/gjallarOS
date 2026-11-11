@@ -322,8 +322,11 @@ func chooseLockedShim(ctx context.Context, ui prompt.UI, out io.Writer, root str
 // trusts the pinned shim. With Secure Boot on, shim must already start this
 // system: the GjallarOS key has to be in its MOK list before the boot chain
 // changes. ok=false means the install goes on without Secure Boot.
+// In Setup Mode there is no offer, only the reason and the way back
+// (Jade Q220, Q223).
 func offerUnknownModelShim(ctx context.Context, ui prompt.UI, out io.Writer, root string, trust secureboot.FirmwareTrust, luksTPM2 bool) (secureboot.ShimFacts, bool, error) {
 	if trust.SetupMode == secureboot.FlagOn {
+		fmt.Fprint(out, setupModeNotice)
 		return secureboot.ShimFacts{}, false, nil
 	}
 	if trust.SecureBoot == secureboot.FlagOn {
@@ -364,6 +367,18 @@ func offerUnknownModelShim(ctx context.Context, ui prompt.UI, out io.Writer, roo
 	}
 	return facts, true, nil
 }
+
+// setupModeNotice tells why a firmware in Setup Mode gets no shim offer.
+// Own GjallarOS keys stay limited to models with ODDC facts (Q223).
+const setupModeNotice = `The firmware is in Setup Mode: its Secure Boot keys are cleared, so it
+would not check the maker-signed shim.
+  - To use Secure Boot through shim, restore the factory keys in the firmware
+    setup (Secure Boot menu, often "Restore Factory Keys" or "Install default
+    keys") and leave Secure Boot off. After the install, run
+    gjallarctl secure-boot setup.
+  - GjallarOS's own keys need tested firmware steps for this model, which
+    GjallarOS does not have yet.
+`
 
 // askFirmwareLocked asks whether the firmware setup is locked, when the
 // firmware enforces Secure Boot outside Setup Mode and its setup may have a

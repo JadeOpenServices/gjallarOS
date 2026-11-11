@@ -896,7 +896,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 			}
 		}
 		if !shimOK {
-			fmt.Fprint(out, secureBootDeclinedNotice("After the install, gjallarctl secure-boot setup turns it on through shim where this firmware allows it."))
+			fmt.Fprint(out, secureBootDeclinedNotice("After the install, gjallarctl secure-boot setup can try it through shim while the firmware keeps its factory keys."))
 		}
 	} else if s.user.SecureBootEnable &&
 		!s.user.SecureBootShim &&
