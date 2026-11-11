@@ -49,7 +49,7 @@ func TestReadLUKSRecordRejectsBrokenBootFacts(t *testing.T) {
 }
 
 func TestBootFactStates(t *testing.T) {
-	chip := func() bool { t.Fatal("chip check asked although the chip unlocks"); return false }
+	chip := func() chipPath { t.Fatal("chip check asked although the chip unlocks"); return chipNone }
 	base := luksRecord{Encrypted: true, TPM2: 1, Recovery: 1}
 	typed := base
 	typed.ChipUnlockKnown = true
@@ -111,7 +111,7 @@ func TestWithBootFacts(t *testing.T) {
 	if again := withBootFacts(fresh, bound, true); again != bound {
 		t.Errorf("bound record lost the mark: %+v", again)
 	}
-	if got := diskProtectionState(bound, diskcrypto.TPMFirmware, func() bool { return false }); got != diskProtectionDone {
+	if got := diskProtectionState(bound, diskcrypto.TPMFirmware, func() chipPath { return chipNone }); got != diskProtectionDone {
 		t.Errorf("bound record: %s, want done", got)
 	}
 }

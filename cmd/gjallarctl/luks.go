@@ -21,13 +21,17 @@ import (
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/diskcrypto"
 )
 
-const luksUsage = "Usage: gjallarctl luks {status|recovery-key|setup|pin [--remove]|remind [--open|--refresh]}"
+const luksUsage = "Usage: gjallarctl luks {status|recovery-key|setup|pin [--remove]|chip|remind [--open|--refresh]}"
 
 // runLUKSLifecycle manages how the root disk unlocks. Reading or changing
 // the LUKS header needs root, so it runs itself again through sudo.
 func runLUKSLifecycle(args []string, stdout, stderr io.Writer) int {
 	if len(args) > 0 && args[0] == "remind" {
 		return runLUKSRemind(args[1:], stderr)
+	}
+	// chip changes settings through the settings service, as the user.
+	if len(args) == 1 && args[0] == "chip" {
+		return runLUKSChip(context.Background(), os.Stdin, stdout, stderr)
 	}
 	// new-pin is for the first-boot enrollment and not offered to people.
 	if len(args) == 1 && args[0] == "new-pin" {
