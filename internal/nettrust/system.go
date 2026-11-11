@@ -273,7 +273,7 @@ func parseTailnet(data []byte) (Tailnet, error) {
 	if err := json.Unmarshal(data, &status); err != nil {
 		return Tailnet{}, fmt.Errorf("parse tailscale status: %w", err)
 	}
-	t := Tailnet{Running: status.BackendState == "Running"}
+	t := Tailnet{Running: status.BackendState == "Running", State: status.BackendState}
 	for _, p := range status.Peer {
 		peer := Peer{HostName: p.HostName, DNSName: p.DNSName, Online: p.Online, ExitNode: p.ExitNode, ExitNodeOption: p.ExitNodeOption}
 		for _, raw := range p.TailscaleIPs {

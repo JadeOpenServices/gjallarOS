@@ -1907,8 +1907,10 @@ Question 25 answered: `auto` blocks, and the pause is the way out. Built
 - `auto` with no exit node online keeps the current exit node, else sets
   an offline exit node (home router first), else reports "no exit node in
   this tailnet". It never clears the exit node on an untrusted network.
-- The verdict carries `blocked`: `exit-node-offline`, `no-exit-node` or
-  `tailscale-down`. `gjallarctl vpn status` prints it in plain words.
+- The verdict carries `blocked`: `exit-node-offline`, `no-exit-node`,
+  `tailscale-down`, `tailscale-signed-out` or `tailscale-needs-approval`
+  (the last two: tailscaled runs but waits for a sign-in or for the
+  tailnet admin, added 2026-11-10 after run 9 said "not running"). `gjallarctl vpn status` prints it in plain words.
 - Found on the way and closed with it: with Tailscale stopped, a wanted
   exit node did nothing and the network carried the traffic in the clear.
   That is now `tailscale-down`.

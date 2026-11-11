@@ -189,6 +189,20 @@ func TestStoppedTailscaleLeavesExitNodeAloneButBlocks(t *testing.T) {
 	}
 }
 
+// A running tailscaled that waits for a person is not "not running".
+func TestSignedOutTailscaleSaysSo(t *testing.T) {
+	for state, want := range map[string]string{"NeedsLogin": BlockSignedOut, "NeedsMachineAuth": BlockNeedsApproval, "Stopped": BlockTailscaleDown} {
+		tn, err := parseTailnet([]byte(`{"BackendState":"` + state + `"}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		v := decide(t, policy, wifi("cafe", "", "172.16.0.0/16"), tn, fakeProber{})
+		if v.Blocked != want || BlockCause(v.Blocked) == v.Blocked {
+			t.Fatalf("%s: verdict = %+v", state, v)
+		}
+	}
+}
+
 func TestTrustedHomeIsNeverBlocked(t *testing.T) {
 	v := decide(t, policy, wifi("synthetic-5Ghz", "wpa-psk", "192.168.8.0/24"), Tailnet{}, fakeProber{})
 	if v.Trust != TrustHome || v.Blocked != "" {

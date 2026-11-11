@@ -159,7 +159,9 @@ func (p Peer) Matches(name string) bool {
 
 type Tailnet struct {
 	Running bool
-	Peers   []Peer
+	// State is tailscaled's BackendState, empty when it gave no answer.
+	State string
+	Peers []Peer
 }
 
 func (t Tailnet) CurrentExitNode() *Peer {
@@ -232,6 +234,8 @@ const (
 	BlockExitNodeOffline = "exit-node-offline"
 	BlockNoExitNode      = "no-exit-node"
 	BlockTailscaleDown   = "tailscale-down"
+	BlockSignedOut       = "tailscale-signed-out"
+	BlockNeedsApproval   = "tailscale-needs-approval"
 )
 
 func (v Verdict) Trusted() bool {
@@ -360,6 +364,10 @@ func (v *Verdict) warnOffline(tn Tailnet) {
 func (v *Verdict) failClosed(choice string, tn Tailnet) {
 	switch {
 	case choice == "" || choice == ExitNodeOff:
+	case tn.State == "NeedsLogin":
+		v.Blocked = BlockSignedOut
+	case tn.State == "NeedsMachineAuth":
+		v.Blocked = BlockNeedsApproval
 	case !tn.Running:
 		v.Blocked = BlockTailscaleDown
 	case v.ExitNode == "" || v.ExitNodeError != "":
