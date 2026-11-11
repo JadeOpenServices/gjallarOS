@@ -128,6 +128,48 @@ func TestSettingsConfirmDeveloper(t *testing.T) {
 	}
 }
 
+// A disk with neither a recovery key nor a startup PIN stops before the
+// prompt and names gjallarctl luks recovery-key; anything that could answer
+// the prompt, or a record that cannot be read, still asks (Plane 331).
+func TestSettingsNoProofYetStopsBeforePrompt(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		record luksRecord
+		err    error
+		stop   bool
+	}{
+		{"passphrase only", luksRecord{Encrypted: true, Passphrase: 1}, nil, true},
+		{"chip without PIN", luksRecord{Encrypted: true, TPM2: 1, Passphrase: 1, PINKnown: true}, nil, true},
+		{"chip with PIN", luksRecord{Encrypted: true, TPM2: 1, PINKnown: true, PIN: true}, nil, false},
+		{"chip, PIN line missing", luksRecord{Encrypted: true, TPM2: 1}, nil, false},
+		{"recovery key", luksRecord{Encrypted: true, Recovery: 1, Passphrase: 1}, nil, false},
+		{"no record", luksRecord{}, errors.New("EXAMPLE no record"), false},
+	} {
+		for _, args := range [][]string{{"settings", "confirm-developer"}, {"settings", "set", "developerMode=true"}} {
+			bus := &fakeSettingsBus{}
+			useFakeSettings(t, bus)
+			developerKeys(bus)
+			bus.values["releaseChannel"] = settings.KeyValue{Key: "releaseChannel", Tier: config.TierCritical, Value: json.RawMessage(`"staging"`)}
+			settingsLUKSRecord = func() (luksRecord, error) { return tc.record, tc.err }
+			asked, _ := useFakeProof(t, devgate.ProofRecovery, "example-recovery", nil)
+			var stdout, stderr bytes.Buffer
+			code := run(args, &stdout, &stderr)
+			if !tc.stop {
+				if *asked != 1 || len(bus.proofs) != 1 {
+					t.Fatalf("%s %v: asked %d, proofs %q, stderr %s", tc.name, args, *asked, bus.proofs, stderr.String())
+				}
+				continue
+			}
+			if code != 1 || *asked != 0 || len(bus.proofs) != 0 || len(bus.requests) != 0 {
+				t.Fatalf("%s %v: code %d, asked %d, proofs %q, requests %q", tc.name, args, code, *asked, bus.proofs, bus.requests)
+			}
+			if stderr.String() != "ERROR: "+noProofYet+".\n" || !strings.Contains(stderr.String(), "gjallarctl luks recovery-key") {
+				t.Fatalf("%s %v: stderr %q", tc.name, args, stderr.String())
+			}
+		}
+	}
+}
+
 // unencrypted makes the EMULATED system disk unencrypted and answers the
 // stable offer with answer.
 func unencrypted(bus *fakeSettingsBus, channel string, answer string) {

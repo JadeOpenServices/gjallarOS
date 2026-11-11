@@ -208,11 +208,14 @@ func (b *fakeSettingsBus) Rebuild(context.Context) (bool, string, error) {
 func useFakeSettings(t *testing.T, bus *fakeSettingsBus) {
 	t.Helper()
 	t.Setenv("HOME", t.TempDir())
-	oldConnect, oldNow, oldSleep, oldEUID, oldStdin, oldProof, oldDisk := settingsConnect, settingsNow, settingsSleep, settingsEUID, settingsStdin, settingsReadProof, settingsDiskEncrypted
+	oldConnect, oldNow, oldSleep, oldEUID, oldStdin, oldProof, oldDisk, oldRecord := settingsConnect, settingsNow, settingsSleep, settingsEUID, settingsStdin, settingsReadProof, settingsDiskEncrypted, settingsLUKSRecord
 	t.Cleanup(func() {
-		settingsConnect, settingsNow, settingsSleep, settingsEUID, settingsStdin, settingsReadProof, settingsDiskEncrypted = oldConnect, oldNow, oldSleep, oldEUID, oldStdin, oldProof, oldDisk
+		settingsConnect, settingsNow, settingsSleep, settingsEUID, settingsStdin, settingsReadProof, settingsDiskEncrypted, settingsLUKSRecord = oldConnect, oldNow, oldSleep, oldEUID, oldStdin, oldProof, oldDisk, oldRecord
 	})
 	settingsDiskEncrypted = func(context.Context) (bool, error) { return true, nil }
+	// EMULATED keyslot record: encrypted, with a recovery key, so the proof
+	// prompt comes. Tests never read the host's /run record.
+	settingsLUKSRecord = func() (luksRecord, error) { return luksRecord{Encrypted: true, Recovery: 1, Passphrase: 1}, nil }
 	// Tests never read the real terminal; the EXAMPLE PIN stands in.
 	settingsReadProof = func(io.Writer) (string, []byte, error) { return devgate.ProofPIN, []byte("2468"), nil }
 	settingsConnect = func() (settingsBus, error) { return bus, nil }
