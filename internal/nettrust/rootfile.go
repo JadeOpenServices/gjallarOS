@@ -1,6 +1,9 @@
 package nettrust
 
 import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"io"
 	"os"
@@ -12,8 +15,21 @@ import (
 // that stopped being renewed no longer counts.
 const VerdictMaxAge = 15 * time.Minute
 
-// ReadVerdict reads root's network verdict. Only a fresh verdict in a file
-// root wrote counts; anything else is not ok.
+// CheckedPath is the stamp root renews each time it checks the network,
+// also when the verdict stays the same and its file is left alone.
+func CheckedPath(verdictPath string) string {
+	return verdictPath + ".checked"
+}
+
+// checkedStamp ties the stamp to the verdict it vouches for.
+func checkedStamp(verdict []byte) []byte {
+	sum := sha256.Sum256(verdict)
+	return []byte(hex.EncodeToString(sum[:]) + "\n")
+}
+
+// ReadVerdict reads root's network verdict. Only a verdict in a file root
+// wrote, with a fresh stamp from root for exactly that verdict, counts;
+// anything else is not ok.
 func ReadVerdict(path string, now time.Time) (Verdict, bool) {
 	verdict, _, ok := ReadVerdictExpiry(path, now)
 	return verdict, ok
@@ -22,16 +38,23 @@ func ReadVerdict(path string, now time.Time) (Verdict, bool) {
 // ReadVerdictExpiry is ReadVerdict that also returns when the verdict stops
 // counting unless root renews it.
 func ReadVerdictExpiry(path string, now time.Time) (Verdict, time.Time, bool) {
-	data, written, ok := ReadRootFile(path)
-	if !ok || now.Sub(written) > VerdictMaxAge {
+	data, _, ok := ReadRootFile(path)
+	if !ok {
+		return Verdict{}, time.Time{}, false
+	}
+	stamp, checked, ok := ReadRootFile(CheckedPath(path))
+	if !ok || !bytes.Equal(stamp, checkedStamp(data)) || now.Sub(checked) > VerdictMaxAge {
 		return Verdict{}, time.Time{}, false
 	}
 	var verdict Verdict
 	if err := json.Unmarshal(data, &verdict); err != nil {
 		return Verdict{}, time.Time{}, false
 	}
-	return verdict, written.Add(VerdictMaxAge), true
+	return verdict, checked.Add(VerdictMaxAge), true
 }
+
+// rootFileOwner is root; tests that run unprivileged use their own uid.
+var rootFileOwner uint32 = 0
 
 // ReadRootFile reads a small regular file only root can write, and when it
 // was written.
@@ -45,7 +68,7 @@ func ReadRootFile(path string) ([]byte, time.Time, bool) {
 	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0o022 != 0 {
 		return nil, time.Time{}, false
 	}
-	if stat, ok := info.Sys().(*syscall.Stat_t); !ok || stat.Uid != 0 {
+	if stat, ok := info.Sys().(*syscall.Stat_t); !ok || stat.Uid != rootFileOwner {
 		return nil, time.Time{}, false
 	}
 	data, err := io.ReadAll(io.LimitReader(file, 64<<10))

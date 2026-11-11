@@ -314,6 +314,9 @@ func runVPNStatus(stdout, stderr io.Writer) int {
 		return 1
 	}
 	fmt.Fprintf(stdout, "network:   %s\nreason:    %s\n", v.Trust, v.Reason)
+	if _, ok := nettrust.ReadVerdict(vpnStatusPath, time.Now()); !ok {
+		fmt.Fprintln(stdout, "checked:   not in the last 15 minutes; pause and home access are off until the next check (systemctl status gjallar-vpn-trust.timer)")
+	}
 	if v.SSID != "" {
 		fmt.Fprintf(stdout, "wifi:      %s\n", v.SSID)
 	}
