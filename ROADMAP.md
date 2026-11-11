@@ -314,7 +314,7 @@ options.
 | Zen | Firefox | Disabled by default; young project | Growing, smaller | Yes | Removed 2026-10-09; not needed next to Firefox |
 | Floorp | Firefox ESR | Disabled | Small | Yes | No clear gain over LibreWolf |
 | Waterfox | Firefox ESR | Minimal; search partnership | Moderate | Yes | No clear gain |
-| ungoogled-chromium | Chromium | Google services stripped | High | Yes (HW key); hybrid questionable | **Used** for the web apps and "Register key" (Chromium sets a missing key PIN) |
+| ungoogled-chromium | Chromium | Google services stripped | High | Yes (HW key); hybrid questionable | **Used** for the web apps and `gjallarctl register-key` (Chromium sets a missing key PIN) |
 | Brave | Chromium | P3A, rewards, wallet, update pings (opt-out) | High, but vendor-driven | Yes | **Excluded**: phones home by default |
 | Vivaldi | Chromium | — | — | — | **Excluded**: UI is closed source |
 

@@ -61,17 +61,6 @@ in
     };
   };
 
-  environment.systemPackages = [
-    (libexec registerKey)
-    (pkgs.makeDesktopItem {
-      name = "gjallar-register-key";
-      desktopName = "Register key";
-      genericName = "Security Key Registration";
-      comment = "Register a security key and set its PIN";
-      exec = "gjallarctl register-key %u";
-      icon = "security-high";
-      terminal = false;
-      categories = [ "Security" "Utility" ];
-    })
-  ];
+  # No menu entry: a system tool, started only as gjallarctl register-key.
+  environment.systemPackages = [ (libexec registerKey) ];
 }
