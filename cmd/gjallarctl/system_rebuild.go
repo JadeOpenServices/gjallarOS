@@ -54,10 +54,17 @@ var devproofSocketPath = "/etc/systemd/system/gjallar-devproof.socket"
 // refusing there would keep it on the old version for good. Such a system
 // has no gate to keep, so it builds the version that brings the gate,
 // and from then on the check applies.
-func checkDeveloperGrant(cfg config.User, stderr io.Writer) int {
+//
+// A rebuild checks twice, before the pull and on the configuration the
+// build reads; noticed keeps the pre-gate notice to one line per rebuild
+// (Plane 330).
+func checkDeveloperGrant(cfg config.User, noticed *bool, stderr io.Writer) int {
 	if err := devgate.Check(developerGrantPath, cfg.Channel(), cfg.DeveloperMode); err != nil {
 		if _, statErr := os.Stat(devproofSocketPath); errors.Is(statErr, os.ErrNotExist) {
-			fmt.Fprintln(stderr, "[gjallarOS] Notice: the running system cannot check the startup PIN or the recovery key yet; building the version that can. Afterwards run gjallarctl settings confirm-developer once")
+			if !*noticed {
+				*noticed = true
+				fmt.Fprintln(stderr, "[gjallarOS] Notice: the running system cannot check the startup PIN or the recovery key yet; building the version that can. Afterwards run gjallarctl settings confirm-developer once")
+			}
 		} else {
 			fmt.Fprintf(stderr, "[gjallarOS] Error: %v; nothing rebuilt\n", err)
 			return 1

@@ -2027,7 +2027,8 @@ func rebuildCheckout(repo string, opts rebuildOptions, stdout, stderr io.Writer)
 		fmt.Fprintf(stderr, "[gjallarOS] Error: %v; nothing rebuilt\n", err)
 		return 1
 	}
-	if code := checkDeveloperGrant(user, stderr); code != 0 {
+	var grantNoticed bool
+	if code := checkDeveloperGrant(user, &grantNoticed, stderr); code != 0 {
 		return code
 	}
 	if update {
@@ -2077,7 +2078,7 @@ func rebuildCheckout(repo string, opts rebuildOptions, stdout, stderr io.Writer)
 	}
 	// Checked again on the configuration this build reads, which may have
 	// changed since the check above.
-	if code := checkDeveloperGrant(userConfig, stderr); code != 0 {
+	if code := checkDeveloperGrant(userConfig, &grantNoticed, stderr); code != 0 {
 		return code
 	}
 	legacyWebApplications := config.HasLegacyWebApplications(rawConfig)
