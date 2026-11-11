@@ -53,8 +53,10 @@ stopped halfway picks up the current installer and resumes. Local edits or
 local commits on that branch stop the script, and nothing is changed. The
 installed system follows the same channel. With security chip unlock, the
 first start confirms the channel when you type the disk passphrase or
-recovery key and set the PIN. Without it, run `gjallarctl luks setup` and
-then `gjallarctl settings confirm-developer` once; rebuilds wait until then.
+recovery key and set the PIN. Without it, run `gjallarctl luks recovery-key`
+and then `gjallarctl settings confirm-developer` once with that key;
+rebuilds wait until then. Without a recovery key or startup PIN the command
+stops at once and says so; the disk passphrase is not accepted.
 A preset `user.config.json` with a different `releaseChannel` stops the
 installer.
 
@@ -493,6 +495,9 @@ and the Plane or JODS item.
 
 - An old command is not run. The shell prints the new name and stops,
   for example: gjallarOS: rebuild was removed; use gjallarctl rebuild
+- An old field in `user.config.json` is not read. Everything that reads
+  the file stops with "unknown field: OLD is now NEW; move the value there
+  in user.config.json", with the names from the table's config-field row.
 - The flake check `legacy-names` fails while an old name is still used
   outside `system/tools/legacy/`, and once the release in `system/release`
   is newer than a row's `deleteAfter` tag. Then the row and the last traces

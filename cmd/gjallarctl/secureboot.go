@@ -24,6 +24,14 @@ const secureBootUsage = "Usage: gjallarctl secure-boot {status|setup|update-dbx}
 
 const dbxUpdateTool = "gjallar-secure-boot-dbx-update"
 
+// noFirmwareSecureBoot is what setup and status say on firmware without
+// Secure Boot (Plane 328).
+const noFirmwareSecureBoot = "This firmware has no Secure Boot, so there is nothing to set up."
+
+// secureBootOffered reports whether the firmware has Secure Boot at all;
+// tests replace it.
+var secureBootOffered = secureboot.FirmwareHasSecureBoot
+
 // runSecureBoot sets up Secure Boot on an installed system the way the
 // installer does: same ownership checks, recovery gate, verification and
 // firmware handoff (internal/installer/secureboot/flow.go). The boot
@@ -68,6 +76,10 @@ func runSecureBoot(args []string, stdout, stderr io.Writer) int {
 }
 
 func runSecureBootStatus(ctx context.Context, stdout, stderr io.Writer) int {
+	if offered, err := secureBootOffered(); err == nil && !offered {
+		fmt.Fprintln(stdout, "Firmware:  no Secure Boot")
+		return 0
+	}
 	inspection, err := secureboot.Inspect(ctx)
 	if err != nil {
 		fmt.Fprintf(stderr, "ERROR: %v\n", err)
@@ -88,7 +100,18 @@ func runSecureBootSetup(ctx context.Context, repo string, ownKeys bool, stdout, 
 		return 1
 	}
 
-	repo, err := installercheck.DiscoverRepository(repo)
+	// Without Secure Boot in the firmware every later step fails on a
+	// missing EFI variable; say so before anything is read or asked.
+	offered, err := secureBootOffered()
+	if err != nil {
+		return fail(fmt.Errorf("read the firmware's Secure Boot variables: %w", err))
+	}
+	if !offered {
+		fmt.Fprintln(stderr, noFirmwareSecureBoot+" Nothing was changed.")
+		return 1
+	}
+
+	repo, err = installercheck.DiscoverRepository(repo)
 	if err != nil {
 		return fail(fmt.Errorf("resolve gjallarOS repository: %w", err))
 	}

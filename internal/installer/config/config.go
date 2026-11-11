@@ -16,6 +16,7 @@ import (
 
 	"github.com/JadeOpenServices/gjallarOS/apps"
 	"github.com/JadeOpenServices/gjallarOS/internal/sshsig"
+	"github.com/JadeOpenServices/gjallarOS/system/tools/legacy"
 )
 
 // User is user.config.json. Every field carries a tier tag that says how the
@@ -289,6 +290,17 @@ func Parse(contents []byte) (User, error) {
 			if _, old := fields[key]; old {
 				return User{}, fmt.Errorf("user configuration: %s was replaced by apps; remove it and list %q in apps when wanted", key, id)
 			}
+		}
+		// Renamed fields are still refused; the error says where each went.
+		var renamed []string
+		for key := range fields {
+			if now, ok := legacy.ConfigField(key); ok {
+				renamed = append(renamed, fmt.Sprintf("%s is now %s", key, now))
+			}
+		}
+		if len(renamed) > 0 {
+			slices.Sort(renamed)
+			return User{}, fmt.Errorf("parse user configuration: unknown field: %s; move the value there in user.config.json", strings.Join(renamed, ", "))
 		}
 		// Noctalia owns the wallpaper now; older configs still carry the key.
 		_, oldBackground := fields["backgroundNormal"]

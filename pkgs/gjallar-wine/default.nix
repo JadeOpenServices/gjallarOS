@@ -41,6 +41,8 @@ buildGoModule {
       ../../internal/winesandbox
       ../../internal/winicon
       ../../internal/winpe
+      ../../system/tools/legacy/legacy.go
+      ../../system/tools/legacy/renames.json
     ];
   };
 
