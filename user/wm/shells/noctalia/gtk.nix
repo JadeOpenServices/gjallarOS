@@ -70,11 +70,12 @@ in
       extraConfig."gtk-application-prefer-dark-theme" = 1;
     };
 
-    gtk4 = {
-      colorScheme = lib.mkForce "dark";
-
-      extraConfig."gtk-application-prefer-dark-theme" = 1;
-    };
+    # GTK 4 takes the colour scheme from the Settings portal, which reads
+    # the dconf color-scheme below. Nothing goes into gtk-4.0/settings.ini:
+    # Home Manager 26.05 writes gtk-interface-color-scheme as a number GTK
+    # cannot read, and libadwaita warns about
+    # gtk-application-prefer-dark-theme (Plane 326, upstream queue 753).
+    gtk4.colorScheme = lib.mkForce null;
   };
 
   dconf.settings."org/gnome/desktop/interface".color-scheme = "prefer-dark";
