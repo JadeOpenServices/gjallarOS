@@ -75,7 +75,7 @@ type CertKind string
 const (
 	CertMicrosoft CertKind = "microsoft"
 	// CertPlatform is the Platform Key, a KEK it signed, or a db key a
-	// PK or KEK key signed: the maker's keys, or GjallarOS's own once it
+	// PK or KEK key signed: the maker's keys, or gjallarOS's own once it
 	// owns the firmware.
 	CertPlatform CertKind = "platform"
 	CertOther    CertKind = "other"
@@ -164,6 +164,24 @@ var liveFirmware = firmwareFiles{
 // ReadFirmwareTrust reads the running firmware.
 func ReadFirmwareTrust() (FirmwareTrust, error) {
 	return liveFirmware.read()
+}
+
+// ReadModeFlags reads only SecureBoot and SetupMode. Both are world
+// readable, so unlike ReadFirmwareTrust this never asks for root.
+func ReadModeFlags() (secureBoot, setupMode TriState, err error) {
+	return liveFirmware.modeFlags()
+}
+
+func (f firmwareFiles) modeFlags() (TriState, TriState, error) {
+	secureBoot, err := f.flag("SecureBoot", efiGlobalGUID)
+	if err != nil {
+		return "", "", err
+	}
+	setupMode, err := f.flag("SetupMode", efiGlobalGUID)
+	if err != nil {
+		return "", "", err
+	}
+	return secureBoot, setupMode, nil
 }
 
 // maxVariable caps one variable; real dbx lists are about 15 KiB.

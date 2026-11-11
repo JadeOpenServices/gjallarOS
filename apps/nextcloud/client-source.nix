@@ -1,4 +1,4 @@
-# Pinned Nextcloud desktop source and the GjallarOS patches on top of it.
+# Pinned Nextcloud desktop source and the gjallarOS patches on top of it.
 # Shared by apps/nextcloud/package.nix and tests/nix/nextcloud-client-patches.nix.
 { fetchFromGitHub, replaceVars }:
 let
@@ -12,7 +12,7 @@ in
     sha256 = "14mzqq4133m6sj9sm9ari0x53n1dsyjdsidmpyz3yyzl231vn7jm";
   };
 
-  # The nixpkgs patch targets the old 4.0.8 source. GjallarOS already
+  # The nixpkgs patch targets the old 4.0.8 source. gjallarOS already
   # disables upstream autostart explicitly, so it is not carried over.
   patches = [
     # Every concurrent FUSE request must receive a result from the shared download.
@@ -41,7 +41,7 @@ in
     # Windows, menus and popups follow the Qt palette (Noctalia via qt6ct,
     # else the system palette) instead of hardcoded light/dark colors.
     ./patches/nextcloud-palette-theme.patch
-    # A rebuilt client never adds itself to autostart; GjallarOS starts it.
+    # A rebuilt client never adds itself to autostart; gjallarOS starts it.
     ./patches/nextcloud-no-autostart.patch
     # A folder added in the settings follows the VFS default too, not only
     # the wizard checkbox. A server that enforces VFS off still wins.

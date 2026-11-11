@@ -24,8 +24,15 @@ func CheckUpdate(repo string, stdout io.Writer) {
 
 	fmt.Fprintf(
 		stdout,
-		"[GjallarOS] ODDC update available: %s -> %s. Apply with: gjallarctl rebuild --hardware-update\n",
+		"[gjallarOS] ODDC update available: %s -> %s. Apply with: gjallarctl rebuild --hardware-update\n",
 		short(pinned),
 		short(upstream),
 	)
+}
+
+func short(rev string) string {
+	if len(rev) > 12 {
+		return rev[:12]
+	}
+	return rev
 }

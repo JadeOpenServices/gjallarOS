@@ -361,5 +361,28 @@ pkgs.testers.runNixOSTest {
         client.succeed("test ! -e /run/gjallar/vpn-boot-block")
         client.succeed("ping -c 1 -W 2 -I eth1 192.168.1.3")
         client.succeed("! gjallarctl vpn status | grep -q 'not checked yet'")
+
+    with subtest("a frozen tailscaled cannot hold the block back"):
+        # Loophole 43: a tailscale call that never returned used up the
+        # deadline the block shared with it, and the status said blocked
+        # while nothing was. Each call now ends on its own limit.
+        pid = client.succeed("systemctl show -p MainPID --value tailscaled.service").strip()
+        client.succeed(f"kill -STOP {pid}")
+        begin = time.monotonic()
+        v = apply()
+        took = time.monotonic() - begin
+        print(f"verdict with a frozen tailscaled took {took:.0f}s")
+        assert v["blocked"] == "tailscale-down" and "blockError" not in v, v
+        assert took < 100, took
+        client.succeed("nft list table inet gjallar_vpn_block")
+        client.fail(internet)
+        client.succeed(lan)
+        client.succeed("gjallarctl vpn status | grep '^blocked:' | grep -vq 'NOT ACTIVE'")
+        client.succeed(f"kill -CONT {pid}")
+        client.wait_until_succeeds("tailscale status --json | jq -e '.Peer[] | select(.HostName == \"exit\") | .Online'", timeout=120)
+        v = apply()
+        assert v["exitNode"] == "exit" and "blocked" not in v, v
+        client.succeed(no_table)
+        client.wait_until_succeeds(internet, timeout=60)
   '';
 }

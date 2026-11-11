@@ -35,6 +35,12 @@ type Grant struct {
 	Time          time.Time `json:"time"`
 }
 
+// Unencrypted is the refusal for a developer channel or developer mode on
+// a device whose system disk is not encrypted: such a disk has no startup
+// PIN or recovery key to prove with, so the device stays on stable (Q212,
+// Q217).
+const Unencrypted = "the system disk is not encrypted; staging, dev and developer mode need an encrypted disk, so this device stays on stable"
+
 // Needs reports what a configuration asks of the grant.
 func Needs(channel string, developerMode bool) Grant {
 	return Grant{Channels: channel != "" && channel != "stable", DeveloperMode: developerMode}

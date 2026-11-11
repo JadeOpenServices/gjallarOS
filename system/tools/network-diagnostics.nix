@@ -1,6 +1,10 @@
-{ pkgs, ... }:
+{ lib, pkgs, ... }:
 let
-  networkDiagnostics = pkgs.writeShellScriptBin "network-diagnostics" ''
+  libexec = import ../../pkgs/lib/libexec.nix { inherit lib pkgs; };
+
+  # gjallarctl network starts this from the system profile's libexec
+  # (Plane 282); it is not on PATH.
+  networkDiagnostics = pkgs.writeShellScriptBin "gjallar-network-diagnostics" ''
     section() {
       printf '\n=== %s ===\n' "$1"
     }
@@ -8,12 +12,12 @@ let
     usage() {
       cat <<'EOF'
 Usage:
-  network-diagnostics [summary]
-  network-diagnostics interfaces
-  network-diagnostics sockets
-  network-diagnostics dns NAME
-  network-diagnostics route IP
-  network-diagnostics tools
+  gjallarctl network [summary]
+  gjallarctl network interfaces
+  gjallarctl network sockets
+  gjallarctl network dns NAME
+  gjallarctl network route IP
+  gjallarctl network tools
 
 Commands:
   summary     Local link, address, route, DNS, NetworkManager and socket state.
@@ -21,7 +25,7 @@ Commands:
   sockets     Listening TCP/UDP sockets.
   dns NAME    Query the configured resolver plus A, AAAA and DNSSEC-aware data.
   route IP    Show the kernel route selected for an IPv4 or IPv6 address.
-  tools       Show the diagnostic tools provided by GjallarOS.
+  tools       Show the diagnostic tools provided by gjallarOS.
 
 Packet capture, active scanning and throughput testing remain explicit operator
 actions through tcpdump, tshark, termshark, nmap, iperf3 and the other raw tools.
@@ -213,24 +217,6 @@ in
           whois
     ])
     ++ [
-      networkDiagnostics
-      (pkgs.writeTextDir "share/zsh/site-functions/_network-diagnostics" ''
-        #compdef network-diagnostics
-        local -a cmds=(
-          'summary:link, address, route, DNS, NetworkManager and socket state'
-          'interfaces:interface, address, Wi-Fi and link information'
-          'sockets:listening TCP/UDP sockets'
-          'dns:query a name'
-          'route:show the route to an address'
-          'tools:list the diagnostic tools'
-        )
-        if (( CURRENT == 2 )); then
-          _describe -t commands 'network-diagnostics command' cmds
-        elif (( CURRENT == 3 )) && [[ $words[2] == dns ]]; then
-          _hosts
-        elif (( CURRENT == 3 )) && [[ $words[2] == route ]]; then
-          _message 'IPv4 or IPv6 address'
-        fi
-      '')
+      (libexec networkDiagnostics)
     ];
 }

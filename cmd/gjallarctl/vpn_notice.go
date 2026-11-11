@@ -85,6 +85,11 @@ func runVPNNotice(args []string, stderr io.Writer) int {
 // was for whether to show one now, and what to remember.
 func vpnNoticeStep(v nettrust.Verdict, seen string) (show bool, next string) {
 	key := vpnNoticeKey(v)
+	if key != "" && v.BlockError != "" {
+		// A block that failed is news even on a noticed network, and so
+		// is the block working again after it.
+		key += vpnBlockFailedKey
+	}
 	switch {
 	case key == seen:
 		return false, seen
@@ -96,6 +101,9 @@ func vpnNoticeStep(v nettrust.Verdict, seen string) (show bool, next string) {
 	}
 	return true, key
 }
+
+// vpnBlockFailedKey marks a remembered network whose block failed.
+const vpnBlockFailedKey = " (block failed)"
 
 // vpnNoticeKey names the network for the notice. A network without a key
 // (no gateway hardware address) cannot be paused, but still gets its one
@@ -129,7 +137,8 @@ func showVPNNotice(ctx context.Context, v nettrust.Verdict) (string, error) {
 				return
 			case <-tick.C:
 				now, err := readVPNVerdict()
-				if err != nil || now.Blocked == "" || vpnNoticeKey(now) != key {
+				if err != nil || now.Blocked == "" || vpnNoticeKey(now) != key ||
+					(now.BlockError == "") != (v.BlockError == "") {
 					cancel()
 					return
 				}
@@ -138,7 +147,7 @@ func showVPNNotice(ctx context.Context, v nettrust.Verdict) (string, error) {
 	}()
 	summary, body := vpnNoticeText(v)
 	actions := []noticeAction{{"ok", "OK"}}
-	if v.Network != "" {
+	if v.Network != "" && v.BlockError == "" {
 		actions = []noticeAction{{"pause", "Pause VPN on this network"}, {"ok", "Keep blocked"}}
 	}
 	choice, err := vpnShowNotice(ctx, desktopNotice{
@@ -166,10 +175,20 @@ func vpnNoticeText(v nettrust.Verdict) (summary, body string) {
 	if v.SSID != "" {
 		body = "Wi-Fi " + html.EscapeString(v.SSID) + ": " + body
 	}
-	if v.Network == "" {
-		return "VPN blocking this network", body + "\nIt cannot be paused: it looks like any other network."
+	if v.BlockError != "" {
+		// Nothing to pause: the network already carries the traffic.
+		return "VPN cannot block this network", body +
+			"\nThe block could not be set up.\nApps connect without the tunnel.\nLeave this network to stay safe."
 	}
-	return "VPN blocking this network", body + fmt.Sprintf(
+	summary = "VPN blocking this network"
+	if v.Blocked == nettrust.BlockCheckTimeout {
+		summary = "VPN could not check this network"
+		body += "\nInternet outside the tunnel stays blocked to be safe.\nThe next check runs within 5 min."
+	}
+	if v.Network == "" {
+		return summary, body + "\nIt cannot be paused: it looks like any other network."
+	}
+	return summary, body + fmt.Sprintf(
 		"\nPausing skips the tunnel here, max %d min, admin password.\nThis network then sees where apps connect.",
 		int(nettrust.MaxPause.Minutes()))
 }

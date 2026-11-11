@@ -35,10 +35,12 @@ buildGoModule {
       ../../internal/sshsig
       ../../internal/usbtrust
       ../../internal/winesandbox
+      ../../system/tools/legacy/legacy.go
+      ../../system/tools/legacy/renames.json
     ];
   };
 
-  vendorHash = "sha256-Mp0do2yse7kCCmyE2ACqdk0DMAX3bpF2KHjHsKDjG8o=";
+  vendorHash = "sha256-MN2ReRzA64XHTzqaCIYwC8Tzb7IZGa+WFd1nP8Idu1M=";
   proxyVendor = true;
 
   subPackages = [
@@ -57,7 +59,7 @@ buildGoModule {
   env.CGO_ENABLED = "0";
 
   meta = {
-    description = "GjallarOS root settings service";
+    description = "gjallarOS root settings service";
     license = lib.licenses.agpl3Plus;
     mainProgram = "gjallar-settingsd";
     platforms = lib.platforms.linux;

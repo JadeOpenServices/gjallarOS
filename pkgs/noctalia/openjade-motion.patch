@@ -1,0 +1,128 @@
+diff --git a/src/render/animation/animation.cpp b/src/render/animation/animation.cpp
+index f94e44b..513c243 100644
+--- a/src/render/animation/animation.cpp
++++ b/src/render/animation/animation.cpp
+@@ -2,6 +2,31 @@
+ 
+ #include <algorithm>
+ 
++namespace {
++
++  // cubic-bezier(0.16, 1, 0.3, 1): find the curve parameter whose x is t
++  // (x rises with it), then return its y.
++  float houseCurve(float t) {
++    const auto bezier = [](float p1, float p2, float s) {
++      const float u = 1.0F - s;
++      return 3.0F * u * u * s * p1 + 3.0F * u * s * s * p2 + s * s * s;
++    };
++    float lo = 0.0F;
++    float hi = 1.0F;
++    float s = t;
++    for (int i = 0; i < 24; ++i) {
++      s = 0.5F * (lo + hi);
++      if (bezier(0.16F, 0.3F, s) < t) {
++        lo = s;
++      } else {
++        hi = s;
++      }
++    }
++    return bezier(1.0F, 1.0F, s);
++  }
++
++} // namespace
++
+ float applyEasing(Easing easing, float t) {
+   t = std::clamp(t, 0.0F, 1.0F);
+ 
+@@ -12,27 +37,13 @@ float applyEasing(Easing easing, float t) {
+   case Easing::EaseInQuad:
+     return t * t;
+ 
++  // OpenJade motion rule: every ease-out and ease-in-out curve is the house
++  // curve, so each move and fade settles the same way.
+   case Easing::EaseOutQuad:
+-    return t * (2.0F - t);
+-
+   case Easing::EaseInOutQuad:
+-    if (t < 0.5F) {
+-      return 2.0F * t * t;
+-    }
+-    return -1.0F + (4.0F - 2.0F * t) * t;
+-
+-  case Easing::EaseOutCubic: {
+-    const float f = t - 1.0F;
+-    return f * f * f + 1.0F;
+-  }
+-
++  case Easing::EaseOutCubic:
+   case Easing::EaseInOutCubic:
+-    if (t < 0.5F) {
+-      return 4.0F * t * t * t;
+-    } else {
+-      const float f = 2.0F * t - 2.0F;
+-      return 0.5F * f * f * f + 1.0F;
+-    }
++    return houseCurve(t);
+ 
+   case Easing::EaseOutBack: {
+     constexpr float c1 = 1.70158F;
+diff --git a/src/shell/panel/panel_manager.cpp b/src/shell/panel/panel_manager.cpp
+index 12b3896..01be0c7 100644
+--- a/src/shell/panel/panel_manager.cpp
++++ b/src/shell/panel/panel_manager.cpp
+@@ -2324,7 +2324,7 @@ void PanelManager::startAttachedOpenAnimation() {
+ 
+   m_attachedOpenAnimationPending = false;
+   m_animations.animate(
+-      m_attachedRevealProgress, 1.0F, Style::animNormal, Easing::EaseOutCubic,
++      m_attachedRevealProgress, 1.0F, Style::animPanel, Easing::EaseOutCubic,
+       [this](float v) { applyAttachedReveal(v); }, {}, m_attachedRevealClipNode
+   );
+ }
+@@ -2737,7 +2737,7 @@ void PanelManager::buildScene(std::uint32_t width, std::uint32_t height) {
+     } else {
+       applyDetachedReveal(0.0F);
+       m_animations.animate(
+-          0.0F, 1.0F, Style::animNormal, Easing::EaseOutCubic, [this](float v) { applyDetachedReveal(v); }, {},
++          0.0F, 1.0F, Style::animPanel, Easing::EaseOutCubic, [this](float v) { applyDetachedReveal(v); }, {},
+           m_sceneRoot.get()
+       );
+     }
+diff --git a/src/theme/theme_service.cpp b/src/theme/theme_service.cpp
+index 950041d..6cd9876 100644
+--- a/src/theme/theme_service.cpp
++++ b/src/theme/theme_service.cpp
+@@ -16,6 +16,7 @@
+ #include "theme/palette_transform.h"
+ #include "theme/scheme.h"
+ #include "ui/app_icon_colorization.h"
++#include "ui/style.h"
+ #include "util/checksum.h"
+ #include "util/string_utils.h"
+ 
+@@ -38,7 +39,7 @@ namespace noctalia::theme {
+ 
+     constexpr auto kLog = Logger("theme");
+ 
+-    constexpr float kTransitionDurationMs = 400.0F;
++    constexpr float kTransitionDurationMs = static_cast<float>(Style::animPanel);
+     constexpr std::chrono::milliseconds kTransitionTick{8};
+ 
+     struct ResolvedTheme {
+diff --git a/src/ui/style.h b/src/ui/style.h
+index 6a24aaf..8300206 100644
+--- a/src/ui/style.h
++++ b/src/ui/style.h
+@@ -6,8 +6,10 @@ namespace Style {
+ 
+   inline constexpr int barThicknessDefault = 34;
+ 
+-  inline constexpr int animFast = 100;
+-  inline constexpr int animNormal = 200;
++  inline constexpr int animFast = 150;
++  inline constexpr int animNormal = 150;
++  // Opens of panels, the launcher, the lock screen and theme changes.
++  inline constexpr int animPanel = 500;
+   inline constexpr int animSlow = 400;
+ 
+   inline constexpr float radiusSm = 2.0F;

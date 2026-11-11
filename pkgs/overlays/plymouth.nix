@@ -18,7 +18,7 @@ in
 {
   plymouth =
     assert lib.assertMsg (prev.plymouth.version == "26.134.222")
-      "GjallarOS plymouth overlay was written for 26.134.222; check whether ${prev.plymouth.version} runs a script theme's quit function on quit --retain-splash and update or remove pkgs/overlays/plymouth.nix.";
+      "gjallarOS plymouth overlay was written for 26.134.222; check whether ${prev.plymouth.version} runs a script theme's quit function on quit --retain-splash and update or remove pkgs/overlays/plymouth.nix.";
     prev.plymouth.overrideAttrs (old: {
       patches = (old.patches or [ ]) ++ [
         ../patches/plymouth-script-quit-on-retain.patch

@@ -9,7 +9,7 @@ in
 {
   usbguard =
     assert lib.assertMsg (prev.usbguard.version == "1.1.4")
-      "GjallarOS usbguard overlay was written for 1.1.4; check whether ${prev.usbguard.version} still rejects long endpoint descriptors (USBGuard/usbguard#686) and update or remove pkgs/overlays/usbguard.nix.";
+      "gjallarOS usbguard overlay was written for 1.1.4; check whether ${prev.usbguard.version} still rejects long endpoint descriptors (USBGuard/usbguard#686) and update or remove pkgs/overlays/usbguard.nix.";
     prev.usbguard.overrideAttrs (old: {
       patches = (old.patches or [ ]) ++ [ ../patches/usbguard-long-endpoint-descriptor.patch ];
     });

@@ -53,7 +53,7 @@ func TestResolveNormalInstallerUsesGitHEAD(t *testing.T) {
 		"git",
 		"-C",
 		repo,
-		"-c", "user.name=GjallarOS Test",
+		"-c", "user.name=gjallarOS Test",
 		"-c", "user.email=test@gjallar.invalid",
 		"commit",
 		"-m", "test",

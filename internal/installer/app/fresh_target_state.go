@@ -60,6 +60,6 @@ func bindFreshTargetState(ctx context.Context, targetRoot string, out io.Writer)
 		mounted = append(mounted, state.path)
 	}
 
-	fmt.Fprintln(out, "PASS: Secure Boot and GjallarOS state now live on the target (/var/lib/sbctl, /var/lib/gjallarOS, /boot)")
+	fmt.Fprintln(out, "PASS: Secure Boot and gjallarOS state now live on the target (/var/lib/sbctl, /var/lib/gjallarOS, /boot)")
 	return release, nil
 }

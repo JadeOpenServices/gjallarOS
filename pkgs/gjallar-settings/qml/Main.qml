@@ -203,7 +203,7 @@ ApplicationWindow {
                     }
                     SectionRow {
                         title: "Apps"
-                        detail: "Install and remove apps from the GjallarOS catalogue."
+                        detail: "Install and remove apps from the gjallarOS catalogue."
                         iconName: "system-software-install"
                         onClicked: window.openPage("apps")
                     }
@@ -222,8 +222,8 @@ ApplicationWindow {
         Layout.rightMargin: window.gap
         padding: window.gap
         background: Rectangle {
-            radius: 12
-            color: row.hovered ? Qt.lighter(palette.alternateBase, 1.2) : palette.alternateBase
+            radius: 6
+            color: row.hovered ? Qt.tint(palette.alternateBase, Qt.rgba(palette.highlight.r, palette.highlight.g, palette.highlight.b, 0.12)) : palette.alternateBase
         }
         contentItem: RowLayout {
             spacing: window.gap

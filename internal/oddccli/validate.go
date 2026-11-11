@@ -27,7 +27,7 @@ func runValidateDevice(args []string, stdout, stderr io.Writer) int {
 	flags := flag.NewFlagSet("gjallarctl oddc validate-device", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 
-	repo := flags.String("repo", ".", "GjallarOS repository root")
+	repo := flags.String("repo", ".", "gjallarOS repository root")
 
 	if err := flags.Parse(args); err != nil {
 		return 2

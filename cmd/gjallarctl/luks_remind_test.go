@@ -58,15 +58,15 @@ func TestReadLUKSRecordRejectsBrokenFiles(t *testing.T) {
 }
 
 func TestDiskProtectionState(t *testing.T) {
-	yes := func() bool { return true }
-	no := func() bool { return false }
-	asked := func(t *testing.T) func() bool {
-		return func() bool { t.Fatal("chip check asked although the chip unlocks"); return false }
+	path := func(p chipPath) func() chipPath { return func() chipPath { return p } }
+	yes, no := path(chipNeedsSecureBoot), path(chipNone)
+	asked := func(t *testing.T) func() chipPath {
+		return func() chipPath { t.Fatal("chip check asked although the chip unlocks"); return chipNone }
 	}
 	cases := []struct {
 		name   string
 		record luksRecord
-		chip   func() bool
+		chip   func() chipPath
 		want   string
 	}{
 		{"unencrypted", luksRecord{}, no, diskProtectionUnencrypted},
@@ -78,6 +78,9 @@ func TestDiskProtectionState(t *testing.T) {
 		{"generic model without key", luksRecord{Encrypted: true, Passphrase: 1}, no, diskProtectionRecoveryKey},
 		{"chip slot without policy", luksRecord{Encrypted: true, TPM2: 1, Recovery: 1, ChipNoPolicy: true}, asked(t), diskProtectionChipNoPolicy},
 		{"no policy comes before the passphrase", luksRecord{Encrypted: true, TPM2: 1, Passphrase: 1, ChipNoPolicy: true}, asked(t), diskProtectionChipNoPolicy},
+		{"chip unlock switched off", luksRecord{Encrypted: true, Recovery: 1}, path(chipSwitchedOff), diskProtectionChipOff},
+		{"chip off comes before the recovery key", luksRecord{Encrypted: true, Passphrase: 1}, path(chipSwitchedOff), diskProtectionChipOff},
+		{"chip enrolls at the next start", luksRecord{Encrypted: true, Recovery: 1}, path(chipNextStart), diskProtectionChipNextStart},
 	}
 	for _, c := range cases {
 		if got := diskProtectionState(c.record, diskcrypto.TPMFirmware, c.chip); got != c.want {
@@ -87,7 +90,7 @@ func TestDiskProtectionState(t *testing.T) {
 }
 
 func TestDiskProtectionStateSuggestsPIN(t *testing.T) {
-	chip := func() bool { t.Fatal("chip check asked although the chip unlocks"); return false }
+	chip := func() chipPath { t.Fatal("chip check asked although the chip unlocks"); return chipNone }
 	noPIN := luksRecord{Encrypted: true, TPM2: 1, Recovery: 1, PINKnown: true}
 	withPIN := luksRecord{Encrypted: true, TPM2: 1, Recovery: 1, PINKnown: true, PIN: true}
 	oldRecord := luksRecord{Encrypted: true, TPM2: 1, Recovery: 1}
@@ -113,7 +116,7 @@ func TestDiskProtectionStateSuggestsPIN(t *testing.T) {
 
 func TestDiskProtectionTextsNameACommandWhereSetupExists(t *testing.T) {
 	r := luksRecord{Encrypted: true, TPM2: 1, Passphrase: 1}
-	for _, state := range []string{diskProtectionSetup, diskProtectionSecureBoot, diskProtectionRecoveryKey, diskProtectionPIN, diskProtectionChipNoPolicy} {
+	for _, state := range []string{diskProtectionSetup, diskProtectionSecureBoot, diskProtectionRecoveryKey, diskProtectionPIN, diskProtectionChipNoPolicy, diskProtectionChipOff} {
 		text := diskProtectionTexts(state, r)
 		if text.summary == "" || text.body == "" || text.risk == "" || text.command == nil {
 			t.Errorf("%s: incomplete %+v", state, text)
@@ -132,7 +135,7 @@ func TestDiskProtectionBodiesFitTheCard(t *testing.T) {
 		{Encrypted: true, TPM2: 1},
 		{Encrypted: true, TPM2: 1, Recovery: 1, Passphrase: 1},
 	}
-	states := []string{diskProtectionSecureBoot, diskProtectionRecoveryKey, diskProtectionUnencrypted, diskProtectionPIN, diskProtectionChipNoPolicy}
+	states := []string{diskProtectionSecureBoot, diskProtectionRecoveryKey, diskProtectionUnencrypted, diskProtectionPIN, diskProtectionChipNoPolicy, diskProtectionChipOff, diskProtectionChipNextStart}
 	for _, r := range records {
 		if body := diskProtectionTexts(diskProtectionSetup, r).body; len(body) > 80 {
 			t.Errorf("setup %+v: %d characters", r, len(body))

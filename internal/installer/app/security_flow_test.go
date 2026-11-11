@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -193,6 +195,87 @@ func TestKeyboardOnlyAtStartup(t *testing.T) {
 	} {
 		if got := keyboardOnlyAtStartup(tc.chassis, tc.touch); got != tc.want {
 			t.Errorf("chassis %q touch %t: %t, want %t", tc.chassis, tc.touch, got, tc.want)
+		}
+	}
+}
+
+// An install that turned TPM2 unlock off must say so in user.config.json,
+// or the next gjallarctl rebuild renders it again (e2e-shim run 9,
+// 2026-11-10).
+func TestSaveTPM2OffWritesTheOutcome(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "user.config.json")
+	user, err := config.Defaults()
+	if err != nil {
+		t.Fatal(err)
+	}
+	user.Username = "example"
+	user.LUKSTPM2Enable = true
+	var out bytes.Buffer
+	if err := saveTPM2Off(&user, path, &out); err != nil {
+		t.Fatal(err)
+	}
+	saved, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if user.LUKSTPM2Enable || saved.LUKSTPM2Enable {
+		t.Fatalf("luksTpm2Enable after save: in memory %t, in file %t; want false", user.LUKSTPM2Enable, saved.LUKSTPM2Enable)
+	}
+	if !strings.Contains(out.String(), "luksTpm2Enable=false") {
+		t.Fatalf("output does not name the change:\n%s", out.String())
+	}
+}
+
+func TestSaveTPM2OffLeavesAnOffRequestAlone(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "user.config.json")
+	var out bytes.Buffer
+	if err := saveTPM2Off(&config.User{}, path, &out); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("user.config.json written although nothing changed (stat: %v)", err)
+	}
+	if out.Len() != 0 {
+		t.Fatalf("output although nothing changed:\n%s", out.String())
+	}
+}
+
+func TestKeptHardwareTPM2(t *testing.T) {
+	dir := t.TempDir()
+	plain := filepath.Join(dir, "plain.nix")
+	luks := filepath.Join(dir, "luks.nix")
+	// SYNTHETIC hardware.nix files.
+	if err := os.WriteFile(plain, []byte("{\n  fileSystems.\"/\".device = \"/dev/disk/by-uuid/example\";\n}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(luks, []byte("{\n  boot.initrd.luks.devices.\"cryptroot\".device = \"/dev/disk/by-uuid/example\";\n}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		name                           string
+		requested, managed, exists, sb bool
+		path                           string
+		want                           keptTPM2
+	}{
+		{"installed host, no LUKS", true, false, true, true, plain, keptTPM2NoLUKS},
+		{"installed host, LUKS, Secure Boot", true, false, true, true, luks, keptTPM2AsRequested},
+		{"not requested", false, false, true, false, plain, keptTPM2AsRequested},
+		{"managed keeps the contract", true, true, true, false, plain, keptTPM2AsRequested},
+		{"fresh install keeps the request", true, false, false, false, plain, keptTPM2AsRequested},
+		{"unreadable file says nothing about LUKS", true, false, true, true, filepath.Join(dir, "missing.nix"), keptTPM2AsRequested},
+		{"no Secure Boot turns off", true, false, true, false, luks, keptTPM2NoSecureBoot},
+		{"no Secure Boot, unreadable hardware.nix turns off", true, false, true, false, filepath.Join(dir, "missing.nix"), keptTPM2NoSecureBoot},
+	}
+	for _, c := range cases {
+		previous := privilegedCommand
+		privilegedCommand = func(_ context.Context, args ...string) ([]byte, error) {
+			t.Errorf("%s: unexpected privileged call %q", c.name, args)
+			return nil, nil
+		}
+		got := keptHardwareTPM2(c.requested, c.managed, c.exists, c.sb, c.path)
+		privilegedCommand = previous
+		if got != c.want {
+			t.Errorf("%s: got %v, want %v", c.name, got, c.want)
 		}
 	}
 }

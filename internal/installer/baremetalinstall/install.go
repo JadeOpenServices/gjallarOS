@@ -139,7 +139,7 @@ func install(
 	)
 
 	// --no-root-passwd ensures nixos-install never opens a password prompt or
-	// tries to move a secret through this stage. GjallarOS owns its configured
+	// tries to move a secret through this stage. gjallarOS owns its configured
 	// credential policy separately.
 	//
 	// No JODS service, endpoint, enrollment command, or installation-complete
@@ -185,7 +185,7 @@ func install(
 	fmt.Fprintln(input.Out, "STAGE: os-installed")
 	fmt.Fprintf(
 		input.Out,
-		"PASS: GjallarOS installed into %s using %s\n",
+		"PASS: gjallarOS installed into %s using %s\n",
 		targetRoot,
 		target,
 	)
@@ -234,7 +234,7 @@ func verifySystemProfile(root string) error {
 }
 
 // Live media keep their Nix store and the checkout in RAM, and have no swap:
-// evaluating the GjallarOS configuration inside nixos-install was OOM-killed
+// evaluating the gjallarOS configuration inside nixos-install was OOM-killed
 // on a 12 GiB machine. A temporary swapfile on the target avoids that. It
 // lives on the encrypted target Btrfs, so swapped pages never reach the disk
 // in clear, and is removed after the installation.

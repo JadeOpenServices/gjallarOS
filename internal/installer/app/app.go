@@ -40,6 +40,7 @@ import (
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/flakesource"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/geolocation"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/hardwareconfig"
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/installreport"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/installstate"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/localgit"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/nixrender"
@@ -85,6 +86,11 @@ type state struct {
 	secureBootFirmware       oddc.EffectiveSecureBootFirmwarePolicy
 	shimFacts                *secureboot.ShimFacts
 	deviceGate               string
+	// oddcModel is the ODDC model id once resolved, "" when none matches.
+	oddcModel string
+	// oddcChecked is true once the ODDC lookup ran, so a report about an
+	// earlier failure does not claim that no model matches.
+	oddcChecked bool
 }
 
 const (
@@ -171,7 +177,7 @@ func trustResumeRepository(repo string) error {
 		"GIT_CONFIG_COUNT":          strconv.Itoa(count + 1),
 	} {
 		if err := os.Setenv(key, value); err != nil {
-			return fmt.Errorf("trust resumed GjallarOS repository: %w", err)
+			return fmt.Errorf("trust resumed gjallarOS repository: %w", err)
 		}
 	}
 
@@ -211,7 +217,7 @@ func validateResume(tx installerresume.Transaction) error {
 }
 
 // maintenanceArgs keeps the mode this run settled on for the rerun after
-// the maintenance boot. By then the machine is a GjallarOS install, so the
+// the maintenance boot. By then the machine is a gjallarOS install, so the
 // first run's arguments alone would ask again whether to touch it, and the
 // default answer leaves it half installed.
 func maintenanceArgs(args []string, forceRedeploy bool) []string {
@@ -228,7 +234,7 @@ func maintenanceArgs(args []string, forceRedeploy bool) []string {
 	return append(out, mode)
 }
 
-func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer) int {
+func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer) (code int) {
 	if os.Getenv("GJALLAR_INSTALLER_RESUMED") == "1" {
 		fmt.Fprintf(
 			out,
@@ -243,14 +249,14 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 	f.SetOutput(errOut)
 	cwd, _ := os.Getwd()
 	opt := options{}
-	f.StringVar(&opt.repo, "repo", cwd, "GjallarOS repository")
+	f.StringVar(&opt.repo, "repo", cwd, "gjallarOS repository")
 	f.BoolVar(&opt.skipHardware, "skip-hardware", false, "skip hardware generation")
 	f.BoolVar(&opt.refreshHardware, "refresh-hardware", false, "regenerate hardware configuration")
 	f.BoolVar(&opt.noRebuild, "no-rebuild", false, "do not install a boot generation")
-	f.BoolVar(&opt.acceptExisting, "accept-existing", false, "allow an existing GjallarOS installation to be updated")
-	f.BoolVar(&opt.forceRedeploy, "force-redeploy", false, "force a full clean GjallarOS redeployment without repartitioning or wiping user data")
-	f.BoolVar(&opt.recovery, "recovery", false, "run from the trusted GjallarOS recovery environment")
-	f.StringVar(&opt.targetDisk, "target-disk", "", "whole physical disk for a destructive fresh GjallarOS installation")
+	f.BoolVar(&opt.acceptExisting, "accept-existing", false, "allow an existing gjallarOS installation to be updated")
+	f.BoolVar(&opt.forceRedeploy, "force-redeploy", false, "force a full clean gjallarOS redeployment without repartitioning or wiping user data")
+	f.BoolVar(&opt.recovery, "recovery", false, "run from the trusted gjallarOS recovery environment")
+	f.StringVar(&opt.targetDisk, "target-disk", "", "whole physical disk for a destructive fresh gjallarOS installation")
 	f.StringVar(&opt.recoveryDisk, "recovery-disk", "", "GPT disk with unallocated space for a recovery partition")
 	f.StringVar(&opt.recoveryPartition, "recovery-partition", "", "existing dedicated recovery partition")
 	f.StringVar(&opt.recoverySigningKey, "recovery-signing-key", "", "runtime path to offline Ed25519 recovery release private key")
@@ -273,6 +279,11 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 	if err := requireNixOS("/etc/os-release"); err != nil {
 		return fail(errOut, err)
 	}
+	if !opt.recovery {
+		if err := requireSystemCheckoutRun(installercheck.SystemRepositoryFile, root, geteuid()); err != nil {
+			return fail(errOut, err)
+		}
+	}
 	// A previous run as root may have left root-owned files in the checkout
 	// (generated/hardware.nix 0600 and its backups); hand them back first,
 	// and hand back whatever this run writes when it runs as root itself.
@@ -289,6 +300,24 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 	}()
 	ui := prompt.New(in, out)
 	s := state{control: controlBinary()}
+	// A failure from here on may become an install report the user saves
+	// (Plane 292). Failures before this point are about the checkout, not
+	// the machine, and get no report.
+	recorder := &failureRecorder{Writer: errOut}
+	errOut = recorder
+	defer func() {
+		if code == 1 && recorder.err != nil && reportAllowed(in, s.user) {
+			offerInstallReport(ctx, ui, out, reportInput{
+				reason:      installreport.ReasonFailed,
+				repo:        root,
+				recovery:    opt.recovery,
+				user:        s.user,
+				oddcModel:   s.oddcModel,
+				oddcChecked: s.oddcChecked,
+				failure:     recorder.err,
+			})
+		}
+	}()
 	installedRoot := "/"
 	presetRoot := root
 	if opt.recovery && opt.acceptExisting {
@@ -319,7 +348,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 			}
 		} else {
 			// The embedded repository is installation source material, not evidence
-			// that the recovery environment itself is an installed GjallarOS system.
+			// that the recovery environment itself is an installed gjallarOS system.
 			// Recovery without --accept-existing is the explicit fresh operation.
 			s.existing = false
 		}
@@ -346,7 +375,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 	if s.existing && !forceRedeploy && !opt.acceptExisting {
 		choice, err := ui.Choice(
 			ctx,
-			"Existing GjallarOS installation detected",
+			"Existing gjallarOS installation detected",
 			existingLeave,
 			[]string{existingUpdate, existingRedeploy, existingLeave},
 		)
@@ -382,6 +411,19 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 			"Force clean redeployment selected; preserving disk layout, credentials, encryption keys, and user data.",
 		)
 	}
+	// Before prepareHost: an in-place run changes /etc/nixos there, and a
+	// refusal has to leave the machine as it was.
+	encrypted := opt.recovery || !persistentInstalledHost
+	if !encrypted {
+		luks, err := diskcrypto.RootDevice(ctx)
+		if err != nil {
+			return fail(errOut, fmt.Errorf("check system disk encryption: %w", err))
+		}
+		encrypted = luks != ""
+	}
+	if err := stableOnUnencryptedDisk(ctx, ui, out, encrypted, &s.user, s.preset, presetPath); err != nil {
+		return fail(errOut, err)
+	}
 	if skip := liveHostPreparationSkip(
 		opt,
 		os.Getenv("GJALLAR_INSTALLER_RESUME_STATE"),
@@ -403,7 +445,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 	}
 	sourceRevision, err := sourcerevision.Resolve(root, opt.recovery)
 	if err != nil {
-		return fail(errOut, fmt.Errorf("resolve GjallarOS source revision: %w", err))
+		return fail(errOut, fmt.Errorf("resolve gjallarOS source revision: %w", err))
 	}
 
 	hardware := detectInstallerHardware("/sys")
@@ -534,9 +576,20 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 	if resolvedDevice.ModelID == "" {
 		fmt.Fprintln(out, "ODDC canonical model: none (unsupported by ODDC; installing the hardware-neutral baseline)")
 		reportBestEffort(out)
+		if reportAllowed(in, s.user) {
+			offerInstallReport(ctx, ui, out, reportInput{
+				reason:      installreport.ReasonUnknown,
+				repo:        root,
+				recovery:    opt.recovery,
+				user:        s.user,
+				oddcChecked: true,
+			})
+		}
 	} else {
 		fmt.Fprintf(out, "ODDC canonical model: %s\n", resolvedDevice.ModelID)
 	}
+	s.oddcModel = resolvedDevice.ModelID
+	s.oddcChecked = true
 
 	if needsDeviceRebind {
 		if s.user.UnattendedInstall || s.user.Management.Enable {
@@ -604,12 +657,21 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 	// A fresh install picks its disk before the questions, so USB blocking
 	// knows whether the system will run from a USB drive (wiki 752 Q11).
 	freshTarget := ""
-	if !persistentInstalledHost && !opt.noRebuild && (!s.preset || s.user.RunRebuild || opt.forceRedeploy) {
-		// The install ends with a clone of this commit; an unpushed one
-		// stops here, before a disk is wiped.
+	mayInstall := !opt.noRebuild && (!s.preset || s.user.RunRebuild || opt.forceRedeploy)
+	if mayInstall && !s.existing {
+		// A first install clones this commit into the system checkout,
+		// fresh and in place (Plane 313); an unpushed commit or a folder
+		// already in the way stops here, before anything is changed.
 		if err := checkReleasedRevision(ctx, sourceRevision); err != nil {
 			return fail(errOut, fmt.Errorf("the installer cannot set up %s: %w", systemcheckout.Path, err))
 		}
+		if persistentInstalledHost {
+			if err := checkoutFree(installedRoot); err != nil {
+				return fail(errOut, err)
+			}
+		}
+	}
+	if !persistentInstalledHost && mayInstall {
 		freshTarget, err = selectFreshTargetDisk(ctx, ui, out, opt.targetDisk)
 		if err != nil {
 			return fail(errOut, fmt.Errorf("select fresh installation target: %w", err))
@@ -665,7 +727,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 			fmt.Fprintln(out, "TPM2 hardware was not detected.")
 			fmt.Fprintln(
 				out,
-				"GjallarOS requires TPM2 for its Secure Boot and measured-boot security policy.",
+				"gjallarOS requires TPM2 for its Secure Boot and measured-boot security policy.",
 			)
 		}
 		fmt.Fprintln(
@@ -834,7 +896,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 			}
 		}
 		if !shimOK {
-			fmt.Fprint(out, secureBootDeclinedNotice("After the install, gjallarctl secure-boot setup turns it on through shim where this firmware allows it."))
+			fmt.Fprint(out, secureBootDeclinedNotice("After the install, gjallarctl secure-boot setup can try it through shim while the firmware keeps its factory keys."))
 		}
 	} else if s.user.SecureBootEnable &&
 		!s.user.SecureBootShim &&
@@ -916,7 +978,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 		if firmwareOn {
 			if s.user.UnattendedInstall {
 				return fail(errOut, errors.New(
-					"firmware enforces Secure Boot but GjallarOS Secure Boot is not set up for this install; turn Secure Boot off in firmware setup and rerun",
+					"firmware enforces Secure Boot but gjallarOS Secure Boot is not set up for this install; turn Secure Boot off in firmware setup and rerun",
 				))
 			}
 			choice, err := ui.Choice(
@@ -1113,6 +1175,28 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 
 	case hardwareRetain:
 		fmt.Fprintln(out, "Existing hardware configuration retained:", hardwarePath)
+		kept := keptHardwareTPM2(
+			s.render.LUKSTPM2Enable,
+			s.render.Management.Enable,
+			persistentInstalledHost,
+			s.render.SecureBootEnable,
+			hardwarePath,
+		)
+		switch kept {
+		case keptTPM2NoLUKS, keptTPM2NoSecureBoot:
+			s.render.LUKSTPM2Enable = false
+			if err := saveTPM2Off(&s.user, presetPath, out); err != nil {
+				return fail(errOut, err)
+			}
+			if kept == keptTPM2NoLUKS {
+				fmt.Fprintln(out, "No encrypted system disk in the kept hardware configuration; TPM2 disk unlock stays off.")
+			} else {
+				fmt.Fprintln(out, "gjallarOS Secure Boot is not set up on this install; TPM2 disk unlock stays off.")
+			}
+			if err := nixrender.WriteAtomic(settingsPath, s.render); err != nil {
+				return fail(errOut, err)
+			}
+		}
 
 	case hardwareGenerate:
 		if s.existing && !hardwareResult.existed {
@@ -1133,10 +1217,12 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 		}
 		if !tpm2AllowedForSecureBoot(s.render.SecureBootEnable) {
 			s.render.LUKSTPM2Enable = false
-			s.user.LUKSTPM2Enable = false
+			if err := saveTPM2Off(&s.user, presetPath, out); err != nil {
+				return fail(errOut, err)
+			}
 			fmt.Fprintln(
 				out,
-				"GjallarOS Secure Boot is not set up on this install; TPM2 disk unlock stays off.",
+				"gjallarOS Secure Boot is not set up on this install; TPM2 disk unlock stays off.",
 			)
 		} else if tpm2FollowsRequest(
 			s.render.Management.Enable,
@@ -1150,6 +1236,13 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 			}
 			fmt.Fprint(out, tpmOut)
 			s.render.LUKSTPM2Enable = strings.Contains(tpmOut, "luks_tpm2_enable=true")
+			// Without a LUKS mapping the request can never work here. A
+			// missing TPM keeps the saved request, as before.
+			if noLUKSMapping(hardwarePath) {
+				if err := saveTPM2Off(&s.user, presetPath, out); err != nil {
+					return fail(errOut, err)
+				}
+			}
 		}
 		if err := nixrender.WriteAtomic(settingsPath, s.render); err != nil {
 			return fail(errOut, err)
@@ -1161,10 +1254,10 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 			//
 			// rootprovision creates the initial human recovery-capable keyslot.
 			// TPM2 enrollment is intentionally deferred until the installed
-			// GjallarOS lifecycle can act against its own verified root device.
+			// gjallarOS lifecycle can act against its own verified root device.
 			fmt.Fprintln(
 				out,
-				"Fresh-target TPM2 LUKS enrollment deferred until the installed GjallarOS lifecycle.",
+				"Fresh-target TPM2 LUKS enrollment deferred until the installed gjallarOS lifecycle.",
 			)
 		} else if s.existing {
 			fmt.Fprintln(out, "Existing LUKS keyslots retained; disk-key migration was not rerun.")
@@ -1194,8 +1287,8 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 		}
 	}
 	if s.render.SecureBootEnable && s.render.SecureBootShim {
-		// Before the rebuild: it puts the GjallarOS boot chain first, which
-		// shim starts only once it lists the GjallarOS key.
+		// Before the rebuild: it puts the gjallarOS boot chain first, which
+		// shim starts only once it lists the gjallarOS key.
 		if installedRoot != "/" {
 			return fail(errOut, errors.New("Secure Boot through shim installs only on the running system"))
 		}
@@ -1224,7 +1317,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 			}
 		} else {
 			// Secure Boot off: the firmware starts any boot chain, so the
-			// rebuild may put shim first now. Only the GjallarOS shim can
+			// rebuild may put shim first now. Only the gjallarOS shim can
 			// show MokManager, so the key is queued after the first start
 			// through it (gjallarctl secure-boot setup), not here.
 			trust, err := secureboot.ReadFirmwareTrust()
@@ -1396,7 +1489,16 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 					target,
 				)
 
-				if err := deploy.Apply(ctx, root, s.user.Hostname); err != nil {
+				if err := deployInPlace(
+					ctx,
+					root,
+					installedRoot,
+					s.user.Hostname,
+					sourceRevision,
+					s.user.Channel(),
+					!s.existing,
+					out,
+				); err != nil {
 					return fail(errOut, err)
 				}
 				if resolvedDevice.ModelID == "" {
@@ -1593,12 +1695,12 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 		shimSBOff = !sbOn
 	}
 	if shimSBOff {
-		// The rest of the switch runs from GjallarOS itself; until Secure
+		// The rest of the switch runs from gjallarOS itself; until Secure
 		// Boot enforces, each start shows the next step.
 		if err := armSecureBootResume(ctx, out); err != nil {
 			return fail(errOut, err)
 		}
-		fmt.Fprintln(out, "Restarting into GjallarOS through shim. Then run gjallarctl secure-boot setup in a terminal: it puts the GjallarOS key into shim's list.")
+		fmt.Fprintln(out, "Restarting into gjallarOS through shim. Then run gjallarctl secure-boot setup in a terminal: it puts the gjallarOS key into shim's list.")
 		if err := attached(ctx, "sudo", "systemctl", "reboot"); err != nil {
 			return fail(errOut, fmt.Errorf("restart: %w", err))
 		}
@@ -1617,7 +1719,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 			if err := armSecureBootResume(ctx, out); err != nil {
 				return fail(errOut, err)
 			}
-			fmt.Fprintln(out, "Restarting into GjallarOS through shim...")
+			fmt.Fprintln(out, "Restarting into gjallarOS through shim...")
 			if err := attached(ctx, "sudo", "systemctl", "reboot"); err != nil {
 				return fail(errOut, fmt.Errorf("restart: %w", err))
 			}
@@ -1677,7 +1779,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 			} else {
 				fmt.Fprintln(
 					out,
-					"JODS enrollment deferred to the installed GjallarOS lifecycle; installer environment was not enrolled.",
+					"JODS enrollment deferred to the installed gjallarOS lifecycle; installer environment was not enrolled.",
 				)
 			}
 		}
@@ -1710,7 +1812,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 		}
 		return 0
 	}
-	fmt.Fprintln(out, "GjallarOS installation complete.")
+	fmt.Fprintln(out, "gjallarOS installation complete.")
 	return 0
 }
 
@@ -1749,10 +1851,10 @@ func activateJODSEnrollment(ctx context.Context, installationSucceeded bool) err
 func liveHostPreparationSkip(opt options, resumeState string) string {
 	switch {
 	case resumeState == installerresume.StateMaintenanceReboot:
-		// The GjallarOS generation was deployed before the maintenance boot.
+		// The gjallarOS generation was deployed before the maintenance boot.
 		// The bootstrap /etc/nixos config lacks the flake's helpers, so it
 		// rebuilt and switched to the bare base system (e2e-full, 2026-10-05).
-		return "Resumed after maintenance; GjallarOS already deployed, live-host rebuild skipped."
+		return "Resumed after maintenance; gjallarOS already deployed, live-host rebuild skipped."
 	case opt.recovery:
 		// Recovery media is a purpose-built execution environment. Never mutate
 		// or rebuild the live recovery system before operating on the target.
@@ -1775,14 +1877,14 @@ func prepareHost(
 	out,
 	errOut io.Writer,
 ) int {
-	// A completed GjallarOS installation is flake-owned: the flake pins the
+	// A completed gjallarOS installation is flake-owned: the flake pins the
 	// NixOS release and brings every installer prerequisite. Staging a release
 	// or rebuilding the bootstrap /etc/nixos/configuration.nix would put the
 	// machine back on its pre-install base generation, and a clean redeploy
 	// once did that under the running desktop (Plane 199). The flake
 	// deployment later in the run is the only system change on a rerun.
 	if s.existing {
-		fmt.Fprintln(out, "Existing GjallarOS installation detected; skipping /etc/nixos release and bootstrap rebuilds.")
+		fmt.Fprintln(out, "Existing gjallarOS installation detected; skipping /etc/nixos release and bootstrap rebuilds.")
 		return offerFirmwareUpdates(ctx, ui, s, out, errOut)
 	}
 	expected, actual, err := release.Inspect(opt.repo, "/etc/os-release")
@@ -2119,7 +2221,7 @@ func collectInteractive(ctx context.Context, ui prompt.UI, root string, partitio
 // noRecoveryPartitionNotice says why a recovery partition was dropped: its
 // image is signed with this machine's Secure Boot key, and without that key
 // nothing checks it before it starts.
-const noRecoveryPartitionNotice = "No recovery partition: it needs GjallarOS Secure Boot, which is off for this install. The disk is not shrunk."
+const noRecoveryPartitionNotice = "No recovery partition: it needs gjallarOS Secure Boot, which is off for this install. The disk is not shrunk."
 
 // shimNoRecoveryPartitionNotice: starting recovery through shim is not
 // tested yet (Plane 293).
@@ -2127,16 +2229,16 @@ const shimNoRecoveryPartitionNotice = "No recovery partition: starting recovery 
 
 // freshRecoveryPartition says whether a fresh disk gets a recovery partition. The
 // boot entry alone needs no partition; the partition comes only with
-// GjallarOS Secure Boot (collectRecovery).
+// gjallarOS Secure Boot (collectRecovery).
 func freshRecoveryPartition(u config.User) bool {
 	return u.RecoveryEnable && u.RecoveryPartitionEnable
 }
 
 // collectRecovery asks for the recovery boot entry and, where the root can
-// take one and GjallarOS Secure Boot is on, the recovery partition.
+// take one and gjallarOS Secure Boot is on, the recovery partition.
 func collectRecovery(ctx context.Context, ui prompt.UI, partitionable, secureBoot bool, u *config.User) error {
 	var err error
-	u.RecoveryEnable, err = ui.Confirm(ctx, "Install the trusted local GjallarOS recovery/JODS boot entry?", true)
+	u.RecoveryEnable, err = ui.Confirm(ctx, "Install the trusted local gjallarOS recovery/JODS boot entry?", true)
 	if err != nil {
 		return err
 	}
@@ -2150,7 +2252,7 @@ func collectRecovery(ctx context.Context, ui prompt.UI, partitionable, secureBoo
 	} else if u.RecoveryEnable {
 		u.RecoveryPartitionEnable, err = ui.Confirm(
 			ctx,
-			"Create and maintain a dedicated GjallarOS recovery partition (recommended):",
+			"Create and maintain a dedicated gjallarOS recovery partition (recommended):",
 			true,
 		)
 		if err != nil {
@@ -2701,12 +2803,12 @@ func askEndpoint(ctx context.Context, ui prompt.UI, label, def string, check fun
 	}
 }
 
-// askSigningKey asks who signs the main user's settings files: GjallarOS,
+// askSigningKey asks who signs the main user's settings files: gjallarOS,
 // or the user's own OpenSSH key (settingsSigningKey). running is the key of
 // the installed system on a rerun. The example is made up and never filled
 // in.
 func askSigningKey(ctx context.Context, ui prompt.UI, running string) (string, error) {
-	managed, err := ui.Confirm(ctx, "Let GjallarOS sign your settings files for you? (recommended; No: you sign them yourself with your own OpenSSH key, ssh-ed25519 or a FIDO sk-ssh-ed25519 key)", running == "")
+	managed, err := ui.Confirm(ctx, "Let gjallarOS sign your settings files for you? (recommended; No: you sign them yourself with your own OpenSSH key, ssh-ed25519 or a FIDO sk-ssh-ed25519 key)", running == "")
 	if err != nil || managed {
 		return "", err
 	}
@@ -2823,7 +2925,7 @@ func configureRecoveryProvisioning(ctx context.Context, ui prompt.UI, opt option
 
 	// Canonical fresh installation owns recovery partition #3 on the
 	// selected target disk. It must never ask the user for a second GPT
-	// disk or for GjallarOS release-signing private/public key files.
+	// disk or for gjallarOS release-signing private/public key files.
 	//
 	// Release signing and per-device recovery identity are separate trust
 	// roles. Fresh storage provisioning only creates the canonical recovery
@@ -2852,13 +2954,13 @@ func configureRecoveryProvisioning(ctx context.Context, ui prompt.UI, opt option
 		}
 		s.recoveryPartition = found
 	}
-	// Without GjallarOS Secure Boot there is no recovery partition, even
+	// Without gjallarOS Secure Boot there is no recovery partition, even
 	// one an older installer already made (e2e-genluks 2026-10-19: the
 	// notice said no recovery partition, then the run offered to format
 	// the leftover one).
 	if !s.user.SecureBootEnable && !explicitTarget {
 		if s.recoveryPartition != "" {
-			fmt.Fprintf(ui.Out, "The recovery partition %s stays unused: it needs GjallarOS Secure Boot.\n", s.recoveryPartition)
+			fmt.Fprintf(ui.Out, "The recovery partition %s stays unused: it needs gjallarOS Secure Boot.\n", s.recoveryPartition)
 		}
 		s.recoveryPartition = ""
 		return nil
@@ -2996,7 +3098,7 @@ func managementBlocker(secureBootSupported, tpm2 bool) string {
 	case !tpm2:
 		return "a managed machine needs TPM2, and none was detected."
 	case !secureBootSupported:
-		return "a managed machine needs GjallarOS Secure Boot, and ODDC has no Secure Boot setup for this machine."
+		return "a managed machine needs gjallarOS Secure Boot, and ODDC has no Secure Boot setup for this machine."
 	}
 	return ""
 }
@@ -3392,12 +3494,12 @@ func armSecureBootResume(ctx context.Context, out io.Writer) error {
 		return fmt.Errorf("arm installer continuation across Secure Boot reboot: %w", err)
 	}
 	fmt.Fprintln(out, "Installer continuation armed across Secure Boot reboot.")
-	fmt.Fprintln(out, "After Secure Boot is verified, GjallarOS will automatically run the final installer checks.")
+	fmt.Fprintln(out, "After Secure Boot is verified, gjallarOS will automatically run the final installer checks.")
 	return nil
 }
 
 // buildShimFacts builds the pinned shim from the checkout and reads what it
-// needs from the firmware. The running system is not GjallarOS yet, so it
+// needs from the firmware. The running system is not gjallarOS yet, so it
 // has no /etc/gjallar/shim.json.
 func buildShimFacts(ctx context.Context, root string) (secureboot.ShimFacts, error) {
 	source, err := flakesource.Stage(root, "")
@@ -3661,6 +3763,7 @@ func fail(out io.Writer, err error) int {
 		}
 		return 130
 	}
+	recordFailure(out, err)
 	fmt.Fprintln(out, "ERROR:", err)
 	return 1
 }
@@ -3682,6 +3785,65 @@ func applyChannelFlag(user *config.User, channel string, preset bool, presetPath
 	return nil
 }
 
+// stableOnUnencryptedDisk keeps staging, dev and developer mode off an
+// unencrypted system disk (Plane 283, wiki 752 Q212). Their confirmation
+// needs the security chip PIN or the disk recovery key; a plain disk has
+// neither, so every system rebuild after the install would be refused
+// (e2e-shim run 9, 2026-11-10). A fresh disk is always encrypted, so this
+// only stops in-place runs. The person may switch to stable instead; a
+// preset then says stable too.
+func stableOnUnencryptedDisk(ctx context.Context, ui confirmer, out io.Writer, encrypted bool, user *config.User, preset bool, presetPath string) error {
+	need := devgate.Needs(user.Channel(), user.DeveloperMode)
+	if encrypted || need.Empty() {
+		return nil
+	}
+	var what []string
+	if need.Channels {
+		what = append(what, "the "+user.Channel()+" channel")
+	}
+	if need.DeveloperMode {
+		what = append(what, "developer mode")
+	}
+	want := strings.Join(what, " and ")
+	needs := "needs"
+	if len(what) > 1 {
+		needs = "need"
+	}
+	fmt.Fprintf(out, "The system disk is not encrypted. %s %s an encrypted disk: confirming it takes the security chip PIN or the disk recovery key, and this disk has neither, so every system update would be refused.\n", upperFirst(want), needs)
+	ok, err := ui.Confirm(ctx, "Install with the stable channel and developer mode off instead?", true)
+	if err != nil || !ok {
+		fix := "run the installer again with --channel stable"
+		if preset {
+			fix = "set releaseChannel to stable and developerMode to false in " + presetPath + " and run the installer again"
+		}
+		return fmt.Errorf("%s %s an encrypted system disk; nothing was changed. Install on a fresh disk to get encryption, or %s", want, needs, fix)
+	}
+	user.ReleaseChannel = "stable"
+	user.DeveloperMode = false
+	// The system rebuild reads the channel from the preset, not from
+	// this run (e2e-shim, 2026-11-11).
+	if preset {
+		if err := config.WriteAtomic(presetPath, *user); err != nil {
+			return fmt.Errorf("save the stable channel to %s: %w", presetPath, err)
+		}
+		fmt.Fprintf(out, "Following the stable channel; developer mode is off. Saved in %s.\n", presetPath)
+		return nil
+	}
+	fmt.Fprintln(out, "Following the stable channel; developer mode is off.")
+	return nil
+}
+
+type confirmer interface {
+	Confirm(ctx context.Context, message string, defaultYes bool) (bool, error)
+}
+
+func upperFirst(s string) string {
+	if s == "" {
+		return s
+	}
+	return strings.ToUpper(s[:1]) + s[1:]
+}
+
 // developerConfirmNotice says how a fresh install of a dev or staging
 // channel or with developer mode gets its developer confirmation (Plane
 // 283, Q192). With chip unlock the first start records it while the
@@ -3698,5 +3860,5 @@ func developerConfirmNotice(user config.User, existing, tpm2 bool) string {
 	if tpm2 {
 		return "The first start confirms " + what + " when you set up the security chip unlock."
 	}
-	return "To keep " + what + ", run gjallarctl luks setup after the first start and then gjallarctl settings confirm-developer once with the recovery key; system rebuilds wait until then."
+	return "To keep " + what + ", run gjallarctl luks recovery-key after the first start and then gjallarctl settings confirm-developer once with the recovery key; system rebuilds wait until then."
 }

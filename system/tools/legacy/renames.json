@@ -5,7 +5,7 @@
       "old": "rebuild",
       "new": "gjallarctl rebuild",
       "removedIn": "dev 2838248d",
-      "deleteAfter": "2026-12-01",
+      "deleteAfter": "v2026.10.70",
       "item": "311",
       "match": [
         "`rebuild`",
@@ -14,11 +14,134 @@
       ]
     },
     {
+      "kind": "command",
+      "old": "helpme",
+      "new": "gjallarctl helpme",
+      "removedIn": "dev merge of one-cli-282",
+      "deleteAfter": "v2026.10.70",
+      "item": "282",
+      "match": [
+        "`helpme`",
+        "`helpme ",
+        "writeShellScriptBin \"helpme\"",
+        "goCommand \"helpme\""
+      ]
+    },
+    {
+      "kind": "command",
+      "old": "cleanup",
+      "new": "gjallarctl cleanup",
+      "removedIn": "dev merge of one-cli-282",
+      "deleteAfter": "v2026.10.70",
+      "item": "282",
+      "match": [
+        "`cleanup`",
+        "`cleanup ",
+        "writeShellScriptBin \"cleanup\"",
+        "goCommand \"cleanup\""
+      ]
+    },
+    {
+      "kind": "command",
+      "old": "cleanup-old-generations",
+      "new": "gjallarctl cleanup-old-generations",
+      "removedIn": "dev merge of one-cli-282",
+      "deleteAfter": "v2026.10.70",
+      "item": "282",
+      "match": [
+        "`cleanup-old-generations`",
+        "`cleanup-old-generations ",
+        "writeShellScriptBin \"cleanup-old-generations\"",
+        "goCommand \"cleanup-old-generations\""
+      ]
+    },
+    {
+      "kind": "command",
+      "old": "thermal-status",
+      "new": "gjallarctl thermal-status",
+      "removedIn": "dev merge of one-cli-282",
+      "deleteAfter": "v2026.10.70",
+      "item": "282",
+      "match": [
+        "`thermal-status`",
+        "`thermal-status ",
+        "writeShellScriptBin \"thermal-status\"",
+        "goCommand \"thermal-status\""
+      ]
+    },
+    {
+      "kind": "command",
+      "old": "thermal-test",
+      "new": "gjallarctl thermal-test",
+      "removedIn": "dev merge of one-cli-282",
+      "deleteAfter": "v2026.10.70",
+      "item": "282",
+      "match": [
+        "`thermal-test`",
+        "`thermal-test ",
+        "writeShellScriptBin \"thermal-test\"",
+        "goCommand \"thermal-test\""
+      ]
+    },
+    {
+      "kind": "command",
+      "old": "check-installer",
+      "new": "gjallarctl check",
+      "removedIn": "dev merge of one-cli-282",
+      "deleteAfter": "v2026.10.70",
+      "item": "282"
+    },
+    {
+      "kind": "command",
+      "old": "gjallar-preflight",
+      "new": "gjallarctl preflight",
+      "removedIn": "dev merge of one-cli-282",
+      "deleteAfter": "v2026.10.70",
+      "item": "282"
+    },
+    {
+      "kind": "command",
+      "old": "network-diagnostics",
+      "new": "gjallarctl network",
+      "removedIn": "dev merge of one-cli-282",
+      "deleteAfter": "v2026.10.70",
+      "item": "282",
+      "match": [
+        "`network-diagnostics",
+        "writeShellScriptBin \"network-diagnostics\"",
+        "#compdef network-diagnostics"
+      ]
+    },
+    {
+      "kind": "command",
+      "old": "gjallar-register-key",
+      "new": "gjallarctl register-key",
+      "removedIn": "dev merge of one-cli-282",
+      "deleteAfter": "v2026.10.70",
+      "item": "282",
+      "match": [
+        "`gjallar-register-key",
+        "#compdef gjallar-register-key",
+        "exec = \"gjallar-register-key"
+      ]
+    },
+    {
+      "kind": "command",
+      "old": "gjallar-management-status",
+      "new": "gjallarctl management status",
+      "removedIn": "dev merge of one-cli-282",
+      "deleteAfter": "v2026.10.70",
+      "item": "282",
+      "match": [
+        "`gjallar-management-status"
+      ]
+    },
+    {
       "kind": "config-field",
       "old": "endpointManagedDevice",
       "new": "management.enable",
       "removedIn": "dev 7f05cae7",
-      "deleteAfter": "2026-12-01",
+      "deleteAfter": "v2026.10.70",
       "item": "JODS-565",
       "allowedIn": [
         "internal/installer/nixrender/nixrender.go"
@@ -29,7 +152,7 @@
       "old": "jodsEndpoint",
       "new": "management.endpoint",
       "removedIn": "dev 7f05cae7",
-      "deleteAfter": "2026-12-01",
+      "deleteAfter": "v2026.10.70",
       "item": "JODS-565",
       "allowedIn": [
         "internal/installer/nixrender/nixrender.go"
@@ -40,7 +163,7 @@
       "old": "jodsPolicySigningPublicKey",
       "new": "management.policySigningPublicKey",
       "removedIn": "dev 7f05cae7",
-      "deleteAfter": "2026-12-01",
+      "deleteAfter": "v2026.10.70",
       "item": "JODS-565",
       "allowedIn": [
         "internal/installer/nixrender/nixrender.go"
@@ -51,7 +174,7 @@
       "old": "jodsRecoveryCommandSigningPublicKey",
       "new": "management.recoveryCommandSigningPublicKey",
       "removedIn": "dev 7f05cae7",
-      "deleteAfter": "2026-12-01",
+      "deleteAfter": "v2026.10.70",
       "item": "JODS-565",
       "allowedIn": [
         "internal/installer/nixrender/nixrender.go"
@@ -62,7 +185,7 @@
       "old": "jodsEnrollmentMode",
       "new": "management.enrollmentMode",
       "removedIn": "dev 7f05cae7",
-      "deleteAfter": "2026-12-01",
+      "deleteAfter": "v2026.10.70",
       "item": "JODS-565",
       "allowedIn": [
         "internal/installer/nixrender/nixrender.go"
@@ -73,7 +196,7 @@
       "old": "jodsAllowInsecureTls",
       "new": "management.allowInsecureTls",
       "removedIn": "dev 7f05cae7",
-      "deleteAfter": "2026-12-01",
+      "deleteAfter": "v2026.10.70",
       "item": "JODS-565",
       "allowedIn": [
         "internal/installer/nixrender/nixrender.go"
@@ -84,7 +207,7 @@
       "old": "jodsDeviceClass",
       "new": "management.deviceClass",
       "removedIn": "dev 7f05cae7",
-      "deleteAfter": "2026-12-01",
+      "deleteAfter": "v2026.10.70",
       "item": "JODS-565",
       "allowedIn": [
         "internal/installer/nixrender/nixrender.go"
@@ -95,7 +218,7 @@
       "old": "jodsDesktopProfile",
       "new": "management.desktopProfile",
       "removedIn": "dev 7f05cae7",
-      "deleteAfter": "2026-12-01",
+      "deleteAfter": "v2026.10.70",
       "item": "JODS-565",
       "allowedIn": [
         "internal/installer/nixrender/nixrender.go"
@@ -106,7 +229,7 @@
       "old": "jodsFingerprintEnrollmentAllowed",
       "new": "management.fingerprintEnrollmentAllowed",
       "removedIn": "dev 7f05cae7",
-      "deleteAfter": "2026-12-01",
+      "deleteAfter": "v2026.10.70",
       "item": "JODS-565",
       "allowedIn": [
         "internal/installer/nixrender/nixrender.go"
@@ -117,7 +240,7 @@
       "old": "jodsPrebootLockEnable",
       "new": "prebootLock.enable",
       "removedIn": "dev 7f05cae7",
-      "deleteAfter": "2026-12-01",
+      "deleteAfter": "v2026.10.70",
       "item": "JODS-565",
       "allowedIn": [
         "internal/installer/nixrender/nixrender.go"
@@ -128,7 +251,7 @@
       "old": "JODS-RECOVERY",
       "new": "GJALLAR-RECOVERY",
       "removedIn": "dev 7f05cae7",
-      "deleteAfter": "2026-12-01",
+      "deleteAfter": "v2026.10.70",
       "item": "JODS-565"
     },
     {
@@ -136,7 +259,7 @@
       "old": "JODS-REC",
       "new": "GJALLAR-REC",
       "removedIn": "dev 7f05cae7",
-      "deleteAfter": "2026-12-01",
+      "deleteAfter": "v2026.10.70",
       "item": "JODS-565"
     },
     {
@@ -144,7 +267,7 @@
       "old": "jods-mdm-agent.service",
       "new": "mdm-agent.service",
       "removedIn": "dev 7f05cae7",
-      "deleteAfter": "2026-12-01",
+      "deleteAfter": "v2026.10.70",
       "item": "JODS-565",
       "match": [
         "jods-mdm-agent"
@@ -155,7 +278,7 @@
       "old": "/var/lib/gjallarOS/jods-status.txt",
       "new": "/var/lib/gjallarOS/management-status.txt",
       "removedIn": "dev 7f05cae7",
-      "deleteAfter": "2026-12-01",
+      "deleteAfter": "v2026.10.70",
       "item": "JODS-565",
       "match": [
         "jods-status"
@@ -166,7 +289,7 @@
       "old": "/var/lib/gjallarOS/jods-enrollment-complete",
       "new": "/var/lib/gjallarOS/management-enrollment-complete",
       "removedIn": "dev 7f05cae7",
-      "deleteAfter": "2026-12-01",
+      "deleteAfter": "v2026.10.70",
       "item": "JODS-565",
       "match": [
         "jods-enrollment-complete"

@@ -4,7 +4,10 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"path/filepath"
 	"strings"
+
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/systemcheckout"
 )
 
 type CommandRunner func(
@@ -105,13 +108,23 @@ func runDeviceEvaluation(
 	)
 }
 
+// runRealMachineRebuild applies the system checkout with gjallarctl
+// rebuild. gjallarctl builds only the system checkout (Q199), so a
+// validation of any other checkout fails here instead of building the
+// wrong tree.
 func runRealMachineRebuild(
 	ctx context.Context,
 	runner CommandRunner,
 	repo string,
 	executable string,
-	hostname string,
 ) Result {
+	if filepath.Clean(repo) != systemcheckout.Path {
+		return Result{
+			Gate:    GateRealMachineRebuild,
+			Passed:  false,
+			Details: fmt.Sprintf("gjallarctl rebuild builds only the system checkout %s, not %s", systemcheckout.Path, repo),
+		}
+	}
 	return runCommandGate(
 		ctx,
 		runner,
@@ -119,10 +132,6 @@ func runRealMachineRebuild(
 		GateRealMachineRebuild,
 		executable,
 		"rebuild",
-		"--repo",
-		repo,
-		"--host",
-		hostname,
 		"--no-cleanup",
 	)
 }

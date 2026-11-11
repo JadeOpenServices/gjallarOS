@@ -189,6 +189,20 @@ func TestStoppedTailscaleLeavesExitNodeAloneButBlocks(t *testing.T) {
 	}
 }
 
+// A running tailscaled that waits for a person is not "not running".
+func TestSignedOutTailscaleSaysSo(t *testing.T) {
+	for state, want := range map[string]string{"NeedsLogin": BlockSignedOut, "NeedsMachineAuth": BlockNeedsApproval, "Stopped": BlockTailscaleDown} {
+		tn, err := parseTailnet([]byte(`{"BackendState":"` + state + `"}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		v := decide(t, policy, wifi("cafe", "", "172.16.0.0/16"), tn, fakeProber{})
+		if v.Blocked != want || BlockCause(v.Blocked) == v.Blocked {
+			t.Fatalf("%s: verdict = %+v", state, v)
+		}
+	}
+}
+
 func TestTrustedHomeIsNeverBlocked(t *testing.T) {
 	v := decide(t, policy, wifi("synthetic-5Ghz", "wpa-psk", "192.168.8.0/24"), Tailnet{}, fakeProber{})
 	if v.Trust != TrustHome || v.Blocked != "" {
@@ -331,6 +345,46 @@ func TestTailnetWaitsForStartingTailscaled(t *testing.T) {
 	}
 	if !slices.Equal(calls, []string{"tailscale", "systemctl"}) {
 		t.Fatalf("calls = %v", calls)
+	}
+}
+
+// A stuck tailscaled answers no CLI call. Each call ends on its own limit,
+// so the verdict keeps the time it needs for the block (loophole 43).
+func TestStuckTailscaledCannotUseUpTheVerdict(t *testing.T) {
+	oldCall, oldSettle := tailscaleCall, tailnetSettle
+	tailscaleCall, tailnetSettle = 50*time.Millisecond, 0
+	defer func() { tailscaleCall, tailnetSettle = oldCall, oldSettle }()
+	s := System{run: func(ctx context.Context, name string, _ ...string) ([]byte, error) {
+		if name == "systemctl" {
+			return []byte("active\n"), nil
+		}
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	begin := time.Now()
+	tn, err := s.Tailnet(ctx)
+	if err != nil || tn.Running {
+		t.Fatalf("tailnet = %+v, %v", tn, err)
+	}
+	tn = Tailnet{Running: true, Peers: []Peer{{HostName: "synthetic-exit", IPs: []netip.Addr{netip.MustParseAddr("100.64.0.9")}, ExitNodeOption: true}}}
+	if changed, err := s.ApplyExitNode(ctx, tn, "synthetic-exit"); changed || !errors.Is(err, ErrNoAnswer) {
+		t.Fatalf("stuck tailscale set: changed %v, err %v", changed, err)
+	}
+	if took := time.Since(begin); took > time.Second || ctx.Err() != nil {
+		t.Fatalf("took %v, verdict context %v", took, ctx.Err())
+	}
+}
+
+// A tailscale call that fails at once is not a timeout (Plane 325).
+func TestApplyExitNodeFailureIsNotNoAnswer(t *testing.T) {
+	s := System{run: func(context.Context, string, ...string) ([]byte, error) {
+		return nil, errors.New("synthetic refusal")
+	}}
+	tn := Tailnet{Running: true, Peers: []Peer{{HostName: "synthetic-exit", IPs: []netip.Addr{netip.MustParseAddr("100.64.0.9")}, ExitNodeOption: true}}}
+	if _, err := s.ApplyExitNode(context.Background(), tn, "synthetic-exit"); err == nil || errors.Is(err, ErrNoAnswer) {
+		t.Fatalf("err %v", err)
 	}
 }
 

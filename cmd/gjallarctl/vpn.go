@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -86,6 +87,19 @@ func runVPN(args []string, stdout, stderr io.Writer) int {
 	}
 }
 
+// vpnBlockDeadline bounds installing or removing the block: a few nft and
+// ip calls.
+const vpnBlockDeadline = 30 * time.Second
+
+// vpnBlockStatus says what the block does on this network, and that it is
+// missing when it could not be installed.
+func vpnBlockStatus(v nettrust.Verdict) string {
+	if v.BlockError != "" {
+		return "NOT ACTIVE: " + v.BlockError + "; traffic leaves without the tunnel (" + nettrust.BlockCause(v.Blocked) + ")"
+	}
+	return nettrust.BlockText(v.Blocked)
+}
+
 func runVPNApply(args []string, stdout, stderr io.Writer) int {
 	flags := flag.NewFlagSet("vpn apply", flag.ContinueOnError)
 	flags.SetOutput(stderr)
@@ -156,7 +170,11 @@ func runVPNApply(args []string, stdout, stderr io.Writer) int {
 		case err != nil:
 			fmt.Fprintf(stderr, "ERROR: set exit node: %v\n", err)
 			verdict.ExitNodeError = err.Error()
-			if verdict.ExitNode != "" {
+			switch {
+			case verdict.ExitNode == "":
+			case errors.Is(err, nettrust.ErrNoAnswer):
+				verdict.Blocked = nettrust.BlockCheckTimeout
+			default:
 				verdict.Blocked = nettrust.BlockNoExitNode
 			}
 			code = 1
@@ -167,15 +185,23 @@ func runVPNApply(args []string, stdout, stderr io.Writer) int {
 		}
 	}
 
-	// Without a network the block stays as it is, like the exit node.
+	// Without a network the block stays as it is, like the exit node. The
+	// block has a deadline of its own: a slow step before it must not
+	// leave the network open while the status says blocked (loophole 43).
 	if network != nil {
-		if err := sys.ApplyBlock(ctx, network, verdict.Blocked != ""); err != nil {
+		blockCtx, cancelBlock := context.WithTimeout(context.Background(), vpnBlockDeadline)
+		err := sys.ApplyBlock(blockCtx, network, verdict.Blocked != "")
+		cancelBlock()
+		if err != nil {
 			fmt.Fprintf(stderr, "ERROR: apply internet block: %v\n", err)
+			if verdict.Blocked != "" {
+				verdict.BlockError = err.Error()
+			}
 			code = 1
 		}
 	}
 	if verdict.Blocked != "" {
-		fmt.Fprintf(stderr, "WARN: %s\n", nettrust.BlockText(verdict.Blocked))
+		fmt.Fprintf(stderr, "WARN: %s\n", vpnBlockStatus(verdict))
 	}
 
 	fmt.Fprintf(stdout, "network %s: %s; bypass [%s]\n",
@@ -293,6 +319,9 @@ func runVPNStatus(stdout, stderr io.Writer) int {
 		return 1
 	}
 	fmt.Fprintf(stdout, "network:   %s\nreason:    %s\n", v.Trust, v.Reason)
+	if _, ok := nettrust.ReadVerdict(vpnStatusPath, time.Now()); !ok {
+		fmt.Fprintln(stdout, "checked:   not in the last 15 minutes; pause and home access are off until the next check (systemctl status gjallar-vpn-trust.timer)")
+	}
 	if v.SSID != "" {
 		fmt.Fprintf(stdout, "wifi:      %s\n", v.SSID)
 	}
@@ -315,7 +344,11 @@ func runVPNStatus(stdout, stderr io.Writer) int {
 	}
 	fmt.Fprintf(stdout, "exit node: %s\nlocal:     %s\n", exit, local)
 	if v.Blocked != "" {
-		fmt.Fprintf(stdout, "blocked:   %s (gjallarctl vpn pause lets this network through for up to 1 hour)\n", nettrust.BlockText(v.Blocked))
+		if v.BlockError != "" {
+			fmt.Fprintf(stdout, "blocked:   %s (systemctl status gjallar-vpn-trust)\n", vpnBlockStatus(v))
+		} else {
+			fmt.Fprintf(stdout, "blocked:   %s (gjallarctl vpn pause lets this network through for up to 1 hour)\n", vpnBlockStatus(v))
+		}
 	}
 	if bootBlocked {
 		// The last verdict had no network to look at.

@@ -16,7 +16,7 @@ import (
 // The shim path (Plane 293 step 4) turns Secure Boot on without touching
 // the firmware's keys:
 //
-//  1. PrepareShim makes the GjallarOS keys and records "pending-mok"; the
+//  1. PrepareShim makes the gjallarOS keys and records "pending-mok"; the
 //     caller then turns on secureBootEnable and secureBootShim and rebuilds,
 //     which puts shim first in the firmware's boot order.
 //  2. ContinueShim, on the next boot (through shim, Secure Boot still off),
@@ -39,7 +39,7 @@ const ContinuationReboot Continuation = "reboot"
 // both would hand out the same key set for different firmware changes.
 var errShimPending = errors.New("a switch to shim is pending; finish it with gjallarctl secure-boot setup")
 
-// PrepareShim creates the GjallarOS keys on a machine with its factory keys
+// PrepareShim creates the gjallarOS keys on a machine with its factory keys
 // and records the pending shim switch. A pending or finished switch is
 // reused; every other state is refused.
 func PrepareShim(ctx context.Context, out io.Writer) error {
@@ -52,15 +52,15 @@ func PrepareShim(ctx context.Context, out io.Writer) error {
 	switch inspection.State {
 	case StateGjallarShim:
 		if inspection.Stage == StagePendingMOK {
-			fmt.Fprintln(out, "shim already lists the GjallarOS key; reusing the prepared key set.")
+			fmt.Fprintln(out, "shim already lists the gjallarOS key; reusing the prepared key set.")
 			return nil
 		}
-		fmt.Fprintln(out, "This system already boots through shim with the GjallarOS key.")
+		fmt.Fprintln(out, "This system already boots through shim with the gjallarOS key.")
 		return nil
 
 	case StatePendingEnrollment:
 		if inspection.Stage != StagePendingMOK {
-			return errors.New("a switch to GjallarOS firmware keys is pending; finish it with gjallarctl secure-boot setup --own-keys")
+			return errors.New("a switch to gjallarOS firmware keys is pending; finish it with gjallarctl secure-boot setup --own-keys")
 		}
 		fmt.Fprintln(out, "A switch to shim is pending; reusing the prepared key set.")
 		return nil
@@ -68,7 +68,7 @@ func PrepareShim(ctx context.Context, out io.Writer) error {
 	case StateOEMFactoryDerived:
 		if inspection.SecureBoot {
 			// Locked firmware (Plane 293): another system's shim starts
-			// this one, so the GjallarOS key can go into the same MOK list
+			// this one, so the gjallarOS key can go into the same MOK list
 			// before the boot chain changes. Without shim there is no way
 			// in with Secure Boot on.
 			started, err := ShimStarted()
@@ -79,7 +79,7 @@ func PrepareShim(ctx context.Context, out io.Writer) error {
 				return errors.New("Secure Boot is on, but this system does not boot through shim yet; turn Secure Boot off in the firmware setup and run this again")
 			}
 		}
-		fmt.Fprintln(out, "The firmware keeps its maker's keys; preparing the GjallarOS key for shim.")
+		fmt.Fprintln(out, "The firmware keeps its maker's keys; preparing the gjallarOS key for shim.")
 		recovery, err := Provision(ctx)
 		if err != nil {
 			return err
@@ -88,16 +88,16 @@ func PrepareShim(ctx context.Context, out io.Writer) error {
 		return RecordOwnership(ctx, StagePendingMOK)
 
 	case StateGjallarManaged:
-		return errors.New("this system already uses GjallarOS firmware keys; it does not need shim")
+		return errors.New("this system already uses gjallarOS firmware keys; it does not need shim")
 
 	case StateSetupModeUnknown:
-		return errors.New("the firmware is in Setup Mode; set up GjallarOS firmware keys with gjallarctl secure-boot setup --own-keys")
+		return errors.New("the firmware is in Setup Mode; set up gjallarOS firmware keys with gjallarctl secure-boot setup --own-keys")
 
 	case StateForeignManaged:
-		return errors.New("the firmware holds keys that are neither its factory keys nor GjallarOS keys; refusing to change Secure Boot")
+		return errors.New("the firmware holds keys that are neither its factory keys nor gjallarOS keys; refusing to change Secure Boot")
 
 	case StateInconsistent:
-		return errors.New("GjallarOS Secure Boot ownership metadata does not match the current key material; refusing to continue")
+		return errors.New("gjallarOS Secure Boot ownership metadata does not match the current key material; refusing to continue")
 
 	default:
 		return fmt.Errorf("unsupported Secure Boot ownership state %q", inspection.State)
@@ -121,7 +121,7 @@ func ContinueShim(
 	}
 	switch {
 	case inspection.State == StateGjallarShim && inspection.Stage == "enrolled":
-		fmt.Fprintln(out, "Secure Boot is on; shim checks this system against the GjallarOS key.")
+		fmt.Fprintln(out, "Secure Boot is on; shim checks this system against the gjallarOS key.")
 		return ContinuationNone, nil
 	case inspection.State == StateGjallarShim:
 		return "", errors.New("Secure Boot is on through shim, but the first Secure Boot start was not recorded; restart once and look at: journalctl -b -u secure-boot-verification")
@@ -148,7 +148,7 @@ func ContinueShim(
 		return "", err
 	}
 	if !ok {
-		return "", errors.New("the GjallarOS Secure Boot keys are incomplete")
+		return "", errors.New("the gjallarOS Secure Boot keys are incomplete")
 	}
 	trust, err := ReadFirmwareTrust()
 	if err != nil {
@@ -163,7 +163,7 @@ func ContinueShim(
 		return "", err
 	}
 	if choice.Path != PathShim {
-		return "", fmt.Errorf("this firmware would not start shim with the GjallarOS key: %s", choice.Reason)
+		return "", fmt.Errorf("this firmware would not start shim with the gjallarOS key: %s", choice.Reason)
 	}
 
 	enrolled, err := mokHolds(liveFirmware, "MokListRT", keys.dbDER)
@@ -177,7 +177,7 @@ func ContinueShim(
 		if err := run(ctx, "sudo", "install", "-m", "0600", "/dev/null", FinalMarkerPath); err != nil {
 			return "", fmt.Errorf("arm final Secure Boot verification: %w", err)
 		}
-		fmt.Fprintln(out, "shim holds the GjallarOS key. Only Secure Boot itself still needs to be turned on in the firmware setup.")
+		fmt.Fprintln(out, "shim holds the gjallarOS key. Only Secure Boot itself still needs to be turned on in the firmware setup.")
 		if err := ui.SecureBootEnableHandoff(ctx, firmwareName, FirmwareLockSteps(firmwarePasswordLock)); err != nil {
 			return "", fmt.Errorf("Secure Boot enable handoff: %w", err)
 		}
@@ -193,7 +193,7 @@ func ContinueShim(
 			return "", err
 		}
 	} else {
-		fmt.Fprintln(out, "The GjallarOS key already waits for MokManager.")
+		fmt.Fprintln(out, "The gjallarOS key already waits for MokManager.")
 	}
 	fmt.Fprint(out, mokManagerSteps(keys.dbDER, queued, "gjallarctl secure-boot setup"))
 	return ContinuationReboot, nil
@@ -208,8 +208,8 @@ func ShimStarted() (bool, error) {
 
 // QueueShimKey runs before an install rebuilds a system that shim already
 // starts with Secure Boot on (locked firmware, Plane 293). The rebuild puts
-// the GjallarOS boot chain first, which shim starts only once its MOK list
-// holds the GjallarOS key; before that, the old boot chain must stay. It
+// the gjallarOS boot chain first, which shim starts only once its MOK list
+// holds the gjallarOS key; before that, the old boot chain must stay. It
 // reports whether shim lists the key. If not, it queues the key for
 // MokManager and prints the steps; the caller stops, the user restarts,
 // confirms the key and runs again ("again" names what to run).
@@ -219,7 +219,7 @@ func QueueShimKey(ctx context.Context, out io.Writer, facts ShimFacts, again str
 		return false, err
 	}
 	if !ok {
-		return false, errors.New("the GjallarOS Secure Boot keys are incomplete")
+		return false, errors.New("the gjallarOS Secure Boot keys are incomplete")
 	}
 	trust, err := ReadFirmwareTrust()
 	if err != nil {
@@ -233,14 +233,14 @@ func QueueShimKey(ctx context.Context, out io.Writer, facts ShimFacts, again str
 		return false, err
 	}
 	if choice.Path != PathShim {
-		return false, fmt.Errorf("this firmware would not start shim with the GjallarOS key: %s", choice.Reason)
+		return false, fmt.Errorf("this firmware would not start shim with the gjallarOS key: %s", choice.Reason)
 	}
 	enrolled, err := mokHolds(liveFirmware, "MokListRT", keys.dbDER)
 	if err != nil {
 		return false, err
 	}
 	if enrolled {
-		fmt.Fprintln(out, "shim lists the GjallarOS key; building GjallarOS with shim.")
+		fmt.Fprintln(out, "shim lists the gjallarOS key; building gjallarOS with shim.")
 		return true, nil
 	}
 	queued, err := mokHolds(liveFirmware, "MokNew", keys.dbDER)
@@ -252,7 +252,7 @@ func QueueShimKey(ctx context.Context, out io.Writer, facts ShimFacts, again str
 			return false, err
 		}
 	} else {
-		fmt.Fprintln(out, "The GjallarOS key already waits for MokManager.")
+		fmt.Fprintln(out, "The gjallarOS key already waits for MokManager.")
 	}
 	fmt.Fprint(out, mokManagerSteps(keys.dbDER, queued, again))
 	return false, nil
@@ -271,10 +271,10 @@ func ContinueShimInstall(ctx context.Context, ui UI, out io.Writer, verifier str
 	}
 	switch {
 	case inspection.State == StateGjallarShim && inspection.Stage == "enrolled":
-		fmt.Fprintln(out, "Secure Boot is on; shim checks this system against the GjallarOS key.")
+		fmt.Fprintln(out, "Secure Boot is on; shim checks this system against the gjallarOS key.")
 		return ContinuationNone, nil
 	case inspection.State != StateGjallarShim || inspection.Stage != StagePendingMOK:
-		return "", fmt.Errorf("shim does not list the GjallarOS key (state %q): %s", inspection.State, inspection.Description)
+		return "", fmt.Errorf("shim does not list the gjallarOS key (state %q): %s", inspection.State, inspection.Description)
 	}
 	trust, err := ReadFirmwareTrust()
 	if err != nil {
@@ -311,7 +311,7 @@ It waits 10 seconds; press the down arrow before it runs out:
      %s
      Press Enter to go back. If it differs, choose Continue boot instead.
   3. Continue
-  4. Yes
+  4. Yes (the screen starts on No; press down, then Enter)
   5. %s
   6. Reboot
 If the 10 seconds ran out, run %[3]s again.
@@ -355,14 +355,14 @@ func queueMOK(ctx context.Context, der []byte, out io.Writer) error {
 	}
 	fmt.Fprintln(out, "Choose a one-time password for MokManager. MokManager reads the keyboard as US layout; letters and digits are safe.")
 	if err := run(ctx, "sudo", privilegedTool("mokutil"), "--import", path); err != nil {
-		return fmt.Errorf("queue the GjallarOS key for MokManager: %w", err)
+		return fmt.Errorf("queue the gjallarOS key for MokManager: %w", err)
 	}
 	queued, err := mokHolds(liveFirmware, "MokNew", der)
 	if err != nil {
 		return err
 	}
 	if !queued {
-		return errors.New("mokutil returned, but the firmware holds no request for the GjallarOS key")
+		return errors.New("mokutil returned, but the firmware holds no request for the gjallarOS key")
 	}
 	return nil
 }
@@ -425,7 +425,7 @@ func RecordShimEnrollment(ctx context.Context, out io.Writer) error {
 		return err
 	}
 	if inspection.State != StateGjallarShim {
-		return fmt.Errorf("this start did not come through shim with the GjallarOS key (state %q): %s", inspection.State, inspection.Description)
+		return fmt.Errorf("this start did not come through shim with the gjallarOS key (state %q): %s", inspection.State, inspection.Description)
 	}
 	switch inspection.Stage {
 	case "enrolled":

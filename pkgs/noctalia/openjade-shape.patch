@@ -1,0 +1,277 @@
+diff --git a/src/shell/bar/widget.cpp b/src/shell/bar/widget.cpp
+index abba675..718c222 100644
+--- a/src/shell/bar/widget.cpp
++++ b/src/shell/bar/widget.cpp
+@@ -72,7 +72,7 @@ float Widget::resolvedBarCapsuleRadius(float width, float height) const noexcept
+   if (!m_barCapsuleSpec.radius.has_value()) {
+     return maxRadius;
+   }
+-  return std::clamp(*m_barCapsuleSpec.radius * m_contentScale, 0.0F, maxRadius);
++  return std::clamp(*m_barCapsuleSpec.radius, 0.0F, maxRadius);
+ }
+ 
+ void Widget::setBarCapsuleScene(Node* shell, Box* box) noexcept {
+diff --git a/src/shell/bar/widgets/notification_widget.cpp b/src/shell/bar/widgets/notification_widget.cpp
+index f137831..0eccb10 100644
+--- a/src/shell/bar/widgets/notification_widget.cpp
++++ b/src/shell/bar/widgets/notification_widget.cpp
+@@ -33,7 +33,7 @@ void NotificationWidget::create() {
+   m_dot = area->addChild(
+       ui::box({
+           .fill = colorSpecFromRole(ColorRole::Primary),
+-          .radius = dotSize * 0.5F,
++          .radius = Style::scaledRadiusSm(),
+           .width = dotSize,
+           .height = dotSize,
+           .visible = false,
+diff --git a/src/shell/bar/widgets/workspaces_widget.cpp b/src/shell/bar/widgets/workspaces_widget.cpp
+index b8fbb89..07ab344 100644
+--- a/src/shell/bar/widgets/workspaces_widget.cpp
++++ b/src/shell/bar/widgets/workspaces_widget.cpp
+@@ -1124,7 +1124,7 @@ void WorkspacesWidget::applyItemLayout(Item& it) {
+       const float dotY = (itemH - dotSize) * 0.5F;
+       it.indicator->setPosition(dotX, dotY);
+       it.indicator->setFrameSize(dotSize, dotSize);
+-      it.indicator->setRadius(dotSize * 0.5F);
++      it.indicator->setRadius(Style::scaledRadiusSm());
+     } else {
+       it.indicator->setPosition(0.0F, 0.0F);
+       it.indicator->setFrameSize(itemW, itemH);
+diff --git a/src/shell/control_center/tabs/power_tab.cpp b/src/shell/control_center/tabs/power_tab.cpp
+index b18b3e7..2d4cfed 100644
+--- a/src/shell/control_center/tabs/power_tab.cpp
++++ b/src/shell/control_center/tabs/power_tab.cpp
+@@ -217,7 +217,7 @@ void PowerTab::buildStatusCard(Flex& root, float scale) {
+           .out = &m_levelBar,
+           .fill = colorSpecFromRole(ColorRole::Primary),
+           .track = colorSpecFromRole(ColorRole::Surface),
+-          .radius = Style::sliderTrackHeight * scale * 0.5F,
++          .radius = 0.0F,
+           .progress = 0.0F,
+           .height = Style::sliderTrackHeight * scale,
+       })
+@@ -365,7 +365,7 @@ void PowerTab::buildHealthCard(Flex& root, float scale) {
+           .out = &m_healthBar,
+           .fill = colorSpecFromRole(ColorRole::Primary),
+           .track = colorSpecFromRole(ColorRole::Surface),
+-          .radius = Style::sliderTrackHeight * scale * 0.5F,
++          .radius = 0.0F,
+           .progress = 0.0F,
+           .height = Style::sliderTrackHeight * scale,
+       })
+diff --git a/src/shell/lockscreen/lockscreen_login_box.h b/src/shell/lockscreen/lockscreen_login_box.h
+index 76bfb5a..bfdb903 100644
+--- a/src/shell/lockscreen/lockscreen_login_box.h
++++ b/src/shell/lockscreen/lockscreen_login_box.h
+@@ -45,9 +45,9 @@ namespace lockscreen_login_box {
+     LayoutMode layout = LayoutMode::Regular;
+     ColorSpec panelFill = colorSpecFromRole(ColorRole::SurfaceContainer, 0.88F);
+     float panelOpacity = 0.88F;
+-    float panelRadius = 12.0F;
++    float panelRadius = 6.0F;
+     float inputOpacity = 1.0F;
+-    float inputRadius = 6.0F;
++    float inputRadius = 4.0F;
+     bool centerPasswordText = false;
+     bool showLoginButton = true;
+     bool showCapsLock = true;
+diff --git a/src/shell/notification/notification_toast.cpp b/src/shell/notification/notification_toast.cpp
+index 94b0430..14221df 100644
+--- a/src/shell/notification/notification_toast.cpp
++++ b/src/shell/notification/notification_toast.cpp
+@@ -410,7 +410,7 @@ namespace {
+         ui::progressBar({
+             .fill = toastProgressFillColor(urgency),
+             .track = clearColorSpec(),
+-            .radius = progressHeight(scale) * 0.5F,
++            .radius = 0.0F,
+             .orientation = ProgressBarOrientation::Horizontal,
+             .width = std::max(0.0F, cardW - topProgressInset(scale) * 2.0F),
+             .height = progressHeight(scale),
+@@ -2625,7 +2625,7 @@ InputArea* NotificationToast::buildCard(
+           .out = outProgress,
+           .fill = toastProgressFillColor(entry.urgency),
+           .track = clearColorSpec(),
+-          .radius = progressHeight(scale) * 0.5F,
++          .radius = 0.0F,
+           .orientation = ProgressBarOrientation::Horizontal,
+           .width = std::max(0.0F, cardW - topProgressInset(scale) * 2.0F),
+           .height = progressHeight(scale),
+diff --git a/src/ui/controls/context_menu.cpp b/src/ui/controls/context_menu.cpp
+index 18bcef7..1fc4a5c 100644
+--- a/src/ui/controls/context_menu.cpp
++++ b/src/ui/controls/context_menu.cpp
+@@ -365,7 +365,7 @@ void ContextMenuControl::rebuildRows(Renderer& renderer) {
+         dot->setFill(*entry.indicatorColor);
+         dot->setBorder(colorSpecFromRole(ColorRole::OutlineVariant), 1.5F);
+         dot->setFrameSize(dotSize, dotSize);
+-        dot->setRadius(dotSize * 0.5F);
++        dot->setRadius(Style::scaledRadiusSm());
+         dot->setPosition(8.0F * scale + indent + toggleSlot, std::round((rowHeight - dotSize) * 0.5F));
+         row->addChild(std::move(dot));
+       }
+diff --git a/src/ui/controls/input.cpp b/src/ui/controls/input.cpp
+index 7e07dea..1e26a1d 100644
+--- a/src/ui/controls/input.cpp
++++ b/src/ui/controls/input.cpp
+@@ -90,7 +90,7 @@ namespace {
+ 
+   char32_t passwordMaskCodepointForIndex(std::size_t index) {
+     if (g_passwordMaskStyle == Input::PasswordMaskStyle::CircleFilled) {
+-      return GlyphRegistry::lookup("circle-filled");
++      return GlyphRegistry::lookup("square-filled");
+     }
+     static const std::array<char32_t, 7> randomCodepoints = {
+         GlyphRegistry::lookup("circle-filled"),        GlyphRegistry::lookup("pentagon-filled"),
+diff --git a/src/ui/controls/progress_bar.cpp b/src/ui/controls/progress_bar.cpp
+index 6e6de30..2ab0b3c 100644
+--- a/src/ui/controls/progress_bar.cpp
++++ b/src/ui/controls/progress_bar.cpp
+@@ -24,7 +24,7 @@ ProgressBar::ProgressBar() {
+ 
+   setTrack(colorSpecFromRole(ColorRole::SurfaceContainer));
+   setFill(colorSpecFromRole(ColorRole::Primary));
+-  setRadius(Style::scaledRadiusSm());
++  setRadius(0.0F);
+   m_paletteConn = paletteChanged().connect([this] { applyPalette(); });
+ }
+ 
+diff --git a/src/ui/controls/radio_button.cpp b/src/ui/controls/radio_button.cpp
+index 4a7de2f..fe660d0 100644
+--- a/src/ui/controls/radio_button.cpp
++++ b/src/ui/controls/radio_button.cpp
+@@ -77,13 +77,13 @@ void RadioButton::doLayout(Renderer& /*renderer*/) {
+   if (m_outer != nullptr) {
+     m_outer->setPosition(indicatorInset, indicatorInset);
+     m_outer->setFrameSize(indicatorSize, indicatorSize);
+-    m_outer->setRadius(indicatorSize * 0.5F);
++    m_outer->setRadius(Style::scaledRadiusSm());
+   }
+ 
+   if (m_inner != nullptr) {
+     m_inner->setPosition(indicatorInset + innerInset, indicatorInset + innerInset);
+     m_inner->setFrameSize(innerSize, innerSize);
+-    m_inner->setRadius(innerSize * 0.5F);
++    m_inner->setRadius(Style::scaledRadiusSm());
+   }
+ 
+   if (m_inputArea != nullptr) {
+diff --git a/src/ui/controls/range_slider.cpp b/src/ui/controls/range_slider.cpp
+index c93d724..2898b5a 100644
+--- a/src/ui/controls/range_slider.cpp
++++ b/src/ui/controls/range_slider.cpp
+@@ -338,10 +338,10 @@ void RangeSlider::applyVisualState() {
+     thumbBorder = resolved(ColorRole::Hover);
+   }
+ 
+-  m_track->setStyle(solidStyle(trackColor, m_trackHeight * 0.5F));
+-  m_fill->setStyle(solidStyle(fillColor, m_trackHeight * 0.5F));
++  m_track->setStyle(solidStyle(trackColor, 0.0F));
++  m_fill->setStyle(solidStyle(fillColor, 0.0F));
+ 
+-  auto thumbStyle = solidStyle(thumbColor, m_thumbSizePx * 0.5F);
++  auto thumbStyle = solidStyle(thumbColor, Style::scaledRadiusSm());
+   thumbStyle.border = thumbBorder;
+   thumbStyle.borderWidth = focused ? Style::focusRingWidth : Style::borderWidth;
+   m_lowThumb->setStyle(thumbStyle);
+diff --git a/src/ui/controls/scrollbar.cpp b/src/ui/controls/scrollbar.cpp
+index 8565657..2dc83a4 100644
+--- a/src/ui/controls/scrollbar.cpp
++++ b/src/ui/controls/scrollbar.cpp
+@@ -236,7 +236,7 @@ void Scrollbar::applyExpansion(float expansion) {
+ }
+ 
+ void Scrollbar::applyPalette() {
+-  const float radius = thickness() * 0.5F;
++  const float radius = 0.0F;
+   if (m_track != nullptr) {
+     m_track->setStyle(makeSolid(resolveColorSpec(scrollbarTrackColor()), radius));
+   }
+diff --git a/src/ui/controls/select.cpp b/src/ui/controls/select.cpp
+index 93cfd02..f5bd0fd 100644
+--- a/src/ui/controls/select.cpp
++++ b/src/ui/controls/select.cpp
+@@ -283,7 +283,7 @@ void Select::doLayout(Renderer& renderer) {
+       m_triggerIndicator->setFill(m_indicatorColors[m_selectedIndex]);
+       m_triggerIndicator->setBorder(colorSpecFromRole(ColorRole::OutlineVariant), indicatorBorder);
+       m_triggerIndicator->setFrameSize(indicatorSize, indicatorSize);
+-      m_triggerIndicator->setRadius(indicatorSize * 0.5F);
++      m_triggerIndicator->setRadius(Style::scaledRadiusSm());
+       const float indicatorX = Style::rtl() ? dropdownWidth - m_horizontalPadding - indicatorSize : m_horizontalPadding;
+       m_triggerIndicator->setPosition(indicatorX, std::round((m_controlHeight - indicatorSize) * 0.5F));
+     }
+diff --git a/src/ui/controls/slider.cpp b/src/ui/controls/slider.cpp
+index 2c0ed4b..aaa14d8 100644
+--- a/src/ui/controls/slider.cpp
++++ b/src/ui/controls/slider.cpp
+@@ -305,13 +305,13 @@ void Slider::applyVisualState() {
+     thumbBorder = resolved(ColorRole::Hover);
+   }
+ 
+-  auto trackStyle = solidStyle(trackColor, m_trackHeight * 0.5F);
++  auto trackStyle = solidStyle(trackColor, 0.0F);
+   m_track->setStyle(trackStyle);
+ 
+-  auto fillStyle = solidStyle(fillColor, m_trackHeight * 0.5F);
++  auto fillStyle = solidStyle(fillColor, 0.0F);
+   m_fill->setStyle(fillStyle);
+ 
+-  auto thumbStyle = solidStyle(thumbColor, m_thumbSizePx * 0.5F);
++  auto thumbStyle = solidStyle(thumbColor, Style::scaledRadiusSm());
+   thumbStyle.border = thumbBorder;
+   thumbStyle.borderWidth = focused ? Style::focusRingWidth : Style::borderWidth;
+   m_thumb->setStyle(thumbStyle);
+diff --git a/src/ui/controls/toggle.cpp b/src/ui/controls/toggle.cpp
+index 6cd8dc8..9604f6f 100644
+--- a/src/ui/controls/toggle.cpp
++++ b/src/ui/controls/toggle.cpp
+@@ -168,7 +168,7 @@ void Toggle::applySize() {
+   }
+ 
+   m_thumb->setFrameSize(m_thumbSize, m_thumbSize);
+-  setRadius((m_thumbSize + (m_inset * 2.0F)) * 0.5F);
++  setRadius(Style::scaledRadiusMd());
+ }
+ 
+ void Toggle::applyState() { applyAnimatedState(m_checked ? 1.0F : 0.0F); }
+@@ -196,7 +196,7 @@ void Toggle::applyAnimatedState(float t) {
+ 
+   auto thumbStyle = m_thumb->style();
+   thumbStyle.fillMode = FillMode::Solid;
+-  thumbStyle.radius = m_thumbSize * 0.5F;
++  thumbStyle.radius = Style::scaledRadiusSm();
+   thumbStyle.softness = 1.0F;
+   thumbStyle.borderWidth = 0.0F;
+   thumbStyle.fill = thumbColor;
+diff --git a/src/ui/style.cpp b/src/ui/style.cpp
+index 8689880..402aa1e 100644
+--- a/src/ui/style.cpp
++++ b/src/ui/style.cpp
+@@ -65,7 +65,7 @@ namespace Style {
+   bool closeButtonsEnabled() noexcept { return g_closeButtonsEnabled; }
+   void setCloseButtonsEnabled(bool enabled) { g_closeButtonsEnabled = enabled; }
+ 
+-  float scaledRadius(float radius, float localScale) noexcept { return radius * localScale * g_cornerRadiusScale; }
++  float scaledRadius(float radius, float /*localScale*/) noexcept { return radius * g_cornerRadiusScale; }
+ 
+   float scaledRadiusSm(float localScale) noexcept { return scaledRadius(radiusSm, localScale); }
+ 
+diff --git a/src/ui/style.h b/src/ui/style.h
+index b1c6b91..6a24aaf 100644
+--- a/src/ui/style.h
++++ b/src/ui/style.h
+@@ -10,10 +10,10 @@ namespace Style {
+   inline constexpr int animNormal = 200;
+   inline constexpr int animSlow = 400;
+ 
+-  inline constexpr float radiusSm = 3.0F;
+-  inline constexpr float radiusMd = 6.0F;
+-  inline constexpr float radiusLg = 9.0F;
+-  inline constexpr float radiusXl = 12.0F;
++  inline constexpr float radiusSm = 2.0F;
++  inline constexpr float radiusMd = 4.0F;
++  inline constexpr float radiusLg = 6.0F;
++  inline constexpr float radiusXl = 6.0F;
+ 
+   inline constexpr float borderWidth = 1.0F;
+   inline constexpr float emphasizedBorderWidth = 3.0F;

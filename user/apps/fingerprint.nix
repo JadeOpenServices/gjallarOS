@@ -28,7 +28,7 @@ let
 
     [ ! -e "$marker" ] || exit 0
 
-    printf 'Set up a fingerprint for login and sudo? [Y/n] '
+    printf 'Set up a fingerprint to unlock the lock screen? [Y/n] '
     read -r answer
 
     case "$answer" in
@@ -64,7 +64,7 @@ let
 
     # Ghostty takes --key=value only; a separate value is a config error.
     exec ${lib.getExe pkgs.ghostty} \
-      --title='GjallarOS fingerprint setup' \
+      --title='gjallarOS fingerprint setup' \
       -e ${enrollment}
   '';
 in

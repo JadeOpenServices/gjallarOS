@@ -23,12 +23,11 @@ import (
 var systemRebuildCommand = "/run/current-system/sw/bin/gjallar-system-rebuild"
 
 type rebuildOptions struct {
-	repo, host           string
-	debug, cleanup       bool
-	hardwareUpdate       bool
-	channel, switchNow   string
-	update, updateInputs bool
-	rebuildArgs          []string
+	debug, cleanup     bool
+	hardwareUpdate     bool
+	update             bool
+	channel, switchNow string
+	rebuildArgs        []string
 }
 
 // localChangesPath is root's copy of the developer-mode folder.
@@ -55,20 +54,24 @@ var devproofSocketPath = "/etc/systemd/system/gjallar-devproof.socket"
 // refusing there would keep it on the old version for good. Such a system
 // has no gate to keep, so it builds the version that brings the gate,
 // and from then on the check applies.
-func checkDeveloperGrant(system bool, cfg config.User, stderr io.Writer) int {
-	if !system {
-		return 0
-	}
+//
+// A rebuild checks twice, before the pull and on the configuration the
+// build reads; noticed keeps the pre-gate notice to one line per rebuild
+// (Plane 330).
+func checkDeveloperGrant(cfg config.User, noticed *bool, stderr io.Writer) int {
 	if err := devgate.Check(developerGrantPath, cfg.Channel(), cfg.DeveloperMode); err != nil {
 		if _, statErr := os.Stat(devproofSocketPath); errors.Is(statErr, os.ErrNotExist) {
-			fmt.Fprintln(stderr, "[GjallarOS] Notice: the running system cannot check the startup PIN or the recovery key yet; building the version that can. Afterwards run gjallarctl settings confirm-developer once")
+			if !*noticed {
+				*noticed = true
+				fmt.Fprintln(stderr, "[gjallarOS] Notice: the running system cannot check the startup PIN or the recovery key yet; building the version that can. Afterwards run gjallarctl settings confirm-developer once")
+			}
 		} else {
-			fmt.Fprintf(stderr, "[GjallarOS] Error: %v; nothing rebuilt\n", err)
+			fmt.Fprintf(stderr, "[gjallarOS] Error: %v; nothing rebuilt\n", err)
 			return 1
 		}
 	}
 	if _, err := devgate.Narrow(developerGrantPath, cfg.Channel(), cfg.DeveloperMode); err != nil {
-		fmt.Fprintf(stderr, "[GjallarOS] Error: %v; nothing rebuilt\n", err)
+		fmt.Fprintf(stderr, "[gjallarOS] Error: %v; nothing rebuilt\n", err)
 		return 1
 	}
 	return 0
@@ -87,29 +90,26 @@ func inRecoveryEntry() bool {
 // system rebuild with developer mode on and records it in facts; the caller
 // stages the returned tree next to the source. Development checkouts change
 // the repository itself and build no local folder.
-func stageLocalChanges(system, developerMode bool, facts *flakesource.BuildSource, stdout, stderr io.Writer) (localchanges.Tree, int) {
-	if !system {
-		return localchanges.Tree{}, 0
-	}
+func stageLocalChanges(developerMode bool, facts *flakesource.BuildSource, stdout, stderr io.Writer) (localchanges.Tree, int) {
 	// With developer mode off the folder is not read, so a broken copy never
 	// stops the way back to the official system.
 	if !developerMode {
 		if _, err := os.Lstat(localChangesPath); err == nil {
-			fmt.Fprintf(stdout, "[GjallarOS] Developer mode is off; %s is not built\n", localChangesPath)
+			fmt.Fprintf(stdout, "[gjallarOS] Developer mode is off; %s is not built\n", localChangesPath)
 		}
 		return localchanges.Tree{}, 0
 	}
 	tree, err := localchanges.ReadRoot(localChangesPath)
 	if err != nil {
-		fmt.Fprintf(stderr, "[GjallarOS] Error: %v; nothing rebuilt\n", err)
+		fmt.Fprintf(stderr, "[gjallarOS] Error: %v; nothing rebuilt\n", err)
 		return tree, 1
 	}
 	switch {
 	case tree.Empty():
-		fmt.Fprintf(stdout, "[GjallarOS] Developer mode is on; %s holds no .nix file yet\n", localChangesPath)
+		fmt.Fprintf(stdout, "[gjallarOS] Developer mode is on; %s holds no .nix file yet\n", localChangesPath)
 	default:
 		facts.Local = &flakesource.LocalSource{Hash: tree.Hash(), Files: tree.Paths()}
-		fmt.Fprintf(stdout, "[GjallarOS] Developer mode: building %d local files (%s)\n", len(tree.Files), facts.Local.Hash[:12])
+		fmt.Fprintf(stdout, "[gjallarOS] Developer mode: building %d local files (%s)\n", len(tree.Files), facts.Local.Hash[:12])
 	}
 	return tree, 0
 }
@@ -118,14 +118,6 @@ func stageLocalChanges(system, developerMode bool, facts *flakesource.BuildSourc
 // list of the root side. The checkout, host and nixos-rebuild arguments are
 // not the user's to choose; only a checked oddc commit passes.
 func systemRebuildArgs(opts rebuildOptions) ([]string, error) {
-	switch {
-	case opts.repo != "":
-		return nil, fmt.Errorf("this system builds %s; --repo is not used", systemcheckout.Path)
-	case opts.host != "":
-		return nil, fmt.Errorf("this system builds the host in its configuration; --host is not used")
-	case opts.updateInputs:
-		return nil, fmt.Errorf("--update-inputs is for development checkouts, not %s", systemcheckout.Path)
-	}
 	args := []string{}
 	if opts.update {
 		args = append(args, "--update")
@@ -163,11 +155,11 @@ func systemRebuildArgs(opts rebuildOptions) ([]string, error) {
 func startSystemRebuild(opts rebuildOptions, stdout, stderr io.Writer) int {
 	args, err := systemRebuildArgs(opts)
 	if err != nil {
-		fmt.Fprintf(stderr, "[GjallarOS] Error: %v\n", err)
+		fmt.Fprintf(stderr, "[gjallarOS] Error: %v\n", err)
 		return 2
 	}
 	if err := systemCheckoutMissing(); err != nil {
-		fmt.Fprintf(stderr, "[GjallarOS] Error: %v; nothing rebuilt\n", err)
+		fmt.Fprintf(stderr, "[gjallarOS] Error: %v; nothing rebuilt\n", err)
 		return 1
 	}
 	rootArgs := append([]string{systemRebuildCommand}, args...)
@@ -177,7 +169,7 @@ func startSystemRebuild(opts rebuildOptions, stdout, stderr io.Writer) int {
 
 	userConfig, err := config.Load(filepath.Join(systemcheckout.Path, "user.config.json"))
 	if err == nil && userConfig.Management.Enable && os.Geteuid() != 0 {
-		fmt.Fprintln(stdout, "[GjallarOS] Managed endpoint: authenticating as root for rebuild.")
+		fmt.Fprintln(stdout, "[gjallarOS] Managed endpoint: authenticating as root for rebuild.")
 		return runCommand(context.Background(), stdout, stderr, "su", "-l", "-c", shellJoin(rootArgs), "root")
 	}
 	return runPrivilegedCommand(context.Background(), stdout, stderr, rootArgs...)
@@ -217,11 +209,11 @@ func runSystem(args []string, stdout, stderr io.Writer) int {
 		return systemTimeCheck(args[1:], stderr)
 	}
 	if err := systemCheckoutMissing(); err != nil {
-		fmt.Fprintf(stderr, "[GjallarOS] Error: %v; nothing rebuilt\n", err)
+		fmt.Fprintf(stderr, "[gjallarOS] Error: %v; nothing rebuilt\n", err)
 		return 1
 	}
 	if err := systemcheckout.CheckOwnership(systemcheckout.Path); err != nil {
-		fmt.Fprintf(stderr, "[GjallarOS] Error: %v; nothing rebuilt\n", err)
+		fmt.Fprintf(stderr, "[gjallarOS] Error: %v; nothing rebuilt\n", err)
 		return 1
 	}
 	// The installed gjallarctl runs check before the checkout's own
@@ -234,7 +226,7 @@ func runSystem(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "ERROR: %v\n", err)
 		return 2
 	}
-	return rebuildCheckout(systemcheckout.Path, opts, true, stdout, stderr)
+	return rebuildCheckout(systemcheckout.Path, opts, stdout, stderr)
 }
 
 // parseSystemRebuildArgs reads the fixed argument list systemRebuildArgs
@@ -295,12 +287,12 @@ func inspectSystemSource(repo string, stdout, stderr io.Writer) (systemcheckout.
 	ctx := context.Background()
 	source, err := systemcheckout.Inspect(ctx, repo)
 	if err != nil {
-		fmt.Fprintf(stderr, "[GjallarOS] Error: %s: %v; nothing rebuilt\n", repo, err)
+		fmt.Fprintf(stderr, "[gjallarOS] Error: %s: %v; nothing rebuilt\n", repo, err)
 		return source, 1
 	}
 	if source.ODDCMoved {
 		if err := systemcheckout.OfficialODDC(ctx, oddcBranchCache(), source.ODDC); err != nil {
-			fmt.Fprintf(stderr, "[GjallarOS] Error: flake.lock: %v; nothing rebuilt\n", err)
+			fmt.Fprintf(stderr, "[gjallarOS] Error: flake.lock: %v; nothing rebuilt\n", err)
 			return source, 1
 		}
 	}
@@ -308,7 +300,7 @@ func inspectSystemSource(repo string, stdout, stderr io.Writer) (systemcheckout.
 	if source.ODDCMoved {
 		pin += " (moved from the checkout's pin, on an official ODDC branch)"
 	}
-	fmt.Fprintf(stdout, "[GjallarOS] Building %s (origin/%s), oddc %s\n",
+	fmt.Fprintf(stdout, "[gjallarOS] Building %s (origin/%s), oddc %s\n",
 		source.Revision[:12], strings.Join(source.Branches, ", origin/"), pin)
 	return source, 0
 }

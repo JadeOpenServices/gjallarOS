@@ -41,7 +41,7 @@ const (
 )
 
 // ErrNotPairingFile says the bytes are not a pairing file.
-var ErrNotPairingFile = errors.New("this is not a GjallarOS pairing file")
+var ErrNotPairingFile = errors.New("this is not a gjallarOS pairing file")
 
 var deviceIDPattern = regexp.MustCompile(`^[0-9a-f]{32}$`)
 

@@ -358,7 +358,7 @@ let
       "provider": {
         "ollama": {
           "npm": "@ai-sdk/openai-compatible",
-          "name": "GjallarOS Model Broker",
+          "name": "gjallarOS Model Broker",
 
           "options": {
             "baseURL": "http://127.0.0.1:11434/v1"
@@ -366,7 +366,7 @@ let
 
           "models": {
             "${assistantModel}": {
-              "name": "GjallarOS Local ${assistantModel}"
+              "name": "gjallarOS Local ${assistantModel}"
             }
           }
         }
@@ -421,7 +421,7 @@ let
 
       "agent": {
         "gjallar": {
-          "description": "GjallarOS local engineering agent",
+          "description": "gjallarOS local engineering agent",
           "mode": "primary",
           "model": "ollama/${assistantModel}",
           "steps": 100,
@@ -1453,7 +1453,7 @@ lib.mkIf config.gjallar.apps.ai.enable (
         {
           assertion = agentMode == "workspace";
 
-          message = "The hardened GjallarOS AI session currently requires " + "aiAgentMode = \"workspace\".";
+          message = "The hardened gjallarOS AI session currently requires " + "aiAgentMode = \"workspace\".";
         }
         {
           assertion = !remote || lib.hasPrefix "https://" upstream;

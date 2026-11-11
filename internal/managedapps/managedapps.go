@@ -1,9 +1,9 @@
-// Package managedapps takes back what GjallarOS installed into an app once
+// Package managedapps takes back what gjallarOS installed into an app once
 // user.config.json no longer asks for it.
 //
 // Nix puts the wanted items in place, but apps such as Firefox keep what
 // they once installed when it drops out of their policy. A ledger per app
-// records what GjallarOS asked for, so a later run removes exactly the items
+// records what gjallarOS asked for, so a later run removes exactly the items
 // that left the configuration and never touches what the user installed.
 package managedapps
 
@@ -23,7 +23,7 @@ type Backend interface {
 	Ledger() string
 	// Busy reports that the app runs, so removals wait for the next run.
 	Busy() (bool, error)
-	// Remove takes out one item that GjallarOS installed. It returns false
+	// Remove takes out one item that gjallarOS installed. It returns false
 	// and leaves the item alone when it is gone or the user installed it.
 	Remove(id string) (bool, error)
 }
@@ -31,7 +31,7 @@ type Backend interface {
 // Result says what a run did.
 type Result struct {
 	Removed []string
-	// Left were not installed by GjallarOS any more and stay as they are.
+	// Left were not installed by gjallarOS any more and stay as they are.
 	Left []string
 	// Failed stay in the ledger for the next run.
 	Failed map[string]error

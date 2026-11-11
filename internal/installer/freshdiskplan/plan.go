@@ -75,7 +75,7 @@ func Build(input Input) (diskplan.Plan, error) {
 
 	if observed.SizeBytes < required {
 		return diskplan.Plan{}, fmt.Errorf(
-			"target disk is too small for canonical GjallarOS layout: have=%d require-at-least=%d",
+			"target disk is too small for canonical gjallarOS layout: have=%d require-at-least=%d",
 			observed.SizeBytes,
 			required,
 		)

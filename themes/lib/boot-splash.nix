@@ -156,6 +156,12 @@ let
         im mark.png -background none -gravity center -extent "''${pad}x''${pad}" \
           -strip "PNG32:$dir/mark.png"
 
+        # Password marks are squares (OpenJade shape rule: no circles). The
+        # one font the initrd gets has no filled square, so the mark is a
+        # picture: a square half as wide as its cell, in the text colour.
+        im -size 64x64 xc:none -fill "${cfg.textColor}" -draw "rectangle 16,16 47,47" \
+          -strip "PNG32:$dir/bullet.png"
+
         cp "$headerPath" "$dir/gjallar.script"
         {
           echo "mark_w = $mark_w;"
@@ -183,7 +189,7 @@ let
 
         cat > "$dir/gjallar.plymouth" <<EOF
         [Plymouth Theme]
-        Name=GjallarOS
+        Name=gjallarOS
         ModuleName=script
 
         [script]
@@ -262,7 +268,8 @@ in
 
     textColor = lib.mkOption {
       type = color;
-      default = "#f6fbf8";
+      default = "#${config.lib.stylix.colors.base05}";
+      defaultText = lib.literalExpression ''"#''${config.lib.stylix.colors.base05}"'';
       description = "Colour of the lines, prompts and messages.";
     };
 

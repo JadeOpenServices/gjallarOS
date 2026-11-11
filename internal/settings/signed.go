@@ -43,7 +43,7 @@ var (
 
 // Errors Open returns before it parses the settings.
 var (
-	ErrNotSettingsFile = errors.New("this is not a GjallarOS settings file")
+	ErrNotSettingsFile = errors.New("this is not a gjallarOS settings file")
 	ErrUnknownSigner   = errors.New("this file was not made on this device or a device you paired")
 	ErrBadSignature    = errors.New("this file was changed after it was made")
 )

@@ -16,7 +16,7 @@ in
 {
   xdg-desktop-portal-hyprland =
     assert lib.assertMsg (prev.xdg-desktop-portal-hyprland.version == "1.3.12")
-      "GjallarOS xdg-desktop-portal-hyprland overlay patches 1.3.12; drop pkgs/patches/xdph-release-wayland.patch if ${prev.xdg-desktop-portal-hyprland.version} has xdph PR #443.";
+      "gjallarOS xdg-desktop-portal-hyprland overlay patches 1.3.12; drop pkgs/patches/xdph-release-wayland.patch if ${prev.xdg-desktop-portal-hyprland.version} has xdph PR #443.";
     prev.xdg-desktop-portal-hyprland.overrideAttrs (old: {
       patches = (old.patches or [ ]) ++ [ ../patches/xdph-release-wayland.patch ];
       postInstall = (old.postInstall or "") + ''

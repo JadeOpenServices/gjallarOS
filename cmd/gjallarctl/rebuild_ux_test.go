@@ -13,45 +13,46 @@ import (
 	"github.com/JadeOpenServices/gjallarOS/internal/oddccli"
 )
 
-func TestRebuildDoesNotRequireExplicitRepoAndHost(t *testing.T) {
-	t.Setenv("GJALLAROS_REPO", "")
-	t.Setenv("XDG_STATE_HOME", t.TempDir())
-	t.Chdir(t.TempDir())
+// Only the system checkout is built (Q199); a system still built from a
+// user's checkout gets the move command, not a build.
+func TestRebuildNeedsSystemCheckout(t *testing.T) {
+	t.Setenv("GJALLAROS_REPO", t.TempDir())
 	oldSystem := installercheck.SystemRepositoryFile
 	installercheck.SystemRepositoryFile = filepath.Join(t.TempDir(), "repository")
 	t.Cleanup(func() { installercheck.SystemRepositoryFile = oldSystem })
 
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-
-	status := runRebuild(nil, &stdout, &stderr)
-
-	if status != 2 {
-		t.Fatalf(
-			"runRebuild status = %d, want 2 for unresolved repository",
-			status,
-		)
+	var stdout, stderr bytes.Buffer
+	if status := runRebuild(nil, &stdout, &stderr); status != 1 ||
+		!strings.Contains(stderr.String(), "gjallarctl system move") {
+		t.Fatalf("status = %d, stderr %q, want 1 and the move command", status, stderr.String())
 	}
-
-	if strings.Contains(
-		stderr.String(),
-		"rebuild requires --repo and --host",
-	) {
-		t.Fatalf(
-			"rebuild still requires explicit repo/host:\n%s",
-			stderr.String(),
-		)
+	stderr.Reset()
+	if status := runRebuild([]string{"--repo", t.TempDir()}, &stdout, &stderr); status != 1 ||
+		!strings.Contains(stderr.String(), "gjallarctl system move") {
+		t.Fatalf("--repo: status = %d, stderr %q", status, stderr.String())
 	}
+}
 
-	if !strings.Contains(
-		stderr.String(),
-		"resolve GjallarOS repository",
-	) {
-		t.Fatalf(
-			"rebuild did not reach repository resolution:\n%s",
-			stderr.String(),
-		)
+// hardwareUpdateRepo is a checkout with a SYNTHETIC default configuration.
+func hardwareUpdateRepo(t *testing.T) string {
+	t.Helper()
+	repo, _ := filepath.EvalSymlinks(t.TempDir())
+	for _, marker := range []string{"flake.nix", "scripts/installation/install.sh"} {
+		if err := os.MkdirAll(filepath.Dir(filepath.Join(repo, marker)), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(repo, marker), nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
 	}
+	user, err := config.Defaults()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := config.WriteAtomic(filepath.Join(repo, "user.config.json"), user); err != nil {
+		t.Fatal(err)
+	}
+	return repo
 }
 
 func TestRebuildPreflightSuccessIsCompact(t *testing.T) {
@@ -82,7 +83,7 @@ func TestRebuildPreflightSuccessIsCompact(t *testing.T) {
 
 	got := stdout.String()
 
-	if !strings.Contains(got, "[GjallarOS] Preflight ✓") {
+	if !strings.Contains(got, "[gjallarOS] Preflight ✓") {
 		t.Fatalf("compact success line missing:\n%s", got)
 	}
 
@@ -149,7 +150,7 @@ func TestRebuildPreflightFailureKeepsDiagnostics(t *testing.T) {
 
 	if !strings.Contains(
 		stderr.String(),
-		"FAIL: GjallarOS preflight failed",
+		"FAIL: gjallarOS preflight failed",
 	) {
 		t.Fatalf(
 			"failure summary missing:\n%s",
@@ -383,15 +384,7 @@ func countString(values []string, want string) int {
 }
 
 func TestRebuildHardwareUpdateFailureStopsRebuild(t *testing.T) {
-	repo, _ := filepath.EvalSymlinks(t.TempDir())
-	for _, marker := range []string{"flake.nix", "scripts/installation/install.sh"} {
-		if err := os.MkdirAll(filepath.Dir(filepath.Join(repo, marker)), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(repo, marker), nil, 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
+	repo := hardwareUpdateRepo(t)
 	log := filepath.Join(t.TempDir(), "log")
 	fake := filepath.Join(t.TempDir(), "oddc")
 	body := "#!/bin/sh\necho \"$@\" > " + log + "\nexit 3\n"
@@ -403,11 +396,7 @@ func TestRebuildHardwareUpdateFailureStopsRebuild(t *testing.T) {
 	t.Cleanup(func() { oddccli.Path = old })
 
 	var stdout, stderr bytes.Buffer
-	status := runRebuild(
-		[]string{"--repo", repo, "--hardware-update", "--channel", "staging"},
-		&stdout,
-		&stderr,
-	)
+	status := rebuildCheckout(repo, rebuildOptions{hardwareUpdate: true, channel: "staging", cleanup: true}, &stdout, &stderr)
 
 	if status != 3 {
 		t.Fatalf("status = %d, want 3:\n%s", status, stderr.String())
@@ -423,7 +412,7 @@ func TestRebuildHardwareUpdateFailureStopsRebuild(t *testing.T) {
 
 func TestRebuildChannelRequiresHardwareUpdate(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	if status := runRebuild([]string{"--repo", t.TempDir(), "--channel", "stable"}, &stdout, &stderr); status != 2 {
+	if status := runRebuild([]string{"--channel", "stable"}, &stdout, &stderr); status != 2 {
 		t.Fatalf("status = %d, want 2", status)
 	}
 	if status := runRebuild([]string{"--hardware-update", "--channel", "dev"}, &stdout, &stderr); status != 2 {
@@ -433,7 +422,7 @@ func TestRebuildChannelRequiresHardwareUpdate(t *testing.T) {
 	if status := runRebuild([]string{"--hardware-update", "--stage", "main"}, &stdout, &stderr); status != 2 || !strings.Contains(stderr.String(), "--channel stable|staging") {
 		t.Fatalf("old --stage: status = %d, stderr %q, want 2 and a pointer to --channel", status, stderr.String())
 	}
-	if status := runRebuild([]string{"--repo", t.TempDir(), "--switch", "0"}, &stdout, &stderr); status != 2 {
+	if status := runRebuild([]string{"--switch", "0"}, &stdout, &stderr); status != 2 {
 		t.Fatalf("switch without hardware-update status = %d, want 2", status)
 	}
 	if status := runRebuild([]string{"--hardware-update", "--switch", "yes"}, &stdout, &stderr); status != 2 {
@@ -442,15 +431,7 @@ func TestRebuildChannelRequiresHardwareUpdate(t *testing.T) {
 }
 
 func TestRebuildHardwareUpdateSwitchZeroOnlyMovesPin(t *testing.T) {
-	repo, _ := filepath.EvalSymlinks(t.TempDir())
-	for _, marker := range []string{"flake.nix", "scripts/installation/install.sh"} {
-		if err := os.MkdirAll(filepath.Dir(filepath.Join(repo, marker)), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(repo, marker), nil, 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
+	repo := hardwareUpdateRepo(t)
 	log := filepath.Join(t.TempDir(), "log")
 	fake := filepath.Join(t.TempDir(), "oddc")
 	body := "#!/bin/sh\necho \"$@\" > " + log + "\n"
@@ -462,11 +443,7 @@ func TestRebuildHardwareUpdateSwitchZeroOnlyMovesPin(t *testing.T) {
 	t.Cleanup(func() { oddccli.Path = old })
 
 	var stdout, stderr bytes.Buffer
-	status := runRebuild(
-		[]string{"--repo", repo, "--hardware-update", "--channel", "stable", "--switch", "0"},
-		&stdout,
-		&stderr,
-	)
+	status := rebuildCheckout(repo, rebuildOptions{hardwareUpdate: true, channel: "stable", switchNow: "0", cleanup: true}, &stdout, &stderr)
 
 	if status != 0 {
 		t.Fatalf("status = %d, want 0:\n%s", status, stderr.String())
@@ -497,7 +474,7 @@ func TestRebuildPlanBootsNextInRecoveryEntry(t *testing.T) {
 	if plan := newRebuildPlan("/repo", "host", "", false, nil); plan.activate[1] != "switch" {
 		t.Fatalf("activate = %q, want switch outside recovery", plan.activate)
 	}
-	if err := os.WriteFile(marker, []byte("Trusted GjallarOS recovery entry.\n"), 0o644); err != nil {
+	if err := os.WriteFile(marker, []byte("Trusted gjallarOS recovery entry.\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if plan := newRebuildPlan("/repo", "host", "", false, nil); plan.activate[1] != "boot" {

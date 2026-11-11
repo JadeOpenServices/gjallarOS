@@ -112,7 +112,7 @@ in
       # The time details (bar clock click, gjallar-time-details). The window
       # sizes itself in cells so no line wraps; a size here would override that.
       {
-        match.title = "^(GjallarOS time)$";
+        match.title = "^(gjallarOS time)$";
         float = true;
         center = true;
         max_size = [

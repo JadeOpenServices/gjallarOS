@@ -1,4 +1,4 @@
-# GjallarOS local-agent policy
+# gjallarOS local-agent policy
 
 This repository is operated with a local Ollama model and a bounded context
 budget. Keep tasks incremental. If a request spans multiple independent

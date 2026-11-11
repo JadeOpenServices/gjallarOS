@@ -159,7 +159,9 @@ func (p Peer) Matches(name string) bool {
 
 type Tailnet struct {
 	Running bool
-	Peers   []Peer
+	// State is tailscaled's BackendState, empty when it gave no answer.
+	State string
+	Peers []Peer
 }
 
 func (t Tailnet) CurrentExitNode() *Peer {
@@ -215,6 +217,9 @@ type Verdict struct {
 	// Blocked says why the internet is cut off on this network: an exit
 	// node is wanted here but cannot carry the traffic. Empty when not.
 	Blocked string `json:"blocked,omitempty"`
+	// BlockError is why the block Blocked asks for could not be installed.
+	// The network then carries traffic outside the tunnel.
+	BlockError string `json:"blockError,omitempty"`
 	// Network is the NetworkKey of the network this verdict is for.
 	Network string `json:"network,omitempty"`
 	// Paused is set while a pause lets this network carry the traffic
@@ -229,6 +234,11 @@ const (
 	BlockExitNodeOffline = "exit-node-offline"
 	BlockNoExitNode      = "no-exit-node"
 	BlockTailscaleDown   = "tailscale-down"
+	BlockSignedOut       = "tailscale-signed-out"
+	BlockNeedsApproval   = "tailscale-needs-approval"
+	// BlockCheckTimeout: setting the exit node got no answer in time, so
+	// nothing says the tunnel carries the traffic (Plane 325, Q226).
+	BlockCheckTimeout = "check-timeout"
 )
 
 func (v Verdict) Trusted() bool {
@@ -357,6 +367,10 @@ func (v *Verdict) warnOffline(tn Tailnet) {
 func (v *Verdict) failClosed(choice string, tn Tailnet) {
 	switch {
 	case choice == "" || choice == ExitNodeOff:
+	case tn.State == "NeedsLogin":
+		v.Blocked = BlockSignedOut
+	case tn.State == "NeedsMachineAuth":
+		v.Blocked = BlockNeedsApproval
 	case !tn.Running:
 		v.Blocked = BlockTailscaleDown
 	case v.ExitNode == "" || v.ExitNodeError != "":

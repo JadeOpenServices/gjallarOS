@@ -136,7 +136,9 @@ fun place_prompt (prompt_text) {
 
 prompt = null;
 bullets = null;
-bullet.image = text_image("•", 1);
+# bullet.png is a square in the text colour; its cell is sized to the prompt.
+bullet_cell = Math.Max(4, Math.Int(text_image("x", 1).GetHeight() * 0.6));
+bullet.image = Image("bullet.png").Scale(bullet_cell, bullet_cell);
 
 fun password_callback (prompt_text, bullet_count) {
   stop_spinner();

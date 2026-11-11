@@ -94,3 +94,12 @@ func TestNoPINOrRefusals(t *testing.T) {
 		t.Fatalf("unencrypted disk: %+v", r)
 	}
 }
+
+func TestUnencryptedDisk(t *testing.T) {
+	c, tests, _ := fakeChecker(t)
+	c.device = func(context.Context) (string, error) { return "", nil }
+	r := c.check(context.Background(), devgate.ProofPIN, []byte("2468"))
+	if r.OK || r.Error != devgate.Unencrypted || *tests != 0 {
+		t.Fatalf("%+v, %d PIN tests", r, *tests)
+	}
+}

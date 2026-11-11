@@ -1,4 +1,4 @@
-// Package rootprovision creates the encrypted GjallarOS root filesystem.
+// Package rootprovision creates the encrypted gjallarOS root filesystem.
 //
 // Secrets are supplied to cryptsetup only through stdin. They are never part
 // of the canonical disk plan, command-line arguments, generated Nix
@@ -153,7 +153,7 @@ func provision(
 	fs := strings.ToLower(strings.TrimSpace(part.Filesystem.Type))
 	if fs != "btrfs" {
 		return Result{}, fmt.Errorf(
-			"fresh GjallarOS root provisioning requires Btrfs; requested filesystem %q",
+			"fresh gjallarOS root provisioning requires Btrfs; requested filesystem %q",
 			part.Filesystem.Type,
 		)
 	}

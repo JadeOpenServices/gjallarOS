@@ -3,52 +3,12 @@ package main
 import (
 	"context"
 	"errors"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 )
-
-func TestPrivilegeFingerprintCommandHasNoPasswordInput(t *testing.T) {
-	tty, err := os.CreateTemp(t.TempDir(), "tty")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer tty.Close()
-
-	const authHelper = "/nix/store/test-gjallarctl/bin/gjallar-sudo-auth"
-
-	cmd := privilegeFingerprintCommand(
-		context.Background(),
-		tty,
-		authHelper,
-	)
-
-	if cmd.Stdin != nil {
-		t.Fatal("fingerprint authentication must not receive password-capable stdin")
-	}
-	if cmd.Stdout != tty || cmd.Stderr != tty {
-		t.Fatal("fingerprint authentication messages must use the controlling TTY")
-	}
-
-	if len(cmd.Args) != 2 ||
-		cmd.Args[0] != "sudo" ||
-		cmd.Args[1] != authHelper {
-		t.Fatalf("unexpected fingerprint command: %#v", cmd.Args)
-	}
-
-	for _, arg := range cmd.Args {
-		if arg == "-A" {
-			t.Fatal("fingerprint phase must not use askpass")
-		}
-	}
-
-	if cmd.SysProcAttr == nil || !cmd.SysProcAttr.Setpgid {
-		t.Fatal("fingerprint authentication process group isolation missing")
-	}
-}
 
 func TestPrivilegePasswordCommandUsesAskpassWithoutStdin(t *testing.T) {
 	tty, err := os.CreateTemp(t.TempDir(), "tty")
@@ -160,16 +120,6 @@ func TestSudoAskpassPromptsOnControllingTerminal(t *testing.T) {
 	// An unattended prompt waited all night after a rebuild.
 	if strings.Contains(script, "--timeout=0") || !strings.Contains(script, "--timeout=") {
 		t.Fatal("askpass must give up after a timeout")
-	}
-}
-
-func TestAuthRejectsArguments(t *testing.T) {
-	var stderr strings.Builder
-	if status := run([]string{"auth", "ls"}, io.Discard, &stderr); status != 2 {
-		t.Fatalf("auth with arguments returned %d", status)
-	}
-	if !strings.Contains(stderr.String(), "Usage: gjallarctl auth") {
-		t.Fatalf("missing usage: %q", stderr.String())
 	}
 }
 
@@ -303,8 +253,8 @@ func TestAuthenticationResultClosesThePrompt(t *testing.T) {
 		status int
 		want   string
 	}{
-		{0, "[GjallarOS] Authenticated.\n"},
-		{1, "[GjallarOS] Authentication failed.\n"},
+		{0, "[gjallarOS] Authenticated.\n"},
+		{1, "[gjallarOS] Authentication failed.\n"},
 		{130, ""},
 	} {
 		var tty strings.Builder

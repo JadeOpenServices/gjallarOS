@@ -8,7 +8,7 @@ import (
 )
 
 // The Framework ODDC policy: the user clears only PK, the firmware's KEK and
-// db stay trusted beside the GjallarOS keys, dbx is never written.
+// db stay trusted beside the gjallarOS keys, dbx is never written.
 func TestOwnershipPlanDescribesEachKeyDatabaseFromPolicy(t *testing.T) {
 	policy := oddc.SecureBootFirmwarePolicy{
 		Supported:               true,
@@ -20,7 +20,7 @@ func TestOwnershipPlanDescribesEachKeyDatabaseFromPolicy(t *testing.T) {
 	plan := OwnershipPlan(policy, true)
 	for _, want := range []string{
 		"Firmware: Framework UEFI",
-		"- PK: you remove the manufacturer PK in firmware setup; GjallarOS enrolls its own PK in its place.",
+		"- PK: you remove the manufacturer PK in firmware setup; gjallarOS enrolls its own PK in its place.",
 		"- KEK: the firmware's built-in manufacturer and Microsoft certificates stay trusted",
 		"- db: the firmware's built-in manufacturer and Microsoft certificates stay trusted",
 		"- dbx: not changed.",
@@ -31,13 +31,13 @@ func TestOwnershipPlanDescribesEachKeyDatabaseFromPolicy(t *testing.T) {
 			t.Errorf("plan lacks %q:\n%s", want, plan)
 		}
 	}
-	if strings.Contains(plan, "replaced by the GjallarOS key only") {
+	if strings.Contains(plan, "replaced by the gjallarOS key only") {
 		t.Errorf("plan claims a firmware database is dropped:\n%s", plan)
 	}
 
 	policy.PreserveFirmwareBuiltin = nil
 	plan = OwnershipPlan(policy, false)
-	if !strings.Contains(plan, "- db: replaced by the GjallarOS key only.") {
+	if !strings.Contains(plan, "- db: replaced by the gjallarOS key only.") {
 		t.Errorf("plan hides that db loses the firmware certificates:\n%s", plan)
 	}
 	if strings.Contains(plan, "LUKS") {

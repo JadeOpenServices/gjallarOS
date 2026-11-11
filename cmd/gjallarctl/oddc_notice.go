@@ -66,7 +66,7 @@ func oddcNoticeText(built builtSource) (summary, body string, ok bool) {
 	}
 	return "ODDC is not the pinned release",
 		fmt.Sprintf("ODDC commit %s is in use. It is not a release.\n"+
-			"GjallarOS pins %s. A plain rebuild goes back to it.",
+			"gjallarOS pins %s. A plain rebuild goes back to it.",
 			html.EscapeString(built.ODDC[:12]), html.EscapeString(built.ODDCPinned[:12])),
 		true
 }

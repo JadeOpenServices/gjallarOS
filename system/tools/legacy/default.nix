@@ -1,17 +1,17 @@
 { config, lib, ... }:
 # Every rename in one table (Jade Q166): commands, settings keys, config
 # fields, labels, units and paths. A row holds the old name, the new name,
-# where it was removed, the date after which the row and every last trace
-# of the old name go, and the Plane or JODS item. The flake check
-# legacy-names fails when an old name is used outside this folder or a row
-# is past its date.
+# where it was removed, the release tag after which the row and every last
+# trace of the old name go, and the Plane or JODS item. The flake check
+# legacy-names fails when an old name is used outside this folder or the
+# release in system/release is newer than a row's tag.
 #
 # Old commands are not run: the shell prints the new name and stops.
 let
   inherit (import ./table.nix { inherit lib; }) commands;
 
   hintLine =
-    row: "${lib.escapeShellArg row.old}) printf '%s\\n' ${lib.escapeShellArg "GjallarOS: ${row.old} was removed; use ${row.new}"} >&2 ;;";
+    row: "${lib.escapeShellArg row.old}) printf '%s\\n' ${lib.escapeShellArg "gjallarOS: ${row.old} was removed; use ${row.new}"} >&2 ;;";
   hints = lib.concatMapStringsSep "\n    " hintLine commands;
 
   # bash and zsh print their own "not found" line only when no handler

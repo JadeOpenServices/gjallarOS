@@ -13,14 +13,14 @@ fi
 set -euo pipefail
 
 command -v nix >/dev/null 2>&1 || {
-    printf 'ERROR: Nix is required to bootstrap GjallarOS.\n' >&2
+    printf 'ERROR: Nix is required to bootstrap gjallarOS.\n' >&2
     exit 1
 }
 
-# GjallarOS boots with systemd-boot or lanzaboote from an ESP; a machine
+# gjallarOS boots with systemd-boot or lanzaboote from an ESP; a machine
 # started in legacy BIOS mode would install and then not boot.
 [[ -d /sys/firmware/efi ]] || {
-    printf 'ERROR: GjallarOS needs UEFI boot. This system was started in legacy BIOS mode; switch the firmware to UEFI (disable CSM) and boot the installer media again.\n' >&2
+    printf 'ERROR: gjallarOS needs UEFI boot. This system was started in legacy BIOS mode; switch the firmware to UEFI (disable CSM) and boot the installer media again.\n' >&2
     exit 1
 }
 
@@ -46,7 +46,7 @@ for arg in "$@"; do
     fi
     case "$arg" in
         --channel=*) channel_flag="${arg#--channel=}" ;;
-        --channel) expect_channel=1 ;;
+        --channel) expect_channel=1 ;; # the handover below looks for this line
     esac
 done
 (( ! expect_channel )) || {
@@ -69,6 +69,49 @@ case "$channel" in
         exit 1
         ;;
 esac
+
+# An installed gjallarOS that builds from the root-owned system checkout
+# runs the installer there, as root (wiki 752 Q214): settings written to any
+# other checkout are never built. gjallar-system-rebuild --update moves the
+# system checkout to the chosen channel, under the same checks as
+# gjallarctl rebuild, so this script leaves its branch alone. The installer
+# refuses any other checkout on such a host by itself; this only takes the
+# user there. GJALLAR_SYSTEM_REPOSITORY_FILE is for the bootstrap tests.
+system_checkout=/etc/gjallar/system
+system_repository_file="${GJALLAR_SYSTEM_REPOSITORY_FILE:-/etc/gjallar/repository}"
+system_install=0
+if [[ -r "$system_repository_file" ]]; then
+    system_repository="$(head -n 1 "$system_repository_file")"
+    [[ "${system_repository%/}" != "$system_checkout" ]] || system_install=1
+fi
+if (( system_install )); then
+    [[ -f "$system_checkout/scripts/installation/install.sh" ]] || {
+        printf 'ERROR: this gjallarOS builds from %s, but that checkout is missing; nothing was changed.\n' "$system_checkout" >&2
+        exit 1
+    }
+    self="$(realpath -e -- "${BASH_SOURCE[0]:-/dev/stdin}" 2>/dev/null || true)"
+    if (( EUID != 0 )) || [[ "$self" != "$system_checkout/scripts/installation/install.sh" ]]; then
+        # A system checkout from before 9fdc7c26 (2026-11-02) has no
+        # --channel and would fail after sudo with a raw flag error. Its
+        # install.sh lacks the parser line marked above, so stop here first
+        # (wiki 752 R38).
+        system_script="$system_checkout/scripts/installation/install.sh"
+        if [[ -n "$channel" && -r "$system_script" ]] &&
+            ! grep -qF -- '--channel) expect_channel=1' "$system_script"; then
+            printf 'ERROR: the system checkout in %s is older than the --channel option; nothing was changed.\nUpdate it first with: gjallarctl rebuild --update\nThen run this again.\n' "$system_checkout" >&2
+            exit 1
+        fi
+        printf 'This gjallarOS builds from %s; the installer runs there as root.\n' "$system_checkout"
+        (exec </dev/tty) 2>/dev/null || {
+            printf 'ERROR: the installer is interactive and needs a terminal.\n' >&2
+            exit 1
+        }
+        if (( EUID == 0 )); then
+            exec bash "$system_checkout/scripts/installation/install.sh" "$@" </dev/tty
+        fi
+        exec sudo bash "$system_checkout/scripts/installation/install.sh" "$@" </dev/tty
+    fi
+fi
 
 # Moves a checkout onto the channel branch. Only a fast-forward: local
 # commits or edits to tracked files stop the install instead of being lost.
@@ -132,7 +175,7 @@ repo="$(cd "$script_dir/../.." && pwd)"
 # Run from a checkout with a channel: move it to that branch first, then run
 # the script from the updated tree, since the branch may change this script
 # and the installer.
-if [[ -n "$channel" && "${GJALLAR_CHANNEL_SYNCED:-0}" != 1 ]]; then
+if [[ -n "$channel" && "${GJALLAR_CHANNEL_SYNCED:-0}" != 1 ]] && (( ! system_install )); then
     sync_channel "$repo"
     GJALLAR_CHANNEL_SYNCED=1 exec bash "$repo/scripts/installation/install.sh" "$@"
 fi
@@ -165,7 +208,7 @@ if [[ ! -f "$repo/pkgs/monique/nix/nixos-module.nix" ]]; then
     stage_flake
 fi
 
-printf 'Building the GjallarOS installer...\n'
+printf 'Building the gjallarOS installer...\n'
 installer_path="$(nix --extra-experimental-features 'nix-command flakes' build \
     --no-link --print-out-paths "path:$flake_src#gjallar-installer")"
 
@@ -185,7 +228,7 @@ probe_tools=(
     # Provided by the prerequisite rebuild on installed hosts; live media
     # skips that rebuild and the minimal ISO ships none of them.
     nixpkgs#sbctl
-    # Queues the GjallarOS key for shim on locked firmware (Plane 293).
+    # Queues the gjallarOS key for shim on locked firmware (Plane 293).
     nixpkgs#mokutil
     nixpkgs#openssl
     nixpkgs#age
@@ -199,7 +242,7 @@ if [[ -n "${WAYLAND_DISPLAY:-}${DISPLAY:-}" && -z "${SSH_CONNECTION:-}" &&
     probe_tools+=(nixpkgs#zenity)
 fi
 
-printf 'Preparing GjallarOS hardware probe environment...\n'
+printf 'Preparing gjallarOS hardware probe environment...\n'
 
 # Not exec: the EXIT trap removes the staged source afterwards.
 nix --extra-experimental-features 'nix-command flakes' shell \

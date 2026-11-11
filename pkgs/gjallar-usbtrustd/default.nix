@@ -19,7 +19,7 @@ buildGoModule {
     ];
   };
 
-  vendorHash = "sha256-Mp0do2yse7kCCmyE2ACqdk0DMAX3bpF2KHjHsKDjG8o=";
+  vendorHash = "sha256-MN2ReRzA64XHTzqaCIYwC8Tzb7IZGa+WFd1nP8Idu1M=";
   proxyVendor = true;
 
   subPackages = [
@@ -29,7 +29,7 @@ buildGoModule {
   ];
 
   meta = {
-    description = "GjallarOS privileged USB trust broker";
+    description = "gjallarOS privileged USB trust broker";
     license = lib.licenses.agpl3Plus;
     mainProgram = "gjallar-usbtrustd";
     platforms = lib.platforms.linux;

@@ -162,7 +162,7 @@ in
   # Consumers may use the shape required by upstream templates without
   # becoming independent owners of the underlying Stylix palette.
   base16.withHashtag = colors.withHashtag // {
-    scheme = "GjallarOS";
+    scheme = "gjallarOS";
 
     base00 = "#${fallback.surface}";
     base01 = "#${fallback.surfaceVariant}";
@@ -175,7 +175,7 @@ in
     base0E = "#${fallback.tertiary}";
   };
 
-  # Stylix supplies the Kvantum artwork, while GjallarOS owns what each
+  # Stylix supplies the Kvantum artwork, while gjallarOS owns what each
   # Base16-shaped slot means semantically.
   kvantum = {
     roles = {

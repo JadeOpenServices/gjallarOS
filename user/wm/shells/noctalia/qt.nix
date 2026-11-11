@@ -37,7 +37,7 @@ let
   kdeTokens = map (key: "{{kde-${key}-hex}}") kdeKeys;
 
   # Follow the same KColorScheme group structure Stylix uses for KDE, but
-  # consume GjallarOS semantic roles so Noctalia remains the live owner.
+  # consume gjallarOS semantic roles so Noctalia remains the live owner.
   kdeStandardColors = {
     BackgroundAlternate = "#{{kde-surfaceVariant-hex}}";
     BackgroundNormal = "#{{kde-surface-hex}}";

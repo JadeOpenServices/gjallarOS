@@ -35,6 +35,12 @@ func BlockText(reason string) string {
 		return "no exit node can be set; internet is blocked outside the tunnel"
 	case BlockTailscaleDown:
 		return "Tailscale is not running; internet is blocked outside the tunnel"
+	case BlockSignedOut:
+		return "Tailscale is not signed in; internet is blocked outside the tunnel"
+	case BlockNeedsApproval:
+		return "Tailscale waits for this device to be approved; internet is blocked outside the tunnel"
+	case BlockCheckTimeout:
+		return "the network check did not finish in time; internet is blocked outside the tunnel until the next check"
 	}
 	return reason
 }

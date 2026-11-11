@@ -1,5 +1,5 @@
 // Package modelbroker is the only inference bridge from
-// the GjallarOS agent to the private Ollama API.
+// the gjallarOS agent to the private Ollama API.
 package modelbroker
 
 import (

@@ -195,16 +195,38 @@ const (
 	// firmware tried another boot entry first. Re-enroll refuses until one
 	// clean restart; card only.
 	diskProtectionRestart = "restart"
-	// A chip keyslot GjallarOS did not set up opens the disk for any start
+	// A chip keyslot gjallarOS did not set up opens the disk for any start
 	// (first installers, or by hand). Secure Boot with the chip unlock
 	// replaces it; until then the card points to luks status.
 	diskProtectionChipNoPolicy = "chip-no-policy"
+	// Secure Boot is on but security chip unlock is switched off, so every
+	// start asks for the recovery key or passphrase (L47). gjallarctl luks
+	// chip turns it back on.
+	diskProtectionChipOff = "chip-off"
+	// Chip unlock is on but not enrolled yet: the next start asks for the
+	// recovery key once and sets it up. Card only.
+	diskProtectionChipNextStart = "chip-next-start"
 )
 
-// diskProtectionState says what is missing. chipPossible reports whether
-// the security chip may unlock this disk once Secure Boot is on; it is only
-// asked when the chip does not unlock it yet.
-func diskProtectionState(r luksRecord, kind diskcrypto.TPMKind, chipPossible func() bool) string {
+// chipPath says how the security chip can come to unlock a disk it does
+// not unlock yet.
+type chipPath int
+
+const (
+	// The chip cannot unlock this disk: the startup key stays.
+	chipNone chipPath = iota
+	// Chip unlock is on; it waits for Secure Boot.
+	chipNeedsSecureBoot
+	// Secure Boot is on; chip unlock is switched off.
+	chipSwitchedOff
+	// Both are on; the next start enrolls the chip.
+	chipNextStart
+)
+
+// diskProtectionState says what is missing. chip reports how the security
+// chip may come to unlock this disk; it is only asked when the chip does
+// not unlock it yet.
+func diskProtectionState(r luksRecord, kind diskcrypto.TPMKind, chip func() chipPath) string {
 	switch {
 	case !r.Encrypted:
 		return diskProtectionUnencrypted
@@ -225,9 +247,18 @@ func diskProtectionState(r luksRecord, kind diskcrypto.TPMKind, chipPossible fun
 			return diskProtectionPIN
 		}
 		return diskProtectionDone
-	case chipPossible():
+	}
+	// The enrollment runs gjallarctl luks setup after it, which creates a
+	// missing recovery key, so the chip goes first.
+	switch chip() {
+	case chipNeedsSecureBoot:
 		return diskProtectionSecureBoot
-	case r.Recovery > 0:
+	case chipSwitchedOff:
+		return diskProtectionChipOff
+	case chipNextStart:
+		return diskProtectionChipNextStart
+	}
+	if r.Recovery > 0 {
 		// Models without a trusted Secure Boot setup keep the passphrase
 		// for startup; the recovery key is the way back when it is lost.
 		return diskProtectionDone
@@ -235,32 +266,47 @@ func diskProtectionState(r luksRecord, kind diskcrypto.TPMKind, chipPossible fun
 	return diskProtectionRecoveryKey
 }
 
-// chipUnlockPossible: the chip unlocks the disk only with Secure Boot on,
-// so it is possible where gjallarctl secure-boot setup can turn that on:
-// through shim when the firmware would start it, or with GjallarOS keys on
-// models whose firmware ODDC knows. Anything unknown counts as no, so a
-// generic model is never sent into a setup that refuses it.
-func chipUnlockPossible() bool {
+// chipUnlockPath: the chip unlocks the disk only with Secure Boot on.
+// With Secure Boot on and a TPM 2.0, chip unlock is either switched off
+// or waits for the next start. With it off, chip unlock is possible where
+// gjallarctl secure-boot setup can turn it on: through shim when the
+// firmware would start it, or with gjallarOS keys on models whose firmware
+// ODDC knows. Anything unknown counts as no, so a generic model is never
+// sent into a setup that refuses it. Secure Boot and chip unlock both off
+// shows no card (Plane 309).
+func chipUnlockPath() chipPath {
 	repo, err := installercheck.DiscoverRepository("")
 	if err != nil {
-		return false
+		return chipNone
 	}
 	user, err := config.Load(filepath.Join(repo, "user.config.json"))
-	if err != nil || !user.LUKSTPM2Enable {
-		return false
+	if err != nil {
+		return chipNone
 	}
 	if user.SecureBootEnable {
-		return true
+		switch {
+		case !diskcrypto.TPMAvailable():
+			return chipNone
+		case user.LUKSTPM2Enable:
+			return chipNextStart
+		}
+		return chipSwitchedOff
+	}
+	if !user.LUKSTPM2Enable {
+		return chipNone
 	}
 	if shimPathPossible() {
-		return true
+		return chipNeedsSecureBoot
 	}
 	device, err := oddcvalidation.LoadDeviceContext(repo)
 	if err != nil {
-		return false
+		return chipNone
 	}
 	firmware, err := oddc.ResolveSecureBootFirmwarePolicy(device.Resolved)
-	return err == nil && device.Resolved.ModelID != "" && firmware.SourceEntity != "" && firmware.Policy.Supported
+	if err == nil && device.Resolved.ModelID != "" && firmware.SourceEntity != "" && firmware.Policy.Supported {
+		return chipNeedsSecureBoot
+	}
+	return chipNone
 }
 
 // shimPathPossible reads only what any user may read (db, dbx, shim's
@@ -338,9 +384,21 @@ func diskProtectionTexts(state string, r luksRecord) diskProtectionText {
 	case diskProtectionChipNoPolicy:
 		return diskProtectionText{
 			summary: "Disk not protected at startup",
-			body:    "The security chip opens your disk for any start. GjallarOS did not set it up.",
+			body:    "The security chip opens your disk for any start. gjallarOS did not set it up.",
 			risk:    "anyone who has this device can get to your files",
 			command: []string{"luks", "status"},
+		}
+	case diskProtectionChipOff:
+		return diskProtectionText{
+			summary: "Security chip unlock is off",
+			body:    "Every start asks for your recovery key. Turn on chip unlock to stop that.",
+			risk:    "you type your recovery key at every start, where someone can watch or record it",
+			command: []string{"luks", "chip"},
+		}
+	case diskProtectionChipNextStart:
+		return diskProtectionText{
+			summary: "Restart to finish chip unlock",
+			body:    "The next start asks for your recovery key once to set up the chip.",
 		}
 	case diskProtectionRestart:
 		return diskProtectionText{
@@ -387,7 +445,7 @@ func runLUKSRemind(args []string, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "ERROR: %v\n", err)
 		return 1
 	}
-	state := diskProtectionState(record, diskcrypto.ModelTPMKind(), chipUnlockPossible)
+	state := diskProtectionState(record, diskcrypto.ModelTPMKind(), chipUnlockPath)
 	if err := writeDiskProtectionState(state); err != nil {
 		fmt.Fprintf(stderr, "ERROR: %v\n", err)
 		return 1
@@ -417,14 +475,17 @@ func runLUKSRemind(args []string, stderr io.Writer) int {
 			label = "Re-enroll"
 		case diskProtectionChipNoPolicy:
 			label = "Details"
+		case diskProtectionChipOff:
+			label = "Turn on"
 		}
 		// A click on the card itself starts setup, like the button.
 		actions = append(actions, noticeAction{"default", label}, noticeAction{"open", label})
 	}
 	actions = append(actions, noticeAction{"later", "Later"})
 	// Re-enroll and restart are about this start only; a later failed chip
-	// unlock must still show, so they cannot be silenced.
-	thisStartOnly := state == diskProtectionReenroll || state == diskProtectionRestart
+	// unlock must still show, so they cannot be silenced. The next start
+	// ends the wait for chip enrollment.
+	thisStartOnly := state == diskProtectionReenroll || state == diskProtectionRestart || state == diskProtectionChipNextStart
 	if os.Getenv("GJALLAR_MANAGED_DEVICE") != "1" && !thisStartOnly {
 		actions = append(actions, noticeAction{"never", "Don't ask"})
 	}
@@ -478,7 +539,7 @@ func runLUKSRemind(args []string, stderr io.Writer) int {
 // runDiskProtectionSetup opens a terminal with the setup command, waits for
 // it, then updates the state, so the bar follows at once.
 func runDiskProtectionSetup(command []string, stderr io.Writer) int {
-	if code := runInTerminal("GjallarOS disk protection", command, stderr); code != 0 {
+	if code := runInTerminal("gjallarOS disk protection", command, stderr); code != 0 {
 		return code
 	}
 	return runLUKSRemind([]string{"--refresh"}, stderr)

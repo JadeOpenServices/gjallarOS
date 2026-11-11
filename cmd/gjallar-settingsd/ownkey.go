@@ -14,7 +14,7 @@ import (
 
 // Own signing keys (ROADMAP "Pairing and own keys"). The main user may sign
 // settings files with their own OpenSSH key, settingsSigningKey, instead of
-// the key GjallarOS keeps for them. That key is then the only signer for
+// the key gjallarOS keeps for them. That key is then the only signer for
 // that account: export writes a file for the user to sign, import takes
 // only files with a signature of that key, and pairing is off.
 
@@ -56,7 +56,7 @@ func (s *service) ownKey(who caller) (sshsig.Key, bool, error) {
 	return key, true, nil
 }
 
-// refuseOwnKey refuses what GjallarOS would sign or trust for an account
+// refuseOwnKey refuses what gjallarOS would sign or trust for an account
 // that has its own key.
 func (s *service) refuseOwnKey(who caller, what string) error {
 	_, own, err := s.ownKey(who)
@@ -83,7 +83,7 @@ func (s *service) ImportSigned(ctx context.Context, sender string, data, sig []b
 		return settings.Pending{}, err
 	}
 	if !own {
-		return settings.Pending{}, fmt.Errorf("%w: your account has no own signing key; GjallarOS signs your settings files, import them without a .sig file", errRefused)
+		return settings.Pending{}, fmt.Errorf("%w: your account has no own signing key; gjallarOS signs your settings files, import them without a .sig file", errRefused)
 	}
 	file, err := settings.OpenSSH(data, func(message []byte) error {
 		return sshsig.Verify(ctx, key, settings.SSHNamespace, message, sig)
@@ -120,9 +120,9 @@ func signingKeyNotes(change settings.Change) []string {
 			continue
 		}
 		if line == "" {
-			return []string{"Without settingsSigningKey, GjallarOS signs the settings files of the main account again. Files signed with the own key no longer import."}
+			return []string{"Without settingsSigningKey, gjallarOS signs the settings files of the main account again. Files signed with the own key no longer import."}
 		}
-		return []string{"With settingsSigningKey, only that key signs the settings files of the main account. Export then writes a file to sign with ssh-keygen; files GjallarOS signed and files of paired devices no longer import for that account, and it cannot pair."}
+		return []string{"With settingsSigningKey, only that key signs the settings files of the main account. Export then writes a file to sign with ssh-keygen; files gjallarOS signed and files of paired devices no longer import for that account, and it cannot pair."}
 	}
 	return nil
 }
