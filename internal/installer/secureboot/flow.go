@@ -12,9 +12,9 @@ import (
 // The installer and `gjallarctl secure-boot setup` take the same steps:
 // Prepare before the rebuild that turns on lanzaboote, Continue after it.
 
-// Prepare creates the GjallarOS keys on a machine still owned by its
+// Prepare creates the gjallarOS keys on a machine still owned by its
 // factory keys and records the pending enrollment. A pending or finished
-// GjallarOS enrollment is reused; every other state is refused.
+// gjallarOS enrollment is reused; every other state is refused.
 func Prepare(ctx context.Context, out io.Writer) error {
 	inspection, err := Inspect(ctx)
 	if err != nil {
@@ -24,12 +24,12 @@ func Prepare(ctx context.Context, out io.Writer) error {
 
 	switch inspection.State {
 	case StateGjallarManaged:
-		fmt.Fprintln(out, "Existing GjallarOS Secure Boot ownership detected; reusing the current PK/KEK/db key set.")
+		fmt.Fprintln(out, "Existing gjallarOS Secure Boot ownership detected; reusing the current PK/KEK/db key set.")
 		if !inspection.Recorded {
 			if err := RecordOwnership(ctx, "enrolled"); err != nil {
 				return err
 			}
-			fmt.Fprintln(out, "Recorded legacy GjallarOS/sbctl Secure Boot ownership without rotating keys.")
+			fmt.Fprintln(out, "Recorded legacy gjallarOS/sbctl Secure Boot ownership without rotating keys.")
 		}
 		return nil
 
@@ -37,15 +37,15 @@ func Prepare(ctx context.Context, out io.Writer) error {
 		if inspection.Stage == StagePendingMOK {
 			return errShimPending
 		}
-		fmt.Fprintln(out, "Existing GjallarOS Secure Boot provisioning is pending; reusing the prepared key set.")
+		fmt.Fprintln(out, "Existing gjallarOS Secure Boot provisioning is pending; reusing the prepared key set.")
 		return nil
 
 	case StateOEMFactoryDerived:
 		if inspection.SecureBoot {
-			return errors.New("factory Secure Boot is currently enforced; disable Secure Boot before transferring ownership to GjallarOS")
+			return errors.New("factory Secure Boot is currently enforced; disable Secure Boot before transferring ownership to gjallarOS")
 		}
 
-		fmt.Fprintln(out, "OEM/factory-derived Secure Boot root detected; preparing machine-specific GjallarOS ownership.")
+		fmt.Fprintln(out, "OEM/factory-derived Secure Boot root detected; preparing machine-specific gjallarOS ownership.")
 
 		// Provision() creates a root-only temporary recovery checkpoint so
 		// an interrupted run can resume with the same recovery
@@ -59,13 +59,13 @@ func Prepare(ctx context.Context, out io.Writer) error {
 		return RecordOwnership(ctx, "pending-enrollment")
 
 	case StateSetupModeUnknown:
-		return errors.New("firmware is already in Secure Boot Setup Mode but GjallarOS cannot prove that it initiated the transition; refusing automatic enrollment. Restore the factory Secure Boot keys in firmware setup, turn Secure Boot off, and run this again")
+		return errors.New("firmware is already in Secure Boot Setup Mode but gjallarOS cannot prove that it initiated the transition; refusing automatic enrollment. Restore the factory Secure Boot keys in firmware setup, turn Secure Boot off, and run this again")
 
 	case StateForeignManaged:
-		return errors.New("an existing non-GjallarOS Secure Boot owner configuration was detected; refusing to replace it automatically")
+		return errors.New("an existing non-gjallarOS Secure Boot owner configuration was detected; refusing to replace it automatically")
 
 	case StateInconsistent:
-		return errors.New("GjallarOS Secure Boot ownership metadata does not match the current key material; refusing to continue")
+		return errors.New("gjallarOS Secure Boot ownership metadata does not match the current key material; refusing to continue")
 
 	default:
 		return fmt.Errorf("unsupported Secure Boot ownership state %q", inspection.State)
@@ -120,10 +120,10 @@ func Continue(
 
 	switch next {
 	case ContinuationNone:
-		fmt.Fprintln(out, "Secure Boot is active and the GjallarOS boot chain is verified.")
+		fmt.Fprintln(out, "Secure Boot is active and the gjallarOS boot chain is verified.")
 
 	case ContinuationEnable:
-		fmt.Fprintln(out, "GjallarOS Secure Boot ownership is already enrolled.")
+		fmt.Fprintln(out, "gjallarOS Secure Boot ownership is already enrolled.")
 		fmt.Fprintln(out, "Only Secure Boot enforcement still needs to be enabled in firmware.")
 		if err := ui.SecureBootEnableHandoff(
 			ctx,

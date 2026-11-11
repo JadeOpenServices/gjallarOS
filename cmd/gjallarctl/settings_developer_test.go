@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -124,6 +125,51 @@ func TestSettingsConfirmDeveloper(t *testing.T) {
 	}
 	if code := run([]string{"settings", "confirm-developer", "extra"}, &stdout, &stderr); code != 2 {
 		t.Fatalf("extra argument: code %d", code)
+	}
+}
+
+// unencrypted makes the EMULATED system disk unencrypted and answers the
+// stable offer with answer.
+func unencrypted(bus *fakeSettingsBus, channel string, answer string) {
+	developerKeys(bus)
+	bus.values["releaseChannel"] = settings.KeyValue{Key: "releaseChannel", Tier: config.TierCritical, Value: json.RawMessage(`"` + channel + `"`)}
+	settingsDiskEncrypted = func(context.Context) (bool, error) { return false, nil }
+	settingsStdin = strings.NewReader(answer)
+}
+
+func TestSettingsUnencryptedRefusesWithoutProof(t *testing.T) {
+	bus := &fakeSettingsBus{}
+	useFakeSettings(t, bus)
+	unencrypted(bus, "stable", "")
+	asked, _ := useFakeProof(t, devgate.ProofPIN, "2468", nil)
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"settings", "set", "releaseChannel=staging"}, &stdout, &stderr); code != 1 {
+		t.Fatalf("code %d", code)
+	}
+	if *asked != 0 || len(bus.requests) != 0 || !strings.Contains(stderr.String(), devgate.Unencrypted) || !strings.Contains(stdout.String(), "Nothing changed") {
+		t.Fatalf("asked %d, requests %q, stdout %s, stderr %s", *asked, bus.requests, stdout.String(), stderr.String())
+	}
+}
+
+func TestSettingsUnencryptedOffersStable(t *testing.T) {
+	for _, tc := range []struct {
+		args   []string
+		answer string
+		want   []string
+	}{
+		{[]string{"settings", "confirm-developer"}, "y\n", []string{`{"developerMode":false,"releaseChannel":"stable"}`}},
+		{[]string{"settings", "set", "developerMode=true", "timezone=UTC"}, "y\n", []string{`{"developerMode":false,"releaseChannel":"stable","timezone":"UTC"}`}},
+		{[]string{"settings", "confirm-developer"}, "n\n", nil},
+	} {
+		bus := &fakeSettingsBus{}
+		useFakeSettings(t, bus)
+		unencrypted(bus, "staging", tc.answer)
+		asked, _ := useFakeProof(t, devgate.ProofPIN, "2468", nil)
+		var stdout, stderr bytes.Buffer
+		run(tc.args, &stdout, &stderr)
+		if *asked != 0 || len(bus.proofs) != 0 || !slices.Equal(bus.requests, tc.want) {
+			t.Fatalf("%v %q: asked %d, proofs %q, requests %q, stderr %s", tc.args, tc.answer, *asked, bus.proofs, bus.requests, stderr.String())
+		}
 	}
 }
 

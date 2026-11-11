@@ -1,4 +1,4 @@
-// Package flakesource stages the GjallarOS repository as a clean flake source.
+// Package flakesource stages the gjallarOS repository as a clean flake source.
 //
 // The flake must be referenced as path: because it imports untracked,
 // machine-local generated/*.nix files that a git+file: reference hides. A

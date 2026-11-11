@@ -25,7 +25,7 @@ const (
 	StateGjallarManaged    State = "gjallar-managed"
 	// StateGjallarShim: the firmware keeps its maker's keys and starts shim
 	// through the UEFI CA; shim checks systemd-boot and the UKIs against
-	// the GjallarOS db certificate in MOK (Plane 293).
+	// the gjallarOS db certificate in MOK (Plane 293).
 	StateGjallarShim       State = "gjallar-shim"
 	StatePendingEnrollment State = "gjallar-pending-enrollment"
 	StateSetupModeUnknown  State = "setup-mode-unknown"
@@ -111,7 +111,7 @@ func Inspect(ctx context.Context) (inspection Inspection, err error) {
 			SetupMode:   setupMode,
 			SecureBoot:  secureBoot,
 			Recorded:    true,
-			Description: "GjallarOS ownership metadata exists but does not match the current local sbctl key set.",
+			Description: "gjallarOS ownership metadata exists but does not match the current local sbctl key set.",
 		}, nil
 	}
 
@@ -123,7 +123,7 @@ func Inspect(ctx context.Context) (inspection Inspection, err error) {
 				SecureBoot:  secureBoot,
 				Recorded:    true,
 				OwnerGUID:   keys.ownerGUID,
-				Description: "Firmware is in Setup Mode and the pending GjallarOS ownership record matches the local key set.",
+				Description: "Firmware is in Setup Mode and the pending gjallarOS ownership record matches the local key set.",
 			}, nil
 		}
 
@@ -132,7 +132,7 @@ func Inspect(ctx context.Context) (inspection Inspection, err error) {
 			SetupMode:   true,
 			SecureBoot:  secureBoot,
 			Recorded:    recorded,
-			Description: "Firmware is already in Setup Mode without a verified GjallarOS pending-ownership record.",
+			Description: "Firmware is already in Setup Mode without a verified gjallarOS pending-ownership record.",
 		}, nil
 	}
 
@@ -149,10 +149,10 @@ func Inspect(ctx context.Context) (inspection Inspection, err error) {
 		return Inspection{}, err
 	}
 
-	// A legacy GjallarOS/sbctl installation may predate ownership.json.
+	// A legacy gjallarOS/sbctl installation may predate ownership.json.
 	// If the exact local PK, KEK and db certificates are already enrolled,
 	// the machine is using this local sbctl key hierarchy and can be adopted
-	// into the explicit GjallarOS ownership record without rotating keys.
+	// into the explicit gjallarOS ownership record without rotating keys.
 	if haveKeys &&
 		pkPresent &&
 		bytes.Contains(pk, keys.pkDER) &&
@@ -164,7 +164,7 @@ func Inspect(ctx context.Context) (inspection Inspection, err error) {
 			SecureBoot:  secureBoot,
 			Recorded:    recorded,
 			OwnerGUID:   keys.ownerGUID,
-			Description: "The active PK/KEK/db contain the current GjallarOS sbctl certificates.",
+			Description: "The active PK/KEK/db contain the current gjallarOS sbctl certificates.",
 		}, nil
 	}
 
@@ -182,7 +182,7 @@ func Inspect(ctx context.Context) (inspection Inspection, err error) {
 				SecureBoot:  true,
 				Recorded:    true,
 				OwnerGUID:   keys.ownerGUID,
-				Description: "Secure Boot is on with the firmware maker's keys; shim started this boot and checks it against the current GjallarOS db certificate in MOK.",
+				Description: "Secure Boot is on with the firmware maker's keys; shim started this boot and checks it against the current gjallarOS db certificate in MOK.",
 			}, nil
 		}
 	}
@@ -197,7 +197,7 @@ func Inspect(ctx context.Context) (inspection Inspection, err error) {
 				SecureBoot:  secureBoot,
 				Recorded:    true,
 				OwnerGUID:   keys.ownerGUID,
-				Description: "GjallarOS ownership metadata is valid, but the active PK is unexpectedly absent outside Setup Mode.",
+				Description: "gjallarOS ownership metadata is valid, but the active PK is unexpectedly absent outside Setup Mode.",
 			}, nil
 		}
 
@@ -213,7 +213,7 @@ func Inspect(ctx context.Context) (inspection Inspection, err error) {
 				SecureBoot:  secureBoot,
 				Recorded:    true,
 				OwnerGUID:   keys.ownerGUID,
-				Description: "GjallarOS keys are prepared and recorded while the firmware still uses its factory Platform Key.",
+				Description: "gjallarOS keys are prepared and recorded while the firmware still uses its factory Platform Key.",
 			}, nil
 		}
 
@@ -223,7 +223,7 @@ func Inspect(ctx context.Context) (inspection Inspection, err error) {
 			SecureBoot:  secureBoot,
 			Recorded:    true,
 			OwnerGUID:   keys.ownerGUID,
-			Description: "GjallarOS ownership metadata is valid, but the active Platform Key is neither the current GjallarOS PK nor the firmware PKDefault.",
+			Description: "gjallarOS ownership metadata is valid, but the active Platform Key is neither the current gjallarOS PK nor the firmware PKDefault.",
 		}, nil
 	}
 
@@ -252,7 +252,7 @@ func Inspect(ctx context.Context) (inspection Inspection, err error) {
 		SetupMode:   false,
 		SecureBoot:  secureBoot,
 		Recorded:    recorded,
-		Description: "The active Secure Boot hierarchy is neither the firmware default PK nor the current GjallarOS key hierarchy.",
+		Description: "The active Secure Boot hierarchy is neither the firmware default PK nor the current gjallarOS key hierarchy.",
 	}, nil
 }
 
@@ -263,7 +263,7 @@ func verifyOwnershipRecord(
 ) error {
 	if record.Schema != 1 {
 		return fmt.Errorf(
-			"unsupported GjallarOS Secure Boot ownership schema %d",
+			"unsupported gjallarOS Secure Boot ownership schema %d",
 			record.Schema,
 		)
 	}
@@ -296,7 +296,7 @@ func verifyOwnershipRecord(
 	} {
 		if pair[0] != pair[1] {
 			return fmt.Errorf(
-				"local %s certificate does not match GjallarOS ownership metadata",
+				"local %s certificate does not match gjallarOS ownership metadata",
 				name,
 			)
 		}
@@ -306,16 +306,16 @@ func verifyOwnershipRecord(
 }
 
 // VerifyOwnership checks that the running boot was verified against the
-// current GjallarOS keys. viaShim is set on a system built to boot through
+// current gjallarOS keys. viaShim is set on a system built to boot through
 // shim; only there does a shim boot count. A system set to its own firmware
 // keys that comes up through shim had its keys replaced, so it fails.
 func VerifyOwnership(ctx context.Context, expectedStage string, viaShim bool) error {
 	record, recorded, err := readOwnership(ctx)
 	if err != nil {
-		return fmt.Errorf("read GjallarOS Secure Boot ownership metadata: %w", err)
+		return fmt.Errorf("read gjallarOS Secure Boot ownership metadata: %w", err)
 	}
 	if !recorded {
-		return fmt.Errorf("GjallarOS Secure Boot ownership metadata is missing")
+		return fmt.Errorf("gjallarOS Secure Boot ownership metadata is missing")
 	}
 
 	keys, haveKeys, err := readLocalKeys(ctx)
@@ -352,7 +352,7 @@ func acceptBoot(inspection Inspection, viaShim bool) error {
 		)
 	}
 	return fmt.Errorf(
-		"active firmware does not contain the current GjallarOS PK/KEK/db hierarchy: %s",
+		"active firmware does not contain the current gjallarOS PK/KEK/db hierarchy: %s",
 		inspection.Description,
 	)
 }
@@ -363,7 +363,7 @@ func RecordOwnership(ctx context.Context, stage string) error {
 		return err
 	}
 	if !ok {
-		return fmt.Errorf("cannot record GjallarOS Secure Boot ownership: sbctl keys are incomplete")
+		return fmt.Errorf("cannot record gjallarOS Secure Boot ownership: sbctl keys are incomplete")
 	}
 
 	rec := ownershipRecord{

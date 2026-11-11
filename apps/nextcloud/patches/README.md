@@ -2,7 +2,7 @@
 
 These patches apply to the source revisions pinned in `../package.nix` and
 `../client-source.nix`. Every source change is a patch file here; the build
-only checks that upstream still has the options GjallarOS relies on.
+only checks that upstream still has the options gjallarOS relies on.
 
 Client behaviour patches:
 

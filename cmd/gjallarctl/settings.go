@@ -296,6 +296,9 @@ func settingsRequest(ctx context.Context, bus settingsBus, values map[string]jso
 	}
 	var answer string
 	if needsDeveloperProof(values) {
+		if unencryptedDisk(ctx) {
+			return refuseUnencrypted(ctx, bus, values, stdout, stderr)
+		}
 		kind, secret, err := settingsReadProof(stderr)
 		if err != nil {
 			fmt.Fprintf(stderr, "ERROR: %v\n", err)

@@ -175,7 +175,7 @@ in
     base0E = "#${fallback.tertiary}";
   };
 
-  # Stylix supplies the Kvantum artwork, while GjallarOS owns what each
+  # Stylix supplies the Kvantum artwork, while gjallarOS owns what each
   # Base16-shaped slot means semantically.
   kvantum = {
     roles = {

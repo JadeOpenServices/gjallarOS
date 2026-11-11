@@ -47,7 +47,7 @@ buildGoModule {
     ];
   };
 
-  vendorHash = "sha256-Mp0do2yse7kCCmyE2ACqdk0DMAX3bpF2KHjHsKDjG8o=";
+  vendorHash = "sha256-MN2ReRzA64XHTzqaCIYwC8Tzb7IZGa+WFd1nP8Idu1M=";
   # Module mode: ODDC's catalog files stay in the module cache, which the
   # tests read as the real catalog.
   proxyVendor = true;
@@ -86,7 +86,7 @@ AUTH
   '';
 
   meta = {
-    description = "Safe GjallarOS maintenance and validation tool";
+    description = "Safe gjallarOS maintenance and validation tool";
     mainProgram = "gjallarctl";
     license = lib.licenses.agpl3Plus;
     platforms = lib.platforms.linux;

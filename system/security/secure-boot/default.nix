@@ -10,6 +10,7 @@ in
     ./verification.nix
     ./lifecycle.nix
     ./measured-boot.nix
+    ./tpm2-clear.nix
     ./dbx-update.nix
     ./flash-read.nix
     ./tool.nix

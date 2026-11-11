@@ -17,13 +17,13 @@ let
   # global-storage profile metadata to reconcile.
   namedVscodiumProfiles = builtins.removeAttrs config.programs.vscodium.profiles [ "default" ];
 
-  # Keep Stylix's font integration, but GjallarOS owns application colors.
+  # Keep Stylix's font integration, but gjallarOS owns application colors.
   stylixVscodiumSettings =
     import "${inputs.stylix}/modules/vscode/templates/settings.nix" config.stylix.fonts;
 
   fontSettings = builtins.removeAttrs stylixVscodiumSettings [ "workbench.colorTheme" ];
 
-  # This reproduces the existing Stylix palette through the GjallarOS semantic
+  # This reproduces the existing Stylix palette through the gjallarOS semantic
   # contract. The following contrast-hardening change can therefore happen in
   # one owner without another VSCodium-specific palette.
   fallbackThemeColors = {
@@ -72,7 +72,7 @@ let
     builtins.toJSON {
       name = "gjallar-theme";
       displayName = "GjallarOS";
-      description = "GjallarOS semantic desktop color theme";
+      description = "gjallarOS semantic desktop color theme";
       publisher = "gjallar";
       version = "1.0.0";
 
@@ -158,7 +158,7 @@ in
       '';
 
   # The settings file intentionally remains writable. Ensure only the theme
-  # selection is owned by GjallarOS while preserving all unrelated user edits.
+  # selection is owned by gjallarOS while preserving all unrelated user edits.
   home.activation.vscodiumGjallarThemeSelection =
     lib.hm.dag.entryAfter [ "vscodiumWritableSettings" ] ''
       settings_file=${lib.escapeShellArg "${config.xdg.configHome}/VSCodium/User/settings.json"}

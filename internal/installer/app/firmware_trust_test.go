@@ -57,7 +57,7 @@ func TestFirmwareTrustReport(t *testing.T) {
 }
 
 // EMULATED firmware states. Only the paths that stop before the shim build:
-// Setup Mode gets no offer, and the offer defaults to no.
+// Setup Mode gets no offer but says why (Q220), and the offer defaults to no.
 func TestOfferUnknownModelShim(t *testing.T) {
 	for _, c := range []struct {
 		name  string
@@ -77,6 +77,10 @@ func TestOfferUnknownModelShim(t *testing.T) {
 		asked := strings.Contains(out.String(), "through shim anyway")
 		if ok || asked != c.ask {
 			t.Errorf("%s: ok=%v asked=%v\n%s", c.name, ok, asked, out)
+		}
+		explained := strings.Contains(out.String(), "Restore Factory Keys")
+		if explained != (c.trust.SetupMode == secureboot.FlagOn) {
+			t.Errorf("%s: setup mode notice=%v\n%s", c.name, explained, out)
 		}
 	}
 }

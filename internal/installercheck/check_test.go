@@ -75,7 +75,7 @@ func testRepository(t *testing.T, config string) string {
 		"system/default.nix":                                            "{}\n",
 		"apps/ai/nixos.nix":                                             "{}\n",
 		"user/default.nix":                                              "{}\n",
-		"system/tools/commands/default.nix":                             "# check-installer\n",
+		"system/tools/commands/default.nix":                             "{}\n",
 	}
 	for relative, contents := range files {
 		path := filepath.Join(root, relative)

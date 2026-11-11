@@ -92,7 +92,7 @@ func (source EmbeddedSource) loadCanonicalValidations(
 			}
 
 			// General hardware evidence can be hardware-validated without
-			// representing a complete GjallarOS release-validation tuple.
+			// representing a complete gjallarOS release-validation tuple.
 			// Only complete tuples participate in the install gate.
 			if validation.LastValidatedNixOS == "" ||
 				validation.LastValidatedGjallarOSRevision == "" ||

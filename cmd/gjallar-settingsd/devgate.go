@@ -199,7 +199,7 @@ func (s *service) ConfirmDeveloper(ctx context.Context, sender, kind string, sec
 		return nil
 	}
 	if err := s.sys.Authorize(ctx, sender, "org.gjallaros.settings."+string(config.TierCritical), map[string]string{
-		"polkit.message":     "Authentication is required to confirm the developer channel or developer mode of this GjallarOS device",
+		"polkit.message":     "Authentication is required to confirm the developer channel or developer mode of this gjallarOS device",
 		"org.gjallaros.keys": "releaseChannel developerMode",
 	}); err != nil {
 		return err

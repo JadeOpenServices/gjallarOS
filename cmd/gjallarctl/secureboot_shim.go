@@ -18,7 +18,7 @@ import (
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/secureboot"
 )
 
-// chooseShimPath decides between the shim path and GjallarOS firmware keys
+// chooseShimPath decides between the shim path and gjallarOS firmware keys
 // (Plane 293, Jade Q189): shim wherever the firmware keeps its maker's keys
 // and would start the pinned shim, own keys on request, in Setup Mode or
 // when db/dbx rule shim out.
@@ -50,7 +50,7 @@ func chooseShimPath(ctx context.Context, user config.User, ownKeys bool, out io.
 
 	facts, err := secureboot.LoadShimFacts(secureboot.ShimFactsPath)
 	if errors.Is(err, fs.ErrNotExist) {
-		fmt.Fprintln(out, "This system has no pinned shim; using GjallarOS firmware keys.")
+		fmt.Fprintln(out, "This system has no pinned shim; using gjallarOS firmware keys.")
 		return false, nil
 	}
 	if err != nil {
@@ -68,7 +68,7 @@ func chooseShimPath(ctx context.Context, user config.User, ownKeys bool, out io.
 		fmt.Fprintf(out, "Secure Boot path: shim (%s).\n", choice.Reason)
 		return true, nil
 	}
-	fmt.Fprintf(out, "Secure Boot path: GjallarOS firmware keys (%s).\n", choice.Reason)
+	fmt.Fprintf(out, "Secure Boot path: gjallarOS firmware keys (%s).\n", choice.Reason)
 	return false, nil
 }
 
@@ -79,10 +79,14 @@ func runShimSetup(ctx context.Context, repo, configPath string, user config.User
 		fmt.Fprintf(stderr, "ERROR: %v\n", err)
 		return 1
 	}
-	firmwareName := shimFirmwareName(repo)
+	firmwareName, tested := shimFirmware(repo)
 	ui := prompt.UI{Reader: bufio.NewReader(os.Stdin), Out: stdout}
 
 	if !user.SecureBootEnable || !user.SecureBootShim {
+		if !tested {
+			// Same best-effort offer as the installer (Jade Q221).
+			fmt.Fprintln(stdout, untestedShimNotice)
+		}
 		fmt.Fprint(stdout, secureboot.ShimPlan(firmwareName, user.LUKSTPM2Enable))
 		question := "Set up Secure Boot through shim?"
 		if firmwareName != "" {
@@ -144,17 +148,21 @@ func runShimSetup(ctx context.Context, repo, configPath string, user config.User
 	return restartFor(ctx, ui, next, stdout, stderr)
 }
 
-// shimFirmwareName is the firmware's name from ODDC, for the messages only;
-// the shim path itself needs nothing model-specific, so a model ODDC does
-// not know gets the generic name.
-func shimFirmwareName(repo string) string {
+// untestedShimNotice goes before the shim question on a model without an
+// ODDC Secure Boot setup: best effort, the question stays default no.
+const untestedShimNotice = "Nobody has tested Secure Boot through shim on this model yet. It needs nothing model-specific, only a firmware that keeps its factory keys; the checks above passed."
+
+// shimFirmware returns the firmware's name from ODDC, for the messages
+// only, and whether ODDC has a tested Secure Boot setup for this model.
+// Missing ODDC data counts as untested.
+func shimFirmware(repo string) (string, bool) {
 	device, err := oddcvalidation.LoadDeviceContext(repo)
-	if err != nil {
-		return ""
+	if err != nil || device.Resolved.ModelID == "" {
+		return "", false
 	}
 	firmware, err := oddc.ResolveSecureBootFirmwarePolicy(device.Resolved)
 	if err != nil {
-		return ""
+		return "", false
 	}
-	return strings.TrimSpace(firmware.Policy.FirmwareName)
+	return strings.TrimSpace(firmware.Policy.FirmwareName), firmware.SourceEntity != "" && firmware.Policy.Supported
 }

@@ -1,5 +1,5 @@
 // Package diskplan defines the canonical, planning-only description of a
-// GjallarOS bare-metal installation target.
+// gjallarOS bare-metal installation target.
 //
 // The package intentionally performs no device discovery, partitioning,
 // formatting, encryption, mounting, or installation. A Plan is safe to
@@ -33,7 +33,7 @@ const (
 
 var guidPattern = regexp.MustCompile(`(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 
-// Plan is the canonical description of one intended GjallarOS installation.
+// Plan is the canonical description of one intended gjallarOS installation.
 //
 // It is shared installation state, not an execution request. Consumers must
 // independently validate the real target device before performing any
@@ -72,7 +72,7 @@ type Partition struct {
 	MountPoint string     `json:"mount_point"`
 }
 
-// Root describes the encrypted GjallarOS root partition.
+// Root describes the encrypted gjallarOS root partition.
 type Root struct {
 	Partition  Partition  `json:"partition"`
 	Encryption Encryption `json:"encryption"`

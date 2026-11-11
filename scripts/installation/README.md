@@ -1,4 +1,4 @@
-# GjallarOS installer
+# gjallarOS installer
 
 Run this from the repository root on an existing NixOS installation:
 
@@ -61,7 +61,7 @@ fwupd metadata and applies available updates before continuing; declining it or
 an unavailable update is non-fatal.
 The bootstrap step enables `services.fwupd` in `/etc/nixos/configuration.nix`
 as well as installing the command, so firmware updates work before the first
-GjallarOS rebuild when possible.
+gjallarOS rebuild when possible.
 
 The wizard collects human and administrator intent, normalizes it, writes the
 machine-local generated state, and can generate hardware configuration before

@@ -81,6 +81,6 @@ func grantDeveloperAtFirstStart(proof string, now time.Time, stdout io.Writer) e
 	case want.DeveloperMode:
 		what = "developer mode"
 	}
-	fmt.Fprintf(stdout, "GjallarOS: %s confirmed with this first start.\n", what)
+	fmt.Fprintf(stdout, "gjallarOS: %s confirmed with this first start.\n", what)
 	return nil
 }

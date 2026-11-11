@@ -45,7 +45,7 @@ func signatureTime(dir string) (time.Time, error) {
 func scanCheck(f securityFacts) securityCheck {
 	c := securityCheck{ID: "scan", Title: "Virus scan"}
 	if f.settings["virusScanEnable"] == "false" {
-		c.State, c.Detail = checkOff, "Off. GjallarOS does not scan files."
+		c.State, c.Detail = checkOff, "Off. gjallarOS does not scan files."
 		return c
 	}
 	switch {

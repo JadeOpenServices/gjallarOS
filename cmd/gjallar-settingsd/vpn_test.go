@@ -116,7 +116,7 @@ func TestResumeVPNNeedsNoPassword(t *testing.T) {
 }
 
 func TestPauseMessageFitsTheDialog(t *testing.T) {
-	for _, b := range []string{nettrust.BlockExitNodeOffline, nettrust.BlockNoExitNode, nettrust.BlockTailscaleDown} {
+	for _, b := range []string{nettrust.BlockExitNodeOffline, nettrust.BlockNoExitNode, nettrust.BlockTailscaleDown, nettrust.BlockSignedOut, nettrust.BlockNeedsApproval} {
 		m := pauseMessage(b)
 		if len(m) > 230 || !strings.Contains(m, nettrust.BlockCause(b)) || !strings.Contains(m, "60 min") {
 			t.Fatalf("%d characters: %q", len(m), m)

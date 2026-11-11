@@ -1,4 +1,4 @@
-# The GjallarOS app catalogue. Every folder with a meta.json is one app;
+# The gjallarOS app catalogue. Every folder with a meta.json is one app;
 # its ID is the folder name. Each app may provide home.nix (Home Manager)
 # and nixos.nix (NixOS), and does nothing until gjallar.apps.<id>.enable.
 let

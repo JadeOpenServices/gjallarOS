@@ -18,6 +18,7 @@ import (
 
 	"github.com/JadeOpenServices/gjallarOS/internal/settings"
 	"github.com/JadeOpenServices/gjallarOS/internal/tty"
+	"github.com/JadeOpenServices/gjallarOS/internal/wineprogress"
 	"github.com/JadeOpenServices/gjallarOS/internal/winesandbox"
 )
 
@@ -119,7 +120,43 @@ func clearSwitches(id string) error {
 	return nil
 }
 
-func addApp(args []string, stdout, stderr io.Writer) error {
+// progressArgs takes a leading --progress-fd N off args: the prepare
+// window's pipe for progress lines (internal/wineprogress).
+func progressArgs(args []string) (*wineprogress.Writer, []string, error) {
+	var v string
+	switch {
+	case len(args) > 0 && args[0] == "--progress-fd":
+		if len(args) < 2 {
+			return nil, nil, errUsage
+		}
+		v, args = args[1], args[2:]
+	case len(args) > 0 && strings.HasPrefix(args[0], "--progress-fd="):
+		v, args = strings.TrimPrefix(args[0], "--progress-fd="), args[1:]
+	default:
+		return nil, args, nil
+	}
+	fd, err := strconv.Atoi(v)
+	if err != nil {
+		return nil, nil, errUsage
+	}
+	w, err := wineprogress.Open(fd)
+	if err != nil {
+		return nil, nil, err
+	}
+	return w, args, nil
+}
+
+func addApp(args []string, stdout, stderr io.Writer) (err error) {
+	progress, args, err := progressArgs(args)
+	if err != nil {
+		return err
+	}
+	defer progress.Close()
+	defer func() {
+		if err != nil {
+			progress.Fail(wineprogress.CodeFailed)
+		}
+	}()
 	if len(args) < 1 || len(args) > 2 {
 		return errUsage
 	}
@@ -151,6 +188,7 @@ func addApp(args []string, stdout, stderr io.Writer) error {
 
 	paths := winesandbox.PathsFor(home, id, name)
 	if _, err := os.Lstat(paths.Record); err == nil {
+		progress.Fail(wineprogress.CodeAppExists)
 		return fmt.Errorf("app %s exists already; gjallarctl wine install %s INSTALLER adds to it", id, id)
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
@@ -173,16 +211,20 @@ func addApp(args []string, stdout, stderr io.Writer) error {
 			return err
 		}
 	}
-	base, err := ensureBase(home, stderr)
+	base, err := ensureBase(home, stderr, progress, name)
 	if err != nil {
 		return err
 	}
+	progress.Start(wineprogress.StepCopy, name)
 	if err := copyPrefix(base, paths, id, userName, stderr); err != nil {
+		progress.Fail(wineprogress.CodeCopyFailed)
 		return err
 	}
 	if err := winesandbox.WriteRecord(paths, winesandbox.App{Name: name}); err != nil {
+		progress.Fail(wineprogress.CodeCopyFailed)
 		return err
 	}
+	progress.Finish(wineprogress.StepCopy)
 	fmt.Fprintf(stdout, "Added app %s. Its files folder is %s, which the app sees as D:.\n", id, paths.Files)
 	if err := setPlace("add", paths.Files, name, placeIcon); err != nil {
 		fmt.Fprintf(stderr, "WARNING: %s is not in the file manager's Places: %v\n", paths.Files, err)
@@ -192,7 +234,7 @@ func addApp(args []string, stdout, stderr io.Writer) error {
 		fmt.Fprintf(stdout, "Next: gjallarctl wine install %s INSTALLER, or gjallarctl wine program %s D:\\PROGRAM.exe for a program in the files folder.\n", id, id)
 		return nil
 	}
-	return installApp(id, installer, os.Stdin, tty.Is(os.Stdin), stdout, stderr)
+	return installApp(id, installer, os.Stdin, tty.Is(os.Stdin), progress, stdout, stderr)
 }
 
 // setupLog is where Wine's one-time setup writes what it did.
@@ -207,7 +249,8 @@ func setupLog(home string) string {
 // ensureBase makes the base prefix once, outside any sandbox, with Wine's
 // setup step. Its downloads are pinned by checksum in winetricks and in
 // the step. A failed setup leaves no marker and is tried again next time.
-func ensureBase(home string, stderr io.Writer) (string, error) {
+// progress hears of the setup only when it runs; name is the app's name.
+func ensureBase(home string, stderr io.Writer, progress *wineprogress.Writer, name string) (string, error) {
 	base := winesandbox.BasePrefix(home)
 	dir := filepath.Dir(base)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
@@ -234,7 +277,9 @@ func ensureBase(home string, stderr io.Writer) (string, error) {
 	if _, err := os.Lstat(marker); err == nil {
 		return base, nil
 	}
+	progress.Start(wineprogress.StepBase, name)
 	if initPath == "" {
+		progress.Fail(wineprogress.CodeBaseIncomplete)
 		return "", errors.New("this gjallar-wine came without Wine's setup step; use the one the system installs")
 	}
 
@@ -254,11 +299,14 @@ func ensureBase(home string, stderr io.Writer) (string, error) {
 		if setupErr != nil {
 			why = setupErr.Error()
 		}
+		progress.Fail(wineprogress.CodeBaseIncomplete)
 		return "", fmt.Errorf("Wine's setup is not complete (%s); %s says why, and the next gjallarctl wine add tries again", why, setupLog(home))
 	}
 	if serverErr != nil {
+		progress.Fail(wineprogress.CodeBaseIncomplete)
 		return "", fmt.Errorf("wait for Wine's setup to save: %w", serverErr)
 	}
+	progress.Finish(wineprogress.StepBase)
 	return base, nil
 }
 
@@ -319,7 +367,17 @@ func checkInstaller(path string) (string, error) {
 	return resolved, nil
 }
 
-func installCmd(args []string, stdout, stderr io.Writer) error {
+func installCmd(args []string, stdout, stderr io.Writer) (err error) {
+	progress, args, err := progressArgs(args)
+	if err != nil {
+		return err
+	}
+	defer progress.Close()
+	defer func() {
+		if err != nil {
+			progress.Fail(wineprogress.CodeFailed)
+		}
+	}()
 	if len(args) != 2 {
 		return errUsage
 	}
@@ -335,12 +393,13 @@ func installCmd(args []string, stdout, stderr io.Writer) error {
 		return err
 	}
 	defer lock.Close()
-	return installApp(args[0], installer, os.Stdin, tty.Is(os.Stdin), stdout, stderr)
+	return installApp(args[0], installer, os.Stdin, tty.Is(os.Stdin), progress, stdout, stderr)
 }
 
 // installApp runs installer in app id's sandbox and picks the program it
-// installed. The caller holds the app's lock.
-func installApp(id, installer string, in io.Reader, interactive bool, stdout, stderr io.Writer) error {
+// installed. The caller holds the app's lock. With progress, the window
+// asks for the program, not the terminal.
+func installApp(id, installer string, in io.Reader, interactive bool, progress *wineprogress.Writer, stdout, stderr io.Writer) error {
 	_, home, err := currentUser()
 	if err != nil {
 		return err
@@ -388,10 +447,13 @@ func installApp(id, installer string, in io.Reader, interactive bool, stdout, st
 		program = []string{"msiexec", "/i", win}
 	}
 	fmt.Fprintf(stdout, "Running the installer in app %s.\n", id)
+	progress.Start(wineprogress.StepInstaller, a.Name)
 	code, err := launchApp(id, program, nil, stderr)
 	if err != nil {
+		progress.Fail(wineprogress.CodeInstallerNotStarted)
 		return err
 	}
+	progress.Finish(wineprogress.StepInstaller)
 	if code != 0 {
 		// Some installers end with a code for "restart needed"; what they
 		// installed still counts.
@@ -409,6 +471,14 @@ func installApp(id, installer string, in io.Reader, interactive bool, stdout, st
 		}
 		fmt.Fprintf(stdout, "App %s starts %s. It is in the app menu, and gjallarctl wine run %s starts it.\n", id, a.Exe, id)
 		return nil
+	}
+	if progress != nil {
+		all, err := winesandbox.Programs(paths, nil)
+		if err != nil {
+			return err
+		}
+		progress.Choose(all, a.Exe)
+		interactive = false
 	}
 	return chooseProgram(id, "", in, interactive, stdout, stderr)
 }

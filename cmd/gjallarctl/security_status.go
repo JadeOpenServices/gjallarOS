@@ -150,8 +150,9 @@ type securityFacts struct {
 	luks     luksRecord
 	luksErr  error
 	diskKind diskcrypto.TPMKind
-	// chipPossible: Secure Boot setup is offered for this model.
-	chipPossible bool
+	// chip: how the security chip can come to unlock the disk; anything
+	// but chipNone means Secure Boot setup is offered or done in the config.
+	chip chipPath
 
 	secureBoot    bool
 	secureBootErr error
@@ -214,7 +215,7 @@ func diskCheck(f securityFacts) securityCheck {
 		c.State, c.Detail = checkUnknown, "The disk protection record cannot be read."
 		return c
 	}
-	state := diskProtectionState(f.luks, f.diskKind, func() bool { return f.chipPossible })
+	state := diskProtectionState(f.luks, f.diskKind, func() chipPath { return f.chip })
 	text := diskProtectionTexts(state, f.luks)
 	switch state {
 	case diskProtectionDone:
@@ -233,8 +234,11 @@ func diskCheck(f securityFacts) securityCheck {
 		c.State, c.Detail = checkWeak, text.summary+". "+text.body
 		if text.command != nil {
 			c.Fix = "Set up"
-			if state == diskProtectionPIN {
+			switch state {
+			case diskProtectionPIN:
 				c.Fix = "Add PIN"
+			case diskProtectionChipOff:
+				c.Fix = "Turn on"
 			}
 		}
 	}
@@ -248,12 +252,12 @@ func secureBootCheck(f securityFacts) securityCheck {
 		c.State, c.Detail = checkUnknown, "The Secure Boot state cannot be read."
 	case f.secureBoot:
 		c.State, c.Detail = checkOK, "On. The firmware checks the startup files."
-	case f.settings["secureBootEnable"] == "false" && !f.chipPossible:
+	case f.settings["secureBootEnable"] == "false" && f.chip == chipNone:
 		c.State, c.Detail = checkOff, "Off. Changed startup files go unnoticed."
-	case f.chipPossible:
+	case f.chip != chipNone:
 		c.State, c.Detail, c.Fix = checkWeak, "Off. Changed startup files go unnoticed.", "Turn on"
 	default:
-		c.State, c.Detail = checkWeak, "Off. GjallarOS has no checked Secure Boot setup for this model yet."
+		c.State, c.Detail = checkWeak, "Off. gjallarOS has no checked Secure Boot setup for this model yet."
 	}
 	return c
 }
@@ -283,7 +287,7 @@ func usbCheck(f securityFacts) securityCheck {
 func firewallCheck(f securityFacts) securityCheck {
 	c := securityCheck{ID: "firewall", Title: "Firewall"}
 	if f.settings["firewallEnable"] == "false" && f.firewall != "active" {
-		c.State, c.Detail = checkOff, "Off. GjallarOS does not filter connections from the network."
+		c.State, c.Detail = checkOff, "Off. gjallarOS does not filter connections from the network."
 		return c
 	}
 	if f.firewall == "active" {
@@ -342,7 +346,7 @@ func developerCheck(f securityFacts) securityCheck {
 }
 
 // hardwareChecks are the per-model facts of `oddc security --json` and
-// GjallarOS's own findings. ODDC answers for the model; what it cannot
+// gjallarOS's own findings. ODDC answers for the model; what it cannot
 // confirm is shown as not confirmed, never as safe (ODDC 97).
 func hardwareChecks(f securityFacts) []securityCheck {
 	checks := []securityCheck{}
@@ -370,7 +374,7 @@ func gatherSecurityFacts(ctx context.Context, stderr io.Writer) securityFacts {
 	var f securityFacts
 	f.luks, f.luksErr = readLUKSRecord(luksRecordPath)
 	f.diskKind = diskcrypto.ModelTPMKind()
-	f.chipPossible = chipUnlockPossible()
+	f.chip = chipUnlockPath()
 	f.secureBoot, f.secureBootErr = secureboot.FirmwareSecureBoot()
 
 	usbCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
@@ -465,9 +469,9 @@ func runSecurityFix(args []string, stdout, stderr io.Writer) int {
 	case "disk":
 		return runLUKSRemind([]string{"--open"}, stderr)
 	case "secure-boot":
-		return runInTerminal("GjallarOS Secure Boot", []string{"secure-boot", "setup"}, stderr)
+		return runInTerminal("gjallarOS Secure Boot", []string{"secure-boot", "setup"}, stderr)
 	case "usb", "updates", "developer":
-		return runInTerminal("GjallarOS security", []string{"security", "fix", args[0], "--here"}, stderr)
+		return runInTerminal("gjallarOS security", []string{"security", "fix", args[0], "--here"}, stderr)
 	}
 	fmt.Fprintf(stderr, "ERROR: %q has no fix\n", args[0])
 	return 2
@@ -487,7 +491,7 @@ func runSecuritySwitch(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	if !here {
-		return runInTerminal("GjallarOS security", []string{"security", "switch", args[0], args[1], "--here"}, stderr)
+		return runInTerminal("gjallarOS security", []string{"security", "switch", args[0], args[1], "--here"}, stderr)
 	}
 	if args[0] == "usb" && args[1] == "off" {
 		if code := usbDisarmForSwitch(stderr); code != 0 {
@@ -514,7 +518,7 @@ func runSecurityWaiting(action string, args []string, stdout, stderr io.Writer) 
 		return 2
 	}
 	if !here {
-		return runInTerminal("GjallarOS security", []string{"security", action, args[0], "--here"}, stderr)
+		return runInTerminal("gjallarOS security", []string{"security", action, args[0], "--here"}, stderr)
 	}
 	bus, ok := openSettings(stderr)
 	if !ok {

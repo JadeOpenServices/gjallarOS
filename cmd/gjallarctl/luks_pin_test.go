@@ -84,6 +84,33 @@ func TestTPM2MetadataPolicy(t *testing.T) {
 	}
 }
 
+func TestTPM2MetadataHuman(t *testing.T) {
+	dir := t.TempDir()
+	for name, tc := range map[string]struct {
+		header string
+		want   string
+	}{
+		"chip only":  {`{"keyslots":{"1":{}},"tokens":{"0":{"type":"systemd-tpm2","keyslots":["1"],"tpm2_pcrlock":true}}}`, "no\n"},
+		"passphrase": {`{"keyslots":{"0":{},"1":{}},"tokens":{"0":{"type":"systemd-tpm2","keyslots":["1"]}}}`, "yes\n"},
+		"recovery": {`{"keyslots":{"1":{},"2":{}},"tokens":{"0":{"type":"systemd-tpm2","keyslots":["1"]},` +
+			`"1":{"type":"systemd-recovery","keyslots":["2"]}}}`, "yes\n"},
+		"empty": {`{"keyslots":{},"tokens":{}}`, "no\n"},
+	} {
+		path := filepath.Join(dir, "m.json")
+		if err := os.WriteFile(path, []byte(tc.header), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		var out, errOut bytes.Buffer
+		if code := runTPM2MetadataHuman([]string{path}, &out, &errOut); code != 0 || out.String() != tc.want {
+			t.Errorf("%s: code %d out %q err %q", name, code, out.String(), errOut.String())
+		}
+	}
+	var out, errOut bytes.Buffer
+	if code := runTPM2MetadataHuman(nil, &out, &errOut); code != 2 {
+		t.Errorf("no argument: code %d", code)
+	}
+}
+
 func TestLUKSArgsValid(t *testing.T) {
 	for _, args := range [][]string{{"status"}, {"recovery-key"}, {"setup"}, {"pin"}, {"pin", "--remove"}, {"record"}} {
 		if !luksArgsValid(args) {

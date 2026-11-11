@@ -64,7 +64,7 @@ let
 
     # Ghostty takes --key=value only; a separate value is a config error.
     exec ${lib.getExe pkgs.ghostty} \
-      --title='GjallarOS fingerprint setup' \
+      --title='gjallarOS fingerprint setup' \
       -e ${enrollment}
   '';
 in

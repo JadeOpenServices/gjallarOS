@@ -62,7 +62,7 @@ func usbKeyboardGateSummary(gate *usbKeyboardGate) string {
 	}
 }
 
-// gjallarOSFindings are the security notes GjallarOS owns itself, next to
+// gjallarOSFindings are the security notes gjallarOS owns itself, next to
 // the ODDC ones. IDs start with "gjallaros/" so they never clash with ODDC.
 func gjallarOSFindings(gate *usbKeyboardGate) []securityFinding {
 	if !usbEarlyBootOpen(gate) {

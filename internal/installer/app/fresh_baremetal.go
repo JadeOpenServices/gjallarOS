@@ -233,7 +233,7 @@ func runFreshBareMetal(
 		)
 	}
 
-	fmt.Fprintln(out, "STAGE: installing GjallarOS into prepared target")
+	fmt.Fprintln(out, "STAGE: installing gjallarOS into prepared target")
 
 	if _, err := baremetalinstall.Install(
 		ctx,
@@ -244,7 +244,7 @@ func runFreshBareMetal(
 		},
 	); err != nil {
 		return freshBareMetalResult{}, fmt.Errorf(
-			"install fresh GjallarOS: %w",
+			"install fresh gjallarOS: %w",
 			err,
 		)
 	}
@@ -391,7 +391,7 @@ func readFreshLUKSPassphrase(out io.Writer) (string, error) {
 	passphrase, err := credential.ReadConfirmedPassword(
 		tty,
 		out,
-		"encrypted GjallarOS root",
+		"encrypted gjallarOS root",
 	)
 	if err != nil {
 		return "", fmt.Errorf(

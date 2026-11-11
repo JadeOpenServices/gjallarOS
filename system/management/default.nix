@@ -8,6 +8,7 @@
 }:
 let
   cfg = config.services.mdm-agent;
+  libexec = import ../../pkgs/lib/libexec.nix { inherit lib pkgs; };
   # Device contract versions this gjallarOS implements (JODS-567). A JODS
   # pin with another version stops the build instead of running an agent
   # whose names or recovery steps no longer match.
@@ -77,7 +78,8 @@ in
     desktopProfile = settings.management.desktopProfile;
     inherit osRelease;
   };
-  environment.systemPackages = [ statusCommand ];
+  # gjallarctl management status starts it (Plane 282); not on PATH.
+  environment.systemPackages = [ (libexec statusCommand) ];
 
   systemd.services.mdm-agent-enroll = {
     wantedBy = lib.mkForce [ ];

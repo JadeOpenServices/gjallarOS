@@ -110,13 +110,13 @@ func TestExistingInstallRejectsUnmarkedGeneratedState(t *testing.T) {
 	}
 	os.WriteFile(path, []byte("{ hostname = \"unrelated\"; }\n"), 0644)
 	if existingInstall(root) {
-		t.Fatal("unmarked generated/state.nix detected as an existing GjallarOS install")
+		t.Fatal("unmarked generated/state.nix detected as an existing gjallarOS install")
 	}
 }
 
 func TestExistingInstallMissingGeneratedStateIsNew(t *testing.T) {
 	if existingInstall(t.TempDir()) {
-		t.Fatal("missing generated/state.nix detected as an existing GjallarOS install")
+		t.Fatal("missing generated/state.nix detected as an existing gjallarOS install")
 	}
 }
 
@@ -375,7 +375,7 @@ func TestCollectRecoveryAsksPartitionWhenPossible(t *testing.T) {
 	}
 }
 
-// Jade 2026-10-19: no recovery partition and no shrink without GjallarOS
+// Jade 2026-10-19: no recovery partition and no shrink without gjallarOS
 // Secure Boot; the partition question is not even asked.
 func TestCollectRecoverySkipsPartitionWithoutSecureBoot(t *testing.T) {
 	var output bytes.Buffer
@@ -391,7 +391,7 @@ func TestCollectRecoverySkipsPartitionWithoutSecureBoot(t *testing.T) {
 	}
 }
 
-// A fresh disk without GjallarOS Secure Boot got a recovery partition anyway: the
+// A fresh disk without gjallarOS Secure Boot got a recovery partition anyway: the
 // plan followed the boot entry answer, not the partition answer.
 func TestFreshDiskGetsRecoveryPartitionOnlyWhenChosen(t *testing.T) {
 	var output bytes.Buffer
@@ -579,7 +579,7 @@ func TestInstalledSystemRecoveryProvisioningRequiresMaintenanceBoundary(t *testi
 	}
 
 	if !s.existing {
-		t.Fatal("test requires an installed GjallarOS system")
+		t.Fatal("test requires an installed gjallarOS system")
 	}
 	if !s.user.RecoveryPartitionEnable {
 		t.Fatal("test requires recovery partition provisioning requested")

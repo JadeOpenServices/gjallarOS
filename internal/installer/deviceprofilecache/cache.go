@@ -70,7 +70,7 @@ func Materialize(input MaterializeInput) (Capsule, error) {
 		return Capsule{}, fmt.Errorf("device-profile capsule destination is required")
 	}
 	if strings.TrimSpace(input.GjallarOSRevision) == "" {
-		return Capsule{}, fmt.Errorf("GjallarOS revision is required")
+		return Capsule{}, fmt.Errorf("gjallarOS revision is required")
 	}
 	if strings.TrimSpace(input.NixOSRelease) == "" {
 		return Capsule{}, fmt.Errorf("NixOS release is required")

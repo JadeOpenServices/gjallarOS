@@ -207,11 +207,19 @@ var tailnetSettle = 30 * time.Second
 // the rest of the verdict needs (loophole 43).
 var tailscaleCall = 15 * time.Second
 
+// ErrNoAnswer marks a tailscale call that ran out of time. It may still
+// have taken effect in tailscaled.
+var ErrNoAnswer = errors.New("no answer in time")
+
 // tailscale runs one tailscale CLI call under tailscaleCall.
 func (s System) tailscale(ctx context.Context, args ...string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, tailscaleCall)
 	defer cancel()
-	return s.run(ctx, "tailscale", args...)
+	out, err := s.run(ctx, "tailscale", args...)
+	if err != nil && errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		err = fmt.Errorf("%w: %w", ErrNoAnswer, err)
+	}
+	return out, err
 }
 
 // tailscaledStarting reports whether systemd may still bring tailscaled up.
@@ -273,7 +281,7 @@ func parseTailnet(data []byte) (Tailnet, error) {
 	if err := json.Unmarshal(data, &status); err != nil {
 		return Tailnet{}, fmt.Errorf("parse tailscale status: %w", err)
 	}
-	t := Tailnet{Running: status.BackendState == "Running"}
+	t := Tailnet{Running: status.BackendState == "Running", State: status.BackendState}
 	for _, p := range status.Peer {
 		peer := Peer{HostName: p.HostName, DNSName: p.DNSName, Online: p.Online, ExitNode: p.ExitNode, ExitNodeOption: p.ExitNodeOption}
 		for _, raw := range p.TailscaleIPs {
@@ -431,13 +439,20 @@ func WriteStatus(path string, v Verdict) error {
 		return err
 	}
 	data = append(data, '\n')
-	// Unchanged verdicts are not rewritten: path units watch this file.
-	if old, err := os.ReadFile(path); err == nil && bytes.Equal(old, data) {
-		return nil
-	}
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return err
 	}
+	// Unchanged verdicts are not rewritten: path units watch this file.
+	// The stamp next to it says the verdict was checked again.
+	if old, err := os.ReadFile(path); err != nil || !bytes.Equal(old, data) {
+		if err := writeAtomic(path, data); err != nil {
+			return err
+		}
+	}
+	return writeAtomic(CheckedPath(path), checkedStamp(data))
+}
+
+func writeAtomic(path string, data []byte) error {
 	tmp := path + ".tmp"
 	if err := os.WriteFile(tmp, data, 0644); err != nil {
 		return err

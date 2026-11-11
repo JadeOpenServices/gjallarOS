@@ -17,7 +17,7 @@ let
 
   # Installs the newest dbx (revocation list) from LVFS. The update is
   # signed by Microsoft's KEK, which enrollment keeps, so it applies under
-  # GjallarOS ownership. fwupd writes the variable now; firmware measures
+  # gjallarOS ownership. fwupd writes the variable now; firmware measures
   # it into PCR 7 from the next boot on. Until then both the current and
   # the new state stay valid, so a rebuild or `gjallarctl tpm2 reenroll`
   # before the restart still finds a matching PCR 7.
@@ -91,7 +91,7 @@ lib.mkIf settings.secureBootEnable {
       # 2.0.8 is the first fwupd that knows Microsoft's 2023 CA rotation
       # (its uefi-kek and uefi-db plugins), which dbx updates now follow.
       assertion = lib.versionAtLeast config.services.fwupd.package.version "2.0.8";
-      message = "GjallarOS dbx updates need fwupd 2.0.8 or newer.";
+      message = "gjallarOS dbx updates need fwupd 2.0.8 or newer.";
     }
   ];
 

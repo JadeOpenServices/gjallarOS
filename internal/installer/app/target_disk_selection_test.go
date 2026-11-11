@@ -21,7 +21,7 @@ func TestTargetDiskSelectionContract(t *testing.T) {
 		"Automatically selected the only eligible target disk:",
 		"Multiple eligible installation target disks detected:",
 		"ui.Choice(",
-		"Select the whole disk to erase and install GjallarOS onto",
+		"Select the whole disk to erase and install gjallarOS onto",
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("dynamic target selection contract missing %q", want)

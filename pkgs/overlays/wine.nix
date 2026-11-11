@@ -23,7 +23,7 @@ in
 {
   _wine =
     assert lib.assertMsg (stagingFull.version == "11.8")
-      "GjallarOS Wine overlay was written for Wine 11.8 with wine-mono 11.0.0; check which wine-mono ${stagingFull.version} asks for and update or remove pkgs/overlays/wine.nix.";
+      "gjallarOS Wine overlay was written for Wine 11.8 with wine-mono 11.0.0; check which wine-mono ${stagingFull.version} asks for and update or remove pkgs/overlays/wine.nix.";
     stagingFull.overrideAttrs (old: {
       patches = (old.patches or [ ]) ++ [ ../patches/wine-setupapi-readonly-target.patch ];
       postInstall = old.postInstall + ''

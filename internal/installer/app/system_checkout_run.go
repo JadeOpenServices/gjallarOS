@@ -24,7 +24,7 @@ func requireSystemCheckoutRun(repositoryFile, root string, euid int) error {
 	}
 	if filepath.Clean(root) != systemcheckout.Path {
 		return fmt.Errorf(
-			"this GjallarOS builds from %s, not from %s; nothing was changed. "+
+			"this gjallarOS builds from %s, not from %s; nothing was changed. "+
 				"Start the installer with scripts/installation/install.sh, which runs it there as root",
 			systemcheckout.Path, root,
 		)

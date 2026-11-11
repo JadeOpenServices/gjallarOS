@@ -21,13 +21,17 @@ import (
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/diskcrypto"
 )
 
-const luksUsage = "Usage: gjallarctl luks {status|recovery-key|setup|pin [--remove]|remind [--open|--refresh]}"
+const luksUsage = "Usage: gjallarctl luks {status|recovery-key|setup|pin [--remove]|chip|remind [--open|--refresh]}"
 
 // runLUKSLifecycle manages how the root disk unlocks. Reading or changing
 // the LUKS header needs root, so it runs itself again through sudo.
 func runLUKSLifecycle(args []string, stdout, stderr io.Writer) int {
 	if len(args) > 0 && args[0] == "remind" {
 		return runLUKSRemind(args[1:], stderr)
+	}
+	// chip changes settings through the settings service, as the user.
+	if len(args) == 1 && args[0] == "chip" {
+		return runLUKSChip(context.Background(), os.Stdin, stdout, stderr)
 	}
 	// new-pin is for the first-boot enrollment and not offered to people.
 	if len(args) == 1 && args[0] == "new-pin" {
@@ -513,7 +517,7 @@ func (s *luksSession) confirm(key string) error {
 		s.clear()
 		fmt.Fprintf(s.tty, "Your new recovery key\n\n    %s\n    %s\n\n",
 			strings.Join(blocks[:4], "-"), strings.Join(blocks[4:], "-"))
-		fmt.Fprintln(s.tty, s.wrap("It unlocks this disk when nothing else can, for example after a firmware change. Write it on paper or keep it in a password manager on another device. GjallarOS does not keep a copy."))
+		fmt.Fprintln(s.tty, s.wrap("It unlocks this disk when nothing else can, for example after a firmware change. Write it on paper or keep it in a password manager on another device. gjallarOS does not keep a copy."))
 		fmt.Fprintln(s.tty)
 		if _, err := s.readLine(s.wrap("Press Enter when it is written down.") + " "); err != nil {
 			return err

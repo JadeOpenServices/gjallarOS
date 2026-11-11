@@ -91,7 +91,7 @@ let
     <!DOCTYPE policyconfig PUBLIC "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
      "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
     <policyconfig>
-      <vendor>GjallarOS</vendor>
+      <vendor>gjallarOS</vendor>
       <action id="org.gjallaros.snapshots.restore">
         <description>Restore one of your files from a snapshot</description>
         <message>Authentication is required to restore a file from a snapshot</message>
@@ -194,7 +194,7 @@ in
       lib.mapAttrs' (name: kind: lib.nameValuePair "gjallar-snapshot-${name}" (service name kind)) kinds
       // {
         gjallar-snapshotd = {
-          description = "GjallarOS snapshot restore service";
+          description = "gjallarOS snapshot restore service";
           unitConfig.RequiresMountsFor = [ "/home" ];
           serviceConfig = {
             Type = "dbus";

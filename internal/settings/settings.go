@@ -307,7 +307,7 @@ func (c Change) Message() string {
 			lines = append(lines[:MaxShownFiles], fmt.Sprintf("and %d more", len(lines)-MaxShownFiles))
 		}
 	} else {
-		fmt.Fprintf(&b, "Change %d GjallarOS setting(s) (%s):", len(c.Keys), c.Tier)
+		fmt.Fprintf(&b, "Change %d gjallarOS setting(s) (%s):", len(c.Keys), c.Tier)
 	}
 	for _, line := range lines {
 		fmt.Fprintf(&b, "\n%s", line)

@@ -1,6 +1,6 @@
 {
   "name": "opencode",
-  "description": "Local AI coding agent on the GjallarOS model backend.",
+  "description": "Local AI coding agent on the gjallarOS model backend.",
   "category": "development",
   "package": "opencode",
   "icon": "devassistant",

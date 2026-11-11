@@ -14,6 +14,129 @@
       ]
     },
     {
+      "kind": "command",
+      "old": "helpme",
+      "new": "gjallarctl helpme",
+      "removedIn": "dev merge of one-cli-282",
+      "deleteAfter": "v2026.10.70",
+      "item": "282",
+      "match": [
+        "`helpme`",
+        "`helpme ",
+        "writeShellScriptBin \"helpme\"",
+        "goCommand \"helpme\""
+      ]
+    },
+    {
+      "kind": "command",
+      "old": "cleanup",
+      "new": "gjallarctl cleanup",
+      "removedIn": "dev merge of one-cli-282",
+      "deleteAfter": "v2026.10.70",
+      "item": "282",
+      "match": [
+        "`cleanup`",
+        "`cleanup ",
+        "writeShellScriptBin \"cleanup\"",
+        "goCommand \"cleanup\""
+      ]
+    },
+    {
+      "kind": "command",
+      "old": "cleanup-old-generations",
+      "new": "gjallarctl cleanup-old-generations",
+      "removedIn": "dev merge of one-cli-282",
+      "deleteAfter": "v2026.10.70",
+      "item": "282",
+      "match": [
+        "`cleanup-old-generations`",
+        "`cleanup-old-generations ",
+        "writeShellScriptBin \"cleanup-old-generations\"",
+        "goCommand \"cleanup-old-generations\""
+      ]
+    },
+    {
+      "kind": "command",
+      "old": "thermal-status",
+      "new": "gjallarctl thermal-status",
+      "removedIn": "dev merge of one-cli-282",
+      "deleteAfter": "v2026.10.70",
+      "item": "282",
+      "match": [
+        "`thermal-status`",
+        "`thermal-status ",
+        "writeShellScriptBin \"thermal-status\"",
+        "goCommand \"thermal-status\""
+      ]
+    },
+    {
+      "kind": "command",
+      "old": "thermal-test",
+      "new": "gjallarctl thermal-test",
+      "removedIn": "dev merge of one-cli-282",
+      "deleteAfter": "v2026.10.70",
+      "item": "282",
+      "match": [
+        "`thermal-test`",
+        "`thermal-test ",
+        "writeShellScriptBin \"thermal-test\"",
+        "goCommand \"thermal-test\""
+      ]
+    },
+    {
+      "kind": "command",
+      "old": "check-installer",
+      "new": "gjallarctl check",
+      "removedIn": "dev merge of one-cli-282",
+      "deleteAfter": "v2026.10.70",
+      "item": "282"
+    },
+    {
+      "kind": "command",
+      "old": "gjallar-preflight",
+      "new": "gjallarctl preflight",
+      "removedIn": "dev merge of one-cli-282",
+      "deleteAfter": "v2026.10.70",
+      "item": "282"
+    },
+    {
+      "kind": "command",
+      "old": "network-diagnostics",
+      "new": "gjallarctl network",
+      "removedIn": "dev merge of one-cli-282",
+      "deleteAfter": "v2026.10.70",
+      "item": "282",
+      "match": [
+        "`network-diagnostics",
+        "writeShellScriptBin \"network-diagnostics\"",
+        "#compdef network-diagnostics"
+      ]
+    },
+    {
+      "kind": "command",
+      "old": "gjallar-register-key",
+      "new": "gjallarctl register-key",
+      "removedIn": "dev merge of one-cli-282",
+      "deleteAfter": "v2026.10.70",
+      "item": "282",
+      "match": [
+        "`gjallar-register-key",
+        "#compdef gjallar-register-key",
+        "exec = \"gjallar-register-key"
+      ]
+    },
+    {
+      "kind": "command",
+      "old": "gjallar-management-status",
+      "new": "gjallarctl management status",
+      "removedIn": "dev merge of one-cli-282",
+      "deleteAfter": "v2026.10.70",
+      "item": "282",
+      "match": [
+        "`gjallar-management-status"
+      ]
+    },
+    {
       "kind": "config-field",
       "old": "endpointManagedDevice",
       "new": "management.enable",

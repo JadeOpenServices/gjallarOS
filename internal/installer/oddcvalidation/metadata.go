@@ -28,7 +28,7 @@ func ValidationMetadata(
 	if strings.TrimSpace(device.Revision) == "" {
 		return oddc.Validation{},
 			fmt.Errorf(
-				"validated GjallarOS revision is empty",
+				"validated gjallarOS revision is empty",
 			)
 	}
 

@@ -17,7 +17,7 @@ import (
 )
 
 // securityFinding is one entry of `oddc security --json`. ODDC owns the
-// facts and the wording; GjallarOS only decides when to show them.
+// facts and the wording; gjallarOS only decides when to show them.
 type securityFinding struct {
 	ID       string `json:"id"`
 	Name     string `json:"name"`
@@ -53,7 +53,7 @@ func runSecurity(args []string, stdout, stderr io.Writer) int {
 	return 2
 }
 
-// runSecurityNotice shows one calm notice when ODDC or GjallarOS knows of a
+// runSecurityNotice shows one calm notice when ODDC or gjallarOS knows of a
 // finding for this model that is new or changed since the user last saw one.
 // It runs at login and after every rebuild, and stays quiet otherwise.
 func runSecurityNotice(stderr io.Writer) int {
@@ -111,7 +111,7 @@ func runSecurityNotice(stderr io.Writer) int {
 		if choice == "details" || choice == "default" {
 			// Plain `oddc security` is ODDC's text for users. --details is
 			// for contributors and spells out how each weakness is used.
-			// GjallarOS's own notes come first, passed as arguments.
+			// gjallarOS's own notes come first, passed as arguments.
 			script := `for note; do printf '%s\n\n' "$note"; done; oddc security; printf '\nPress Enter to close. '; read -r _`
 			args := []string{"--title=Security notes for this device", "-e", "sh", "-c", script, "sh"}
 			for _, f := range own {

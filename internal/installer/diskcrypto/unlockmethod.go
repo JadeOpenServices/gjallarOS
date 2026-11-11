@@ -82,7 +82,7 @@ func ParseBootUnlockMethod(journal []byte, luksUUID string) (string, error) {
 		case "":
 			method = UnlockTyped
 		default:
-			// fido2 or pkcs11: not set up by GjallarOS, and not the chip.
+			// fido2 or pkcs11: not set up by gjallarOS, and not the chip.
 			method = UnlockTyped
 		}
 	}

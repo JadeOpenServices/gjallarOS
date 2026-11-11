@@ -22,7 +22,7 @@ func repo(t *testing.T) string {
 	root := t.TempDir()
 	git(t, root, "init", "-q")
 	git(t, root, "config", "user.email", "test@example.invalid")
-	git(t, root, "config", "user.name", "GjallarOS Test")
+	git(t, root, "config", "user.name", "gjallarOS Test")
 	return root
 }
 

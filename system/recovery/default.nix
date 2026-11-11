@@ -74,7 +74,7 @@ let
       bootctl --root="$root" set-oneshot "$entry"
 
       printf '%s\n' \
-        "PASS: armed one-shot GjallarOS recovery-storage maintenance boot" \
+        "PASS: armed one-shot gjallarOS recovery-storage maintenance boot" \
         "PASS: normal default boot entry was not changed" \
         "Rebooting into maintenance..."
 
@@ -128,7 +128,7 @@ lib.mkMerge [
       systemd.services."getty@".enable = lib.mkForce true;
 
       environment.etc."gjallar/recovery".text = ''
-        Trusted GjallarOS recovery entry.
+        Trusted gjallarOS recovery entry.
         Sign in locally and run: sudo gjallar-recover audit
         Root disks need the disk recovery key or passphrase.
         Developer mode off and back to the official system:
@@ -209,7 +209,7 @@ lib.mkMerge [
           trap cleanup_key EXIT
 
           printf '%s\n' \
-            "GjallarOS recovery-storage maintenance" \
+            "gjallarOS recovery-storage maintenance" \
             "The installed root is not mounted as /." \
             "The disk recovery key or passphrase is needed before /mnt is exposed."
 
@@ -273,7 +273,7 @@ lib.mkMerge [
           # one-shot maintenance entry is already used up.
           # Plymouth hides console text, so the retry notice rides in the
           # prompt itself; otherwise a wrong key looks like nothing happened.
-          prompt="GjallarOS: enter the LUKS recovery credential for storage maintenance"
+          prompt="gjallarOS: enter the LUKS recovery credential for storage maintenance"
 
           for attempt in 1 2 3; do
             # cryptsetup --key-file uses every byte of the file; the newline
@@ -290,7 +290,7 @@ lib.mkMerge [
             printf '%s\n' \
               "No configured encrypted Btrfs root accepted that credential (try $attempt of 3)." >&2
 
-            prompt="GjallarOS: that credential did not unlock storage (try $((attempt + 1)) of 3). Enter the LUKS recovery credential for storage maintenance"
+            prompt="gjallarOS: that credential did not unlock storage (try $((attempt + 1)) of 3). Enter the LUKS recovery credential for storage maintenance"
           done
 
           if [ -z "$selected_device" ] ||
@@ -300,11 +300,11 @@ lib.mkMerge [
             printf '%s\n' \
               "ERROR: no configured encrypted Btrfs root accepted the supplied credential." \
               "No storage changes were made." \
-              "Rebooting to the normal GjallarOS boot path in 15 seconds..." >&2
+              "Rebooting to the normal gjallarOS boot path in 15 seconds..." >&2
 
             if command -v plymouth >/dev/null && plymouth --ping; then
               plymouth display-message \
-                --text="No storage changes were made. Rebooting to the normal GjallarOS boot in 15 seconds." ||
+                --text="No storage changes were made. Rebooting to the normal gjallarOS boot in 15 seconds." ||
                 true
             fi
 
@@ -339,7 +339,7 @@ lib.mkMerge [
             "PASS: exact 12 GiB recovery partition provisioned" \
             "PASS: installed root was serviced only at /mnt" \
             "PASS: maintenance credential removed" \
-            "Rebooting to the normal GjallarOS boot path..."
+            "Rebooting to the normal gjallarOS boot path..."
 
           systemctl reboot --force --force
         '';

@@ -136,7 +136,7 @@ func Inspect(ctx context.Context, root string) (Source, error) {
 		return Source{}, fmt.Errorf("the checkout has no origin: %w", err)
 	}
 	if !official(origin) {
-		return Source{}, fmt.Errorf("origin is %s, not the official GjallarOS repository", origin)
+		return Source{}, fmt.Errorf("origin is %s, not the official gjallarOS repository", origin)
 	}
 	revision, err := git(ctx, root, "rev-parse", "--verify", "HEAD^{commit}")
 	if err != nil {

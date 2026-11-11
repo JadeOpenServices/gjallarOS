@@ -15,7 +15,7 @@ in
 pkgs.testers.runNixOSTest {
   name = "btrbk-onchange";
 
-  # The stock bug shows only on the kernel GjallarOS ships; the patched
+  # The stock bug shows only on the kernel gjallarOS ships; the patched
   # btrbk must work on the default one as well.
   nodes.latest = {
     imports = [ node ];

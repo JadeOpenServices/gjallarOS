@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -169,7 +170,11 @@ func runVPNApply(args []string, stdout, stderr io.Writer) int {
 		case err != nil:
 			fmt.Fprintf(stderr, "ERROR: set exit node: %v\n", err)
 			verdict.ExitNodeError = err.Error()
-			if verdict.ExitNode != "" {
+			switch {
+			case verdict.ExitNode == "":
+			case errors.Is(err, nettrust.ErrNoAnswer):
+				verdict.Blocked = nettrust.BlockCheckTimeout
+			default:
 				verdict.Blocked = nettrust.BlockNoExitNode
 			}
 			code = 1
@@ -314,6 +319,9 @@ func runVPNStatus(stdout, stderr io.Writer) int {
 		return 1
 	}
 	fmt.Fprintf(stdout, "network:   %s\nreason:    %s\n", v.Trust, v.Reason)
+	if _, ok := nettrust.ReadVerdict(vpnStatusPath, time.Now()); !ok {
+		fmt.Fprintln(stdout, "checked:   not in the last 15 minutes; pause and home access are off until the next check (systemctl status gjallar-vpn-trust.timer)")
+	}
 	if v.SSID != "" {
 		fmt.Fprintf(stdout, "wifi:      %s\n", v.SSID)
 	}

@@ -1,4 +1,4 @@
-# GjallarOS recovery console. The recovery partition starts this on tty1
+# gjallarOS recovery console. The recovery partition starts this on tty1
 # instead of a login prompt. Firmware boots that partition even when USB boot
 # is locked, so a shell here first needs the disk's recovery key or
 # passphrase. Without it, the only way on is to erase the disk and reinstall.
@@ -97,7 +97,7 @@ erase_and_reinstall() {
     'This erases the encrypted disk of this device. Its files cannot be' \
     'recovered afterwards, not even with the recovery key.'
   [ ${#devices[@]} -eq 0 ] || printf '  %s\n' "${devices[@]}"
-  printf '%s\n' 'The GjallarOS installer starts afterwards.'
+  printf '%s\n' 'The gjallarOS installer starts afterwards.'
   printf 'Type ERASE-THIS-DEVICE to continue: '
   read -r answer || return
   [ "$answer" = ERASE-THIS-DEVICE ] || {
@@ -118,9 +118,9 @@ erase_and_reinstall() {
 }
 
 while true; do
-  printf '%s\n' '' 'GjallarOS recovery' \
+  printf '%s\n' '' 'gjallarOS recovery' \
     '  1) Unlock the installed system and open a recovery shell' \
-    '  2) Erase this device and reinstall GjallarOS' \
+    '  2) Erase this device and reinstall gjallarOS' \
     '  3) Restart' \
     '  4) Power off'
   drop_typeahead

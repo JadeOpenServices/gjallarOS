@@ -52,6 +52,13 @@ in
       "measured-boot-tpm2-enrollment.service"
       "systemd-pcrlock-make-policy.service"
     ];
+    # The login card and the bar also follow these settings (chip unlock
+    # off, or on from the next start). A rebuild that changes one rewrites
+    # the record they watch, so the bar updates without a new login.
+    restartTriggers = [
+      (lib.boolToString settings.luksTpm2Enable)
+      (lib.boolToString settings.secureBootEnable)
+    ];
     path = [
       pkgs.cryptsetup
       pkgs.util-linux
