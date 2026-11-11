@@ -199,9 +199,13 @@ in
     wants = [ "systemd-pcrlock-make-policy.service" ];
     unitConfig = {
       ConditionSecurity = "uefi-secureboot";
+      # The switch that turns chip unlock on starts this unit too. It waits
+      # for the restart, so its prompt does not take tty1 away from the
+      # desktop.
       ConditionPathExists = [
         "!/var/lib/gjallarOS/tpm2-enrollment-complete"
         "/var/lib/gjallarOS/secure-boot/ownership.json"
+        "/run/booted-system/etc/systemd/system/measured-boot-tpm2-enrollment.service"
       ];
     };
     serviceConfig = {
