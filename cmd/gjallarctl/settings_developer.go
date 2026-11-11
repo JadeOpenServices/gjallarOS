@@ -7,12 +7,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"strings"
 
 	"github.com/JadeOpenServices/gjallarOS/internal/devgate"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/credential"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/diskcrypto"
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/prompt"
 )
 
 // A developer channel or developer mode needs the startup PIN or the
@@ -39,6 +41,74 @@ func needsDeveloperProof(values map[string]json.RawMessage) bool {
 		}
 	}
 	return false
+}
+
+// settingsDiskEncrypted reports whether the system disk is encrypted;
+// tests replace it.
+var settingsDiskEncrypted = func(ctx context.Context) (bool, error) {
+	device, err := diskcrypto.RootDevice(ctx)
+	return device != "", err
+}
+
+// unencryptedDisk reports a system disk that is known not to be
+// encrypted. Such a disk has no startup PIN or recovery key, so asking for
+// one would only end in a refusal (Q217). When the disk cannot be read the
+// proof is asked as before, and the service decides.
+func unencryptedDisk(ctx context.Context) bool {
+	encrypted, err := settingsDiskEncrypted(ctx)
+	return err == nil && !encrypted
+}
+
+// refuseUnencrypted says why a developer channel or developer mode is
+// refused and, on a device that still runs one, offers stable with
+// developer mode off together with the other values asked for. A device
+// left on a developer channel from before the refusal could otherwise
+// change no setting at all.
+func refuseUnencrypted(ctx context.Context, bus settingsBus, values map[string]json.RawMessage, stdout, stderr io.Writer) int {
+	fmt.Fprintf(stderr, "ERROR: %s.\n", devgate.Unencrypted)
+	running, err := runsDeveloperSetup(ctx, bus)
+	if err != nil {
+		fmt.Fprintf(stderr, "ERROR: %v\n", err)
+		return 1
+	}
+	if !running {
+		fmt.Fprintln(stdout, "Nothing changed.")
+		return 1
+	}
+	ui := prompt.UI{Reader: bufio.NewReader(settingsStdin), Out: stdout}
+	ok, err := ui.Confirm(ctx, "This device still runs a developer channel or developer mode. Switch to stable with developer mode off?", false)
+	if err != nil {
+		fmt.Fprintf(stderr, "ERROR: %v\n", err)
+		return 1
+	}
+	if !ok {
+		fmt.Fprintln(stdout, "Nothing changed. Changes and rebuilds stay refused until the device is on stable.")
+		return 1
+	}
+	stable := maps.Clone(values)
+	if stable == nil {
+		stable = map[string]json.RawMessage{}
+	}
+	stable["releaseChannel"] = json.RawMessage(`"stable"`)
+	stable["developerMode"] = json.RawMessage(`false`)
+	return settingsRequest(ctx, bus, stable, stdout, stderr)
+}
+
+// runsDeveloperSetup reports whether the configuration has a developer
+// channel or developer mode on.
+func runsDeveloperSetup(ctx context.Context, bus settingsBus) (bool, error) {
+	var channel string
+	var mode bool
+	for name, into := range map[string]any{"releaseChannel": &channel, "developerMode": &mode} {
+		key, err := settingsKey(ctx, bus, name)
+		if err != nil {
+			return false, err
+		}
+		if err := json.Unmarshal(key.Value, into); err != nil {
+			return false, fmt.Errorf("read %s: %w", name, err)
+		}
+	}
+	return !devgate.Needs(channel, mode).Empty(), nil
 }
 
 // readDeveloperProof asks for the startup PIN, or the recovery key when
@@ -93,6 +163,9 @@ func settingsConfirmDeveloper(ctx context.Context, bus settingsBus, args []strin
 	if len(args) != 0 {
 		fmt.Fprintln(stderr, settingsUsage)
 		return 2
+	}
+	if unencryptedDisk(ctx) {
+		return refuseUnencrypted(ctx, bus, nil, stdout, stderr)
 	}
 	kind, secret, err := settingsReadProof(stderr)
 	if err != nil {
