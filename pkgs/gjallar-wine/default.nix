@@ -37,6 +37,7 @@ buildGoModule {
       ../../internal/sshsig
       ../../internal/tty
       ../../internal/winefix
+      ../../internal/wineprogress
       ../../internal/winesandbox
       ../../internal/winicon
       ../../internal/winpe
