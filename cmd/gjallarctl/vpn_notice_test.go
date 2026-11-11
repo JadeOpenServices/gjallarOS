@@ -67,8 +67,16 @@ func TestVPNNoticeText(t *testing.T) {
 	if summary != "VPN cannot block this network" || !strings.Contains(body, "without the tunnel") || strings.Contains(body, "Pausing") {
 		t.Fatalf("summary %q body %q", summary, body)
 	}
+	// A check that ran out of time says so (Q226).
+	summary, body = vpnNoticeText(nettrust.Verdict{Blocked: nettrust.BlockCheckTimeout, Network: "synthetic-net-a"})
+	if summary != "VPN could not check this network" ||
+		!strings.HasPrefix(body, "The network check did not finish in time.\n") ||
+		!strings.Contains(body, "next check runs within 5 min") || !strings.Contains(body, "Pausing") {
+		t.Fatalf("summary %q body %q", summary, body)
+	}
 	// The popup cuts each line after three rows of about 33 characters.
 	for _, v := range []nettrust.Verdict{
+		{Blocked: nettrust.BlockCheckTimeout, Network: "synthetic-net-a", SSID: "Synthetic Cafe Guest 5G"},
 		{Blocked: nettrust.BlockNoExitNode, Network: "synthetic-net-a", SSID: "Synthetic Cafe Guest 5G"},
 		{Blocked: nettrust.BlockTailscaleDown},
 		{Blocked: nettrust.BlockNoExitNode, BlockError: "synthetic nft error", SSID: "Synthetic Cafe Guest 5G"},
