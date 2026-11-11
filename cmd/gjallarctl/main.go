@@ -203,6 +203,9 @@ func runInstaller(args []string, stdout, stderr io.Writer) int {
 	if args[0] == "tpm2-metadata-policy" {
 		return runTPM2MetadataPolicy(args[1:], stdout, stderr)
 	}
+	if args[0] == "tpm2-metadata-human" {
+		return runTPM2MetadataHuman(args[1:], stdout, stderr)
+	}
 	if args[0] == "tpm2-check-pcrlock-policy" {
 		return runTPM2CheckPCRLockPolicy(args[1:], stdout, stderr)
 	}
@@ -562,6 +565,31 @@ func runTPM2MetadataPolicy(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stdout, "bound")
 	default:
 		fmt.Fprintln(stdout, "unbound")
+	}
+	return 0
+}
+
+// Tells the chip slot removal whether a recovery key or passphrase still
+// opens the volume once the chip slots are gone: "yes" or "no".
+func runTPM2MetadataHuman(args []string, stdout, stderr io.Writer) int {
+	if len(args) != 1 {
+		fmt.Fprintln(stderr, "Usage: gjallarctl installer tpm2-metadata-human <metadata-json>")
+		return 2
+	}
+	raw, err := os.ReadFile(args[0])
+	if err != nil {
+		fmt.Fprintf(stderr, "ERROR: %v\n", err)
+		return 1
+	}
+	slots, err := diskcrypto.ParseKeyslots(raw)
+	if err != nil {
+		fmt.Fprintf(stderr, "ERROR: %v\n", err)
+		return 1
+	}
+	if len(slots.Recovery)+len(slots.Passphrase) > 0 {
+		fmt.Fprintln(stdout, "yes")
+	} else {
+		fmt.Fprintln(stdout, "no")
 	}
 	return 0
 }

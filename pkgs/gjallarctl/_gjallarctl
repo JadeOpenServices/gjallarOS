@@ -176,6 +176,7 @@ _gjallarctl_luks() {
     'recovery-key:create a new recovery key'
     'setup:add a recovery key and remove the install passphrase'
     'pin:set, change or remove the startup PIN'
+    'chip:switch security chip unlock back on'
     'remind:ask about missing disk protection, as at login'
   )
   if (( CURRENT == 2 )); then

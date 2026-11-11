@@ -3,9 +3,12 @@
   lib,
   pkgs,
   settings,
+  gjallarTpm2Clear,
   ...
 }:
 let
+  luksMappings = builtins.attrValues config.boot.initrd.luks.devices;
+  luksDevice = if builtins.length luksMappings == 1 then (builtins.head luksMappings).device else "";
   # systemd-pcrlock supports at most 8 alternatives per PCR, and PCR 4
   # measures every installed UKI: one per generation plus one per
   # specialisation (trusted recovery, recovery-storage maintenance). With
@@ -168,6 +171,15 @@ let
         '') unmeasuredEntries
       )}
       if [ -n "$has_tpm2" ]; then
+        ${lib.optionalString (luksDevice != "") ''
+          # Chip unlock is being switched on from a start that had it off.
+          # A chip slot and startup policy from before it was switched off
+          # make make-policy fail (e2e-fw13, 2026-11-10, loophole 47); they
+          # go first, and the restart enrolls the chip afresh.
+          if [ ! -e /run/booted-system/etc/systemd/system/measured-boot-tpm2-enrollment.service ]; then
+            ${gjallarTpm2Clear}/bin/gjallar-tpm2-clear ${lib.escapeShellArg luksDevice}
+          fi
+        ''}
         ${lib.optionalString keepBooted restoreBooted}
         echo "Predicting the PCR state for future boots..."
         # The rebuild still fails; the message names the way out. A policy

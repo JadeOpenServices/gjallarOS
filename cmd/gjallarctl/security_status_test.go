@@ -92,7 +92,7 @@ func TestSecurityChecksFailuresAreNotOff(t *testing.T) {
 		t.Errorf("firewall down = %s, want bad", c.State)
 	}
 	f.secureBoot = false
-	f.chipPossible = true
+	f.chip = chipNeedsSecureBoot
 	if c := checkByID(t, securityChecks(f), "secure-boot"); c.State != checkWeak || c.Fix == "" {
 		t.Errorf("secure boot off, setup possible = %s fix %q", c.State, c.Fix)
 	}
