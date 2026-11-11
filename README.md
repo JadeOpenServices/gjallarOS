@@ -27,8 +27,48 @@ NixOS 26.05 · Hyprland · Noctalia · ODDC hardware policy · TPM2 disk encrypt
 
 ## 🚀 Quick start
 
-Needs a machine booted in UEFI mode (legacy BIOS/CSM is refused). On NixOS,
-or the NixOS minimal ISO:
+Needs a machine booted in UEFI mode (legacy BIOS/CSM is refused).
+
+<table>
+<tr>
+<th width="50%">New machine: from a USB stick</th>
+<th width="50%">Existing NixOS</th>
+</tr>
+<tr>
+<td valign="top">
+
+Sets up a whole disk from nothing. You do not install NixOS first: the
+stick only runs the installer, and nothing from it ends up on the disk.
+GjallarOS is itself a NixOS system, built from this repository.
+
+1. Download the NixOS minimal ISO from
+   [nixos.org/download](https://nixos.org/download) and write it to a
+   USB stick, for example with GNOME Disks ("Restore Disk Image").
+2. Turn Secure Boot off in the firmware settings. The NixOS stick is
+   not signed; the installer offers to set Secure Boot up again
+   (see [Secure Boot](#secure-boot)).
+3. Start from the stick (the boot menu key is often F12, F10 or Esc).
+   Ethernet connects on its own; for Wi-Fi, run `nmtui`.
+4. Run the command below and answer the questions. The disk you pick
+   is erased completely; the installer asks twice before it touches
+   it. Write down the recovery key it shows.
+5. Shut down, pull the stick, and start from the disk.
+
+</td>
+<td valign="top">
+
+On a machine that already runs NixOS, run the same command there. No
+stick needed. After one approval the installer adds the tools it needs
+to `/etc/nixos/configuration.nix`, rebuilds, and carries on.
+
+From an existing checkout, run `./scripts/installation/install.sh`
+directly.
+
+</td>
+</tr>
+</table>
+
+Both start with the same command:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/JadeOpenServices/gjallarOS/stable/scripts/installation/install.sh | bash
@@ -37,8 +77,7 @@ curl -fsSL https://raw.githubusercontent.com/JadeOpenServices/gjallarOS/stable/s
 The script clones the repository with its submodules into
 `~/Documents/gjallarOS` (set `GJALLAR_DIR` to change it) and starts the
 interactive installer from that checkout. Re-running it reuses the checkout.
-`GJALLAR_CLONE_ONLY=1` stops after the clone. From an existing checkout,
-run `./scripts/installation/install.sh` directly.
+`GJALLAR_CLONE_ONLY=1` stops after the clone.
 
 To install from `staging` or `dev` instead of `stable`, add `--channel`
 (or set `GJALLAR_CHANNEL`):
