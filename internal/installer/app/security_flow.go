@@ -72,11 +72,11 @@ const (
 	// keptTPM2NoLUKS turns the request off: no encrypted system disk.
 	keptTPM2NoLUKS
 	// keptTPM2NoSecureBoot turns the request off: GjallarOS Secure Boot is
-	// not set up and the disk holds no TPM2 enrollment (fresh-install rule).
+	// not set up, and the build refuses TPM2 unlock without it
+	// (measured-boot.nix). A token left on the disk is removed by
+	// gjallar-tpm2-clear (L47); the login card brings chip unlock back once
+	// Secure Boot is set up (wiki 752 Q224).
 	keptTPM2NoSecureBoot
-	// keptTPM2Enrolled keeps an enrollment that already works while Secure
-	// Boot is off; new enrollments wait for Secure Boot (wiki 752 Q213).
-	keptTPM2Enrolled
 )
 
 // keptHardwareTPM2 decides a TPM2 request on a kept hardware.nix. Only
@@ -86,49 +86,19 @@ const (
 // unencrypted disk, luksTpm2Enable = true and every rebuild stopped at
 // "requires exactly one LUKS device").
 func keptHardwareTPM2(
-	ctx context.Context,
 	requested, endpointManaged, persistentInstalledHost, secureBoot bool,
 	hardwarePath string,
-) (keptTPM2, error) {
+) keptTPM2 {
 	if !requested || tpm2FollowsRequest(endpointManaged, persistentInstalledHost) {
-		return keptTPM2AsRequested, nil
+		return keptTPM2AsRequested
 	}
 	if noLUKSMapping(hardwarePath) {
-		return keptTPM2NoLUKS, nil
+		return keptTPM2NoLUKS
 	}
-	if tpm2AllowedForSecureBoot(secureBoot) {
-		return keptTPM2AsRequested, nil
+	if !tpm2AllowedForSecureBoot(secureBoot) {
+		return keptTPM2NoSecureBoot
 	}
-	enrolled, err := luksHasTPM2Token(ctx, hardwarePath)
-	if err != nil {
-		return keptTPM2AsRequested, err
-	}
-	if enrolled {
-		return keptTPM2Enrolled, nil
-	}
-	return keptTPM2NoSecureBoot, nil
-}
-
-// luksHasTPM2Token reports whether the LUKS header of the system disk in
-// hardwarePath holds a TPM2 enrollment. Reading the header needs root.
-// Anything it cannot read is an error, never a guess.
-func luksHasTPM2Token(ctx context.Context, hardwarePath string) (bool, error) {
-	mapping, err := diskcrypto.MappingDetails(hardwarePath)
-	if err != nil {
-		return false, fmt.Errorf("read %s: %w", hardwarePath, err)
-	}
-	if !strings.HasPrefix(mapping.Device, "/dev/") {
-		return false, fmt.Errorf("%s names no encrypted system disk under /dev for %q", hardwarePath, mapping.Name)
-	}
-	raw, err := privilegedCommand(ctx, "cryptsetup", "luksDump", "--dump-json-metadata", mapping.Device)
-	if err != nil {
-		return false, fmt.Errorf("check the TPM2 enrollment on %s: %w", mapping.Device, err)
-	}
-	slots, err := diskcrypto.ParseKeyslots(raw)
-	if err != nil {
-		return false, fmt.Errorf("check the TPM2 enrollment on %s: %w", mapping.Device, err)
-	}
-	return len(slots.TPM2) > 0, nil
+	return keptTPM2AsRequested
 }
 
 // saveTPM2Off turns TPM2 unlock off in user.config.json too. The file is
