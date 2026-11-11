@@ -1175,20 +1175,14 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 
 	case hardwareRetain:
 		fmt.Fprintln(out, "Existing hardware configuration retained:", hardwarePath)
-		kept, err := keptHardwareTPM2(
-			ctx,
+		kept := keptHardwareTPM2(
 			s.render.LUKSTPM2Enable,
 			s.render.Management.Enable,
 			persistentInstalledHost,
 			s.render.SecureBootEnable,
 			hardwarePath,
 		)
-		if err != nil {
-			return fail(errOut, err)
-		}
 		switch kept {
-		case keptTPM2Enrolled:
-			fmt.Fprintln(out, "GjallarOS Secure Boot is not set up on this install; the TPM2 disk unlock already enrolled stays, and a new enrollment waits for Secure Boot.")
 		case keptTPM2NoLUKS, keptTPM2NoSecureBoot:
 			s.render.LUKSTPM2Enable = false
 			if err := saveTPM2Off(&s.user, presetPath, out); err != nil {
