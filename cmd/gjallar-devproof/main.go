@@ -74,7 +74,9 @@ func (c checker) check(ctx context.Context, kind string, secret []byte) devgate.
 	}
 	device, err := c.device(ctx)
 	if err == nil && device == "" {
-		err = fmt.Errorf("the system disk is not encrypted")
+		log.Print("system disk: not encrypted")
+		reply.Error = devgate.Unencrypted
+		return reply
 	}
 	if err != nil {
 		log.Printf("system disk: %v", err)
