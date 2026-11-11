@@ -123,26 +123,26 @@ func TestSystemRebuildNeedsDeveloperGrant(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if code := checkDeveloperGrant(user, &stderr); code != 0 {
+	if code := checkDeveloperGrant(user, new(bool), &stderr); code != 0 {
 		t.Fatalf("stable without a grant: %d", code)
 	}
 	user.ReleaseChannel = "dev"
 	if err := devgate.Save(developerGrantPath, devgate.Grant{Channels: true, Proof: devgate.ProofPIN}); err != nil {
 		t.Fatal(err)
 	}
-	if code := checkDeveloperGrant(user, &stderr); code != 0 {
+	if code := checkDeveloperGrant(user, new(bool), &stderr); code != 0 {
 		t.Fatalf("dev with a channel grant: %d %q", code, stderr.String())
 	}
 	user.DeveloperMode = true
 	stderr.Reset()
-	if code := checkDeveloperGrant(user, &stderr); code != 1 || !strings.Contains(stderr.String(), "developer mode needs") {
+	if code := checkDeveloperGrant(user, new(bool), &stderr); code != 1 || !strings.Contains(stderr.String(), "developer mode needs") {
 		t.Fatalf("developer mode on a channel grant: %d %q", code, stderr.String())
 	}
 	if err := os.WriteFile(developerGrantPath, []byte("{"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	user.DeveloperMode = false
-	if code := checkDeveloperGrant(user, &stderr); code != 1 {
+	if code := checkDeveloperGrant(user, new(bool), &stderr); code != 1 {
 		t.Fatal("a broken grant let dev build")
 	}
 
@@ -151,14 +151,14 @@ func TestSystemRebuildNeedsDeveloperGrant(t *testing.T) {
 	if err := devgate.Save(developerGrantPath, devgate.Grant{Channels: true, DeveloperMode: true, Proof: devgate.ProofPIN}); err != nil {
 		t.Fatal(err)
 	}
-	if code := checkDeveloperGrant(user, &stderr); code != 0 {
+	if code := checkDeveloperGrant(user, new(bool), &stderr); code != 0 {
 		t.Fatalf("dev with a wide grant: %d %q", code, stderr.String())
 	}
 	if g, err := devgate.Load(developerGrantPath); err != nil || !g.Channels || g.DeveloperMode {
 		t.Fatalf("grant after a rebuild without developer mode: %+v %v", g, err)
 	}
 	user.ReleaseChannel = "stable"
-	if code := checkDeveloperGrant(user, &stderr); code != 0 {
+	if code := checkDeveloperGrant(user, new(bool), &stderr); code != 0 {
 		t.Fatalf("stable with a grant: %d %q", code, stderr.String())
 	}
 	if _, err := os.Stat(developerGrantPath); !os.IsNotExist(err) {
@@ -172,14 +172,20 @@ func TestSystemRebuildNeedsDeveloperGrant(t *testing.T) {
 	devproofSocketPath = filepath.Join(t.TempDir(), "missing.socket")
 	user.ReleaseChannel = "staging"
 	stderr.Reset()
-	if code := checkDeveloperGrant(user, &stderr); code != 0 || !strings.Contains(stderr.String(), "confirm-developer once") {
+	var noticed bool
+	if code := checkDeveloperGrant(user, &noticed, &stderr); code != 0 || !strings.Contains(stderr.String(), "confirm-developer once") {
 		t.Fatalf("migration from a system without the gate: %d %q", code, stderr.String())
+	}
+	// The rebuild's second check on the same system says nothing new
+	// (Plane 330).
+	if code := checkDeveloperGrant(user, &noticed, &stderr); code != 0 || strings.Count(stderr.String(), "[gjallarOS] Notice:") != 1 {
+		t.Fatalf("second check of one rebuild: %d %q", code, stderr.String())
 	}
 	if _, err := os.Stat(developerGrantPath); !os.IsNotExist(err) {
 		t.Fatalf("the migration wrote a grant: %v", err)
 	}
 	devproofSocketPath = savedSocket
-	if code := checkDeveloperGrant(user, &stderr); code != 1 {
+	if code := checkDeveloperGrant(user, new(bool), &stderr); code != 1 {
 		t.Fatal("staging without a grant built on a system with the gate")
 	}
 }
