@@ -44,6 +44,8 @@ buildGoModule {
       ../../internal/tty
       ../../internal/usbtrust
       ../../internal/winesandbox
+      ../../system/tools/legacy/legacy.go
+      ../../system/tools/legacy/renames.json
     ];
   };
 
