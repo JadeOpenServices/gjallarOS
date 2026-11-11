@@ -493,6 +493,9 @@ and the Plane or JODS item.
 
 - An old command is not run. The shell prints the new name and stops,
   for example: gjallarOS: rebuild was removed; use gjallarctl rebuild
+- An old field in `user.config.json` is not read. Everything that reads
+  the file stops with "unknown field: OLD is now NEW; move the value there
+  in user.config.json", with the names from the table's config-field row.
 - The flake check `legacy-names` fails while an old name is still used
   outside `system/tools/legacy/`, and once the release in `system/release`
   is newer than a row's `deleteAfter` tag. Then the row and the last traces
