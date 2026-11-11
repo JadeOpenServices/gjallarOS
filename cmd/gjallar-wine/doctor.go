@@ -52,7 +52,7 @@ func resetCmd(args []string, stdout, stderr io.Writer) error {
 		return err
 	}
 	// The base prefix is made first: if that fails, nothing has changed.
-	base, err := ensureBase(home, stderr)
+	base, err := ensureBase(home, stderr, nil, "")
 	if err != nil {
 		return err
 	}

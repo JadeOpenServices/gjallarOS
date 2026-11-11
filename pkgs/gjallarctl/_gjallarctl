@@ -367,8 +367,8 @@ _gjallarctl_wine() {
       _arguments "1:app id:(${ids[*]})" \
         '--internet[reach the internet]:state:(on off)' \
         '--home[reach the tailnet and home network]:state:(on off)' ;;
-    add) _arguments '1:app name:' "2:installer:$installer" ;;
-    install) _arguments "1:app id:(${ids[*]})" "2:installer:$installer" ;;
+    add) _arguments '--progress-fd[pipe the app window reads progress from]:fd number:' '1:app name:' "2:installer:$installer" ;;
+    install) _arguments '--progress-fd[pipe the app window reads progress from]:fd number:' "1:app id:(${ids[*]})" "2:installer:$installer" ;;
     check) _arguments "1:installer:$installer" ;;
     fixes)
       local -a fixes=(${(f)"$(gjallarctl wine fixes --ids 2>/dev/null)"})

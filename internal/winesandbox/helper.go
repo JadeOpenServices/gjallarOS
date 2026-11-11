@@ -47,4 +47,5 @@ const CommandsUsage = `       gjallarctl wine add NAME [INSTALLER]  add an app w
 ID is the app's id, as gjallarctl wine list shows it. CHOICE is a number from
 the list or a program's path on C: or D:, such as D:\Tool\tool.exe. An
 installer is an .exe or .msi file; add and install check it the same way
-before they run it.`
+before they run it. The app window starts add and install with --progress-fd N
+first, a pipe it reads their progress from.`
