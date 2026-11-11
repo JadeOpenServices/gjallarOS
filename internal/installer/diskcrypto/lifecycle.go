@@ -24,11 +24,11 @@ type Keyslots struct {
 	// systemd before 255 wrote those; their unlock trusts whatever chip
 	// answers. gjallar-tpm2-reenroll replaces them.
 	TPM2NoSRK bool
-	// A TPM2 token without a pcrlock policy. GjallarOS enrolls only with
+	// A TPM2 token without a pcrlock policy. gjallarOS enrolls only with
 	// one; the others came from the first installers (2026-08/09, no PCRs
 	// at all) or by hand, and nothing ties them to how the device starts.
 	TPM2NoPolicy bool
-	// A TPM2 token with a pcrlock policy: one GjallarOS enrolled.
+	// A TPM2 token with a pcrlock policy: one gjallarOS enrolled.
 	TPM2Policy bool
 	// Token id of each TPM2 slot.
 	TPM2Token map[int]string

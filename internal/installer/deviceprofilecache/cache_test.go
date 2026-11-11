@@ -143,7 +143,7 @@ func TestMaterializeAndVerify(t *testing.T) {
 	}
 	if verified.Source.GjallarOSRevision != "gjallar-test-revision" {
 		t.Fatalf(
-			"GjallarOS revision=%q",
+			"gjallarOS revision=%q",
 			verified.Source.GjallarOSRevision,
 		)
 	}

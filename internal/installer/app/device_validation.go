@@ -90,7 +90,7 @@ func enforceDeviceValidation(
 
 	if user.UnattendedInstall {
 		return fmt.Errorf(
-			"ODDC model %q is not validated for NixOS %q, GjallarOS %q, and ODDC revision %q; unattended installation requires allowUnvalidatedODDCModel=true",
+			"ODDC model %q is not validated for NixOS %q, gjallarOS %q, and ODDC revision %q; unattended installation requires allowUnvalidatedODDCModel=true",
 			modelID,
 			nixOSRelease,
 			gjallarOSRevision,
@@ -101,7 +101,7 @@ func enforceDeviceValidation(
 	approved, err := ui.Confirm(
 		ctx,
 		fmt.Sprintf(
-			"WARNING: ODDC model %q has not completed the full real-device validation gate for NixOS %s and the current GjallarOS/ODDC revisions. Continuing may cause hardware, graphics, tablet/sensor, or Secure Boot problems. Continue with this unvalidated device?",
+			"WARNING: ODDC model %q has not completed the full real-device validation gate for NixOS %s and the current gjallarOS/ODDC revisions. Continuing may cause hardware, graphics, tablet/sensor, or Secure Boot problems. Continue with this unvalidated device?",
 			modelID,
 			nixOSRelease,
 		),

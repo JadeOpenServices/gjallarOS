@@ -1,4 +1,4 @@
-"""GjallarOS settings window: gjallarHorn and the app catalogue.
+"""gjallarOS settings window: gjallarHorn and the app catalogue.
 
 Plane 216 (gjallarHorn), 218 (settings window) and 220 (apps). The window
 holds no rights of its own: it reads `gjallarctl security status --json`,
@@ -326,13 +326,13 @@ class Backend(QObject):
         # gjallarctl wine checks both again; these only keep a wrong pick out.
         if not self._wineTool or not name or not os.path.isabs(installer) or not os.path.isfile(installer):
             return
-        self._wineTerminal("GjallarOS Wine app", ["add", name, installer])
+        self._wineTerminal("gjallarOS Wine app", ["add", name, installer])
 
     @Slot(str)
     def pickWineProgram(self, app_id):
         """Choose the program a Wine app starts, from the programs its shortcuts start."""
         if self._wineTool and WINE_ID.fullmatch(app_id):
-            self._wineTerminal("GjallarOS Wine app", ["program", app_id])
+            self._wineTerminal("gjallarOS Wine app", ["program", app_id])
 
     @Slot(str, bool)
     def removeWine(self, app_id, delete_files):
@@ -511,7 +511,7 @@ def main():
     # the usual way when started from a terminal.
     signal.signal(signal.SIGINT, signal.SIG_DFL)
     app = QGuiApplication(sys.argv)
-    app.setApplicationName("GjallarOS Settings")
+    app.setApplicationName("gjallarOS Settings")
     app.setDesktopFileName("gjallar-settings")
     app.setWindowIcon(QIcon.fromTheme("preferences-system"))
     app.setFont(QFont("Fira Sans", 11))

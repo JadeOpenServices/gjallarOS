@@ -189,7 +189,7 @@ func (u UI) Confirm(ctx context.Context, message string, defaultYes bool) (bool,
 		width := gtkConfirmationWidth(message)
 		args := []string{
 			"--question",
-			"--title=GjallarOS installer",
+			"--title=gjallarOS installer",
 			"--text=" + message,
 			"--width=" + strconv.Itoa(width),
 			"--ok-label=Yes",
@@ -255,7 +255,7 @@ SECURE BOOT RECOVERY PASSPHRASE
 
 IMPORTANT
 
-The encrypted archive contains this machine's GjallarOS Secure Boot
+The encrypted archive contains this machine's gjallarOS Secure Boot
 signing keys.
 
 The recovery passphrase is required to decrypt that archive.
@@ -278,7 +278,7 @@ Do not continue until you have saved both.
 	}
 	return u.secureTextDialog(
 		ctx,
-		"GjallarOS Secure Boot Recovery Key",
+		"gjallarOS Secure Boot Recovery Key",
 		text,
 		"I have saved this recovery material",
 	)
@@ -309,7 +309,7 @@ func (u UI) secretOut() (io.Writer, func(), error) {
 func (u UI) SecureBootOwnershipPlan(ctx context.Context, plan string) error {
 	return u.secureTextDialog(
 		ctx,
-		"GjallarOS Secure Boot - What Will Change",
+		"gjallarOS Secure Boot - What Will Change",
 		plan,
 		"Continue",
 	)
@@ -328,7 +328,7 @@ func (u UI) SecureBootEnableHandoff(
 	instructions := fmt.Sprintf(`GJALLAROS SECURE BOOT
 FINAL FIRMWARE ACTION
 
-GjallarOS ownership is already enrolled and verified.
+gjallarOS ownership is already enrolled and verified.
 
 Firmware: %s
 
@@ -338,7 +338,7 @@ Do not clear, erase, reset, or replace Secure Boot keys during this final step.
 
 	if err := u.secureTextDialog(
 		ctx,
-		"GjallarOS Secure Boot - Enable Secure Boot",
+		"gjallarOS Secure Boot - Enable Secure Boot",
 		instructions,
 		"Continue",
 	); err != nil {
@@ -395,10 +395,10 @@ Follow the detected device firmware policy exactly:
 After completing the firmware action:
 
 - save the firmware configuration
-- boot GjallarOS normally
-- leave further Secure Boot changes to the GjallarOS enrollment transaction
+- boot gjallarOS normally
+- leave further Secure Boot changes to the gjallarOS enrollment transaction
 
-GjallarOS will verify the expected firmware state before performing enrollment.
+gjallarOS will verify the expected firmware state before performing enrollment.
 After enrolling its keys it reboots into firmware setup once more. There:
 
 %s`,
@@ -412,21 +412,21 @@ After enrolling its keys it reboots into firmware setup once more. There:
 Different firmware implementations require different steps to enter a safe
 Secure Boot enrollment state.
 
-GjallarOS therefore does not hardcode a vendor procedure in the installer UI.
+gjallarOS therefore does not hardcode a vendor procedure in the installer UI.
 The instructions above come from the detected device's validated ODDC firmware
 policy.
 
 The policy is descriptive data only. It cannot provide commands, scripts,
 executables, URLs, or arbitrary shell input.
 
-GjallarOS will independently verify the resulting firmware state before any
+gjallarOS will independently verify the resulting firmware state before any
 key enrollment is allowed.
 `
 
 	for {
 		if err := u.secureTextDialog(
 			ctx,
-			"GjallarOS Secure Boot - Firmware Instructions",
+			"gjallarOS Secure Boot - Firmware Instructions",
 			instructions,
 			"Continue",
 		); err != nil {
@@ -445,7 +445,7 @@ key enrollment is allowed.
 		if !understood {
 			if err := u.secureTextDialog(
 				ctx,
-				"GjallarOS Secure Boot - Explanation",
+				"gjallarOS Secure Boot - Explanation",
 				explanation,
 				"Back to instructions",
 			); err != nil {
@@ -483,7 +483,7 @@ func (u UI) Exact(ctx context.Context, label, expected string) error {
 		out, err := zenityCommand(
 			ctx,
 			"--entry",
-			"--title=GjallarOS installer",
+			"--title=gjallarOS installer",
 			"--text="+label,
 		).Output()
 		if err != nil {
@@ -535,7 +535,7 @@ func (u UI) readLine(ctx context.Context) (string, error) {
 
 func (u UI) Value(ctx context.Context, label, def string) (string, error) {
 	if u.GTK {
-		out, err := zenityCommand(ctx, "--entry", "--title=GjallarOS installer", "--text="+label, "--entry-text="+def).Output()
+		out, err := zenityCommand(ctx, "--entry", "--title=gjallarOS installer", "--text="+label, "--entry-text="+def).Output()
 		if err != nil {
 			return "", ErrCancelled
 		}
@@ -564,7 +564,7 @@ func (u UI) Example(ctx context.Context, label, example string, required bool) (
 	for {
 		var line string
 		if u.GTK {
-			out, err := zenityCommand(ctx, "--entry", "--title=GjallarOS installer", "--text="+text).Output()
+			out, err := zenityCommand(ctx, "--entry", "--title=gjallarOS installer", "--text="+text).Output()
 			if err != nil {
 				return "", ErrCancelled
 			}
@@ -592,7 +592,7 @@ func (u UI) Choice(ctx context.Context, label, def string, options []string) (st
 		return "", fmt.Errorf("no options for %s", label)
 	}
 	if u.GTK {
-		args := []string{"--list", "--radiolist", "--title=GjallarOS installer", "--text=" + label, "--column=Selected", "--column=Value"}
+		args := []string{"--list", "--radiolist", "--title=gjallarOS installer", "--text=" + label, "--column=Selected", "--column=Value"}
 		for _, v := range options {
 			args = append(args, strconv.FormatBool(v == def), v)
 		}
@@ -632,7 +632,7 @@ func (u UI) Multi(ctx context.Context, label string, defaults, options []string)
 		selected[v] = true
 	}
 	if u.GTK {
-		args := []string{"--list", "--checklist", "--title=GjallarOS installer", "--text=" + label, "--separator=\n", "--column=Selected", "--column=Value"}
+		args := []string{"--list", "--checklist", "--title=gjallarOS installer", "--text=" + label, "--separator=\n", "--column=Selected", "--column=Value"}
 		for _, v := range options {
 			args = append(args, strconv.FormatBool(selected[v]), v)
 		}
@@ -697,7 +697,7 @@ func (u UI) Checklist(ctx context.Context, label string, items []Item) ([]string
 		return values
 	}
 	if u.GTK {
-		args := []string{"--list", "--checklist", "--title=GjallarOS installer", "--text=" + label, "--width=720", "--height=420", "--separator=\n",
+		args := []string{"--list", "--checklist", "--title=gjallarOS installer", "--text=" + label, "--width=720", "--height=420", "--separator=\n",
 			"--column=Use", "--column=Value", "--column=Name", "--column=Description", "--hide-column=2", "--print-column=2"}
 		for _, item := range items {
 			args = append(args, strconv.FormatBool(item.On), item.Value, item.Name, item.Description)
@@ -764,7 +764,7 @@ func (u UI) Checklist(ctx context.Context, label string, items []Item) ([]string
 func finalFirmwareSteps(lockSteps []string) []string {
 	steps := []string{"Enable Secure Boot."}
 	steps = append(steps, lockSteps...)
-	return append(steps, "Save the firmware configuration.", "Boot GjallarOS.")
+	return append(steps, "Save the firmware configuration.", "Boot gjallarOS.")
 }
 
 func numberedSteps(steps []string) string {

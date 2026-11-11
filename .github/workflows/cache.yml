@@ -1,4 +1,4 @@
-# Builds the packages GjallarOS patches (flake package `prebuilt`) for each
+# Builds the packages gjallarOS patches (flake package `prebuilt`) for each
 # release tag and adds them to the signed Nix cache kept as files of the
 # `nix-cache` release, so machines download them instead of compiling for
 # hours. Setup: README "Release cache".
@@ -110,7 +110,7 @@ jobs:
         run: |
           gh release view nix-cache > /dev/null 2>&1 ||
             gh release create nix-cache --prerelease --title "Nix cache" \
-              --notes 'Signed Nix binary cache for GjallarOS packages, not a release. See README "Release cache".'
+              --notes 'Signed Nix binary cache for gjallarOS packages, not a release. See README "Release cache".'
           gh release view nix-cache --json assets --jq '.assets[].name' | sort > "$RUNNER_TEMP/have"
           for files in '*.nar.zst' '*.narinfo' nix-cache-info; do
             ls $files | sort | comm -23 - "$RUNNER_TEMP/have" | xargs -r gh release upload nix-cache

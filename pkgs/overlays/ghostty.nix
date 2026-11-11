@@ -15,7 +15,7 @@ in
 {
   ghostty =
     assert lib.assertMsg (prev.ghostty.version == "1.3.1")
-      "GjallarOS ghostty overlay patches 1.3.1; check pkgs/patches/ghostty-*.patch against ${prev.ghostty.version}.";
+      "gjallarOS ghostty overlay patches 1.3.1; check pkgs/patches/ghostty-*.patch against ${prev.ghostty.version}.";
     prev.ghostty.overrideAttrs (old: {
       patches = (old.patches or [ ]) ++ [
         ../patches/ghostty-touch-cancel.patch

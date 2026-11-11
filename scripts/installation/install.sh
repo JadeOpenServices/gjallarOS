@@ -13,14 +13,14 @@ fi
 set -euo pipefail
 
 command -v nix >/dev/null 2>&1 || {
-    printf 'ERROR: Nix is required to bootstrap GjallarOS.\n' >&2
+    printf 'ERROR: Nix is required to bootstrap gjallarOS.\n' >&2
     exit 1
 }
 
-# GjallarOS boots with systemd-boot or lanzaboote from an ESP; a machine
+# gjallarOS boots with systemd-boot or lanzaboote from an ESP; a machine
 # started in legacy BIOS mode would install and then not boot.
 [[ -d /sys/firmware/efi ]] || {
-    printf 'ERROR: GjallarOS needs UEFI boot. This system was started in legacy BIOS mode; switch the firmware to UEFI (disable CSM) and boot the installer media again.\n' >&2
+    printf 'ERROR: gjallarOS needs UEFI boot. This system was started in legacy BIOS mode; switch the firmware to UEFI (disable CSM) and boot the installer media again.\n' >&2
     exit 1
 }
 
@@ -70,7 +70,7 @@ case "$channel" in
         ;;
 esac
 
-# An installed GjallarOS that builds from the root-owned system checkout
+# An installed gjallarOS that builds from the root-owned system checkout
 # runs the installer there, as root (wiki 752 Q214): settings written to any
 # other checkout are never built. gjallar-system-rebuild --update moves the
 # system checkout to the chosen channel, under the same checks as
@@ -86,12 +86,12 @@ if [[ -r "$system_repository_file" ]]; then
 fi
 if (( system_install )); then
     [[ -f "$system_checkout/scripts/installation/install.sh" ]] || {
-        printf 'ERROR: this GjallarOS builds from %s, but that checkout is missing; nothing was changed.\n' "$system_checkout" >&2
+        printf 'ERROR: this gjallarOS builds from %s, but that checkout is missing; nothing was changed.\n' "$system_checkout" >&2
         exit 1
     }
     self="$(realpath -e -- "${BASH_SOURCE[0]:-/dev/stdin}" 2>/dev/null || true)"
     if (( EUID != 0 )) || [[ "$self" != "$system_checkout/scripts/installation/install.sh" ]]; then
-        printf 'This GjallarOS builds from %s; the installer runs there as root.\n' "$system_checkout"
+        printf 'This gjallarOS builds from %s; the installer runs there as root.\n' "$system_checkout"
         (exec </dev/tty) 2>/dev/null || {
             printf 'ERROR: the installer is interactive and needs a terminal.\n' >&2
             exit 1
@@ -198,7 +198,7 @@ if [[ ! -f "$repo/pkgs/monique/nix/nixos-module.nix" ]]; then
     stage_flake
 fi
 
-printf 'Building the GjallarOS installer...\n'
+printf 'Building the gjallarOS installer...\n'
 installer_path="$(nix --extra-experimental-features 'nix-command flakes' build \
     --no-link --print-out-paths "path:$flake_src#gjallar-installer")"
 
@@ -218,7 +218,7 @@ probe_tools=(
     # Provided by the prerequisite rebuild on installed hosts; live media
     # skips that rebuild and the minimal ISO ships none of them.
     nixpkgs#sbctl
-    # Queues the GjallarOS key for shim on locked firmware (Plane 293).
+    # Queues the gjallarOS key for shim on locked firmware (Plane 293).
     nixpkgs#mokutil
     nixpkgs#openssl
     nixpkgs#age
@@ -232,7 +232,7 @@ if [[ -n "${WAYLAND_DISPLAY:-}${DISPLAY:-}" && -z "${SSH_CONNECTION:-}" &&
     probe_tools+=(nixpkgs#zenity)
 fi
 
-printf 'Preparing GjallarOS hardware probe environment...\n'
+printf 'Preparing gjallarOS hardware probe environment...\n'
 
 # Not exec: the EXIT trap removes the staged source afterwards.
 nix --extra-experimental-features 'nix-command flakes' shell \

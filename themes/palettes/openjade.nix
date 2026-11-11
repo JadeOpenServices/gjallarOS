@@ -1,4 +1,4 @@
-# openJade desktop palettes, picked in Noctalia's settings (Appearance,
+# OpenJade desktop palettes, picked in Noctalia's settings (Appearance,
 # custom palette). Source: THEMEBRAIN (Nextcloud claude/themebrain).
 #
 # Obsidian is the brand's dark theme as written there (section 1); tertiary

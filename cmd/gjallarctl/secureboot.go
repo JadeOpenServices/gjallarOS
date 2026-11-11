@@ -90,7 +90,7 @@ func runSecureBootSetup(ctx context.Context, repo string, ownKeys bool, stdout, 
 
 	repo, err := installercheck.DiscoverRepository(repo)
 	if err != nil {
-		return fail(fmt.Errorf("resolve GjallarOS repository: %w", err))
+		return fail(fmt.Errorf("resolve gjallarOS repository: %w", err))
 	}
 	configPath := filepath.Join(repo, "user.config.json")
 	user, err := config.Load(configPath)
@@ -126,9 +126,9 @@ func runSecureBootSetup(ctx context.Context, repo string, ownKeys bool, stdout, 
 
 	if !user.SecureBootEnable {
 		fmt.Fprint(stdout, secureboot.OwnershipPlan(firmware.Policy, user.LUKSTPM2Enable))
-		question := "Set up Secure Boot with GjallarOS keys?"
+		question := "Set up Secure Boot with gjallarOS keys?"
 		if name := strings.TrimSpace(firmware.Policy.FirmwareName); name != "" {
-			question = "Set up Secure Boot with GjallarOS keys on " + name + "?"
+			question = "Set up Secure Boot with gjallarOS keys on " + name + "?"
 		}
 		yes, err := ui.Confirm(ctx, question, false)
 		if err != nil {

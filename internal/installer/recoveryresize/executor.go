@@ -233,7 +233,7 @@ func ExecuteFreshInstallerResize(
 
 	// GNU Parted --script deliberately answers NO to warnings, including
 	// partition shrink confirmation. The destructive action has already
-	// passed GjallarOS installer consent and identity validation, so perform
+	// passed gjallarOS installer consent and identity validation, so perform
 	// this single resizepart interactively with deterministic C-locale input.
 	//
 	// Only the partition END is changed. The start, PARTUUID and type GUID

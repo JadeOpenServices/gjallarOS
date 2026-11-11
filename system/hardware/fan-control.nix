@@ -1,4 +1,4 @@
-# ODDC runs the fw-fanctrl backend on models with fan policy; GjallarOS
+# ODDC runs the fw-fanctrl backend on models with fan policy; gjallarOS
 # supplies the policy controller that applies its thresholds.
 { ... }:
 {

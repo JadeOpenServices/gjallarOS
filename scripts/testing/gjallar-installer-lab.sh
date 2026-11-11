@@ -173,7 +173,7 @@ run_install() {
     say "Physical host disks: NOT attached"
     say "Installer repository inside guest: /run/gjallarOS/repo"
     say
-    say "Inside the GjallarOS environment, run the installer against:"
+    say "Inside the gjallarOS environment, run the installer against:"
     say "  /dev/vda"
     say
     say "When asked for destructive confirmation, it should require:"
@@ -292,7 +292,7 @@ Usage:
   $0 reset
 
 install
-  Builds the real GjallarOS recovery/installer ISO, creates an
+  Builds the real gjallarOS recovery/installer ISO, creates an
   80 GiB disposable qcow2 disk, starts QEMU/KVM with UEFI + TPM2,
   and boots the ISO.
 

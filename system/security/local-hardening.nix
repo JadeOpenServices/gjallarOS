@@ -30,7 +30,7 @@
 
   # pkexec's generic action runs any program as root behind one password
   # dialog, so every local process can raise a root prompt that looks like a
-  # GjallarOS one. Tools that need root ship their own action with a fixed
+  # gjallarOS one. Tools that need root ship their own action with a fixed
   # program path (exec.path annotation), as KDE does with KAuth helpers; the
   # generic action is refused. Root keeps it for recovery work.
   security.polkit.extraConfig = lib.mkAfter ''

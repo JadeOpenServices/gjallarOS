@@ -18,10 +18,10 @@ in
   };
 
   # The unit existed only in the wrapper generation built for release
-  # alignment; installing GjallarOS or a later rebuild dropped it, and a
+  # alignment; installing gjallarOS or a later rebuild dropped it, and a
   # reboot mid-resume lost the transaction (e2e-target, 2026-10-05).
   config.systemd.services.installer-resume = {
-    description = "Resume the GjallarOS installer after a planned or interrupted reboot";
+    description = "Resume the gjallarOS installer after a planned or interrupted reboot";
     wantedBy = [ "multi-user.target" ];
     wants = [ "network-online.target" ];
     after = [

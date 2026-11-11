@@ -195,7 +195,7 @@ const (
 	// firmware tried another boot entry first. Re-enroll refuses until one
 	// clean restart; card only.
 	diskProtectionRestart = "restart"
-	// A chip keyslot GjallarOS did not set up opens the disk for any start
+	// A chip keyslot gjallarOS did not set up opens the disk for any start
 	// (first installers, or by hand). Secure Boot with the chip unlock
 	// replaces it; until then the card points to luks status.
 	diskProtectionChipNoPolicy = "chip-no-policy"
@@ -270,7 +270,7 @@ func diskProtectionState(r luksRecord, kind diskcrypto.TPMKind, chip func() chip
 // With Secure Boot on and a TPM 2.0, chip unlock is either switched off
 // or waits for the next start. With it off, chip unlock is possible where
 // gjallarctl secure-boot setup can turn it on: through shim when the
-// firmware would start it, or with GjallarOS keys on models whose firmware
+// firmware would start it, or with gjallarOS keys on models whose firmware
 // ODDC knows. Anything unknown counts as no, so a generic model is never
 // sent into a setup that refuses it. Secure Boot and chip unlock both off
 // shows no card (Plane 309).
@@ -384,7 +384,7 @@ func diskProtectionTexts(state string, r luksRecord) diskProtectionText {
 	case diskProtectionChipNoPolicy:
 		return diskProtectionText{
 			summary: "Disk not protected at startup",
-			body:    "The security chip opens your disk for any start. GjallarOS did not set it up.",
+			body:    "The security chip opens your disk for any start. gjallarOS did not set it up.",
 			risk:    "anyone who has this device can get to your files",
 			command: []string{"luks", "status"},
 		}
@@ -539,7 +539,7 @@ func runLUKSRemind(args []string, stderr io.Writer) int {
 // runDiskProtectionSetup opens a terminal with the setup command, waits for
 // it, then updates the state, so the bar follows at once.
 func runDiskProtectionSetup(command []string, stderr io.Writer) int {
-	if code := runInTerminal("GjallarOS disk protection", command, stderr); code != 0 {
+	if code := runInTerminal("gjallarOS disk protection", command, stderr); code != 0 {
 		return code
 	}
 	return runLUKSRemind([]string{"--refresh"}, stderr)

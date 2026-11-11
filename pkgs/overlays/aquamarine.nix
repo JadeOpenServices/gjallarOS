@@ -13,7 +13,7 @@ in
 {
   aquamarine =
     assert lib.assertMsg (prev.aquamarine.version == "0.11.0")
-      "GjallarOS aquamarine overlay patches 0.11.0; drop pkgs/patches/aquamarine-primary-renderer-once.patch if updateSecondaryRendererState no longer retries initMgpu for a primary GPU on every commit.";
+      "gjallarOS aquamarine overlay patches 0.11.0; drop pkgs/patches/aquamarine-primary-renderer-once.patch if updateSecondaryRendererState no longer retries initMgpu for a primary GPU on every commit.";
     prev.aquamarine.overrideAttrs (old: {
       patches = (old.patches or [ ]) ++ [ ../patches/aquamarine-primary-renderer-once.patch ];
     });

@@ -9,7 +9,7 @@ in
 {
   wvkbd =
     assert lib.assertMsg (prev.wvkbd.version == "0.19.4")
-      "GjallarOS wvkbd overlay moves 0.19.4 to 0.20; review or remove pkgs/overlays/wvkbd.nix now that nixpkgs has ${prev.wvkbd.version}.";
+      "gjallarOS wvkbd overlay moves 0.19.4 to 0.20; review or remove pkgs/overlays/wvkbd.nix now that nixpkgs has ${prev.wvkbd.version}.";
     prev.wvkbd.overrideAttrs (old: rec {
       version = "0.20";
       src = prev.fetchFromGitHub {

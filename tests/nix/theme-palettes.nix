@@ -1,5 +1,5 @@
 { pkgs }:
-# Holds every openJade palette to the brand floors (text 12:1, dim text and
+# Holds every OpenJade palette to the brand floors (text 12:1, dim text and
 # accent 3:1 on the ground) and to the 4.5:1 the Noctalia pre-hook asks for.
 # Tones Noctalia derives itself (surface_container_*) are left to that
 # pre-hook at run time.

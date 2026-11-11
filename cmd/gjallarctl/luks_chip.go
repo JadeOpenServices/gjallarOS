@@ -40,7 +40,7 @@ func runLUKSChip(ctx context.Context, in io.Reader, stdout, stderr io.Writer) in
 
 	repo, err := installercheck.DiscoverRepository("")
 	if err != nil {
-		return fail(fmt.Errorf("resolve GjallarOS repository: %w", err))
+		return fail(fmt.Errorf("resolve gjallarOS repository: %w", err))
 	}
 	configPath := filepath.Join(repo, "user.config.json")
 	user, err := config.Load(configPath)

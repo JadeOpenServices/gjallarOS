@@ -13,7 +13,7 @@ in
 {
   udiskie =
     assert lib.assertMsg (prev.udiskie.version == "2.6.2")
-      "GjallarOS udiskie overlay was written for 2.6.2; check whether ${prev.udiskie.version} still mounts devices that appear long after their media and update or remove pkgs/overlays/udiskie.nix.";
+      "gjallarOS udiskie overlay was written for 2.6.2; check whether ${prev.udiskie.version} still mounts devices that appear long after their media and update or remove pkgs/overlays/udiskie.nix.";
     prev.udiskie.overrideAttrs (old: {
       patches = (old.patches or [ ]) ++ [ ../patches/udiskie-mount-new-media-only.patch ];
     });

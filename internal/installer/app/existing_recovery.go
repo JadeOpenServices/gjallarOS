@@ -67,7 +67,7 @@ var detectCurrentRootFilesystem = func(
 }
 
 // installedSystemEvidence reports whether the running system was deployed by
-// GjallarOS. Every flake-built system names its checkout in
+// gjallarOS. Every flake-built system names its checkout in
 // /etc/gjallar/repository; installation-complete is written only by JODS
 // enrollment, so unmanaged installs have the first one alone. Swapped in tests,
 // both read the live host.
@@ -107,12 +107,12 @@ func handleExistingRecoveryFilesystem(
 	}
 
 	message := fmt.Sprintf(
-		"Dedicated GjallarOS recovery storage cannot be enabled on this existing installation.\n\n"+
+		"Dedicated gjallarOS recovery storage cannot be enabled on this existing installation.\n\n"+
 			"Current root filesystem: %s\n\n"+
-			"GjallarOS currently supports shrinking an existing root for the dedicated recovery partition only when the root filesystem is Btrfs. "+
+			"gjallarOS currently supports shrinking an existing root for the dedicated recovery partition only when the root filesystem is Btrfs. "+
 			"The current %s root cannot use the supported live inspection and maintenance shrink path.\n\n"+
 			"To use this recovery feature, reinstall or migrate the root filesystem to Btrfs.\n\n"+
-			"Continue installing GjallarOS without the recovery feature?",
+			"Continue installing gjallarOS without the recovery feature?",
 		filesystem,
 		filesystem,
 	)

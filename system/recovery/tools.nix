@@ -43,7 +43,7 @@ let
 
       usage() {
         printf '%s\n' \
-          'GjallarOS trusted recovery' \
+          'gjallarOS trusted recovery' \
           '  gjallar-recover audit' \
           '  gjallar-recover unlock DEVICE NAME' \
           '  gjallar-recover mount DEVICE MOUNTPOINT' \
@@ -253,7 +253,7 @@ let
           device="''${2:?DEVICE required}"
           name="''${3:?mapping NAME required}"
           cryptsetup isLuks "$device"
-          systemd-ask-password --timeout=0 -n 'GjallarOS: enter the recovery key or disk passphrase:' |
+          systemd-ask-password --timeout=0 -n 'gjallarOS: enter the recovery key or disk passphrase:' |
             cryptsetup open --type luks --key-file=- "$device" "$name"
           ;;
         mount)
@@ -286,12 +286,12 @@ let
             exit 1
           fi
 
-          printf '%s\n'             'GjallarOS installed root is encrypted.'             'Authentication is required before its files can be viewed or modified.'
+          printf '%s\n'             'gjallarOS installed root is encrypted.'             'Authentication is required before its files can be viewed or modified.'
 
           # No timeout: a prompt that gave up while someone typed a long
           # recovery key left the rest of it on the screen (e2e-fw13,
           # 2026-10-28).
-          systemd-ask-password --timeout=0 -n             'GjallarOS recovery: enter the recovery key or disk passphrase:' |
+          systemd-ask-password --timeout=0 -n             'gjallarOS recovery: enter the recovery key or disk passphrase:' |
             cryptsetup open               --type luks               --key-file=-               "$device"               "$name"
 
           cleanup_mapping=true
@@ -365,7 +365,7 @@ let
           cleanup_mapping=false
           trap - EXIT
 
-          printf '%s\n'             'PASS: recovery authorization accepted.'             "PASS: installed GjallarOS root unlocked as $mapping."             "PASS: installed GjallarOS root mounted read-write at $target."             'Repair tools may now operate against /mnt.'
+          printf '%s\n'             'PASS: recovery authorization accepted.'             "PASS: installed gjallarOS root unlocked as $mapping."             "PASS: installed gjallarOS root mounted read-write at $target."             'Repair tools may now operate against /mnt.'
           ;;
         generations)
           root="''${2:?installed ROOT mountpoint required}"

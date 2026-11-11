@@ -104,7 +104,7 @@ func TestFreshInstallDoesNotRunHostLUKSMigration(t *testing.T) {
 
 	if !strings.Contains(
 		text,
-		"Fresh-target TPM2 LUKS enrollment deferred until the installed GjallarOS lifecycle.",
+		"Fresh-target TPM2 LUKS enrollment deferred until the installed gjallarOS lifecycle.",
 	) {
 		t.Fatal("fresh-target TPM/LUKS deferral marker missing")
 	}
@@ -445,7 +445,7 @@ func TestForceRedeployPreservesExistingInstallState(t *testing.T) {
 
 	// An installed system, clean redeploy or not, never reaches the release
 	// staging or the /etc/nixos bootstrap switch (Plane 199).
-	guard := strings.Index(prepareHost, "if s.existing {\n\t\tfmt.Fprintln(out, \"Existing GjallarOS installation detected; skipping /etc/nixos release and bootstrap rebuilds.\")\n\t\treturn offerFirmwareUpdates(")
+	guard := strings.Index(prepareHost, "if s.existing {\n\t\tfmt.Fprintln(out, \"Existing gjallarOS installation detected; skipping /etc/nixos release and bootstrap rebuilds.\")\n\t\treturn offerFirmwareUpdates(")
 	if guard < 0 {
 		t.Fatal("an existing installation must leave prepareHost before release and bootstrap rebuilds")
 	}

@@ -354,9 +354,9 @@ func (s *service) Export(ctx context.Context, sender string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	message := "Authentication is required to sign and export your GjallarOS settings"
+	message := "Authentication is required to sign and export your gjallarOS settings"
 	if hasOwn {
-		message = "Authentication is required to export your GjallarOS settings for signing with your own key"
+		message = "Authentication is required to export your gjallarOS settings for signing with your own key"
 	} else if s.keys.hostKey == nil {
 		return nil, errNoSigningKey
 	}

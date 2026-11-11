@@ -57,14 +57,14 @@ var devproofSocketPath = "/etc/systemd/system/gjallar-devproof.socket"
 func checkDeveloperGrant(cfg config.User, stderr io.Writer) int {
 	if err := devgate.Check(developerGrantPath, cfg.Channel(), cfg.DeveloperMode); err != nil {
 		if _, statErr := os.Stat(devproofSocketPath); errors.Is(statErr, os.ErrNotExist) {
-			fmt.Fprintln(stderr, "[GjallarOS] Notice: the running system cannot check the startup PIN or the recovery key yet; building the version that can. Afterwards run gjallarctl settings confirm-developer once")
+			fmt.Fprintln(stderr, "[gjallarOS] Notice: the running system cannot check the startup PIN or the recovery key yet; building the version that can. Afterwards run gjallarctl settings confirm-developer once")
 		} else {
-			fmt.Fprintf(stderr, "[GjallarOS] Error: %v; nothing rebuilt\n", err)
+			fmt.Fprintf(stderr, "[gjallarOS] Error: %v; nothing rebuilt\n", err)
 			return 1
 		}
 	}
 	if _, err := devgate.Narrow(developerGrantPath, cfg.Channel(), cfg.DeveloperMode); err != nil {
-		fmt.Fprintf(stderr, "[GjallarOS] Error: %v; nothing rebuilt\n", err)
+		fmt.Fprintf(stderr, "[gjallarOS] Error: %v; nothing rebuilt\n", err)
 		return 1
 	}
 	return 0
@@ -88,21 +88,21 @@ func stageLocalChanges(developerMode bool, facts *flakesource.BuildSource, stdou
 	// stops the way back to the official system.
 	if !developerMode {
 		if _, err := os.Lstat(localChangesPath); err == nil {
-			fmt.Fprintf(stdout, "[GjallarOS] Developer mode is off; %s is not built\n", localChangesPath)
+			fmt.Fprintf(stdout, "[gjallarOS] Developer mode is off; %s is not built\n", localChangesPath)
 		}
 		return localchanges.Tree{}, 0
 	}
 	tree, err := localchanges.ReadRoot(localChangesPath)
 	if err != nil {
-		fmt.Fprintf(stderr, "[GjallarOS] Error: %v; nothing rebuilt\n", err)
+		fmt.Fprintf(stderr, "[gjallarOS] Error: %v; nothing rebuilt\n", err)
 		return tree, 1
 	}
 	switch {
 	case tree.Empty():
-		fmt.Fprintf(stdout, "[GjallarOS] Developer mode is on; %s holds no .nix file yet\n", localChangesPath)
+		fmt.Fprintf(stdout, "[gjallarOS] Developer mode is on; %s holds no .nix file yet\n", localChangesPath)
 	default:
 		facts.Local = &flakesource.LocalSource{Hash: tree.Hash(), Files: tree.Paths()}
-		fmt.Fprintf(stdout, "[GjallarOS] Developer mode: building %d local files (%s)\n", len(tree.Files), facts.Local.Hash[:12])
+		fmt.Fprintf(stdout, "[gjallarOS] Developer mode: building %d local files (%s)\n", len(tree.Files), facts.Local.Hash[:12])
 	}
 	return tree, 0
 }
@@ -148,11 +148,11 @@ func systemRebuildArgs(opts rebuildOptions) ([]string, error) {
 func startSystemRebuild(opts rebuildOptions, stdout, stderr io.Writer) int {
 	args, err := systemRebuildArgs(opts)
 	if err != nil {
-		fmt.Fprintf(stderr, "[GjallarOS] Error: %v\n", err)
+		fmt.Fprintf(stderr, "[gjallarOS] Error: %v\n", err)
 		return 2
 	}
 	if err := systemCheckoutMissing(); err != nil {
-		fmt.Fprintf(stderr, "[GjallarOS] Error: %v; nothing rebuilt\n", err)
+		fmt.Fprintf(stderr, "[gjallarOS] Error: %v; nothing rebuilt\n", err)
 		return 1
 	}
 	rootArgs := append([]string{systemRebuildCommand}, args...)
@@ -162,7 +162,7 @@ func startSystemRebuild(opts rebuildOptions, stdout, stderr io.Writer) int {
 
 	userConfig, err := config.Load(filepath.Join(systemcheckout.Path, "user.config.json"))
 	if err == nil && userConfig.Management.Enable && os.Geteuid() != 0 {
-		fmt.Fprintln(stdout, "[GjallarOS] Managed endpoint: authenticating as root for rebuild.")
+		fmt.Fprintln(stdout, "[gjallarOS] Managed endpoint: authenticating as root for rebuild.")
 		return runCommand(context.Background(), stdout, stderr, "su", "-l", "-c", shellJoin(rootArgs), "root")
 	}
 	return runPrivilegedCommand(context.Background(), stdout, stderr, rootArgs...)
@@ -202,11 +202,11 @@ func runSystem(args []string, stdout, stderr io.Writer) int {
 		return systemTimeCheck(args[1:], stderr)
 	}
 	if err := systemCheckoutMissing(); err != nil {
-		fmt.Fprintf(stderr, "[GjallarOS] Error: %v; nothing rebuilt\n", err)
+		fmt.Fprintf(stderr, "[gjallarOS] Error: %v; nothing rebuilt\n", err)
 		return 1
 	}
 	if err := systemcheckout.CheckOwnership(systemcheckout.Path); err != nil {
-		fmt.Fprintf(stderr, "[GjallarOS] Error: %v; nothing rebuilt\n", err)
+		fmt.Fprintf(stderr, "[gjallarOS] Error: %v; nothing rebuilt\n", err)
 		return 1
 	}
 	// The installed gjallarctl runs check before the checkout's own
@@ -280,12 +280,12 @@ func inspectSystemSource(repo string, stdout, stderr io.Writer) (systemcheckout.
 	ctx := context.Background()
 	source, err := systemcheckout.Inspect(ctx, repo)
 	if err != nil {
-		fmt.Fprintf(stderr, "[GjallarOS] Error: %s: %v; nothing rebuilt\n", repo, err)
+		fmt.Fprintf(stderr, "[gjallarOS] Error: %s: %v; nothing rebuilt\n", repo, err)
 		return source, 1
 	}
 	if source.ODDCMoved {
 		if err := systemcheckout.OfficialODDC(ctx, oddcBranchCache(), source.ODDC); err != nil {
-			fmt.Fprintf(stderr, "[GjallarOS] Error: flake.lock: %v; nothing rebuilt\n", err)
+			fmt.Fprintf(stderr, "[gjallarOS] Error: flake.lock: %v; nothing rebuilt\n", err)
 			return source, 1
 		}
 	}
@@ -293,7 +293,7 @@ func inspectSystemSource(repo string, stdout, stderr io.Writer) (systemcheckout.
 	if source.ODDCMoved {
 		pin += " (moved from the checkout's pin, on an official ODDC branch)"
 	}
-	fmt.Fprintf(stdout, "[GjallarOS] Building %s (origin/%s), oddc %s\n",
+	fmt.Fprintf(stdout, "[gjallarOS] Building %s (origin/%s), oddc %s\n",
 		source.Revision[:12], strings.Join(source.Branches, ", origin/"), pin)
 	return source, 0
 }

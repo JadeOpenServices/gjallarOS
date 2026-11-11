@@ -14,7 +14,7 @@ import (
 )
 
 // tpm12Notice is printed when the only TPM is a TPM 1.2.
-const tpm12Notice = `This machine has a TPM 1.2. GjallarOS cannot use Secure Boot or TPM disk unlock on it:
+const tpm12Notice = `This machine has a TPM 1.2. gjallarOS cannot use Secure Boot or TPM disk unlock on it:
 TPM 1.2 only supports SHA-1 measurements, and the boot policy needs TPM 2.0.
 Some vendors ship a firmware update that turns it into a TPM 2.0; check the vendor's support page.
 `
@@ -71,7 +71,7 @@ const (
 	keptTPM2AsRequested keptTPM2 = iota
 	// keptTPM2NoLUKS turns the request off: no encrypted system disk.
 	keptTPM2NoLUKS
-	// keptTPM2NoSecureBoot turns the request off: GjallarOS Secure Boot is
+	// keptTPM2NoSecureBoot turns the request off: gjallarOS Secure Boot is
 	// not set up, and the build refuses TPM2 unlock without it
 	// (measured-boot.nix). A token left on the disk is removed by
 	// gjallar-tpm2-clear (L47); the login card brings chip unlock back once
@@ -125,7 +125,7 @@ func installerTPM2Args(root, hardwarePath string, requested bool) []string {
 	return []string{"installer", "tpm2", "--repo", root, "--hardware", hardwarePath, "--requested=" + strconv.FormatBool(requested)}
 }
 
-// noSecureBootPolicyNotice tells the user why GjallarOS leaves Secure Boot
+// noSecureBootPolicyNotice tells the user why gjallarOS leaves Secure Boot
 // alone on this machine. A generic "Secure Boot is disabled" read like a
 // misdetection on the real HP, where nobody had said that ODDC simply has no
 // Secure Boot setup for the model (2026-10-09).
@@ -137,28 +137,28 @@ func noSecureBootPolicyNotice(modelID string) string {
 		lines = append(lines, "  ODDC has no Secure Boot setup for "+modelID+" yet.")
 	}
 	lines = append(lines,
-		"  GjallarOS will not install its own Secure Boot keys here, and TPM2 disk unlock stays off because it depends on them.",
+		"  gjallarOS will not install its own Secure Boot keys here, and TPM2 disk unlock stays off because it depends on them.",
 	)
 	return strings.Join(lines, "\n") + "\n"
 }
 
-// secureBootDeclinedNotice says what an install without GjallarOS Secure
+// secureBootDeclinedNotice says what an install without gjallarOS Secure
 // Boot does not have, in words a non-technical owner can follow. later says
 // how to get it afterwards.
 func secureBootDeclinedNotice(later string) string {
 	return strings.Join([]string{
-		"Without GjallarOS Secure Boot:",
+		"Without gjallarOS Secure Boot:",
 		"  - Nothing checks the startup files before they run. Someone who gets the machine",
 		"    alone for a while could change them to record the disk passphrase.",
 		"  - The disk does not unlock on its own; the passphrase is typed at every startup.",
-		"  - No recovery partition. Repairs start from a GjallarOS USB stick.",
+		"  - No recovery partition. Repairs start from a gjallarOS USB stick.",
 		"  - JODS cannot manage this machine.",
 		"  " + later,
 	}, "\n") + "\n"
 }
 
 // firmwareSecureBootNotice reports the firmware's own Secure Boot state when
-// GjallarOS installs without its Secure Boot keys. It used to print only
+// gjallarOS installs without its Secure Boot keys. It used to print only
 // inside the no-ODDC-setup branch, which needs a TPM and secureBootPrompt, so
 // other paths installed an unbootable system without a word. Firmware
 // without a SecureBoot variable has no Secure Boot and boots anything.
@@ -168,7 +168,7 @@ func firmwareSecureBootNotice(firmwareOn bool, firmwareErr error) string {
 		return "Firmware Secure Boot state could not be read (" + firmwareErr.Error() + ").\n"
 	case firmwareOn:
 		return strings.Join([]string{
-			"Firmware Secure Boot is ON, but GjallarOS Secure Boot is not set up for this install.",
+			"Firmware Secure Boot is ON, but gjallarOS Secure Boot is not set up for this install.",
 			"The installed boot loader is not signed, so this firmware will refuse to start it.",
 			"Secure Boot has to be off in firmware setup before the installed system boots.",
 		}, "\n") + "\n"
@@ -192,7 +192,7 @@ func keyboardOnlyAtStartup(chassisType string, touchscreen bool) bool {
 	return !touchscreen && (chassisType == "30" || chassisType == "32")
 }
 
-// collectStartupUnlock asks how the disk unlocks once GjallarOS Secure Boot
+// collectStartupUnlock asks how the disk unlocks once gjallarOS Secure Boot
 // is chosen. Both choices use the security chip.
 func collectStartupUnlock(ctx context.Context, ui prompt.UI, kind diskcrypto.TPMKind, chassisType string, touchscreen bool, u *config.User) error {
 	text := startupUnlockText(kind)
@@ -210,7 +210,7 @@ func collectStartupUnlock(ctx context.Context, ui prompt.UI, kind diskcrypto.TPM
 	u.LUKSTPM2Enable = true
 	u.LUKSTPM2PIN = choice == diskcrypto.StartupUnlockPIN
 	if keyboardOnlyAtStartup(chassisType, touchscreen) {
-		fmt.Fprintln(ui.Out, "This device has no touchscreen GjallarOS can use at startup: typing the PIN or the recovery key needs a keyboard attached.")
+		fmt.Fprintln(ui.Out, "This device has no touchscreen gjallarOS can use at startup: typing the PIN or the recovery key needs a keyboard attached.")
 	}
 	return nil
 }
@@ -236,15 +236,15 @@ func firmwareTrustReport(t secureboot.FirmwareTrust) string {
 // lockedFirmwareStop ends the install on locked firmware where shim cannot
 // help: Secure Boot cannot be turned off and own keys cannot go in.
 func lockedFirmwareStop(why string) string {
-	return "The firmware setup is locked, so Secure Boot cannot be turned off and GjallarOS cannot install its own keys here.\n" +
+	return "The firmware setup is locked, so Secure Boot cannot be turned off and gjallarOS cannot install its own keys here.\n" +
 		why + "\n" +
 		"Installation stopped before anything was installed.\n"
 }
 
 // chooseLockedShim decides an install on locked firmware (Plane 293). With
-// Secure Boot on and the firmware keys fixed, GjallarOS can start only
+// Secure Boot on and the firmware keys fixed, gjallarOS can start only
 // through shim, and only if a shim already starts this system: its MOK list
-// is where the GjallarOS key goes. ok=false means the install stopped and
+// is where the gjallarOS key goes. ok=false means the install stopped and
 // the reason is printed.
 func chooseLockedShim(ctx context.Context, ui prompt.UI, out io.Writer, root string, trust secureboot.FirmwareTrust, luksTPM2 bool) (secureboot.ShimFacts, bool, error) {
 	started, err := secureboot.ShimStarted()
@@ -252,14 +252,14 @@ func chooseLockedShim(ctx context.Context, ui prompt.UI, out io.Writer, root str
 		return secureboot.ShimFacts{}, false, err
 	}
 	if !started {
-		fmt.Fprint(out, lockedFirmwareStop("shim does not start this system, so there is no list GjallarOS could add its key to."))
+		fmt.Fprint(out, lockedFirmwareStop("shim does not start this system, so there is no list gjallarOS could add its key to."))
 		return secureboot.ShimFacts{}, false, nil
 	}
 	if trust.ShimValidationOff {
 		fmt.Fprint(out, lockedFirmwareStop("shim's own check is switched off in MokManager; turn it back on there and run the installer again."))
 		return secureboot.ShimFacts{}, false, nil
 	}
-	fmt.Fprintln(out, "shim starts this system. Building the pinned GjallarOS shim to check it against the firmware...")
+	fmt.Fprintln(out, "shim starts this system. Building the pinned gjallarOS shim to check it against the firmware...")
 	facts, err := buildShimFacts(ctx, root)
 	if err != nil {
 		return secureboot.ShimFacts{}, false, err
@@ -269,13 +269,13 @@ func chooseLockedShim(ctx context.Context, ui prompt.UI, out io.Writer, root str
 		return secureboot.ShimFacts{}, false, err
 	}
 	if choice.Path != secureboot.PathShim {
-		fmt.Fprint(out, lockedFirmwareStop("The GjallarOS shim cannot start here: "+choice.Reason+"."))
+		fmt.Fprint(out, lockedFirmwareStop("The gjallarOS shim cannot start here: "+choice.Reason+"."))
 		return secureboot.ShimFacts{}, false, nil
 	}
 	if err := ui.SecureBootOwnershipPlan(ctx, secureboot.LockedShimPlan(luksTPM2)); err != nil {
 		return secureboot.ShimFacts{}, false, err
 	}
-	yes, err := ui.Confirm(ctx, "Install GjallarOS with Secure Boot through shim?", true)
+	yes, err := ui.Confirm(ctx, "Install gjallarOS with Secure Boot through shim?", true)
 	if err != nil {
 		return secureboot.ShimFacts{}, false, err
 	}
@@ -290,7 +290,7 @@ func chooseLockedShim(ctx context.Context, ui prompt.UI, out io.Writer, root str
 // no Secure Boot setup for (Jade Q200): best effort, default no. shim needs
 // nothing model-specific, only a firmware that keeps its maker's keys and
 // trusts the pinned shim. With Secure Boot on, shim must already start this
-// system: the GjallarOS key has to be in its MOK list before the boot chain
+// system: the gjallarOS key has to be in its MOK list before the boot chain
 // changes. ok=false means the install goes on without Secure Boot.
 // In Setup Mode there is no offer, only the reason and the way back
 // (Jade Q220, Q223).
@@ -331,7 +331,7 @@ func offerUnknownModelShim(ctx context.Context, ui prompt.UI, out io.Writer, roo
 	if err := ui.SecureBootOwnershipPlan(ctx, plan); err != nil {
 		return secureboot.ShimFacts{}, false, err
 	}
-	yes, err := ui.Confirm(ctx, "Install GjallarOS with Secure Boot through shim?", false)
+	yes, err := ui.Confirm(ctx, "Install gjallarOS with Secure Boot through shim?", false)
 	if err != nil || !yes {
 		return secureboot.ShimFacts{}, false, err
 	}
@@ -339,15 +339,15 @@ func offerUnknownModelShim(ctx context.Context, ui prompt.UI, out io.Writer, roo
 }
 
 // setupModeNotice tells why a firmware in Setup Mode gets no shim offer.
-// Own GjallarOS keys stay limited to models with ODDC facts (Q223).
+// Own gjallarOS keys stay limited to models with ODDC facts (Q223).
 const setupModeNotice = `The firmware is in Setup Mode: its Secure Boot keys are cleared, so it
 would not check the maker-signed shim.
   - To use Secure Boot through shim, restore the factory keys in the firmware
     setup (Secure Boot menu, often "Restore Factory Keys" or "Install default
     keys") and leave Secure Boot off. After the install, run
     gjallarctl secure-boot setup.
-  - GjallarOS's own keys need tested firmware steps for this model, which
-    GjallarOS does not have yet.
+  - gjallarOS's own keys need tested firmware steps for this model, which
+    gjallarOS does not have yet.
 `
 
 // askFirmwareLocked asks whether the firmware setup is locked, when the

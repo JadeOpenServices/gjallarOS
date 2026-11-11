@@ -2,7 +2,7 @@
 {
   config = lib.mkIf (!(options ? gjallar && options.gjallar ? installerResume)) {
     systemd.services.installer-resume = {
-      description = "Resume the GjallarOS installer after a planned or interrupted reboot";
+      description = "Resume the gjallarOS installer after a planned or interrupted reboot";
       wantedBy = [ "multi-user.target" ];
       wants = [ "network-online.target" ];
       after = [ "local-fs.target" "network-online.target" ];

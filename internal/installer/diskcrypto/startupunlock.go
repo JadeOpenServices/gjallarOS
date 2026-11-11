@@ -31,7 +31,7 @@ func StartupUnlockText(kind TPMKind) string {
 		automatic, pin = "", " (recommended on this device)"
 		note = `
   The security chip in this device is a separate part on the board, or
-  GjallarOS could not confirm that it sits inside the processor. Without a
+  gjallarOS could not confirm that it sits inside the processor. Without a
   PIN, someone who has the device and special tools can get the disk key
   out of such a chip.
 `

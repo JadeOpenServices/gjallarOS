@@ -24,7 +24,7 @@ func CheckUpdate(repo string, stdout io.Writer) {
 
 	fmt.Fprintf(
 		stdout,
-		"[GjallarOS] ODDC update available: %s -> %s. Apply with: gjallarctl rebuild --hardware-update\n",
+		"[gjallarOS] ODDC update available: %s -> %s. Apply with: gjallarctl rebuild --hardware-update\n",
 		short(pinned),
 		short(upstream),
 	)

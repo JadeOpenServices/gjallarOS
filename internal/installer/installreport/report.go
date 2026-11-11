@@ -83,10 +83,10 @@ func (r Report) Render() []byte {
 		fmt.Fprintf(&b, "%-18s %s\n", label+":", value)
 	}
 
-	fmt.Fprintf(&b, "GjallarOS install report (format %d)\n\n", Format)
+	fmt.Fprintf(&b, "gjallarOS install report (format %d)\n\n", Format)
 	line("Why", string(r.Reason))
 	line("Date (UTC)", r.Date.UTC().Format("2006-01-02"))
-	line("GjallarOS commit", only(r.Commit, commitPattern))
+	line("gjallarOS commit", only(r.Commit, commitPattern))
 	line("Release channel", field(r.Channel))
 	line("Live kernel", field(r.Kernel))
 	line("Firmware", r.Firmware.text())

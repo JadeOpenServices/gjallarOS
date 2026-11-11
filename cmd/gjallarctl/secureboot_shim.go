@@ -18,7 +18,7 @@ import (
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/secureboot"
 )
 
-// chooseShimPath decides between the shim path and GjallarOS firmware keys
+// chooseShimPath decides between the shim path and gjallarOS firmware keys
 // (Plane 293, Jade Q189): shim wherever the firmware keeps its maker's keys
 // and would start the pinned shim, own keys on request, in Setup Mode or
 // when db/dbx rule shim out.
@@ -50,7 +50,7 @@ func chooseShimPath(ctx context.Context, user config.User, ownKeys bool, out io.
 
 	facts, err := secureboot.LoadShimFacts(secureboot.ShimFactsPath)
 	if errors.Is(err, fs.ErrNotExist) {
-		fmt.Fprintln(out, "This system has no pinned shim; using GjallarOS firmware keys.")
+		fmt.Fprintln(out, "This system has no pinned shim; using gjallarOS firmware keys.")
 		return false, nil
 	}
 	if err != nil {
@@ -68,7 +68,7 @@ func chooseShimPath(ctx context.Context, user config.User, ownKeys bool, out io.
 		fmt.Fprintf(out, "Secure Boot path: shim (%s).\n", choice.Reason)
 		return true, nil
 	}
-	fmt.Fprintf(out, "Secure Boot path: GjallarOS firmware keys (%s).\n", choice.Reason)
+	fmt.Fprintf(out, "Secure Boot path: gjallarOS firmware keys (%s).\n", choice.Reason)
 	return false, nil
 }
 

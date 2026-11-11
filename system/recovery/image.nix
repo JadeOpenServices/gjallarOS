@@ -130,7 +130,7 @@ let
   # systemd-boot lists it by its os-release PRETTY_NAME, next to the
   # installed system's entries.
   recoveryPartitionUki = pkgs.runCommand "gjallar-recovery-partition.efi" { } ''
-    sed 's/^PRETTY_NAME=.*/PRETTY_NAME="GjallarOS recovery (partition)"/' \
+    sed 's/^PRETTY_NAME=.*/PRETTY_NAME="gjallarOS recovery (partition)"/' \
       ${config.system.build.etc}/etc/os-release > os-release
     ${pkgs.buildPackages.systemdUkify}/lib/systemd/ukify build \
       --linux=${config.boot.kernelPackages.kernel}/${config.system.boot.loader.kernelFile} \
@@ -293,7 +293,7 @@ in
       if [ "$(blkid -p -o value -s PART_ENTRY_NAME "$gjallarDev")" != GJALLAR-RECOVERY ] \
         || [ "$(blkid -p -o value -s TYPE "$gjallarDev")" != vfat ] \
         || [ "$(blkid -p -o value -s LABEL "$gjallarDev")" != GJALLAR-REC ]; then
-        echo "$gjallarDev is not the GjallarOS recovery partition."
+        echo "$gjallarDev is not the gjallarOS recovery partition."
         fail
       fi
       mount -t vfat -o ro,nodev,nosuid,noexec "$gjallarDev" /gjallar-src || fail
@@ -364,7 +364,7 @@ in
     done
   '';
   systemd.services.gjallar-recovery-console = {
-    description = "GjallarOS recovery console";
+    description = "gjallarOS recovery console";
     wantedBy = [ "multi-user.target" ];
     after = [
       "installer-repository.service"
@@ -511,7 +511,7 @@ in
   };
 
   environment.etc."gjallar/recovery-image".text = ''
-    GjallarOS minimal recovery and installer environment.
+    gjallarOS minimal recovery and installer environment.
     Verify the signed release manifest before copying this image to recovery media.
     Network access is opt-in; SSH is disabled.
   '';
@@ -523,7 +523,7 @@ in
   environment.etc."gjallar/installer-fallback-user.config.json".source = installerFallbackPreset;
 
   environment.etc."gjallar/device-config-contract".text = ''
-    GjallarOS fresh-install device configuration handoff
+    gjallarOS fresh-install device configuration handoff
 
     Runtime provider path:
       /run/gjallarOS/device-config/user.config.json

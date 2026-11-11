@@ -84,7 +84,7 @@ in
 
               if ! printf '%s\n' "$status" | grep -Eq 'Secure Boot:.*Enabled'; then
                 printf '%s\n' \
-                  'GjallarOS Secure Boot keys are enrolled, but Secure Boot enforcement is still disabled.' \
+                  'gjallarOS Secure Boot keys are enrolled, but Secure Boot enforcement is still disabled.' \
                   'Enter firmware setup and enable Secure Boot.' >&2
                 exit 0
               fi
@@ -106,7 +106,7 @@ in
               rm -f -- "$marker"
 
               printf '%s\n' \
-                'GjallarOS Secure Boot provisioning complete.' \
+                'gjallarOS Secure Boot provisioning complete.' \
                 'Secure Boot is enabled, Setup Mode is disabled, and signed artifacts verified.'
     '';
   };
@@ -169,7 +169,7 @@ in
 
                         printf '%s\n' "$message"
 
-                        printf '\n[GjallarOS Installer]\n%s\n\n' "$message" |
+                        printf '\n[gjallarOS Installer]\n%s\n\n' "$message" |
                           wall 2>/dev/null || true
                       }
 
@@ -207,7 +207,7 @@ in
                                 ${lib.getExe pkgs.zenity} \
                                   --info \
                                   --timeout="$timeout_seconds" \
-                                  --title="GjallarOS Installer" \
+                                  --title="gjallarOS Installer" \
                                   --width=520 \
                                   --text="$message"
                             then
@@ -235,7 +235,7 @@ in
                                 --unit="$unit" \
                                 ${lib.getExe pkgs.zenity} \
                                   --info \
-                                  --title="GjallarOS Installer" \
+                                  --title="gjallarOS Installer" \
                                   --width=520 \
                                   --text="$message"
                             then
@@ -270,7 +270,7 @@ in
                         message="$1"
 
                         write_status "INSTALLER PAUSED: $message"
-                        gtk_message "GjallarOS installation is paused.
+                        gtk_message "gjallarOS installation is paused.
 
               $message
 
@@ -280,7 +280,7 @@ in
                       }
 
                       write_status \
-                        "GjallarOS is checking the pending Secure Boot installation stage."
+                        "gjallarOS is checking the pending Secure Boot installation stage."
 
                       if [ -e "$sb_enrollment" ]; then
                         instructions="$(
@@ -292,12 +292,12 @@ in
 
       $instructions
 
-      After completing those firmware steps, boot GjallarOS again."
+      After completing those firmware steps, boot gjallarOS again."
                       fi
 
                       if [ -e "$sb_final" ]; then
                         pause_visible \
-                          "GjallarOS keys are enrolled. Enable Secure Boot in firmware, save, then boot GjallarOS for final verification. Do not clear or replace PK, KEK, DB or DBX."
+                          "gjallarOS keys are enrolled. Enable Secure Boot in firmware, save, then boot gjallarOS for final verification. Do not clear or replace PK, KEK, DB or DBX."
                       fi
 
                       status="$(sbctl status 2>&1)" ||
@@ -312,15 +312,15 @@ in
                         pause_visible "Firmware is unexpectedly still in Secure Boot Setup Mode."
                       fi
 
-                      write_status "Verifying signed GjallarOS boot artifacts..."
+                      write_status "Verifying signed gjallarOS boot artifacts..."
 
                       gjallar-verify-secure-boot-artifacts ||
-                        pause_visible "GjallarOS boot artifact verification failed."
+                        pause_visible "gjallarOS boot artifact verification failed."
 
-                      write_status "Verifying GjallarOS Secure Boot ownership..."
+                      write_status "Verifying gjallarOS Secure Boot ownership..."
 
                       gjallar-verify-secure-boot-ownership enrolled ||
-                        pause_visible "GjallarOS PK/KEK/db ownership verification failed."
+                        pause_visible "gjallarOS PK/KEK/db ownership verification failed."
 
                       [ -e /run/current-system ] ||
                         pause_visible "/run/current-system is missing."
@@ -328,19 +328,19 @@ in
                       [ -e /run/booted-system ] ||
                         pause_visible "/run/booted-system is missing."
 
-                      write_status "Final GjallarOS installer checks passed."
+                      write_status "Final gjallarOS installer checks passed."
 
                       install -m 0600 /dev/null "$complete"
                       rm -f -- "$resume"
 
                       sync
 
-                      write_status "GjallarOS installation complete."
+                      write_status "gjallarOS installation complete."
 
-                      gtk_message "GjallarOS installation complete.
+                      gtk_message "gjallarOS installation complete.
 
               Secure Boot is enabled.
-              GjallarOS PK/KEK/db ownership is verified.
+              gjallarOS PK/KEK/db ownership is verified.
               Boot artifacts are verified.
 
               The installation transaction has finished successfully."

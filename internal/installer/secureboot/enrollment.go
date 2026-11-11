@@ -80,7 +80,7 @@ func enrollFirmware(
 	}
 
 	if !inspection.SetupMode {
-		// sbctl enrolled the GjallarOS keys, which ends Setup Mode, but a
+		// sbctl enrolled the gjallarOS keys, which ends Setup Mode, but a
 		// later step of this transaction failed (e2e-target, 2026-09-29:
 		// sbctl verify found no lsblk). Every rerun then waited for a PK
 		// removal the firmware no longer needs; finish the transaction.
@@ -219,7 +219,7 @@ func enrollFirmware(
 // the policy wants dbx present but it is empty. Some firmware clears dbx
 // together with the Platform Key (Setup Mode by "erase all keys"), and an
 // empty dbx trusts every revoked boot loader again. The default comes from
-// the firmware itself (dbxDefault), is written signed with the GjallarOS
+// the firmware itself (dbxDefault), is written signed with the gjallarOS
 // KEK and must read back byte for byte, or enrollment stops before the PK is
 // written.
 func restoreDefaultDBX(
@@ -265,7 +265,7 @@ func restoreDefaultDBX(
 }
 
 // writeSignedDBX writes esl, an EFI signature list, to dbx as an
-// authenticated update signed with the GjallarOS KEK (efitools, as in
+// authenticated update signed with the gjallarOS KEK (efitools, as in
 // https://wiki.archlinux.org/title/Unified_Extensible_Firmware_Interface/Secure_Boot).
 func writeSignedDBX(ctx context.Context, esl []byte) error {
 	dir, err := os.MkdirTemp("/run", "gjallar-dbx-")
@@ -294,7 +294,7 @@ func writeSignedDBX(ctx context.Context, esl []byte) error {
 	return nil
 }
 
-// finishEnrollment verifies and records GjallarOS ownership once its keys are
+// finishEnrollment verifies and records gjallarOS ownership once its keys are
 // in firmware, then hands over to final Secure Boot verification.
 func finishEnrollment(ctx context.Context, ops enrollmentOps) (EnrollmentResult, error) {
 	if err := ops.verifyArtifacts(ctx); err != nil {
@@ -310,7 +310,7 @@ func finishEnrollment(ctx context.Context, ops enrollmentOps) (EnrollmentResult,
 	}
 	if after.State != StateGjallarManaged {
 		return "", fmt.Errorf(
-			"Secure Boot enrollment did not establish GjallarOS ownership: %s",
+			"Secure Boot enrollment did not establish gjallarOS ownership: %s",
 			after.Description,
 		)
 	}

@@ -1,4 +1,4 @@
-# The GjallarOS release cache from deployment/binary-cache.json. CI builds the
+# The gjallarOS release cache from deployment/binary-cache.json. CI builds the
 # heavy local packages for each release tag and signs them with this key.
 # Anything missing from the cache still builds on the machine.
 { lib, ... }:

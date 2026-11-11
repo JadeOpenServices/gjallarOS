@@ -198,7 +198,7 @@ func TestGTKConfirmationWidthCountsRunesNotBytes(t *testing.T) {
 func TestGTKConfirmationWidthLongRecoveryCompatibilityWarning(t *testing.T) {
 	message := `The existing installation cannot use the requested trusted recovery layout with its current filesystem configuration.
 
-GjallarOS recovery requires compatible Btrfs state so the recovery environment can repair or reconstruct the installed system safely. Continuing without that compatibility changes which recovery guarantees are available.
+gjallarOS recovery requires compatible Btrfs state so the recovery environment can repair or reconstruct the installed system safely. Continuing without that compatibility changes which recovery guarantees are available.
 
 Do you want to continue without the incompatible recovery configuration?`
 
@@ -213,7 +213,7 @@ Do you want to continue without the incompatible recovery configuration?`
 func TestGTKConfirmationWidthVeryLongDeviceCompatibilityWarning(t *testing.T) {
 	message := `The detected device does not currently have a validated firmware ownership-transfer procedure for this security operation.
 
-GjallarOS uses the resolved ODDC device profile to determine whether firmware behavior has been validated for the exact device family. The device policy may describe supported firmware actions, but it cannot execute commands or bypass the trusted installer boundary.
+gjallarOS uses the resolved ODDC device profile to determine whether firmware behavior has been validated for the exact device family. The device policy may describe supported firmware actions, but it cannot execute commands or bypass the trusted installer boundary.
 
 Continuing with an unsupported firmware procedure could leave the machine unable to boot, replace firmware-owned Secure Boot material, or produce a configuration that cannot be recovered automatically.
 
@@ -246,7 +246,7 @@ func TestTerminalSecureBootHandoffPlacesFirmwareLockInFinalVisit(t *testing.T) {
 		t.Fatal(err)
 	}
 	shown := out.String()
-	want := "1. Enable Secure Boot.\n2. Set a firmware supervisor password.\n3. Save the firmware configuration.\n4. Boot GjallarOS.\n"
+	want := "1. Enable Secure Boot.\n2. Set a firmware supervisor password.\n3. Save the firmware configuration.\n4. Boot gjallarOS.\n"
 	if !strings.Contains(shown, want) {
 		t.Fatalf("enrollment handoff does not announce the final firmware visit with the lock step:\n%s", shown)
 	}

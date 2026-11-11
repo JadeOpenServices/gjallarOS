@@ -470,7 +470,7 @@ in
       };
   };
 
-  # Themes without an openJade palette offer their own colours; with one, a
+  # Themes without an OpenJade palette offer their own colours; with one, a
   # "stylix" entry would only repeat it under a name nobody knows.
   xdg.configFile."noctalia/palettes/stylix.json" = lib.mkIf (!themeDetails ? palette) {
     text = builtins.toJSON palette;
@@ -511,7 +511,7 @@ in
       Type = "exec";
       ExecStart = lib.escapeShellArgs [
         "${pkgs.ghostty}/bin/ghostty"
-        "--title=GjallarOS developer mode"
+        "--title=gjallarOS developer mode"
         "-e"
         (pkgs.writeShellScript "developer-mode-status" ''
           ${gjallarctlPackage}/bin/gjallarctl system status
@@ -546,7 +546,7 @@ in
       Type = "exec";
       ExecStart = lib.escapeShellArgs [
         "${pkgs.ghostty}/bin/ghostty"
-        "--title=GjallarOS time"
+        "--title=gjallarOS time"
         "--window-width=84"
         "--window-height=12"
         "-e"

@@ -42,7 +42,7 @@ func TestVanillaPersistentRootIsFresh(t *testing.T) {
 		t.Fatal(err)
 	}
 	if existing {
-		t.Fatal("vanilla persistent NixOS root was treated as existing GjallarOS")
+		t.Fatal("vanilla persistent NixOS root was treated as existing gjallarOS")
 	}
 }
 
@@ -88,7 +88,7 @@ func TestUnmanagedInstallIsExisting(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !existing {
-		t.Fatal("installed GjallarOS without JODS was treated as fresh")
+		t.Fatal("installed gjallarOS without JODS was treated as fresh")
 	}
 }
 

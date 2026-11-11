@@ -226,7 +226,7 @@ _gjallarctl_addons() {
     'set:turn a collection or add-on off, on or locked'
     'pin:add an add-on from addons.mozilla.org'
     'update:pin the newest version of store add-ons'
-    'reconcile:remove add-ons GjallarOS no longer wants'
+    'reconcile:remove add-ons gjallarOS no longer wants'
   )
   if (( CURRENT == 2 )); then
     _describe -t commands 'addons command' cmds
@@ -239,7 +239,7 @@ _gjallarctl_addons() {
   case $words[1] in
     list)
       _arguments '--names[print only the names set accepts]' \
-        '--repo[GjallarOS checkout]:checkout:_files -/' ;;
+        '--repo[gjallarOS checkout]:checkout:_files -/' ;;
     set)
       targets=(${(f)"$(gjallarctl addons list --names 2>/dev/null)"})
       if (( CURRENT == 2 )); then
@@ -251,18 +251,18 @@ _gjallarctl_addons() {
           _values mode on off
         fi
       else
-        _arguments '--repo[GjallarOS checkout]:checkout:_files -/'
+        _arguments '--repo[gjallarOS checkout]:checkout:_files -/'
       fi ;;
     pin)
       _arguments '--mode[how to install it]:mode:(on locked)' \
         '(-y --yes)'{-y,--yes}'[accept without asking]' \
-        '--repo[GjallarOS checkout]:checkout:_files -/' \
+        '--repo[gjallarOS checkout]:checkout:_files -/' \
         '1:add-on ID (about\:support lists it):' ;;
     update)
       targets=(${(f)"$(gjallarctl addons list --names 2>/dev/null)"})
       targets=(${(M)targets:#$~store})
       _arguments '(-y --yes)'{-y,--yes}'[accept without asking]' \
-        '--repo[GjallarOS checkout]:checkout:_files -/' \
+        '--repo[gjallarOS checkout]:checkout:_files -/' \
         "*:store add-on:(${targets[*]})" ;;
     reconcile)
       _arguments '1:app:(firefox)' \
@@ -417,7 +417,7 @@ _gjallarctl_oddc() {
   (( CURRENT-- ))
   case $words[1] in
     validate-device)
-      _arguments '--repo[GjallarOS checkout]:checkout:_files -/' ;;
+      _arguments '--repo[gjallarOS checkout]:checkout:_files -/' ;;
   esac
 }
 
@@ -446,7 +446,7 @@ _gjallarctl() {
 
   local -a cmds=(
     'rebuild:rebuild and switch the system'
-    'helpme:list the GjallarOS tools'
+    'helpme:list the gjallarOS tools'
     'check:run the safe repository checks'
     'preflight:check the repository before a rebuild'
     'system:root side of the system checkout rebuild'
@@ -458,12 +458,12 @@ _gjallarctl() {
     'management:device management (JODS) status'
     'addons:Firefox add-ons'
     'apps:install or remove catalogue apps'
-    'settings:change GjallarOS settings'
+    'settings:change gjallarOS settings'
     'snapshots:restore your files from the /home snapshots'
     'wine:Wine apps and their network switches'
     'tpm2:TPM2 disk unlock'
     'luks:system disk unlock methods and recovery key'
-    'secure-boot:Secure Boot with GjallarOS keys'
+    'secure-boot:Secure Boot with gjallarOS keys'
     'security:security checks and notes for this device'
     'oddc:ODDC hardware catalogue'
     'fan:fan control'
@@ -506,15 +506,15 @@ _gjallarctl() {
         media) _arguments '1:media command:((notice\:"offer writing on disks from another system (session service)"))' ;;
         secure-boot)
           _arguments '1:secure-boot command:((status\:"show Secure Boot ownership" setup\:"set up Secure Boot on this installed system" update-dbx\:"install the newest dbx revocation list from LVFS"))' \
-            '--repo[GjallarOS checkout]:checkout:_files -/' \
-            '--own-keys[setup: GjallarOS firmware keys instead of shim]' ;;
+            '--repo[gjallarOS checkout]:checkout:_files -/' \
+            '--own-keys[setup: gjallarOS firmware keys instead of shim]' ;;
         fan) _arguments '1:fan command:(status list reconcile)' ;;
         cleanup) _arguments '(-k --keep)'{-k,--keep}'[generations to keep]:count:' ;;
         thermal-test) _arguments '1:mode:(off on status)' '2:process pattern:_process_names' ;;
         check)
-          _arguments '--repo[GjallarOS checkout]:checkout:_files -/' \
+          _arguments '--repo[gjallarOS checkout]:checkout:_files -/' \
             '--timeout[time per external check]:duration:' ;;
-        preflight) _arguments '--repo[GjallarOS checkout]:checkout:_files -/' ;;
+        preflight) _arguments '--repo[gjallarOS checkout]:checkout:_files -/' ;;
         ai)
           _arguments '1:ai command:((enable\:"turn local AI on; the rebuild picks the model" profile\:"show the profile this machine gets" set-token\:"store the bearer token of the AI server"))' \
             '--config[user configuration]:file:_files -g "*.json"' ;;

@@ -123,7 +123,7 @@ func TestDiscoverRepositoryNamesStaleSystemPointer(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "the checkout at "+missing+" that this system was built from is missing or empty") {
 		t.Fatalf("err = %v", err)
 	}
-	if _, err := discoverRepository("", "", "", start); err == nil || !strings.Contains(err.Error(), "no GjallarOS repository found") {
+	if _, err := discoverRepository("", "", "", start); err == nil || !strings.Contains(err.Error(), "no gjallarOS repository found") {
 		t.Fatalf("no pointer: %v", err)
 	}
 }

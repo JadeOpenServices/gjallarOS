@@ -1,4 +1,4 @@
-# GjallarOS roadmap: USB trust, passkeys, device tooling
+# gjallarOS roadmap: USB trust, passkeys, device tooling
 
 Status as of 2026-09-30. `[x]` = done and committed; `[ ]` = open.
 Research notes are from memory (knowledge up to mid-2026). Before acting on a
@@ -336,7 +336,7 @@ Next steps:
 | **NinjaOne** (RMM) | No deep native USB engine; uses Windows policies and scripts, or the device control of the bundled AV (e.g. Bitdefender GravityZone) | Depends on the AV module | Technician changes policy | AV-dependent | Technician or remote script |
 | **Ubuntu** (Landscape, Ubuntu Pro USG, Intune-for-Linux) | USG (CIS/STIG) disables `usb-storage`; USBGuard is available but not managed by Landscape; Intune on Ubuntu checks compliance only | Storage blocked by kernel module denylist; others allowed | None | n/a | Root or remote script |
 | **RHEL** | **USBGuard** in base since 7.4; rule language (`hash`, `serial`, `via-port`, `with-interface`); `usbguard-notifier` desktop notices; STIG requires it; rules distributed with Ansible or Satellite | `ImplicitPolicyTarget=block` | `usbguard-notifier` informs; allowing needs root or IPC ACL | Device IDs are per connection; a removed device's allow is gone | Root edits rules |
-| **GjallarOS** | USBGuard plus a TPM-signed trust store plus ODDC hardware model | Blocked (armed) or audit | Notice → review → password | Connection token; broker rejects stale; prompts close on unplug | Disk passphrase (`usb disarm`) |
+| **gjallarOS** | USBGuard plus a TPM-signed trust store plus ODDC hardware model | Blocked (armed) or audit | Notice → review → password | Connection token; broker rejects stale; prompts close on unplug | Disk passphrase (`usb disarm`) |
 
 Ideas worth taking:
 
@@ -419,18 +419,18 @@ Ideas worth taking:
       daily session still has to catch the separate password. Default stays a
       single account until the flow is tested on real hardware.
 
-## 10. ODDC beyond GjallarOS
+## 10. ODDC beyond gjallarOS
 
-- [ ] **Screen rotation from ODDC on any NixOS install.** Today the GjallarOS
+- [ ] **Screen rotation from ODDC on any NixOS install.** Today the gjallarOS
       installer reads `hardware.sensors.hub.provides.orientation` from the
-      ODDC model and sets `orientationSensorEnable`, and GjallarOS's Hyprland
-      unit does the rotating. ODDC is meant to work without GjallarOS, so the
+      ODDC model and sets `orientationSensorEnable`, and gjallarOS's Hyprland
+      unit does the rotating. ODDC is meant to work without gjallarOS, so the
       part that does not depend on the compositor could live in ODDC's own
       NixOS module: turn on `hardware.sensor.iio` (iio-sensor-proxy) when the
-      model has the sensor. GjallarOS would then keep only the Hyprland side
+      model has the sensor. gjallarOS would then keep only the Hyprland side
       (`gjallarctl hyprland-rotate`). ODDC agreed and built it as ODDC-95
       (`oddc.sensors.orientation.enable`, sets `hardware.sensor.iio.enable`
-      with `mkDefault`). When the GjallarOS pin reaches it: `input.nix` sets
+      with `mkDefault`). When the gjallarOS pin reaches it: `input.nix` sets
       iio only through `mkIf` on the old installer flag, the rotation unit
       turns on from `config.hardware.sensor.iio.enable`, and the installer
       stops writing `orientationSensorEnable`. Open question to ODDC: can a
@@ -472,11 +472,11 @@ Plan agreed 2026-10-10. Channels decided 2026-10-20 (Q16): `main` became
       channel on managed devices.
 - [ ] **ODDC stays separate.** A release carries whatever ODDC commit its
       `flake.lock` pins; the next item keeps that pin current. `gjallarctl rebuild --hardware-update --channel stable|staging`
-      keeps working as it does today and is not tied to the GjallarOS
+      keeps working as it does today and is not tied to the gjallarOS
       channel.
 - [ ] **ODDC pin follows ODDC stable** (Jade, ODDC items 83, 100). Security
       findings and catalog fixes must reach machines without waiting for a
-      GjallarOS release. ODDC promises that every commit on its `stable` is a
+      gjallarOS release. ODDC promises that every commit on its `stable` is a
       release and is never force-pushed. A workflow moves the pin; people
       still decide what lands.
       1. **Trigger.** Hourly schedule plus manual start. It polls ODDC
@@ -495,9 +495,9 @@ Plan agreed 2026-10-10. Channels decided 2026-10-20 (Q16): `main` became
          - `oddc status --root DIR --json`: a model that was verified and is
            no longer verified fails the job, and the pull request says
            which one.
-         - `oddc security --json`: a flag GjallarOS reads that existed at the
+         - `oddc security --json`: a flag gjallarOS reads that existed at the
            old commit and is gone at the new one fails the job (job 29.1).
-           The flags GjallarOS reads are listed in one file next to the
+           The flags gjallarOS reads are listed in one file next to the
            code that reads them, with no per-model values.
          - `prebuilt` keeps its drvPath. An ODDC bump then never makes slow
            devices compile, so it needs no release cache build (item 80).
@@ -729,7 +729,7 @@ setup existed) can only get it by running the whole installer again.
       1. Resolve the device and its ODDC Secure Boot setup the way the
          installer does. No setup for this model: stop and point to §8.
       2. Read the firmware state. Factory keys with Secure Boot off is the
-         start. A pending or finished GjallarOS enrollment resumes where it
+         start. A pending or finished gjallarOS enrollment resumes where it
          stopped. Setup Mode without our record, someone else's keys, or a
          mixed state: stop and say what to do (for HP: restore the factory
          keys in firmware setup, then run the command again).
@@ -836,10 +836,10 @@ Sources:
 
 Plane GJALLAROS-183, weight 44. Nothing in this section is built yet.
 
-Jade's idea (2026-10-13): GjallarOS pins its packages in Nix. JODS should
+Jade's idea (2026-10-13): gjallarOS pins its packages in Nix. JODS should
 also be able to pin its own things, such as Noctalia plugins or a company's
 own Firefox add-ons. An organisation runs its own build agents, which build
-these for the GjallarOS channel the devices are on. Devices then only
+these for the gjallarOS channel the devices are on. Devices then only
 download them.
 
 ### Is it sane?
@@ -847,7 +847,7 @@ download them.
 Mostly yes, because Nix already has the parts:
 
 - A pin is a flake input or a fetcher with a hash, in a repository JODS
-  owns. Devices evaluate it like the GjallarOS repo itself.
+  owns. Devices evaluate it like the gjallarOS repo itself.
 - A build agent builds the pinned sources and puts the outputs in a binary
   cache. Devices list that cache as a substituter and get the outputs
   instead of compiling them, like the release cache in section 11.
@@ -857,7 +857,7 @@ Mostly yes, because Nix already has the parts:
 Three parts need more than that:
 
 - **Build per channel.** Noctalia plugins follow the Noctalia plugin API of
-  the release. The agent builds every pin once per GjallarOS channel
+  the release. The agent builds every pin once per gjallarOS channel
   (`dev`, `staging`, `stable`) against that channel's `flake.lock`. A pin
   that does not build on a channel is not offered there.
 - **Firefox add-ons stay signed by Mozilla.** Release Firefox only installs
@@ -870,7 +870,7 @@ Three parts need more than that:
   user's rights and nobody signs them. A plugin pin is trusted like a
   package in the system: someone reviews the source at the pinned commit.
 
-Standalone installs do not need any of this. They keep the GjallarOS pins
+Standalone installs do not need any of this. They keep the gjallarOS pins
 and can add their own overlay in their own checkout.
 
 ### Security pass
@@ -1139,7 +1139,7 @@ How others handle the same split:
   alias expansion in Kubernetes
   [CVE-2019-11253](https://nvd.nist.gov/vuln/detail/CVE-2019-11253).
 
-What follows for GjallarOS:
+What follows for gjallarOS:
 
 1. **Settings are data, never Nix.** The editor and any import file only
    set known keys with typed values from the `user.config.json` schema
@@ -1150,7 +1150,7 @@ What follows for GjallarOS:
 2. **Three tiers of settings** with their own password and delay rules
    (below).
 3. **Import only signed files.** An exported file is signed by a device
-   key GjallarOS manages for the user; unsigned or unknown files are
+   key gjallarOS manages for the user; unsigned or unknown files are
    refused, and even a valid one only loads as a draft (below).
 4. **Code changes are developer mode** with a local folder outside the
    official checkout (below). JODS-managed devices cannot turn it on.
@@ -1200,7 +1200,7 @@ fails when a field has none. Decided with Jade 2026-10-19:
   ([bug 162020](https://www.bugzilla.mozilla.org/show_bug.cgi?id=162020));
   the delay restarts whenever the window loses focus, which closed later
   bypasses ([MFSA 2016-08](https://www.mozilla.org/en-CA/security/advisories/mfsa2016-08/)).
-  GjallarOS uses 10 s because the point is reading the change, not only
+  gjallarOS uses 10 s because the point is reading the change, not only
   avoiding a stray click.
 - **Security delay.** Apple's Stolen Device Protection makes some changes
   wait an hour and ask Face ID again when the phone is away from familiar
@@ -1208,7 +1208,7 @@ fails when a field has none. Decided with Jade 2026-10-19:
   The weak spot people found: "familiar" was learned from location history,
   so a bar someone visits often counted as home
   ([9to5Mac](https://9to5mac.com/2024/01/28/security-bite-iphones-stolen-device-protection-has-a-fatal-flaw-but-you-can-fix-it/)).
-  GjallarOS uses the proven home network instead (a router of the user's
+  gjallarOS uses the proven home network instead (a router of the user's
   own tailnet, see `routerHome`), and critical changes ignore location.
 - **While a change waits.** A notification names the change and offers
   Cancel. Locking the screen does not cancel it; logging out or rebooting
@@ -1344,7 +1344,7 @@ page.
 
 ### Signed settings files
 
-Decided with Jade 2026-10-18: imports must be signed, and GjallarOS does
+Decided with Jade 2026-10-18: imports must be signed, and gjallarOS does
 the key handling unless the installer is told otherwise.
 
 Inspiration: systemd-homed signs every user record and only accepts records
@@ -1374,7 +1374,7 @@ profiles show "not signed" but still install, which is what phishing uses.
   show the same code made from both public keys, and the user confirms on
   both with their password. Each then trusts the other's public key for
   that user. Unpairing removes it. See "Pairing and own keys" below.
-- **Opting out in the installer.** "Let GjallarOS manage signing keys
+- **Opting out in the installer.** "Let gjallarOS manage signing keys
   (recommended)". Saying no lets the person add their own OpenSSH public
   key (ed25519 file or FIDO hardware key) as the only signer instead.
 - **Nothing is locked behind the key.** Login, disk unlock, applying
@@ -1539,7 +1539,7 @@ How others do it:
 
 **Own key (3.4d, done 46a02b61).**
 
-- The installer asks "Let GjallarOS sign your settings files for you?"
+- The installer asks "Let gjallarOS sign your settings files for you?"
   (recommended). No: the user gives an OpenSSH public key line
   (`ssh-ed25519` or `sk-ssh-ed25519@openssh.com`), checked before the
   interview goes on. It is stored as `settingsSigningKey` (critical tier,
@@ -1651,7 +1651,7 @@ safe.
 
 2026-10-18, Jade: typed settings service; security changes show old and
 new value, ask the password every time and wait; imports only signed, with
-GjallarOS managing the keys by default; Nix code only in developer mode
+gjallarOS managing the keys by default; Nix code only in developer mode
 with a local folder. Migration on the one existing install: whatever does
 not break the running system. New installs get no `~/Documents` clone.
 
@@ -2763,7 +2763,7 @@ up every account. Decisions are Q50 to Q57 on the questionnaire page.
 - On by default: Simple HTML reading, key lookups only when the user asks,
   a local first-run guide (account, Primary Password, key create or import,
   key backup, Nextcloud calendar and contacts) (Q57).
-- Theme: follows the GjallarOS theme job (250, genbu Superbird look),
+- Theme: follows the gjallarOS theme job (250, genbu Superbird look),
   in the theme phase.
 
 ### Security pass

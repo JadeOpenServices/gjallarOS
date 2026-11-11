@@ -21,7 +21,7 @@ func validateTargetDiskContext(targetDisk string, persistentInstalledHost bool) 
 		return nil
 	}
 	return fmt.Errorf(
-		"--target-disk %s requests a fresh installation, which must run from the GjallarOS/NixOS live or recovery environment; this system boots from a persistent root, so nothing was changed",
+		"--target-disk %s requests a fresh installation, which must run from the gjallarOS/NixOS live or recovery environment; this system boots from a persistent root, so nothing was changed",
 		targetDisk,
 	)
 }
@@ -97,7 +97,7 @@ func selectFreshTargetDisk(
 
 	selected, err := ui.Choice(
 		ctx,
-		"Select the whole disk to erase and install GjallarOS onto",
+		"Select the whole disk to erase and install gjallarOS onto",
 		options[0],
 		options,
 	)

@@ -29,7 +29,7 @@ const addonsUsage = `usage: gjallarctl addons list [--names] [--repo PATH]
        gjallarctl addons update [STORE-ID...] [--yes] [--repo PATH]
                                            pin the newest version; shows new permissions
        gjallarctl addons reconcile firefox --desired FILE --profile DIR
-                                           remove add-ons GjallarOS installed and
+                                           remove add-ons gjallarOS installed and
                                            no longer wants (run by the session)
 
 Modes: on installs the add-on and lets you turn it off in Firefox, locked
@@ -100,7 +100,7 @@ func runAddons(args []string, stdout, stderr io.Writer) int {
 	}
 	repo, err := installercheck.DiscoverRepository(a.repo)
 	if err != nil {
-		fmt.Fprintf(stderr, "ERROR: resolve GjallarOS repository: %v\n", err)
+		fmt.Fprintf(stderr, "ERROR: resolve gjallarOS repository: %v\n", err)
 		return 1
 	}
 	path := filepath.Join(repo, "user.config.json")
@@ -384,7 +384,7 @@ func reportReconcile(res managedapps.Result, err error, stdout, stderr io.Writer
 		fmt.Fprintf(stdout, "Removed %s; Firefox drops it on its next start.\n", id)
 	}
 	for _, id := range res.Left {
-		fmt.Fprintf(stdout, "Left %s: GjallarOS did not install it.\n", id)
+		fmt.Fprintf(stdout, "Left %s: gjallarOS did not install it.\n", id)
 	}
 	if res.Busy {
 		fmt.Fprintln(stdout, "Firefox is running; add-ons that were turned off go at the next login.")

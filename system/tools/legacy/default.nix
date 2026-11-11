@@ -11,7 +11,7 @@ let
   inherit (import ./table.nix { inherit lib; }) commands;
 
   hintLine =
-    row: "${lib.escapeShellArg row.old}) printf '%s\\n' ${lib.escapeShellArg "GjallarOS: ${row.old} was removed; use ${row.new}"} >&2 ;;";
+    row: "${lib.escapeShellArg row.old}) printf '%s\\n' ${lib.escapeShellArg "gjallarOS: ${row.old} was removed; use ${row.new}"} >&2 ;;";
   hints = lib.concatMapStringsSep "\n    " hintLine commands;
 
   # bash and zsh print their own "not found" line only when no handler

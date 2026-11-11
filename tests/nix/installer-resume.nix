@@ -25,7 +25,7 @@ let
   unitOf = evaluated: evaluated.config.systemd.units."installer-resume.service".text;
   permanent = unitOf (evaluate [ resumeModule ]);
   # The wrapper adds its unit to a configuration that may already be
-  # GjallarOS; both copies together must not conflict.
+  # gjallarOS; both copies together must not conflict.
   both = unitOf (evaluate [
     resumeModule
     wrapperModule
@@ -34,7 +34,7 @@ let
   has = needle: text: nixpkgs.lib.hasInfix needle text;
 in
 # A reboot mid-resume lost the transaction: the unit moved pending.json
-# away before the run and was absent from the installed GjallarOS
+# away before the run and was absent from the installed gjallarOS
 # generation (e2e-target, 2026-10-05).
 assert has "ConditionPathExists=|/var/lib/gjallarOS/installer-resume/pending.json" permanent;
 assert has "ConditionPathExists=|/var/lib/gjallarOS/installer-resume/active.json" permanent;

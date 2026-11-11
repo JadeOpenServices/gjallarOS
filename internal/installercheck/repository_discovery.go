@@ -9,7 +9,7 @@ import (
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/systemcheckout"
 )
 
-// DiscoverRepository resolves the active GjallarOS checkout.
+// DiscoverRepository resolves the active gjallarOS checkout.
 //
 // Order:
 //  1. explicit --repo
@@ -37,7 +37,7 @@ func DiscoverRepository(explicit string) (string, error) {
 }
 
 // SystemRepositoryFile names the checkout the running system was built
-// from (settings.dotfilesDir), so every GjallarOS deployment has one fixed
+// from (settings.dotfilesDir), so every gjallarOS deployment has one fixed
 // place to find it.
 var SystemRepositoryFile = "/etc/gjallar/repository"
 
@@ -126,6 +126,6 @@ func discoverRepository(
 		)
 	}
 	return "", fmt.Errorf(
-		"no GjallarOS repository found; use --repo PATH or GJALLAROS_REPO",
+		"no gjallarOS repository found; use --repo PATH or GJALLAROS_REPO",
 	)
 }

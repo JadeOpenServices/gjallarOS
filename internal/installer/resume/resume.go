@@ -223,7 +223,7 @@ func writeDurable(path string, data []byte) error {
 }
 
 // ArmMaintenance arms a continuation for after the one-shot recovery-storage
-// maintenance boot. The installed GjallarOS configuration already carries
+// maintenance boot. The installed gjallarOS configuration already carries
 // the installer-resume unit.
 func ArmMaintenance(
 	ctx context.Context,
@@ -244,7 +244,7 @@ func ArmMaintenance(
 
 // Arm arms a continuation for after the staged NixOS release boot. The
 // staged generation is built from WrapperPath, which adds the resume unit
-// to a configuration that is not GjallarOS yet.
+// to a configuration that is not gjallarOS yet.
 func Arm(
 	ctx context.Context,
 	executable string,
@@ -302,7 +302,7 @@ func Module() string {
 		"{\n" +
 		"  config = lib.mkIf (!(options ? gjallar && options.gjallar ? installerResume)) {\n" +
 		"    systemd.services.installer-resume = {\n" +
-		"      description = \"Resume the GjallarOS installer after a planned or interrupted reboot\";\n" +
+		"      description = \"Resume the gjallarOS installer after a planned or interrupted reboot\";\n" +
 		"      wantedBy = [ \"multi-user.target\" ];\n" +
 		"      wants = [ \"network-online.target\" ];\n" +
 		"      after = [ \"local-fs.target\" \"network-online.target\" ];\n" +

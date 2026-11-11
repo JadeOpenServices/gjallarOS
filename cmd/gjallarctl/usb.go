@@ -963,7 +963,7 @@ func usbReviewConfigValue(path string) (bool, bool) {
 func setUSBReviewAlwaysTechnical(on bool) error {
 	path, err := usbReviewConfigPath()
 	if err != nil {
-		return fmt.Errorf("find the GjallarOS checkout: %w", err)
+		return fmt.Errorf("find the gjallarOS checkout: %w", err)
 	}
 	if onSystemCheckout(path) {
 		return applySystemSettingNow(usbReviewConfigKey, on)

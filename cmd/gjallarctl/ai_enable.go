@@ -33,12 +33,12 @@ func syncLocalAIModel(statePath string, user config.User, stdout, stderr io.Writ
 	}
 	current, err := nixrender.AIModel(statePath)
 	if err != nil {
-		fmt.Fprintf(stderr, "[GjallarOS] Error: read the local AI model: %v\n", err)
+		fmt.Fprintf(stderr, "[gjallarOS] Error: read the local AI model: %v\n", err)
 		return false
 	}
 	override, err := profile.NewOverride(user.OverrideAISelection, user.OverrideModelWith)
 	if err != nil {
-		fmt.Fprintf(stderr, "[GjallarOS] Error: overrideModelWith: %v; nothing rebuilt\n", err)
+		fmt.Fprintf(stderr, "[gjallarOS] Error: overrideModelWith: %v; nothing rebuilt\n", err)
 		return false
 	}
 	switch {
@@ -50,11 +50,11 @@ func syncLocalAIModel(statePath string, user config.User, stdout, stderr io.Writ
 	}
 	result, err := aiDetect(context.Background(), override)
 	if err != nil {
-		fmt.Fprintf(stderr, "[GjallarOS] Error: pick the local AI model: %v; nothing rebuilt\n", err)
+		fmt.Fprintf(stderr, "[gjallarOS] Error: pick the local AI model: %v; nothing rebuilt\n", err)
 		return false
 	}
 	if result.Model == "" {
-		fmt.Fprintf(stderr, "[GjallarOS] Error: user.config.json enables local AI, but "+noLocalModel+"; nothing rebuilt\n", result.RAMGB)
+		fmt.Fprintf(stderr, "[gjallarOS] Error: user.config.json enables local AI, but "+noLocalModel+"; nothing rebuilt\n", result.RAMGB)
 		return false
 	}
 	if err := nixrender.SyncAIProfile(statePath, nixrender.Settings{
@@ -63,10 +63,10 @@ func syncLocalAIModel(statePath string, user config.User, stdout, stderr io.Writ
 		AIContextTokens:       result.ContextTokens,
 		AIVRAMMB:              result.VRAMMB,
 	}); err != nil {
-		fmt.Fprintf(stderr, "[GjallarOS] Error: write the local AI model: %v\n", err)
+		fmt.Fprintf(stderr, "[gjallarOS] Error: write the local AI model: %v\n", err)
 		return false
 	}
-	fmt.Fprintf(stdout, "[GjallarOS] Local AI: %s picked for this machine (%s).\n", result.Model, result.Profile)
+	fmt.Fprintf(stdout, "[gjallarOS] Local AI: %s picked for this machine (%s).\n", result.Model, result.Profile)
 	return true
 }
 

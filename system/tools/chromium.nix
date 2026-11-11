@@ -3,8 +3,9 @@ let
   libexec = import ../../pkgs/lib/libexec.nix { inherit lib pkgs; };
 
   # Opens a security key registration link in a plain Chromium window with a
-  # throwaway profile. Chromium asks to set a PIN on keys that have none;
-  # LibreWolf does not. Key access comes from systemd's 60-fido-id.rules.
+  # throwaway profile. Chromium asks to set a PIN on keys that have none.
+  # Firefox has not been checked for this on a real key yet; this wrapper
+  # goes away once it has. Key access comes from systemd's 60-fido-id.rules.
   # Started by gjallarctl register-key (Plane 282); not on PATH.
   registerKey = pkgs.writeShellApplication {
     name = "gjallar-register-key";
@@ -13,7 +14,7 @@ let
       url="''${1:-}"
       if [ -z "$url" ]; then
         url=$(zenity --entry --title="Register key" \
-          --text="Link from the registration page:") || exit 0
+          --text="Paste the link from the security key registration page:") || exit 0
       fi
       case "$url" in
         https://*) ;;
