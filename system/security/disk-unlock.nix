@@ -37,6 +37,22 @@ in
     );
   };
 
+  # After a wrong startup PIN systemd-cryptsetup asked "Please enter TPM2
+  # PIN:" again, so the boot screen looked as if nothing had happened; only
+  # the journal said "Bad PIN." (Plane 332, R44). The patch makes every ask
+  # after a wrong PIN say "Wrong PIN, try again:". Only the initrd copy is
+  # patched: the PIN is asked there, and patching the system systemd would
+  # rebuild nearly every package. Upstream queue: book 753.
+  # Remove when upstream systemd says a PIN was wrong when it asks again.
+  config.boot.initrd.systemd.package =
+    assert lib.assertMsg (config.systemd.package.version == "260.5")
+      "GjallarOS initrd systemd patch was written for 260.5; check whether ${config.systemd.package.version} still asks for the TPM2 PIN again without saying it was wrong and update or remove the patch in system/security/disk-unlock.nix.";
+    config.systemd.package.overrideAttrs (old: {
+      patches = (old.patches or [ ]) ++ [
+        ../../pkgs/patches/systemd-cryptsetup-wrong-pin-text.patch
+      ];
+    });
+
   # Which unlock methods the system disk has, as counts in
   # /run/gjallar-luks/keyslots, so the login reminder and the bar need no
   # root. gjallarctl luks setup and recovery-key rewrite it after a change.
