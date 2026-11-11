@@ -520,37 +520,30 @@ reason. The machine gets the hardware-neutral base; nothing optional is
 switched on, and no part from that list becomes a built-in USB device.
 
 The answer comes from the ODDC commit `flake.lock` pins for the `oddc` input.
-Updating ODDC on a device is one operation:
+Moving the ODDC pin on a device is one operation:
 
 ```bash
-gjallarctl oddc update --rebuild
+gjallarctl rebuild --hardware-update
 ```
 
 <details>
 <summary><b>How ODDC updates work</b></summary>
 <br>
 
-`gjallarctl oddc update --rebuild` runs `nix flake update oddc` on the
-system's checkout and rebuilds, then says whether ODDC moved
-(`ODDC: OLD -> NEW` or `ODDC: already at REV`) and where this machine's answer
-stands. `--simple` prints only that as one line; `--debug` lists the lock and
-answer revisions before and after, the model, and whether the answer was
-fetched, kept or left unchanged. When the pinned commit differs from
+`gjallarctl rebuild --hardware-update [--channel stable|staging] [--switch 0|1]`
+runs `oddc update --flake <checkout> [--channel CHANNEL]` on the system
+checkout first and stops with `nothing rebuilt` if that fails. `--channel`
+moves the oddc input to the newest commit of that ODDC channel (`stable` when
+left out); no commit hash is needed. `--switch 1` (the default) rebuilds and
+switches right away; `--switch 0` only moves the pin, and the next
+`gjallarctl rebuild` applies it. It needs an `oddc` that knows
+`update --flake`. When the pinned commit differs from
 `generated/oddc/revision`, the rebuild fetches the same model again at the new
 commit and swaps it in only once complete. If that fetch fails, for example
-offline, the rebuild stops with the error and changes nothing. Without `--rebuild`, the next `gjallarctl rebuild` does the
-fetch. `gjallarctl oddc doctor` shows the ODDC revision the installed model
-came from.
-
-`gjallarctl rebuild --hardware-update [--channel stable|staging] [--switch 0|1]` does
-the same move as part of a rebuild: it runs `oddc update --flake <checkout>
-[--channel CHANNEL]` first and stops with `nothing rebuilt` if that fails.
-`--channel` moves the oddc input to the newest commit of that ODDC channel
-(`stable` when left out); no commit hash is needed. `--switch 1` (the default) rebuilds and switches right away;
-`--switch 0` only moves the pin, and the next `gjallarctl rebuild` applies it. It needs an
-`oddc` that knows `update --flake`. Always apply with `gjallarctl rebuild`, not `sudo
-nixos-rebuild switch --flake`: `generated/` is untracked, so a plain git flake
-cannot see it.
+offline, the rebuild stops with the error and changes nothing.
+`gjallarctl oddc doctor` shows the ODDC revision the installed model came
+from. Always apply with `gjallarctl rebuild`, not `sudo nixos-rebuild switch
+--flake`: `generated/` is untracked, so a plain git flake cannot see it.
 
 A plain `gjallarctl rebuild` never moves the pin. It asks GitHub whether the branch the
 oddc input follows has a newer commit and, if so, prints `ODDC update
@@ -570,10 +563,14 @@ validates this checkout on the device. Validation evidence goes to ODDC through
 
 ## 💾 Rebuilds and removable disks
 
-Every GjallarOS system names its checkout in `/etc/gjallar/repository`
-(`dotfilesDir`), so `gjallarctl rebuild`, `gjallarctl oddc update` and the other commands
-find it from any directory. `--repo PATH`, `GJALLAROS_REPO` and the checkout you
-last rebuilt from take precedence. Direct host flake builds fail unless the
+`gjallarctl rebuild` builds only the system checkout `/etc/gjallar/system`,
+from any directory. Root owns that checkout and builds it as it is on the
+official origin; with developer mode on it also builds local changes in it.
+A checkout anywhere else is never rebuilt: an install that still builds from
+a folder in your home is moved with `gjallarctl system move` (see below).
+Other commands find their checkout through `--repo PATH`, `GJALLAROS_REPO`,
+`/etc/gjallar/repository` (`dotfilesDir`) or the current directory, in that
+order. Direct host flake builds fail unless the
 source was staged by `gjallarctl`; installer and recovery deployment also use
 that staging path. This prevents skipping the normal preparation workflow. It
 is not an authorization boundary against root or someone who can change the
@@ -599,13 +596,11 @@ and rebuilds until you run `gjallarctl settings confirm-developer` once.
 Local commits or uncommitted edits stop the update, and nothing is rebuilt.
 A checkout that is ahead of its channel stays where it is until the channel
 catches up; it never goes back to an older commit.
-`gjallarctl rebuild --update-inputs` moves every flake input first (for development
-checkouts). `gjallarctl rebuild --help` lists every option.
+`gjallarctl rebuild --help` lists every option.
 
-When `dotfilesDir` is `/etc/gjallar/system`, root owns the checkout and
-builds it only as it is on the official origin. `--repo`, `--host`,
-`--update-inputs` and other `nixos-rebuild` arguments are refused there; the
-oddc pin may move only to a commit of an official ODDC branch (ROADMAP §14).
+`--repo`, `--host`, `--update-inputs` and other `nixos-rebuild` arguments are
+refused; only `-- --override-input oddc COMMIT` may follow, and the oddc pin
+may move only to a commit of an official ODDC branch (ROADMAP §14).
 
 ### Moving an older install to `/etc/gjallar/system`
 

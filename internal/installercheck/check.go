@@ -80,7 +80,6 @@ func Preflight(root string) Report {
 	}
 
 	checkRequiredFiles(&r, root)
-	checkRegistration(&r, root)
 	checkFlakeInputWiring(&r, root)
 	checkModuleWiring(&r, root)
 	return r
@@ -332,20 +331,6 @@ func checkRequiredFiles(r *Report, root string) {
 			r.Findings = append(r.Findings, Finding{Error, fmt.Sprintf("required file missing: %s", relative)})
 		} else {
 			r.Findings = append(r.Findings, Finding{OK, fmt.Sprintf("required file present: %s", relative)})
-		}
-	}
-}
-
-func checkRegistration(r *Report, root string) {
-	for _, relative := range []string{"system/tools/commands/default.nix"} {
-		contents, err := os.ReadFile(filepath.Join(root, relative))
-		if err != nil {
-			continue
-		}
-		if strings.Contains(string(contents), "check-installer") {
-			r.Findings = append(r.Findings, Finding{OK, fmt.Sprintf("installer checker registered in %s", relative)})
-		} else {
-			r.Findings = append(r.Findings, Finding{Warn, fmt.Sprintf("installer checker not registered in %s", relative)})
 		}
 	}
 }

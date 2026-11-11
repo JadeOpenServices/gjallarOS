@@ -1,7 +1,7 @@
 // Package oddccli is `gjallarctl oddc`. ODDC owns its commands; gjallarctl
 // passes them to the `oddc` command unchanged except validate-device, which
-// validates this GjallarOS checkout on the device, and update, which moves
-// the checkout's oddc input so the rebuild refetches this device's answer.
+// validates this GjallarOS checkout on the device. The oddc pin moves with
+// gjallarctl rebuild --hardware-update.
 package oddccli
 
 import (
@@ -19,8 +19,6 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	switch args[0] {
 	case "validate-device":
 		return runValidateDevice(args[1:], stdout, stderr)
-	case "update":
-		return runUpdate(args[1:], stdout, stderr)
 	}
 
 	return runODDC(args, stdout, stderr)
@@ -29,6 +27,5 @@ func Run(args []string, stdout, stderr io.Writer) int {
 // Usage lists the commands for gjallarctl's help.
 func Usage(out io.Writer) {
 	fmt.Fprintln(out, "       gjallarctl oddc validate-device [--repo PATH]")
-	fmt.Fprintln(out, "       gjallarctl oddc update [--repo PATH] [--rebuild] [--simple|--debug]")
 	fmt.Fprintln(out, "       gjallarctl oddc ODDC-COMMAND [ODDC-ARGS...]")
 }

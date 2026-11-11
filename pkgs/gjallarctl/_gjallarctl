@@ -1,22 +1,19 @@
-#compdef gjallarctl helpme cleanup cleanup-old-generations thermal-status thermal-test check-installer gjallar-preflight gjallar-system-rebuild
+#compdef gjallarctl gjallar-system-rebuild
 
 # Hand-written: gjallarctl parses its own arguments, so nothing can be
-# generated. Keep in step with printUsage in cmd/gjallarctl/main.go. The
-# other names are the wrappers in system/tools/commands/default.nix.
+# generated. Keep in step with printUsage in cmd/gjallarctl/main.go.
+# gjallar-system-rebuild is the root side of gjallarctl rebuild.
 
 _gjallarctl_rebuild() {
   _arguments -S \
     '(- *)'{-h,--help}'[show help]' \
-    '--repo[GjallarOS checkout]:checkout:_files -/' \
-    '--host[host name]:host:' \
     '(-d --debug)'{-d,--debug}'[show the full build output]' \
     '(-n --no-cleanup)'{-n,--no-cleanup}'[keep old generations]' \
     '--update[update the checkout first]' \
-    '--update-inputs[update the flake inputs first]' \
     '--hardware-update[move the ODDC hardware catalogue pin first]' \
     '--channel[ODDC channel]:channel:(stable staging)' \
     '--switch[switch after the hardware update]:switch:(0 1)' \
-    '*::nixos-rebuild argument:'
+    '*::override (-- --override-input oddc COMMIT):'
 }
 
 # The root side of rebuild: the options systemRebuildArgs passes on.
@@ -411,7 +408,6 @@ _gjallarctl_snapshots() {
 _gjallarctl_oddc() {
   local -a cmds=(
     'validate-device:check this machine against its ODDC model'
-    'update:move the ODDC pin'
   )
   if (( CURRENT == 2 )); then
     _describe -t commands 'oddc command' cmds
@@ -422,22 +418,30 @@ _gjallarctl_oddc() {
   case $words[1] in
     validate-device)
       _arguments '--repo[GjallarOS checkout]:checkout:_files -/' ;;
-    update)
-      _arguments '--repo[GjallarOS checkout]:checkout:_files -/' \
-        '--rebuild[rebuild after the update]' \
-        '(--debug)--simple[print only the result line]' \
-        '(--simple)--debug[print the ODDC state before and after]' ;;
   esac
+}
+
+_gjallarctl_network() {
+  local -a cmds=(
+    'summary:link, address, route, DNS, NetworkManager and socket state'
+    'interfaces:interface, address, Wi-Fi and link information'
+    'sockets:listening TCP/UDP sockets'
+    'dns:query a name'
+    'route:show the route to an address'
+    'tools:list the diagnostic tools'
+  )
+  if (( CURRENT == 2 )); then
+    _describe -t commands 'gjallarctl network command' cmds
+  elif (( CURRENT == 3 )) && [[ $words[2] == dns ]]; then
+    _hosts
+  elif (( CURRENT == 3 )) && [[ $words[2] == route ]]; then
+    _message 'IPv4 or IPv6 address'
+  fi
 }
 
 _gjallarctl() {
   case $service in
     gjallar-system-rebuild) _gjallarctl_system_rebuild; return ;;
-    helpme) _arguments '--text[print instead of opening a window]'; return ;;
-    cleanup) _arguments '(-k --keep)'{-k,--keep}'[generations to keep]:count:'; return ;;
-    cleanup-old-generations|thermal-status|gjallar-preflight) _message 'no arguments'; return ;;
-    thermal-test) _arguments '1:mode:(off on status)' '2:process pattern:_process_names'; return ;;
-    check-installer) _arguments '--timeout[time per external check]:duration:'; return ;;
   esac
 
   local -a cmds=(
@@ -449,6 +453,9 @@ _gjallarctl() {
     'usb:USB trust enforcement'
     'thunderbolt:Thunderbolt and USB4 device authorization'
     'vpn:VPN and trusted Wi-Fi'
+    'network:network diagnostics'
+    'register-key:register a security key and set its PIN'
+    'management:device management (JODS) status'
     'addons:Firefox add-ons'
     'apps:install or remove catalogue apps'
     'settings:change GjallarOS settings'
@@ -483,6 +490,9 @@ _gjallarctl() {
         usb) _gjallarctl_usb ;;
         thunderbolt) _gjallarctl_thunderbolt ;;
         vpn) _gjallarctl_vpn ;;
+        network) _gjallarctl_network ;;
+        register-key) _arguments '1:link from the registration page:_urls' ;;
+        management) _arguments '1:management command:((status\:"show the enrollment state"))' ;;
         addons) _gjallarctl_addons ;;
         apps) _gjallarctl_apps ;;
         settings) _gjallarctl_settings ;;

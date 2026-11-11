@@ -32,7 +32,7 @@ func TestSystemRebuildArgsRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if parsed.repo != "" || parsed.host != "" || !parsed.update || !parsed.hardwareUpdate ||
+	if !parsed.update || !parsed.hardwareUpdate ||
 		parsed.channel != "staging" || parsed.switchNow != "1" || !parsed.debug || parsed.cleanup ||
 		!slices.Equal(parsed.rebuildArgs, opts.rebuildArgs) {
 		t.Fatalf("parsed = %+v", parsed)
@@ -41,12 +41,11 @@ func TestSystemRebuildArgsRoundTrip(t *testing.T) {
 
 func TestSystemRebuildArgsRefuseUserChoices(t *testing.T) {
 	for name, opts := range map[string]rebuildOptions{
-		"repo":          {repo: "/home/someone/gjallarOS", cleanup: true},
-		"host":          {host: "other", cleanup: true},
-		"update inputs": {updateInputs: true, cleanup: true},
-		"nix argument":  {rebuildArgs: []string{"--override-input", "nixpkgs", "path:/tmp/x"}, cleanup: true},
-		"impure":        {rebuildArgs: []string{"--impure"}, cleanup: true},
-		"oddc branch":   {rebuildArgs: []string{"--override-input", "oddc", "github:JadeOpenServices/oddc/stable"}, cleanup: true},
+		"repo":         {rebuildArgs: []string{"--repo", "/home/someone/gjallarOS"}, cleanup: true},
+		"host":         {rebuildArgs: []string{"--host", "other"}, cleanup: true},
+		"nix argument": {rebuildArgs: []string{"--override-input", "nixpkgs", "path:/tmp/x"}, cleanup: true},
+		"impure":       {rebuildArgs: []string{"--impure"}, cleanup: true},
+		"oddc branch":  {rebuildArgs: []string{"--override-input", "oddc", "github:JadeOpenServices/oddc/stable"}, cleanup: true},
 	} {
 		if args, err := systemRebuildArgs(opts); err == nil {
 			t.Errorf("%s: accepted as %q", name, args)
@@ -85,22 +84,19 @@ func TestStageLocalChanges(t *testing.T) {
 	}
 	var stdout, stderr bytes.Buffer
 	facts := &flakesource.BuildSource{}
-	if _, status := stageLocalChanges(false, true, facts, &stdout, &stderr); status != 0 || facts.Local != nil {
-		t.Fatalf("development checkout staged the folder: %d %v", status, facts.Local)
-	}
-	if _, status := stageLocalChanges(true, false, facts, &stdout, &stderr); status != 0 || facts.Local != nil {
+	if _, status := stageLocalChanges(false, facts, &stdout, &stderr); status != 0 || facts.Local != nil {
 		t.Fatalf("developer mode off staged the folder: %d %v", status, facts.Local)
 	}
 	if !strings.Contains(stdout.String(), "Developer mode is off") {
 		t.Fatalf("no note with developer mode off: %q", stdout.String())
 	}
 	// The test user owns the folder, so root's copy check refuses it.
-	if _, status := stageLocalChanges(true, true, facts, &stdout, &stderr); status != 1 || facts.Local != nil {
+	if _, status := stageLocalChanges(true, facts, &stdout, &stderr); status != 1 || facts.Local != nil {
 		t.Fatalf("a folder not owned by root was staged: %d %v", status, facts.Local)
 	}
 	localChangesPath = filepath.Join(t.TempDir(), "missing")
 	stdout.Reset()
-	if _, status := stageLocalChanges(true, true, facts, &stdout, &stderr); status != 0 || facts.Local != nil ||
+	if _, status := stageLocalChanges(true, facts, &stdout, &stderr); status != 0 || facts.Local != nil ||
 		!strings.Contains(stdout.String(), "holds no .nix file") {
 		t.Fatalf("missing folder: %d %v %q", status, facts.Local, stdout.String())
 	}
@@ -115,7 +111,7 @@ func TestSystemRebuildNeedsDeveloperGrant(t *testing.T) {
 	gitRun(t, upstream, "commit", "-q", "--allow-empty", "-m", "two")
 	before := gitOut(t, checkout, "rev-parse", "refs/remotes/origin/dev")
 	var stdout, stderr bytes.Buffer
-	if code := rebuildCheckout(checkout, rebuildOptions{update: true}, true, &stdout, &stderr); code != 1 ||
+	if code := rebuildCheckout(checkout, rebuildOptions{update: true}, &stdout, &stderr); code != 1 ||
 		!strings.Contains(stderr.String(), "confirm-developer") {
 		t.Fatalf("dev without a grant: %d %q", code, stderr.String())
 	}
@@ -127,29 +123,26 @@ func TestSystemRebuildNeedsDeveloperGrant(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if code := checkDeveloperGrant(true, user, &stderr); code != 0 {
+	if code := checkDeveloperGrant(user, &stderr); code != 0 {
 		t.Fatalf("stable without a grant: %d", code)
 	}
 	user.ReleaseChannel = "dev"
-	if code := checkDeveloperGrant(false, user, &stderr); code != 0 {
-		t.Fatal("a development checkout asked for the grant")
-	}
 	if err := devgate.Save(developerGrantPath, devgate.Grant{Channels: true, Proof: devgate.ProofPIN}); err != nil {
 		t.Fatal(err)
 	}
-	if code := checkDeveloperGrant(true, user, &stderr); code != 0 {
+	if code := checkDeveloperGrant(user, &stderr); code != 0 {
 		t.Fatalf("dev with a channel grant: %d %q", code, stderr.String())
 	}
 	user.DeveloperMode = true
 	stderr.Reset()
-	if code := checkDeveloperGrant(true, user, &stderr); code != 1 || !strings.Contains(stderr.String(), "developer mode needs") {
+	if code := checkDeveloperGrant(user, &stderr); code != 1 || !strings.Contains(stderr.String(), "developer mode needs") {
 		t.Fatalf("developer mode on a channel grant: %d %q", code, stderr.String())
 	}
 	if err := os.WriteFile(developerGrantPath, []byte("{"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	user.DeveloperMode = false
-	if code := checkDeveloperGrant(true, user, &stderr); code != 1 {
+	if code := checkDeveloperGrant(user, &stderr); code != 1 {
 		t.Fatal("a broken grant let dev build")
 	}
 
@@ -158,14 +151,14 @@ func TestSystemRebuildNeedsDeveloperGrant(t *testing.T) {
 	if err := devgate.Save(developerGrantPath, devgate.Grant{Channels: true, DeveloperMode: true, Proof: devgate.ProofPIN}); err != nil {
 		t.Fatal(err)
 	}
-	if code := checkDeveloperGrant(true, user, &stderr); code != 0 {
+	if code := checkDeveloperGrant(user, &stderr); code != 0 {
 		t.Fatalf("dev with a wide grant: %d %q", code, stderr.String())
 	}
 	if g, err := devgate.Load(developerGrantPath); err != nil || !g.Channels || g.DeveloperMode {
 		t.Fatalf("grant after a rebuild without developer mode: %+v %v", g, err)
 	}
 	user.ReleaseChannel = "stable"
-	if code := checkDeveloperGrant(true, user, &stderr); code != 0 {
+	if code := checkDeveloperGrant(user, &stderr); code != 0 {
 		t.Fatalf("stable with a grant: %d %q", code, stderr.String())
 	}
 	if _, err := os.Stat(developerGrantPath); !os.IsNotExist(err) {
@@ -179,14 +172,14 @@ func TestSystemRebuildNeedsDeveloperGrant(t *testing.T) {
 	devproofSocketPath = filepath.Join(t.TempDir(), "missing.socket")
 	user.ReleaseChannel = "staging"
 	stderr.Reset()
-	if code := checkDeveloperGrant(true, user, &stderr); code != 0 || !strings.Contains(stderr.String(), "confirm-developer once") {
+	if code := checkDeveloperGrant(user, &stderr); code != 0 || !strings.Contains(stderr.String(), "confirm-developer once") {
 		t.Fatalf("migration from a system without the gate: %d %q", code, stderr.String())
 	}
 	if _, err := os.Stat(developerGrantPath); !os.IsNotExist(err) {
 		t.Fatalf("the migration wrote a grant: %v", err)
 	}
 	devproofSocketPath = savedSocket
-	if code := checkDeveloperGrant(true, user, &stderr); code != 1 {
+	if code := checkDeveloperGrant(user, &stderr); code != 1 {
 		t.Fatal("staging without a grant built on a system with the gate")
 	}
 }

@@ -1,8 +1,11 @@
 { lib, pkgs, ... }:
 let
+  libexec = import ../../pkgs/lib/libexec.nix { inherit lib pkgs; };
+
   # Opens a security key registration link in a plain Chromium window with a
   # throwaway profile. Chromium asks to set a PIN on keys that have none;
   # LibreWolf does not. Key access comes from systemd's 60-fido-id.rules.
+  # Started by gjallarctl register-key (Plane 282); not on PATH.
   registerKey = pkgs.writeShellApplication {
     name = "gjallar-register-key";
     runtimeInputs = [ pkgs.coreutils pkgs.zenity ];
@@ -58,21 +61,6 @@ in
     };
   };
 
-  environment.systemPackages = [
-    registerKey
-    (pkgs.writeTextDir "share/zsh/site-functions/_gjallar-register-key" ''
-      #compdef gjallar-register-key
-      _arguments '1:link from the registration page:_urls'
-    '')
-    (pkgs.makeDesktopItem {
-      name = "gjallar-register-key";
-      desktopName = "Register key";
-      genericName = "Security Key Registration";
-      comment = "Register a security key and set its PIN";
-      exec = "gjallar-register-key %u";
-      icon = "security-high";
-      terminal = false;
-      categories = [ "Security" "Utility" ];
-    })
-  ];
+  # No menu entry: a system tool, started only as gjallarctl register-key.
+  environment.systemPackages = [ (libexec registerKey) ];
 }
