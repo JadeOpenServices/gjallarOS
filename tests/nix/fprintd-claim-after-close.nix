@@ -24,7 +24,7 @@ let
       G_MESSAGES_DEBUG = "all";
     };
     # Test only: the client runs as root outside any session, which the
-    # fprintd policy refuses. GjallarOS itself grants no such rule.
+    # fprintd policy refuses. gjallarOS itself grants no such rule.
     security.polkit.enable = true;
     security.polkit.extraConfig = ''
       polkit.addRule(function (action, subject) {

@@ -51,7 +51,7 @@ lib.mkIf config.gjallar.apps.thunderbird.enable (
               "locale"
               "theme"
             ];
-            blocked_install_message = "GjallarOS allows only dictionaries, languages and themes in Thunderbird.";
+            blocked_install_message = "gjallarOS allows only dictionaries, languages and themes in Thunderbird.";
           };
           Preferences = {
             # Account autoconfig over HTTPS only.

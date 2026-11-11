@@ -44,7 +44,7 @@ let
   action = tier: description: ''
     <action id="org.gjallaros.settings.${tier}">
       <description>${description}</description>
-      <message>Authentication is required to change GjallarOS settings</message>
+      <message>Authentication is required to change gjallarOS settings</message>
       <defaults>
         <allow_any>no</allow_any>
         <allow_inactive>no</allow_inactive>
@@ -57,13 +57,13 @@ let
     <!DOCTYPE policyconfig PUBLIC "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
      "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
     <policyconfig>
-      <vendor>GjallarOS</vendor>
-      ${action "everyday" "Change an everyday GjallarOS setting"}
-      ${action "security" "Change a security GjallarOS setting"}
-      ${action "critical" "Change a critical GjallarOS setting"}
+      <vendor>gjallarOS</vendor>
+      ${action "everyday" "Change an everyday gjallarOS setting"}
+      ${action "security" "Change a security gjallarOS setting"}
+      ${action "critical" "Change a critical gjallarOS setting"}
       <action id="org.gjallaros.settings.export">
-        <description>Sign and export your GjallarOS settings</description>
-        <message>Authentication is required to sign and export your GjallarOS settings</message>
+        <description>Sign and export your gjallarOS settings</description>
+        <message>Authentication is required to sign and export your gjallarOS settings</message>
         <defaults>
           <allow_any>no</allow_any>
           <allow_inactive>no</allow_inactive>
@@ -132,7 +132,7 @@ lib.mkIf (settings.dotfilesDir == "/etc/gjallar/system") {
   # key lost while the system runs (systemd drops its credential key when
   # /etc/machine-id changes) would otherwise fail the service until reboot.
   systemd.services.gjallar-settings-key = {
-    description = "Create the GjallarOS settings signing key";
+    description = "Create the gjallarOS settings signing key";
     wantedBy = [ "multi-user.target" ];
     before = [ "gjallar-settingsd.service" ];
     path = [ pkgs.coreutils ];
@@ -162,7 +162,7 @@ lib.mkIf (settings.dotfilesDir == "/etc/gjallar/system") {
   # whether the system runs from a USB disk. The service refuses USB
   # blocking when it does, or when this answer is missing (wiki 752 Q11).
   systemd.services.gjallar-system-disk = {
-    description = "Check whether the GjallarOS system disk is on USB";
+    description = "Check whether the gjallarOS system disk is on USB";
     wantedBy = [ "multi-user.target" ];
     before = [ "gjallar-settingsd.service" ];
     path = [ pkgs.util-linux ];
@@ -184,7 +184,7 @@ lib.mkIf (settings.dotfilesDir == "/etc/gjallar/system") {
   ];
 
   systemd.services.gjallar-settingsd = {
-    description = "GjallarOS settings service";
+    description = "gjallarOS settings service";
     wants = [
       "gjallar-settings-key.service"
       "gjallar-system-disk.service"
@@ -255,7 +255,7 @@ lib.mkIf (settings.dotfilesDir == "/etc/gjallar/system") {
   # receive from local addresses, never by root. It asks from port
   # ReplyPort (internal/namecheck); only it may bind there.
   systemd.sockets.gjallar-namecheck = {
-    description = "GjallarOS hostname check socket";
+    description = "gjallarOS hostname check socket";
     wantedBy = [ "sockets.target" ];
     socketConfig = {
       ListenStream = "/run/gjallar/namecheck.sock";
@@ -267,7 +267,7 @@ lib.mkIf (settings.dotfilesDir == "/etc/gjallar/system") {
   };
 
   systemd.services."gjallar-namecheck@" = {
-    description = "GjallarOS hostname check";
+    description = "gjallarOS hostname check";
     serviceConfig = {
       ExecStart = "${settingsd}/bin/gjallar-namecheck";
       StandardInput = "socket";
@@ -322,7 +322,7 @@ lib.mkIf (settings.dotfilesDir == "/etc/gjallar/system") {
   # its own count of wrong PINs (3 per 2 h) so the chip's lockout, which
   # also guards startup, is never reached from here.
   systemd.sockets.gjallar-devproof = {
-    description = "GjallarOS developer proof socket";
+    description = "gjallarOS developer proof socket";
     wantedBy = [ "sockets.target" ];
     socketConfig = {
       ListenStream = "/run/gjallar/devproof.sock";
@@ -334,7 +334,7 @@ lib.mkIf (settings.dotfilesDir == "/etc/gjallar/system") {
   };
 
   systemd.services."gjallar-devproof@" = {
-    description = "GjallarOS developer proof check";
+    description = "gjallarOS developer proof check";
     path = [
       pkgs.cryptsetup
       pkgs.util-linux
@@ -420,7 +420,7 @@ lib.mkIf (settings.dotfilesDir == "/etc/gjallar/system") {
   # Started by the service after it wrote a change. A switch must not stop
   # the rebuild that runs it, as with nixos-upgrade.
   systemd.services.gjallar-settings-rebuild = {
-    description = "GjallarOS rebuild after a settings change";
+    description = "gjallarOS rebuild after a settings change";
     restartIfChanged = false;
     stopIfChanged = false;
     unitConfig.X-StopOnRemoval = false;

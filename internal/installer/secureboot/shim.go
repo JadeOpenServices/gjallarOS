@@ -124,7 +124,7 @@ type PathChoice struct {
 }
 
 // ChoosePath picks the default path for this firmware. ourKey is the DER of
-// the GjallarOS db certificate that goes into MOK, nil when it does not
+// the gjallarOS db certificate that goes into MOK, nil when it does not
 // exist yet. An error means neither path can be shown safe: a variable did
 // not parse.
 func ChoosePath(trust FirmwareTrust, facts ShimFacts, ourKey []byte) (PathChoice, error) {
@@ -185,12 +185,12 @@ func shimBlocked(trust FirmwareTrust, facts ShimFacts, ourKey []byte) string {
 	if len(ourKey) > 0 {
 		sum := sha256.Sum256(ourKey)
 		if revokedCert(hex.EncodeToString(sum[:])) {
-			return "the firmware dbx revokes the GjallarOS key"
+			return "the firmware dbx revokes the gjallarOS key"
 		}
 		if cert, err := x509.ParseCertificate(ourKey); err == nil {
 			tbs := sha256.Sum256(cert.RawTBSCertificate)
 			if revokedTBS(hex.EncodeToString(tbs[:])) {
-				return "the firmware dbx revokes the GjallarOS key"
+				return "the firmware dbx revokes the gjallarOS key"
 			}
 		}
 	}

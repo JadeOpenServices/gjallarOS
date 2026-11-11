@@ -1,5 +1,5 @@
 {
-  description = "GjallarOS — a practical Nordic NixOS workstation";
+  description = "gjallarOS — a practical Nordic NixOS workstation";
 
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs/nixos-26.05";
@@ -69,7 +69,7 @@
         else if self ? narHash then
           "nar:${self.narHash}"
         else
-          throw "GjallarOS source provenance is unavailable";
+          throw "gjallarOS source provenance is unavailable";
       # gjallarctl writes this into the staged source it builds.
       buildContext =
         if builtins.pathExists (self.outPath + "/.gjallar-build-context.json") then
@@ -131,7 +131,7 @@
         "gjallar-installer-lab-iso" =
           self.nixosConfigurations.gjallar-installer-lab.config.system.build.isoImage;
 
-        # Packages that cache.nixos.org does not have because GjallarOS patches
+        # Packages that cache.nixos.org does not have because gjallarOS patches
         # them. The modules use the same files with the same pkgs, so a build
         # here has the drvPath the machines need. CI builds `prebuilt` for each
         # release tag and pushes it to the cache in deployment/binary-cache.json.

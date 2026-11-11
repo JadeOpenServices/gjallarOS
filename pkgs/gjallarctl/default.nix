@@ -86,7 +86,7 @@ AUTH
   '';
 
   meta = {
-    description = "Safe GjallarOS maintenance and validation tool";
+    description = "Safe gjallarOS maintenance and validation tool";
     mainProgram = "gjallarctl";
     license = lib.licenses.agpl3Plus;
     platforms = lib.platforms.linux;

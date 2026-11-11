@@ -2,7 +2,7 @@
 
 Reads the live binds from `hyprctl binds -j`, so the list always matches the
 running session, including binds the user added. The gestures come from the
-GjallarOS config, because Hyprland does not report them.
+gjallarOS config, because Hyprland does not report them.
 """
 import json
 import re

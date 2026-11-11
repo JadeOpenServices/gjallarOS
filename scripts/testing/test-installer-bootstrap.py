@@ -46,7 +46,7 @@ exit 97
         sudo.chmod(0o755)
         self.env["PATH"] = str(tools) + os.pathsep + self.env["PATH"]
         # Never read the host's /etc/gjallar/repository: on an installed
-        # GjallarOS it would send the bootstrap to the system checkout.
+        # gjallarOS it would send the bootstrap to the system checkout.
         self.repository_file = self.root / "repository"
         self.env["GJALLAR_SYSTEM_REPOSITORY_FILE"] = str(self.repository_file)
         # The curl path clones into GJALLAR_DIR or reuses it; keep it away

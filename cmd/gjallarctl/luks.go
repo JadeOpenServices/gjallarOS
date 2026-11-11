@@ -517,7 +517,7 @@ func (s *luksSession) confirm(key string) error {
 		s.clear()
 		fmt.Fprintf(s.tty, "Your new recovery key\n\n    %s\n    %s\n\n",
 			strings.Join(blocks[:4], "-"), strings.Join(blocks[4:], "-"))
-		fmt.Fprintln(s.tty, s.wrap("It unlocks this disk when nothing else can, for example after a firmware change. Write it on paper or keep it in a password manager on another device. GjallarOS does not keep a copy."))
+		fmt.Fprintln(s.tty, s.wrap("It unlocks this disk when nothing else can, for example after a firmware change. Write it on paper or keep it in a password manager on another device. gjallarOS does not keep a copy."))
 		fmt.Fprintln(s.tty)
 		if _, err := s.readLine(s.wrap("Press Enter when it is written down.") + " "); err != nil {
 			return err

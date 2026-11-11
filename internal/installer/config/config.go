@@ -101,7 +101,7 @@ type User struct {
 	DeveloperMode             bool             `json:"developerMode" tier:"critical" scope:"device"`
 	// SettingsSigningKey is the main user's own OpenSSH public key for
 	// settings files (ROADMAP "Pairing and own keys"); empty means
-	// GjallarOS manages that user's signing key.
+	// gjallarOS manages that user's signing key.
 	SettingsSigningKey string `json:"settingsSigningKey" tier:"critical" scope:"device"`
 	// ReleaseChannel is the branch of the official repository that
 	// rebuild --update follows (ROADMAP §11): dev, staging or stable.

@@ -18,7 +18,7 @@ artifact="${2:-}"
 
 # This binary is intentionally recovery-only.
 [ -e /etc/gjallar/recovery ] || [ -e /etc/gjallar/recovery-image ] || \
-  fail 'not running inside a GjallarOS recovery environment'
+  fail 'not running inside a gjallarOS recovery environment'
 
 for command in jq sha256sum lsblk realpath awk grep; do
   command -v "$command" >/dev/null || fail "required command missing: $command"
@@ -155,7 +155,7 @@ printf '%s\n' \
 platform_executor='/run/current-system/sw/bin/gjallar-recovery-platform-install'
 
 [ -x "$platform_executor" ] || \
-  fail 'validated contract, but canonical GjallarOS platform installer is not implemented'
+  fail 'validated contract, but canonical gjallarOS platform installer is not implemented'
 
 "$platform_executor" \
   --operation "$operation" \

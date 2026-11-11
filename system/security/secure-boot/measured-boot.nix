@@ -95,7 +95,7 @@ let
       gjallar-verify-secure-boot-ownership enrolled
 
       systemd-ask-password --timeout=0 -n \
-        "GjallarOS: enter the disk recovery key or passphrase to re-enroll TPM2 unlock" >"$keyfile"
+        "gjallarOS: enter the disk recovery key or passphrase to re-enroll TPM2 unlock" >"$keyfile"
       chmod 0600 "$keyfile"
       # Check the key before anything is removed.
       cryptsetup open --test-passphrase --type luks "$device" --key-file "$keyfile"
@@ -118,7 +118,7 @@ let
       NEWPIN="$newpin" systemd-cryptenroll --wipe-slot=tpm2 --unlock-key-file="$keyfile" \
         --tpm2-device=auto --tpm2-pcrlock=/var/lib/systemd/pcrlock.json "$pin_arg" "$device"
       ${recordEnrollment}
-      printf '%s\n' 'GjallarOS TPM2 unlock re-enrolled; human recovery keyslots were preserved.'
+      printf '%s\n' 'gjallarOS TPM2 unlock re-enrolled; human recovery keyslots were preserved.'
     '';
   };
 in
@@ -172,11 +172,11 @@ in
   config.assertions = lib.optionals settings.luksTpm2Enable [
     {
       assertion = settings.secureBootEnable;
-      message = "GjallarOS TPM2 unlock requires Secure Boot.";
+      message = "gjallarOS TPM2 unlock requires Secure Boot.";
     }
     {
       assertion = builtins.length luksMappings == 1 && lib.hasPrefix "/dev/disk/by-uuid/" luksDevice;
-      message = "GjallarOS TPM2 enrollment requires exactly one LUKS device addressed by /dev/disk/by-uuid/.";
+      message = "gjallarOS TPM2 enrollment requires exactly one LUKS device addressed by /dev/disk/by-uuid/.";
     }
   ];
 
@@ -236,7 +236,7 @@ in
       # A chip slot without a startup policy (first installers, or made by
       # hand) opens the disk for any start; the enrollment below replaces
       # it in the same call that adds the bound slot (loophole 40/41). A
-      # slot GjallarOS enrolled stays: only its finished enrollment may
+      # slot gjallarOS enrolled stays: only its finished enrollment may
       # replace it.
       cryptsetup luksDump --dump-json-metadata "$device" >"$keyfile.meta"
       chip="$(gjallarctl installer tpm2-metadata-policy "$keyfile.meta")"
@@ -246,10 +246,10 @@ in
         none) ;;
         unbound)
           wipe=(--wipe-slot=tpm2)
-          printf '%s\n' 'Replacing the security chip slot GjallarOS did not set up; it has no startup policy.'
+          printf '%s\n' 'Replacing the security chip slot gjallarOS did not set up; it has no startup policy.'
           ;;
         *)
-          printf 'ERROR: %s has a GjallarOS security chip slot, but its enrollment did not finish; no slot was changed. Remove it with systemd-cryptenroll --wipe-slot=tpm2 %s and restart to enroll again.\n' \
+          printf 'ERROR: %s has a gjallarOS security chip slot, but its enrollment did not finish; no slot was changed. Remove it with systemd-cryptenroll --wipe-slot=tpm2 %s and restart to enroll again.\n' \
             "$device" "$device" >&2
           exit 1
           ;;
@@ -267,7 +267,7 @@ in
       plymouth quit || true
       chvt 1 || true
       systemd-ask-password --timeout=0 -n \
-        "GjallarOS: enter the disk passphrase or recovery key to set up security chip unlock" >"$keyfile"
+        "gjallarOS: enter the disk passphrase or recovery key to set up security chip unlock" >"$keyfile"
       chmod 0600 "$keyfile"
       cryptsetup open --test-passphrase --type luks "$device" --key-file "$keyfile"
 
@@ -288,7 +288,7 @@ in
       gjallarctl luks grant-developer ${if pinEnabled then "pin" else "recovery"} ||
         printf '%s\n' 'Developer channel not confirmed; run gjallarctl settings confirm-developer once.' >&2
       install -m 0600 /dev/null "$state/tpm2-enrollment-complete"
-      printf '%s\n' 'GjallarOS measured-boot TPM2 enrollment completed; human recovery keyslots were preserved.'
+      printf '%s\n' 'gjallarOS measured-boot TPM2 enrollment completed; human recovery keyslots were preserved.'
 
       # A confirmed recovery key replaces the install passphrase. Cancelled,
       # the passphrase stays and `gjallarctl luks setup` finishes it later.

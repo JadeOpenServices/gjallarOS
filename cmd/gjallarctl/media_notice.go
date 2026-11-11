@@ -415,7 +415,7 @@ func mediaOfferWriting(card *mediaCard, conn *dbus.Conn, path dbus.ObjectPath, d
 		App:     "GjallarOS",
 		Icon:    "drive-removable-media",
 		Summary: name + " opened read-only",
-		Body: "Its file system comes from another system, so GjallarOS does not change anything on it. " +
+		Body: "Its file system comes from another system, so gjallarOS does not change anything on it. " +
 			"Allow writing only if you want to save files on it. " +
 			"If the other system went to sleep on it or did not shut down fully, shut it down there first.",
 		Actions: []noticeAction{{"allow", "Allow writing"}, {"keep", "Keep read-only"}},

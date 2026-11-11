@@ -31,7 +31,7 @@ gjallarctl.overrideAttrs (old: {
   ) "-X github.com/JadeOpenServices/gjallarOS/internal/installer/oddcdraft.Catalog=${oddc}";
 
   meta = old.meta // {
-    description = "GjallarOS installer and recovery-storage maintenance";
+    description = "gjallarOS installer and recovery-storage maintenance";
     mainProgram = "gjallar-installer";
   };
 })

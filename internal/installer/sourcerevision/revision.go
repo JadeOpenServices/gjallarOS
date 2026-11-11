@@ -30,7 +30,7 @@ func Resolve(repo string, recovery bool) (string, error) {
 	).Output()
 	if err != nil {
 		return "", fmt.Errorf(
-			"resolve GjallarOS repository revision: %w",
+			"resolve gjallarOS repository revision: %w",
 			err,
 		)
 	}
@@ -38,7 +38,7 @@ func Resolve(repo string, recovery bool) (string, error) {
 	revision := strings.TrimSpace(string(output))
 	if revision == "" {
 		return "", fmt.Errorf(
-			"resolve GjallarOS repository revision: empty revision",
+			"resolve gjallarOS repository revision: empty revision",
 		)
 	}
 

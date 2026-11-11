@@ -221,7 +221,7 @@ lib.mkIf config.gjallar.apps.dolphin.enable {
     fi
   '';
 
-  # Migrate only GjallarOS' previous Nextcloud icon defaults. Preserve any
+  # Migrate only gjallarOS' previous Nextcloud icon defaults. Preserve any
   # user-selected custom icon and every unrelated Places entry.
   home.activation.dolphinNextcloudIconMigration =
     lib.mkIf nextcloudActive (

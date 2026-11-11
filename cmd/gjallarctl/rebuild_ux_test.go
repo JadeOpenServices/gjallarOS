@@ -83,7 +83,7 @@ func TestRebuildPreflightSuccessIsCompact(t *testing.T) {
 
 	got := stdout.String()
 
-	if !strings.Contains(got, "[GjallarOS] Preflight ✓") {
+	if !strings.Contains(got, "[gjallarOS] Preflight ✓") {
 		t.Fatalf("compact success line missing:\n%s", got)
 	}
 
@@ -150,7 +150,7 @@ func TestRebuildPreflightFailureKeepsDiagnostics(t *testing.T) {
 
 	if !strings.Contains(
 		stderr.String(),
-		"FAIL: GjallarOS preflight failed",
+		"FAIL: gjallarOS preflight failed",
 	) {
 		t.Fatalf(
 			"failure summary missing:\n%s",
@@ -474,7 +474,7 @@ func TestRebuildPlanBootsNextInRecoveryEntry(t *testing.T) {
 	if plan := newRebuildPlan("/repo", "host", "", false, nil); plan.activate[1] != "switch" {
 		t.Fatalf("activate = %q, want switch outside recovery", plan.activate)
 	}
-	if err := os.WriteFile(marker, []byte("Trusted GjallarOS recovery entry.\n"), 0o644); err != nil {
+	if err := os.WriteFile(marker, []byte("Trusted gjallarOS recovery entry.\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if plan := newRebuildPlan("/repo", "host", "", false, nil); plan.activate[1] != "boot" {

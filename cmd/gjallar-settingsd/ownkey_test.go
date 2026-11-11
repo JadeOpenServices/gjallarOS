@@ -152,7 +152,7 @@ func TestOwnKeyRefuses(t *testing.T) {
 		}
 	}
 
-	// Other accounts keep the key GjallarOS manages.
+	// Other accounts keep the key gjallarOS manages.
 	if other, err := f.svc.Export(ctx, ":1.12"); err != nil || settings.IsUnsigned(other) {
 		t.Errorf("export of another account: %v", err)
 	}

@@ -336,7 +336,7 @@ if fields.get("targetPath", "") != "/":
 if fields.get("_kind") != "FoldersWithPlaceholders":
     print(
         "Nextcloud policy refused: classic sync folders are not allowed; "
-        "GjallarOS requires an OpenVFS placeholder folder.",
+        "gjallarOS requires an OpenVFS placeholder folder.",
         file=sys.stderr,
     )
     raise SystemExit(78)
@@ -634,7 +634,7 @@ lib.mkMerge [
         do
           if [ -e "$entry" ]; then
             run ${pkgs.coreutils}/bin/rm -f "$entry"
-            echo "GjallarOS: removed the old Nextcloud autostart entry $entry; the session starts the client"
+            echo "gjallarOS: removed the old Nextcloud autostart entry $entry; the session starts the client"
           fi
         done
         run ${pkgs.coreutils}/bin/mkdir -p "$(${pkgs.coreutils}/bin/dirname "$marker")"

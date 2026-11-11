@@ -394,7 +394,7 @@ in
 
   systemd.user.services.firefox-addons-reconcile = {
     Unit = {
-      Description = "Remove Firefox add-ons GjallarOS no longer installs";
+      Description = "Remove Firefox add-ons gjallarOS no longer installs";
       Before = [ "graphical-session.target" ];
     };
     Service = {

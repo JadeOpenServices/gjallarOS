@@ -77,7 +77,7 @@ let
       }
 
       produce_status | zenity --progress \
-        --title="GjallarOS Battery" \
+        --title="gjallarOS Battery" \
         --width=520 \
         --no-cancel \
         --auto-close \
@@ -112,7 +112,7 @@ let
           DBUS_SESSION_BUS_ADDRESS="unix:path=$runtime/bus" \
           systemd-run --user --quiet --collect --unit="$unit" \
             zenity --warning \
-              --title="GjallarOS Battery" \
+              --title="gjallarOS Battery" \
               --width=520 \
               --text="$message" \
               >/dev/null ||

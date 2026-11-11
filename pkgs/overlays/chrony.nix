@@ -16,7 +16,7 @@ in
 {
   chrony =
     assert lib.assertMsg (prev.chrony.version == "4.8")
-      "GjallarOS chrony overlay was written for 4.8; check whether ${prev.chrony.version} still waits forever for RTC interrupts with -s and an rtcfile and update or remove pkgs/overlays/chrony.nix.";
+      "gjallarOS chrony overlay was written for 4.8; check whether ${prev.chrony.version} still waits forever for RTC interrupts with -s and an rtcfile and update or remove pkgs/overlays/chrony.nix.";
     prev.chrony.overrideAttrs (old: {
       patches = (old.patches or [ ]) ++ [ ../patches/chrony-rtc-initial-trim-timeout.patch ];
     });

@@ -8,7 +8,7 @@ local -a agent_tools=(
 
 case $service in
   gjallar-ai|opencode-local)
-    _arguments '1:workspace:{_alternative "flags:flag:((--gjallaros\:\"the GjallarOS checkout\"))" "dirs:workspace:_files -/"}'
+    _arguments '1:workspace:{_alternative "flags:flag:((--gjallaros\:\"the gjallarOS checkout\"))" "dirs:workspace:_files -/"}'
     ;;
   gjallar-agent-tool)
     _arguments \

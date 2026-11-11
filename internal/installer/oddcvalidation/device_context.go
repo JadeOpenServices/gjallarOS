@@ -47,7 +47,7 @@ func loadDeviceContext(
 	revision, err := resolveRevision(repo, false)
 	if err != nil {
 		return DeviceContext{}, fmt.Errorf(
-			"resolve GjallarOS source revision: %w",
+			"resolve gjallarOS source revision: %w",
 			err,
 		)
 	}

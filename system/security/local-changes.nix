@@ -33,7 +33,7 @@ let
         else if type == "regular" then
           [ rel ]
         else
-          throw "GjallarOS: ${rel} in the local folder is not a plain file"
+          throw "gjallarOS: ${rel} in the local folder is not a plain file"
       ) (builtins.readDir (at sub))
     );
 
@@ -66,11 +66,11 @@ let
 
   checked =
     if present && local == null then
-      throw "GjallarOS: .gjallar-local is in the source, but gjallarctl did not stage it; build with gjallarctl rebuild"
+      throw "gjallarOS: .gjallar-local is in the source, but gjallarctl did not stage it; build with gjallarctl rebuild"
     else if !present && local != null then
-      throw "GjallarOS: the build context names local changes, but .gjallar-local is missing"
+      throw "gjallarOS: the build context names local changes, but .gjallar-local is missing"
     else if local != null && (local.hash or "") != hash then
-      throw "GjallarOS: .gjallar-local does not match the hash gjallarctl recorded"
+      throw "gjallarOS: .gjallar-local does not match the hash gjallarctl recorded"
     else
       true;
 in

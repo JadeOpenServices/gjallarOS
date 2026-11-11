@@ -29,7 +29,7 @@ buildGoModule {
   ];
 
   meta = {
-    description = "GjallarOS privileged USB trust broker";
+    description = "gjallarOS privileged USB trust broker";
     license = lib.licenses.agpl3Plus;
     mainProgram = "gjallar-usbtrustd";
     platforms = lib.platforms.linux;

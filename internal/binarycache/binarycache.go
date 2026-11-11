@@ -1,4 +1,4 @@
-// Package binarycache reads the GjallarOS release cache from
+// Package binarycache reads the gjallarOS release cache from
 // deployment/binary-cache.json. system/maintenance/binary-cache.nix adds it to
 // nix.conf, but that only takes effect after the first switch. Installs and
 // rebuilds pass it on the command line as well, so the build that brings the

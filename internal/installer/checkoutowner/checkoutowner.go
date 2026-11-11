@@ -16,7 +16,7 @@ import (
 	"syscall"
 )
 
-// Managed lists the repository-relative paths GjallarOS tools write into a
+// Managed lists the repository-relative paths gjallarOS tools write into a
 // checkout. Directories are handled recursively.
 var Managed = []string{
 	"generated",

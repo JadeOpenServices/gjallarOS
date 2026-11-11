@@ -27,7 +27,7 @@ matches = [
 
 if len(matches) != 1:
     raise SystemExit(
-        "expected exactly one GjallarOS recovery-maintenance boot entry "
+        "expected exactly one gjallarOS recovery-maintenance boot entry "
         f"for generation {generation}, found {len(matches)}"
     )
 

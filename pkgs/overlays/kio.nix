@@ -16,7 +16,7 @@ in
     _scopeFinal: scopePrev: {
       kio =
         assert lib.assertMsg (scopePrev.kio.version == "6.26.0")
-          "GjallarOS KIO overlay backports the 6.31 FUSE slow-mount check to 6.26.0; drop pkgs/overlays/kio.nix if ${scopePrev.kio.version} has KIO commits 0d477be2 and 26081ad6, otherwise update the patch.";
+          "gjallarOS KIO overlay backports the 6.31 FUSE slow-mount check to 6.26.0; drop pkgs/overlays/kio.nix if ${scopePrev.kio.version} has KIO commits 0d477be2 and 26081ad6, otherwise update the patch.";
         scopePrev.kio.overrideAttrs (old: {
           patches = (old.patches or [ ]) ++ [ ../patches/kio-fuse-mounts-slow.patch ];
         });

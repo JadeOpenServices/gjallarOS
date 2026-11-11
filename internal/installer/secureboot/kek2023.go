@@ -15,7 +15,7 @@ import (
 // Microsoft's KEK CA 2011 expired on 2026-06-24; new db and dbx updates are
 // signed by its successor, "Microsoft Corporation KEK 2K CA 2023". Vendors
 // ship that KEK as an update signed with their own Platform Key, which can
-// never apply once GjallarOS owns the PK. A machine whose built-in KEK only
+// never apply once gjallarOS owns the PK. A machine whose built-in KEK only
 // knows the 2011 CA would stop taking revocation updates for good, so
 // enrollment adds the 2023 CA next to the preserved built-in KEK.
 //

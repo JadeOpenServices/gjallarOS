@@ -41,10 +41,10 @@ func syntheticReport() Report {
 func TestRenderLayout(t *testing.T) {
 	got := string(syntheticReport().Render())
 	for _, want := range []string{
-		"GjallarOS install report (format 1)",
+		"gjallarOS install report (format 1)",
 		"Why:               the install failed",
 		"Date (UTC):        2026-11-10\n",
-		"GjallarOS commit:  2aa66ac7dd24a0900983ccfc6841d50c5e04663d",
+		"gjallarOS commit:  2aa66ac7dd24a0900983ccfc6841d50c5e04663d",
 		"Firmware:          UEFI, Secure Boot off, Setup Mode on, TPM 2",
 		"ODDC model:        none",
 		"  Product:         Example 13[2J",

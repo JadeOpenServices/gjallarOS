@@ -1,4 +1,4 @@
-# GjallarOS local changes
+# gjallarOS local changes
 
 Developer mode builds the files in this folder into your system.
 

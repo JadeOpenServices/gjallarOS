@@ -88,7 +88,7 @@ in
     xdg.dataFile."applications/gjallar-url-handler.desktop".text = ''
       [Desktop Entry]
       Type=Application
-      Name=GjallarOS URL handler
+      Name=gjallarOS URL handler
       NoDisplay=true
       Exec=${handler}/bin/gjallar-open-url %u
       MimeType=x-scheme-handler/http;x-scheme-handler/https;

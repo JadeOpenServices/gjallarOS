@@ -75,7 +75,7 @@ type CertKind string
 const (
 	CertMicrosoft CertKind = "microsoft"
 	// CertPlatform is the Platform Key, a KEK it signed, or a db key a
-	// PK or KEK key signed: the maker's keys, or GjallarOS's own once it
+	// PK or KEK key signed: the maker's keys, or gjallarOS's own once it
 	// owns the firmware.
 	CertPlatform CertKind = "platform"
 	CertOther    CertKind = "other"

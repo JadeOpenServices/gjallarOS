@@ -96,7 +96,7 @@ stdenv.mkDerivation {
   desktopItems = [
     (makeDesktopItem {
       name = "gjallar-settings";
-      desktopName = "GjallarOS Settings";
+      desktopName = "gjallarOS Settings";
       comment = "Security checks and apps for this device";
       exec = "gjallar-settings";
       icon = "preferences-system";
@@ -114,7 +114,7 @@ stdenv.mkDerivation {
       name = "gjallar-settings-apps";
       desktopName = "Apps";
       genericName = "App catalogue";
-      comment = "Install and remove apps from the GjallarOS catalogue";
+      comment = "Install and remove apps from the gjallarOS catalogue";
       exec = "gjallar-settings apps";
       icon = "system-software-install";
       categories = [ "Settings" "PackageManager" ];
@@ -122,7 +122,7 @@ stdenv.mkDerivation {
   ];
 
   meta = {
-    description = "GjallarOS settings window with gjallarHorn and the app catalogue";
+    description = "gjallarOS settings window with gjallarHorn and the app catalogue";
     mainProgram = "gjallar-settings";
     license = lib.licenses.agpl3Plus;
     platforms = lib.platforms.linux;

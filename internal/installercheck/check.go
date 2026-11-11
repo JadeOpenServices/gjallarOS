@@ -64,7 +64,7 @@ func ResolveRepository(path string) (string, error) {
 	for _, marker := range []string{"flake.nix", "scripts/installation/install.sh"} {
 		info, err := os.Stat(filepath.Join(root, marker))
 		if err != nil || info.IsDir() {
-			return "", fmt.Errorf("not a GjallarOS repository (missing %s)", marker)
+			return "", fmt.Errorf("not a gjallarOS repository (missing %s)", marker)
 		}
 	}
 	return root, nil

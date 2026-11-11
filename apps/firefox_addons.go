@@ -9,7 +9,7 @@ import (
 	"unicode"
 )
 
-// The Firefox add-ons GjallarOS offers, grouped in collections. Each id is
+// The Firefox add-ons gjallarOS offers, grouped in collections. Each id is
 // the add-on's attribute in the NUR firefox-addons set, addonId its ID on
 // addons.mozilla.org.
 //
@@ -21,7 +21,7 @@ const UBlockOriginID = "uBlock0@raymondhill.net"
 
 // Add-on modes. "on" installs the add-on and lets the user turn it off in
 // Firefox; "locked" keeps it on; "off" leaves it out, and an add-on that
-// GjallarOS installed before is removed again.
+// gjallarOS installed before is removed again.
 const (
 	AddonOff    = "off"
 	AddonOn     = "on"

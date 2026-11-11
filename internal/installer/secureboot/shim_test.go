@@ -112,8 +112,8 @@ func TestChoosePath(t *testing.T) {
 			return c.trust(digestList(t, x509SHA256SignatureType, c.facts.VendorCATBS))
 		}, nil, PathOwnKeys, "MokManager"},
 		{"dbx holds shim itself", func() FirmwareTrust { return c.trust(digestList(t, sha256SignatureType, shimFile)) }, nil, PathOwnKeys, "shimx64.efi"},
-		{"dbx holds our key", func() FirmwareTrust { return c.trust(x509SignatureList(c.ours)) }, c.ours, PathOwnKeys, "GjallarOS key"},
-		{"dbx holds our key TBS", func() FirmwareTrust { return c.trust(digestList(t, x509SHA256SignatureType, sum(c.oursTBS))) }, c.ours, PathOwnKeys, "GjallarOS key"},
+		{"dbx holds our key", func() FirmwareTrust { return c.trust(x509SignatureList(c.ours)) }, c.ours, PathOwnKeys, "gjallarOS key"},
+		{"dbx holds our key TBS", func() FirmwareTrust { return c.trust(digestList(t, x509SHA256SignatureType, sum(c.oursTBS))) }, c.ours, PathOwnKeys, "gjallarOS key"},
 		{"our key unknown yet", func() FirmwareTrust { return c.trust(x509SignatureList(c.ours)) }, nil, PathShim, "trusts the signer"},
 		{"SBAT level above shim", func() FirmwareTrust {
 			tr := c.trust(nil)

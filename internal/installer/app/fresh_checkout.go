@@ -197,7 +197,7 @@ func checkoutFree(targetRoot string) error {
 	switch {
 	case err == nil:
 		return fmt.Errorf(
-			"%s already exists, but GjallarOS is not installed on this system; "+
+			"%s already exists, but gjallarOS is not installed on this system; "+
 				"nothing was changed. Move %s away and run the installer again",
 			systemcheckout.Path, systemcheckout.Path,
 		)

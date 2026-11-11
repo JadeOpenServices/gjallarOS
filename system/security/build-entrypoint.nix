@@ -51,7 +51,7 @@ in
             entrypoint = "gjallarctl";
           }
         && sourceValid;
-      message = "Direct GjallarOS flake builds are disabled. Use rebuild (or gjallarctl installer deploy); these commands prepare and validate a staged source.";
+      message = "Direct gjallarOS flake builds are disabled. Use rebuild (or gjallarctl installer deploy); these commands prepare and validate a staged source.";
     }
   ];
 }

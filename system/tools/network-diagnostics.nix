@@ -25,7 +25,7 @@ Commands:
   sockets     Listening TCP/UDP sockets.
   dns NAME    Query the configured resolver plus A, AAAA and DNSSEC-aware data.
   route IP    Show the kernel route selected for an IPv4 or IPv6 address.
-  tools       Show the diagnostic tools provided by GjallarOS.
+  tools       Show the diagnostic tools provided by gjallarOS.
 
 Packet capture, active scanning and throughput testing remain explicit operator
 actions through tcpdump, tshark, termshark, nmap, iperf3 and the other raw tools.

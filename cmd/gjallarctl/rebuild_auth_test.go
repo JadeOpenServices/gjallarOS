@@ -253,8 +253,8 @@ func TestAuthenticationResultClosesThePrompt(t *testing.T) {
 		status int
 		want   string
 	}{
-		{0, "[GjallarOS] Authenticated.\n"},
-		{1, "[GjallarOS] Authentication failed.\n"},
+		{0, "[gjallarOS] Authenticated.\n"},
+		{1, "[gjallarOS] Authentication failed.\n"},
 		{130, ""},
 	} {
 		var tty strings.Builder

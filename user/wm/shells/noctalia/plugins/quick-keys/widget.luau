@@ -1,6 +1,6 @@
 -- oddc-quick-keys writes preset1, preset2 or preset3 here when the device
 -- reports a change. The file is missing until the first key press after boot,
--- and the widget stays hidden until then. GjallarOS maps none of the keys:
+-- and the widget stays hidden until then. gjallarOS maps none of the keys:
 -- each preset sends ODDC's own macro keys, free for the user's binds.
 local presetFile = "/run/oddc/quick-keys/preset"
 

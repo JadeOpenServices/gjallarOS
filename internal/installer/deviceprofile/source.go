@@ -7,7 +7,7 @@ import (
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/oddc"
 )
 
-// AnswerDir is where a GjallarOS tree keeps the ODDC answer for its machine;
+// AnswerDir is where a gjallarOS tree keeps the ODDC answer for its machine;
 // the system configuration reads it as oddc.catalog.
 const AnswerDir = "generated/oddc"
 

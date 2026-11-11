@@ -203,7 +203,7 @@ ApplicationWindow {
                     }
                     SectionRow {
                         title: "Apps"
-                        detail: "Install and remove apps from the GjallarOS catalogue."
+                        detail: "Install and remove apps from the gjallarOS catalogue."
                         iconName: "system-software-install"
                         onClicked: window.openPage("apps")
                     }

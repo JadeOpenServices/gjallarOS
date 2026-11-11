@@ -1,8 +1,8 @@
 <div align="center">
 
-<img src="docs/branding/gjallaros-logo.svg" alt="GjallarOS logo: Gjallarhorn held in a fist" width="128">
+<img src="docs/branding/gjallaros-logo.svg" alt="gjallarOS logo: Gjallarhorn held in a fist" width="128">
 
-# GjallarOS
+# gjallarOS
 
 **A secure, modular NixOS workstation on Hyprland.**
 
@@ -193,7 +193,7 @@ keyboard on every touch device. These keyboards
 have letters, numbers and symbols only: no clipboard, emoji or word
 suggestions. The HP ZBook
 x2 bezel Quick Keys have three presets, switched with the third key from the
-top. GjallarOS maps none of them: every key sends a macro key
+top. gjallarOS maps none of them: every key sends a macro key
 (`XF86Macro1`–`15`) that no other key sends, so you can bind it in Hyprland,
 a drawing app or any other program. The bar shows the active preset number
 next to the network widget after the first key press.
@@ -277,7 +277,7 @@ asks for the change the way `set` does, with the same tiers and waits, and
 says how old the file is.
 
 To sign these files with your own OpenSSH key instead (an `ssh-ed25519` key
-file or a FIDO `sk-ssh-ed25519` key), answer No to "Let GjallarOS sign your
+file or a FIDO `sk-ssh-ed25519` key), answer No to "Let gjallarOS sign your
 settings files for you?" in the installer, or set `settingsSigningKey` to
 your public key line later (critical tier). Export then writes a file you
 sign yourself, and import needs that signature next to the file:
@@ -289,7 +289,7 @@ gjallarctl settings import ~/settings.gjallar
 ```
 
 The second line writes `~/settings.gjallar.sig`. With an own key, only that
-key counts for your account: files GjallarOS signed are refused, and pairing
+key counts for your account: files gjallarOS signed are refused, and pairing
 is off. A file made on another device brings your personal settings, not
 that device's (hostname, disk, boot and the like).
 
@@ -323,7 +323,7 @@ the settings window does the same.
 
 ### Settings window and gjallarHorn
 
-GjallarOS Settings (`gjallar-settings`) has two pages, also in the launcher on
+gjallarOS Settings (`gjallar-settings`) has two pages, also in the launcher on
 their own: Apps and gjallarHorn. gjallarHorn shows the security checks of this
 device (disk encryption, Secure Boot, USB devices, firewall, virus scan,
 updates, developer mode) and a fix button where one helps. `gjallarctl security status`
@@ -371,7 +371,7 @@ Add-ons come in collections, listed in `apps/firefox-addons.json`: Privacy,
 Password managers, Comfort and Cookie banners. New installs start with uBlock
 Origin on and everything else off. Each add-on has one of three modes:
 
-- `off`: not installed. If GjallarOS installed it earlier, it is removed.
+- `off`: not installed. If gjallarOS installed it earlier, it is removed.
 - `on`: installed, and you can turn it off in about:addons.
 - `locked`: installed and always on.
 
@@ -409,7 +409,7 @@ Firefox installs all of these through its enterprise policy, from the Nix
 store, and does not update them by itself; new versions arrive with
 `gjallarctl rebuild`. The rebuild, or the next login if Firefox was open,
 removes add-ons that left the list, but only those Firefox itself installed
-from the policy. GjallarOS
+from the policy. gjallarOS
 keeps a list of them in `~/.local/state/gjallaros/managed/`. Add-ons you
 installed by hand stay untouched. JODS and unattended installs set both keys
 in the same way.
@@ -455,7 +455,7 @@ before it installs it. You set up every account yourself. On the first start a
 local page walks through the account, the Primary Password, your OpenPGP key
 and its backup, and Nextcloud calendar and contacts.
 
-GjallarOS sets these through Thunderbird's enterprise policy:
+gjallarOS sets these through Thunderbird's enterprise policy:
 
 - A Primary Password is asked before the first saved password, and it cannot
   be removed. It protects saved passwords, login tokens and OpenPGP keys.
@@ -479,7 +479,7 @@ gjallarctl settings apply
 
 This starts `pcscd` and `gpg-agent`, lets Thunderbird use a card key through
 GnuPG, and adds OpenSC for S/MIME cards. Approve the card reader when
-GjallarOS asks about the new USB device.
+gjallarOS asks about the new USB device.
 
 <div align="right"><a href="#gjallaros">↑ back to top</a></div>
 
@@ -492,7 +492,7 @@ release after which it can go (`deleteAfter`, a tag like `v2026.10.70`)
 and the Plane or JODS item.
 
 - An old command is not run. The shell prints the new name and stops,
-  for example: GjallarOS: rebuild was removed; use gjallarctl rebuild
+  for example: gjallarOS: rebuild was removed; use gjallarctl rebuild
 - The flake check `legacy-names` fails while an old name is still used
   outside `system/tools/legacy/`, and once the release in `system/release`
   is newer than a row's `deleteAfter` tag. Then the row and the last traces
@@ -636,13 +636,13 @@ the same `system clone` step.
 To try a `gjallarctl` change before rebuilding, run it from the checkout with
 `go run ./cmd/gjallarctl rebuild` (or any other command). It uses the sudo
 helpers of the installed system, so this works only on a machine that already
-runs GjallarOS. If you need the package itself, build it with
+runs gjallarOS. If you need the package itself, build it with
 `nix build "git+file://$PWD#gjallarctl"`. A `path:` flake reference copies the
 whole directory into the Nix store, untracked files and VM disks included.
 
 ### Release cache
 
-GjallarOS patches a few packages (Noctalia, its greeter, the Nextcloud client
+gjallarOS patches a few packages (Noctalia, its greeter, the Nextcloud client
 with OpenVFS, OpenCode, Hyprland, Ghostty, Dolphin and the KDE apps that
 come with it, and others), so cache.nixos.org does not have them and every
 machine compiled them itself. For each `v*` release tag,
@@ -697,10 +697,10 @@ sudo gjallar-recover rollback / N
 
 This adds a new generation with that system; nothing newer is deleted.
 
-The recovery partition shows up in the same menu as "GjallarOS recovery
+The recovery partition shows up in the same menu as "gjallarOS recovery
 (partition)". It has no firmware boot entry of its own and no loader at the
 removable-media path, so firmware that ignores the boot order still starts
-GjallarOS. If the ESP itself is broken, boot the recovery ISO from USB.
+gjallarOS. If the ESP itself is broken, boot the recovery ISO from USB.
 
 > [!NOTE]
 > The installed system does not carry the installer. `gjallar-installer` and
@@ -783,7 +783,7 @@ gjallarctl secure-boot setup
 
 On a machine that still has its maker's keys, `setup` goes through shim and
 leaves the firmware keys alone. The firmware starts shim, which is signed by
-Microsoft, and shim checks GjallarOS's own key, which you confirm once in
+Microsoft, and shim checks gjallarOS's own key, which you confirm once in
 MokManager. This works on any model whose firmware trusts the pinned shim,
 also without an ODDC entry. The command checks that first: db must hold the
 certificate that signed shim, and dbx and shim's SBAT level must not revoke
@@ -796,13 +796,13 @@ it. Each run does one step and says which restart comes next:
 3. Turn on Secure Boot in the firmware setup. The first Secure Boot start
    records the switch and verifies it.
 
-That check refuses unsigned files in the GjallarOS folders of the EFI system
+That check refuses unsigned files in the gjallarOS folders of the EFI system
 partition (`EFI/nixos`, `EFI/BOOT`, `EFI/systemd`, `EFI/Linux`). Unsigned files
 in other folders, such as another system's boot loader, only give a warning:
 they stay where they are, and the firmware and shim decide whether they start.
 
 `gjallarctl secure-boot setup --own-keys` replaces the firmware keys with
-GjallarOS keys instead. It needs an ODDC Secure Boot setup for the model. The
+gjallarOS keys instead. It needs an ODDC Secure Boot setup for the model. The
 command also takes this path on its own when the firmware is already in Setup
 Mode, or when db or dbx would stop shim.
 
@@ -817,7 +817,7 @@ Some firmware empties its revocation list (dbx) along with its keys. When the
 ODDC setup wants dbx kept, the firmware's own default list is written back
 before enrolling, and enrollment stops if that fails. Firmware that only knows
 Microsoft's 2011 KEK (expired June 2026) also gets the 2023 one, so revocation
-updates signed with it still apply once GjallarOS owns the keys.
+updates signed with it still apply once gjallarOS owns the keys.
 
 Revocation updates do not arrive on their own. Once Secure Boot is on, `setup`
 offers one, and you can check any time with:
@@ -1001,7 +1001,7 @@ next steps are in section 18 of
 
 ## 💜 Credits
 
-GjallarOS builds on the ideas and groundwork of
+gjallarOS builds on the ideas and groundwork of
 [AlfheimOS](https://github.com/Serpentian/AlfheimOS) and the
 [hyprdots](https://github.com/prasanthrangan/hyprdots) project.
 [v3rm1n's dotfiles](https://codeberg.org/v3rm1n/dotfiles) inspired it
@@ -1015,13 +1015,13 @@ takes inspiration from [HyDE](https://github.com/HyDE-Project/HyDE).
 
 ## 📜 License
 
-GjallarOS is licensed under the GNU Affero General Public License v3.0 or
+gjallarOS is licensed under the GNU Affero General Public License v3.0 or
 later; see [LICENSE](LICENSE). Bundled parts keep their own licenses:
 
 - [`pkgs/monique`](https://github.com/vardstein/monique): GPL-3.0.
 - [`apps/nemu/module.nix`](apps/nemu/module.nix): nemu's upstream NixOS
   module, BSD-2-Clause, license text in the file header.
-- [`themes/brand/openjade`](themes/brand/openjade/README.md): the openJade
+- [`themes/brand/openjade`](themes/brand/openjade/README.md): the OpenJade
   logo is a trademark and not covered by the AGPL.
 
 <div align="right"><a href="#gjallaros">↑ back to top</a></div>

@@ -52,7 +52,7 @@ let
       ''}
 
       ${lib.optionalString shim ''
-        # The folders GjallarOS writes or a GjallarOS loader reads:
+        # The folders gjallarOS writes or a gjallarOS loader reads:
         # nixos (kernels, lanzaboote, shim), BOOT (fallback path), systemd
         # (systemd-boot) and Linux (UKIs systemd-boot lists). FAT ignores case.
         foreign_folder() {
@@ -95,7 +95,7 @@ let
         ${lib.optionalString shim ''
           # Under shim the firmware keeps its maker's keys: a file in a
           # folder of another system starts only if a key the firmware
-          # already trusts signed it, whatever this check says. GjallarOS
+          # already trusts signed it, whatever this check says. gjallarOS
           # folders stay strict (Jade Q202).
           if foreign_folder "$path"; then
             foreign="$foreign$path"$'\n'
@@ -111,7 +111,7 @@ let
       fi
 
       if [ -n "$foreign" ]; then
-        printf 'WARNING: unsigned EFI files outside the GjallarOS folders (left as they are; the firmware decides whether they start):\n%s' "$foreign" >&2
+        printf 'WARNING: unsigned EFI files outside the gjallarOS folders (left as they are; the firmware decides whether they start):\n%s' "$foreign" >&2
       fi
 
       if [ "$rc" -ne 0 ] && [ "$allowed" -eq 0 ] && [ -z "$foreign" ]; then
@@ -120,7 +120,7 @@ let
       fi
 
       printf '%s\n' \
-        'GjallarOS boot artifact verification passed.' \
+        'gjallarOS boot artifact verification passed.' \
         'The external Lanzaboote kernel remains byte-identical and is hash-verified by the signed generation stub.'
       ${lib.optionalString shim ''
         printf '%s\n' 'shim and MokManager on the ESP are byte-identical to the pinned shim package.'

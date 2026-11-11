@@ -1,6 +1,6 @@
 // Package oddccli is `gjallarctl oddc`. ODDC owns its commands; gjallarctl
 // passes them to the `oddc` command unchanged except validate-device, which
-// validates this GjallarOS checkout on the device. The oddc pin moves with
+// validates this gjallarOS checkout on the device. The oddc pin moves with
 // gjallarctl rebuild --hardware-update.
 package oddccli
 
