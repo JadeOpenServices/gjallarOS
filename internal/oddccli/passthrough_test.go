@@ -67,3 +67,24 @@ func TestRunReportsMissingODDC(t *testing.T) {
 		t.Fatalf("stderr %q", stderr.String())
 	}
 }
+
+func TestRunRefusesUpdate(t *testing.T) {
+	fakeODDC(t)
+
+	for _, args := range [][]string{
+		{"update"},
+		{"update", "--channel", "staging"},
+		{"update", "--flake", "/etc/gjallar/system"},
+	} {
+		var stdout, stderr bytes.Buffer
+		if code := Run(args, &stdout, &stderr); code != 2 {
+			t.Fatalf("%v: exit code %d, want 2", args, code)
+		}
+		if stdout.Len() != 0 {
+			t.Fatalf("%v: oddc ran: %q", args, stdout.String())
+		}
+		if !strings.Contains(stderr.String(), "gjallarctl rebuild --hardware-update") {
+			t.Fatalf("%v: stderr %q", args, stderr.String())
+		}
+	}
+}
