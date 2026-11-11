@@ -18,7 +18,7 @@
       "old": "helpme",
       "new": "gjallarctl helpme",
       "removedIn": "dev merge of one-cli-282",
-      "deleteAfter": "2026-12-03",
+      "deleteAfter": "v2026.10.70",
       "item": "282",
       "match": [
         "`helpme`",
@@ -32,7 +32,7 @@
       "old": "cleanup",
       "new": "gjallarctl cleanup",
       "removedIn": "dev merge of one-cli-282",
-      "deleteAfter": "2026-12-03",
+      "deleteAfter": "v2026.10.70",
       "item": "282",
       "match": [
         "`cleanup`",
@@ -46,7 +46,7 @@
       "old": "cleanup-old-generations",
       "new": "gjallarctl cleanup-old-generations",
       "removedIn": "dev merge of one-cli-282",
-      "deleteAfter": "2026-12-03",
+      "deleteAfter": "v2026.10.70",
       "item": "282",
       "match": [
         "`cleanup-old-generations`",
@@ -60,7 +60,7 @@
       "old": "thermal-status",
       "new": "gjallarctl thermal-status",
       "removedIn": "dev merge of one-cli-282",
-      "deleteAfter": "2026-12-03",
+      "deleteAfter": "v2026.10.70",
       "item": "282",
       "match": [
         "`thermal-status`",
@@ -74,7 +74,7 @@
       "old": "thermal-test",
       "new": "gjallarctl thermal-test",
       "removedIn": "dev merge of one-cli-282",
-      "deleteAfter": "2026-12-03",
+      "deleteAfter": "v2026.10.70",
       "item": "282",
       "match": [
         "`thermal-test`",
@@ -88,7 +88,7 @@
       "old": "check-installer",
       "new": "gjallarctl check",
       "removedIn": "dev merge of one-cli-282",
-      "deleteAfter": "2026-12-03",
+      "deleteAfter": "v2026.10.70",
       "item": "282"
     },
     {
@@ -96,7 +96,7 @@
       "old": "gjallar-preflight",
       "new": "gjallarctl preflight",
       "removedIn": "dev merge of one-cli-282",
-      "deleteAfter": "2026-12-03",
+      "deleteAfter": "v2026.10.70",
       "item": "282"
     },
     {
@@ -104,7 +104,7 @@
       "old": "network-diagnostics",
       "new": "gjallarctl network",
       "removedIn": "dev merge of one-cli-282",
-      "deleteAfter": "2026-12-03",
+      "deleteAfter": "v2026.10.70",
       "item": "282",
       "match": [
         "`network-diagnostics",
@@ -117,7 +117,7 @@
       "old": "gjallar-register-key",
       "new": "gjallarctl register-key",
       "removedIn": "dev merge of one-cli-282",
-      "deleteAfter": "2026-12-03",
+      "deleteAfter": "v2026.10.70",
       "item": "282",
       "match": [
         "`gjallar-register-key",
@@ -130,7 +130,7 @@
       "old": "gjallar-management-status",
       "new": "gjallarctl management status",
       "removedIn": "dev merge of one-cli-282",
-      "deleteAfter": "2026-12-03",
+      "deleteAfter": "v2026.10.70",
       "item": "282",
       "match": [
         "`gjallar-management-status"
