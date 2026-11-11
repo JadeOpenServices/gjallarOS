@@ -542,7 +542,8 @@ switches right away; `--switch 0` only moves the pin, and the next
 commit and swaps it in only once complete. If that fetch fails, for example
 offline, the rebuild stops with the error and changes nothing.
 `gjallarctl oddc doctor` shows the ODDC revision the installed model came
-from. Always apply with `gjallarctl rebuild`, not `sudo nixos-rebuild switch
+from. `gjallarctl oddc update` is refused and points here, because
+plain `oddc update` moves the pin of `/etc/nixos`, not the system checkout. Always apply with `gjallarctl rebuild`, not `sudo nixos-rebuild switch
 --flake`: `generated/` is untracked, so a plain git flake cannot see it.
 
 A plain `gjallarctl rebuild` never moves the pin. It asks GitHub whether the branch the
