@@ -132,6 +132,59 @@ exit 97
             self.assertFalse((repo / "sudo-invoked").exists())
             self.assertFalse((repo / "nix-invoked").exists())
 
+    def run_against_system_checkout(self, system_script, *args, channel=None):
+        # SYNTHETIC system checkout: a private mount namespace puts a temp
+        # directory over /etc/gjallar, so the real one is never read.
+        if not Path("/etc/gjallar").is_dir() or shutil.which("unshare") is None:
+            self.skipTest("needs /etc/gjallar as a mount point and unshare")
+        etc = Path(tempfile.mkdtemp(prefix="etc-gjallar-", dir=self.root))
+        script = etc / "system/scripts/installation/install.sh"
+        script.parent.mkdir(parents=True)
+        script.write_text(system_script)
+        (etc / "repository").write_text("/etc/gjallar/system\n")
+        repo = Path(tempfile.mkdtemp(prefix="copy-", dir=self.root))
+        self.install_script(repo)
+        (repo / "flake.nix").write_text("{}\n")
+        env = dict(self.env, TEST_REPO=str(repo),
+                   GJALLAR_SYSTEM_REPOSITORY_FILE="/etc/gjallar/repository")
+        env.pop("GJALLAR_CHANNEL", None)
+        if channel is not None:
+            env["GJALLAR_CHANNEL"] = channel
+        probe = subprocess.run(["unshare", "-rm", "true"], capture_output=True)
+        if probe.returncode != 0:
+            self.skipTest("user namespaces are not available")
+        result = subprocess.run(
+            ["unshare", "-rm", "bash", "-c",
+             'mount --bind "$1" /etc/gjallar && shift && exec bash "$@"', "bash",
+             str(etc), str(repo / "scripts/installation/install.sh"), *args],
+            env=env, text=True, capture_output=True,
+            stdin=subprocess.DEVNULL, start_new_session=True)
+        self.assertFalse((repo / "sudo-invoked").exists())
+        self.assertFalse((repo / "nix-invoked").exists())
+        return result
+
+    def test_channel_stops_at_system_checkout_without_channel(self):
+        # Wiki 752 R38: an install.sh from before 9fdc7c26 has no channel text.
+        old = "#!/usr/bin/env bash\nexit 0\n"
+        for args, channel in ((("--channel", "staging"), None),
+                              (("--channel=dev",), None),
+                              ((), "stable")):
+            result = self.run_against_system_checkout(old, *args, channel=channel)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("older than the --channel option", result.stderr)
+            self.assertIn("gjallarctl rebuild --update", result.stderr)
+            self.assertNotIn("needs a terminal", result.stderr)
+
+    def test_system_checkout_with_channel_or_no_channel_goes_on(self):
+        current = BOOTSTRAP.read_text()
+        old = "#!/usr/bin/env bash\nexit 0\n"
+        for system_script, args in ((current, ("--channel", "staging")),
+                                    (old, ())):
+            result = self.run_against_system_checkout(system_script, *args)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertNotIn("older than the --channel option", result.stderr)
+            self.assertIn("needs a terminal", result.stderr)
+
     def test_other_repository_file_keeps_the_local_checkout(self):
         repo = self.repository_copy()
         self.repository_file.write_text("/etc/gjallar/system-other\n")

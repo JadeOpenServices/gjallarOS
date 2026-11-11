@@ -46,7 +46,7 @@ for arg in "$@"; do
     fi
     case "$arg" in
         --channel=*) channel_flag="${arg#--channel=}" ;;
-        --channel) expect_channel=1 ;;
+        --channel) expect_channel=1 ;; # the handover below looks for this line
     esac
 done
 (( ! expect_channel )) || {
@@ -91,6 +91,16 @@ if (( system_install )); then
     }
     self="$(realpath -e -- "${BASH_SOURCE[0]:-/dev/stdin}" 2>/dev/null || true)"
     if (( EUID != 0 )) || [[ "$self" != "$system_checkout/scripts/installation/install.sh" ]]; then
+        # A system checkout from before 9fdc7c26 (2026-11-02) has no
+        # --channel and would fail after sudo with a raw flag error. Its
+        # install.sh lacks the parser line marked above, so stop here first
+        # (wiki 752 R38).
+        system_script="$system_checkout/scripts/installation/install.sh"
+        if [[ -n "$channel" && -r "$system_script" ]] &&
+            ! grep -qF -- '--channel) expect_channel=1' "$system_script"; then
+            printf 'ERROR: the system checkout in %s is older than the --channel option; nothing was changed.\nUpdate it first with: gjallarctl rebuild --update\nThen run this again.\n' "$system_checkout" >&2
+            exit 1
+        fi
         printf 'This gjallarOS builds from %s; the installer runs there as root.\n' "$system_checkout"
         (exec </dev/tty) 2>/dev/null || {
             printf 'ERROR: the installer is interactive and needs a terminal.\n' >&2
