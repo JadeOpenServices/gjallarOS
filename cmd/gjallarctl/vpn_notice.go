@@ -180,10 +180,15 @@ func vpnNoticeText(v nettrust.Verdict) (summary, body string) {
 		return "VPN cannot block this network", body +
 			"\nThe block could not be set up.\nApps connect without the tunnel.\nLeave this network to stay safe."
 	}
-	if v.Network == "" {
-		return "VPN blocking this network", body + "\nIt cannot be paused: it looks like any other network."
+	summary = "VPN blocking this network"
+	if v.Blocked == nettrust.BlockCheckTimeout {
+		summary = "VPN could not check this network"
+		body += "\nInternet outside the tunnel stays blocked to be safe.\nThe next check runs within 5 min."
 	}
-	return "VPN blocking this network", body + fmt.Sprintf(
+	if v.Network == "" {
+		return summary, body + "\nIt cannot be paused: it looks like any other network."
+	}
+	return summary, body + fmt.Sprintf(
 		"\nPausing skips the tunnel here, max %d min, admin password.\nThis network then sees where apps connect.",
 		int(nettrust.MaxPause.Minutes()))
 }

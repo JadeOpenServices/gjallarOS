@@ -236,6 +236,9 @@ const (
 	BlockTailscaleDown   = "tailscale-down"
 	BlockSignedOut       = "tailscale-signed-out"
 	BlockNeedsApproval   = "tailscale-needs-approval"
+	// BlockCheckTimeout: setting the exit node got no answer in time, so
+	// nothing says the tunnel carries the traffic (Plane 325, Q226).
+	BlockCheckTimeout = "check-timeout"
 )
 
 func (v Verdict) Trusted() bool {

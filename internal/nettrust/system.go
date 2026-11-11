@@ -207,11 +207,19 @@ var tailnetSettle = 30 * time.Second
 // the rest of the verdict needs (loophole 43).
 var tailscaleCall = 15 * time.Second
 
+// ErrNoAnswer marks a tailscale call that ran out of time. It may still
+// have taken effect in tailscaled.
+var ErrNoAnswer = errors.New("no answer in time")
+
 // tailscale runs one tailscale CLI call under tailscaleCall.
 func (s System) tailscale(ctx context.Context, args ...string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, tailscaleCall)
 	defer cancel()
-	return s.run(ctx, "tailscale", args...)
+	out, err := s.run(ctx, "tailscale", args...)
+	if err != nil && errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		err = fmt.Errorf("%w: %w", ErrNoAnswer, err)
+	}
+	return out, err
 }
 
 // tailscaledStarting reports whether systemd may still bring tailscaled up.

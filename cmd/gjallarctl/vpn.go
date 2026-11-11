@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -169,7 +170,11 @@ func runVPNApply(args []string, stdout, stderr io.Writer) int {
 		case err != nil:
 			fmt.Fprintf(stderr, "ERROR: set exit node: %v\n", err)
 			verdict.ExitNodeError = err.Error()
-			if verdict.ExitNode != "" {
+			switch {
+			case verdict.ExitNode == "":
+			case errors.Is(err, nettrust.ErrNoAnswer):
+				verdict.Blocked = nettrust.BlockCheckTimeout
+			default:
 				verdict.Blocked = nettrust.BlockNoExitNode
 			}
 			code = 1

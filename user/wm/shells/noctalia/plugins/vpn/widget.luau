@@ -10,6 +10,7 @@ local blockedText = {
   ["tailscale-down"] = "Tailscale is not running",
   ["tailscale-signed-out"] = "Tailscale is not signed in",
   ["tailscale-needs-approval"] = "this device waits for approval",
+  ["check-timeout"] = "the network check did not finish in time",
 }
 
 local shown = false
