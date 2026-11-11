@@ -3860,5 +3860,5 @@ func developerConfirmNotice(user config.User, existing, tpm2 bool) string {
 	if tpm2 {
 		return "The first start confirms " + what + " when you set up the security chip unlock."
 	}
-	return "To keep " + what + ", run gjallarctl luks setup after the first start and then gjallarctl settings confirm-developer once with the recovery key; system rebuilds wait until then."
+	return "To keep " + what + ", run gjallarctl luks recovery-key after the first start and then gjallarctl settings confirm-developer once with the recovery key; system rebuilds wait until then."
 }

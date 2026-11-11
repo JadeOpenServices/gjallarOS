@@ -53,8 +53,10 @@ stopped halfway picks up the current installer and resumes. Local edits or
 local commits on that branch stop the script, and nothing is changed. The
 installed system follows the same channel. With security chip unlock, the
 first start confirms the channel when you type the disk passphrase or
-recovery key and set the PIN. Without it, run `gjallarctl luks setup` and
-then `gjallarctl settings confirm-developer` once; rebuilds wait until then.
+recovery key and set the PIN. Without it, run `gjallarctl luks recovery-key`
+and then `gjallarctl settings confirm-developer` once with that key;
+rebuilds wait until then. Without a recovery key or startup PIN the command
+stops at once and says so; the disk passphrase is not accepted.
 A preset `user.config.json` with a different `releaseChannel` stops the
 installer.
 

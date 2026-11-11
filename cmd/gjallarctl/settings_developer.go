@@ -59,6 +59,27 @@ func unencryptedDisk(ctx context.Context) bool {
 	return err == nil && !encrypted
 }
 
+// settingsLUKSRecord reads the keyslot counts root leaves in /run; tests
+// replace it.
+var settingsLUKSRecord = func() (luksRecord, error) { return readLUKSRecord(luksRecordPath) }
+
+// noProofYet is the refusal for an encrypted disk that has neither a
+// recovery key nor a startup PIN (Plane 331, wiki 752 R42).
+const noProofYet = "this device has no recovery key yet; run gjallarctl luks recovery-key, then run this again"
+
+// lacksDeveloperProof reports an encrypted disk with nothing that could
+// answer the proof prompt: no recovery key, and no chip keyslot with a
+// startup PIN. The disk passphrase is not a proof. Without a readable
+// record the prompt is asked as before and the service decides; this only
+// saves a prompt that cannot be answered.
+func lacksDeveloperProof() bool {
+	r, err := settingsLUKSRecord()
+	if err != nil || !r.Encrypted || r.Recovery > 0 {
+		return false
+	}
+	return r.TPM2 == 0 || r.PINKnown && !r.PIN
+}
+
 // refuseUnencrypted says why a developer channel or developer mode is
 // refused and, on a device that still runs one, offers stable with
 // developer mode off together with the other values asked for. A device
@@ -166,6 +187,10 @@ func settingsConfirmDeveloper(ctx context.Context, bus settingsBus, args []strin
 	}
 	if unencryptedDisk(ctx) {
 		return refuseUnencrypted(ctx, bus, nil, stdout, stderr)
+	}
+	if lacksDeveloperProof() {
+		fmt.Fprintf(stderr, "ERROR: %s.\n", noProofYet)
+		return 1
 	}
 	kind, secret, err := settingsReadProof(stderr)
 	if err != nil {
