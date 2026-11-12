@@ -4,20 +4,13 @@
 
 # gjallarOS
 
-**A secure, modular NixOS workstation on Hyprland.**
+**A secure, modular NixOS workstation on Hyprland**
 
 NixOS 26.05 · Hyprland · Noctalia · ODDC hardware policy · TPM2 disk encryption · reviewable installer
 
+[Quick start](#quick-start) · [Screenshots](#screenshots) · [Features](#features) · [Keybindings](#keybindings) · [Daily use](#daily-use) · [Security](#security) · [Docs](docs/README.md)
+
 <br>
-
-<a href="#quick-start"><kbd> <br> Quick start <br> </kbd></a>&ensp;
-<a href="#screenshots"><kbd> <br> Screenshots <br> </kbd></a>&ensp;
-<a href="#features"><kbd> <br> Features <br> </kbd></a>&ensp;
-<a href="#keybindings"><kbd> <br> Keybindings <br> </kbd></a>&ensp;
-<a href="#configuration"><kbd> <br> Configuration <br> </kbd></a>&ensp;
-<a href="#licence"><kbd> <br> Licence <br> </kbd></a>
-
-<br><br>
 
 <img src="docs/screenshots/desktop.webp" alt="gjallarOS desktop with the Noctalia bar" width="100%">
 
@@ -27,44 +20,53 @@ NixOS 26.05 · Hyprland · Noctalia · ODDC hardware policy · TPM2 disk encrypt
 
 ## Quick start
 
-There are two ways in, and both start with the same command.
+There are two ways in. The main differences:
+
+| What differs | From a USB stick | On an existing NixOS |
+| --- | --- | --- |
+| The disk | Erased; gjallarOS takes the whole disk | Kept as it is, home folder included |
+| USB stick | 2 GB or more | Not needed |
+| NixOS first | Not needed | Needed; another release moves to 26.05 at the next start |
 
 Before you start:
 
 - A 64-bit Intel or AMD machine (x86_64) that starts in UEFI mode;
   legacy BIOS (CSM) and ARM boards are not supported
-- Internet for the whole install. A network cable is the easiest
+- Internet for the whole install (a network cable is easiest)
 - Somewhere safe for the recovery key the installer shows, such as a
   password manager on another device or a sheet of paper
+
+Both ways run this command on the machine that gets gjallarOS:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/JadeOpenServices/gjallarOS/stable/scripts/installation/install.sh | bash
 ```
 
-It clones the repository with its submodules into `~/Documents/gjallarOS`
-and starts the installer from there. `GJALLAR_DIR` sets another folder, and
-`GJALLAR_CLONE_ONLY=1` stops after the clone. Running it again reuses the
-checkout.
+> [!TIP]
+> To read the script before it runs, download it first:
+>
+> ```bash
+> curl -fsSLO https://raw.githubusercontent.com/JadeOpenServices/gjallarOS/stable/scripts/installation/install.sh
+> less install.sh
+> bash install.sh
+> ```
 
-<table>
-<tr>
-<th width="50%">New machine: from a USB stick</th>
-<th width="50%">Existing NixOS</th>
-</tr>
-<tr>
-<td valign="top">
+<details>
+<summary><b>Where the checkout goes</b></summary>
+<br>
 
-Installs gjallarOS on a whole disk. Everything on that disk is
-replaced. NixOS does not need to be installed first, and nothing from
-the stick stays on the machine.
+The script clones the repository with its submodules into
+`~/Documents/gjallarOS` and starts the installer from there. `GJALLAR_DIR`
+sets another folder, and `GJALLAR_CLONE_ONLY=1` stops after the clone.
+Running it again reuses the checkout. In an existing checkout,
+`./scripts/installation/install.sh` does the same.
 
-What it takes:
+</details>
 
-- A USB stick of 2 GB or more
-- A disk with nothing on it you still need
-- A network cable or Wi-Fi
+### From a USB stick
 
-Steps:
+This installs gjallarOS on a whole disk. Everything on that disk is
+replaced, and nothing from the stick stays on the machine.
 
 1. Download the NixOS minimal ISO for 64-bit Intel/AMD from
    [nixos.org/download](https://nixos.org/download) and compare it with
@@ -84,26 +86,18 @@ Steps:
    the disk if the PIN or the security chip ever fails
 7. Shut down, take the stick out and start from the disk
 
-</td>
-<td valign="top">
+### On an existing NixOS
 
-Run the command on the machine itself, no stick needed. The
-installer asks once, adds the tools it needs to
-`/etc/nixos/configuration.nix`, rebuilds and carries on.
+Run the command on the machine itself. The installer shows the tools it
+would add to `/etc/nixos/configuration.nix` and asks once before it adds
+them and rebuilds. It keeps a copy of the file as
+`configuration.nix.gjallar-backup.<time>` and puts it back if the rebuild
+fails. The disk layout stays as it is, so your home folder stays too.
 
-On another NixOS release, it sets up NixOS 26.05 for the next start
-and leaves the running desktop alone. After the restart, it carries on
-where it stopped.
-
-On a machine that already runs gjallarOS, it offers to update it,
-install it again from scratch, or leave it as it is.
-
-In an existing checkout, `./scripts/installation/install.sh` does the
-same.
-
-</td>
-</tr>
-</table>
+On another NixOS release, it sets up NixOS 26.05 for the next start and
+leaves the running desktop alone. After the restart, it carries on where
+it stopped. On a machine that already runs gjallarOS, it offers to update
+it, install it again from scratch, or leave it as it is.
 
 ### What the installer asks
 
@@ -114,60 +108,21 @@ terminal.
 | Topic | Questions |
 | --- | --- |
 | You and your region | Username, password, hostname, timezone, language, keyboard layout and weather location |
-| Disk and startup (USB stick) | Which disk to use, and whether the security chip (TPM2) unlocks the disk by itself or asks for a PIN at startup. Both come with a recovery key |
-| Desktop and apps | Login shell, editors, browsers, Firefox add-on collections, apps from the catalogue, touchpad swipes, the closed lid on a dock, printing and scanning, and a smart card for mail keys |
+| Disk (USB stick) | Which disk to erase |
+| Startup (USB stick) | Whether the security chip (TPM2) unlocks the disk alone or asks a PIN; both add a recovery key |
+| Desktop | Login shell, editors, browsers, touchpad swipes and the closed lid on a dock |
+| Apps | Apps from the catalogue, Firefox add-ons, printing and scanning, a smart card for mail keys |
 | Network | Tailscale as a VPN on networks you do not trust, and Nextcloud |
-| Security | USB device trust, Secure Boot, firmware updates, a recovery partition, and who signs the settings files |
+| Security | USB device trust, Secure Boot, firmware updates, a recovery partition, who signs settings files |
 | AI (optional) | A local model, an AI server on your network, or none |
 
-### Release channels
-
-`stable` is the default. For `staging` or `dev`, add `--channel` (or set
-`GJALLAR_CHANNEL`):
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/JadeOpenServices/gjallarOS/staging/scripts/installation/install.sh | bash -s -- --channel staging
-```
-
-The installed system follows the same channel. When the script runs again,
-it moves its checkout forward to the newest commit of the channel and
-resumes where the last run stopped. Local edits or local commits on that
-branch stop it before anything changes.
-
-Choosing `staging` or `dev` needs one confirmation with the recovery key
-or the startup PIN. Rebuilds wait until it is done. With security chip
-(TPM2) unlock this happens at the first start, when you set the PIN.
-Without it, run `gjallarctl luks recovery-key`, then
-`gjallarctl settings confirm-developer` with that key. The disk passphrase
-does not count.
-
-### Preset answers
-
-The installer can take its non-secret answers from a file:
-
-```bash
-cp scripts/installation/user_PresetJSON/default.user.config.json user.config.json
-```
-
-Edit the copy, then run the installer. A preset with a different
-`releaseChannel` than the chosen channel stops the installer. Secrets, LUKS
-passphrases, recovery settings, generated hardware data and backups stay out
-of Git.
-
-### System checkout
-
-The checkout in `~/Documents` only runs the installer. The installed system
-gets a clone of the official repository in `/etc/gjallar/system`, owned by
-root, at the commit the installer was built from. This machine's
-`generated/` and `user.config.json` are copied in. An installer with local
-changes, or built from a commit outside `stable`, `staging` and `dev`,
-stops before this step.
+[Install details](docs/install.md) covers release channels, preset answers
+and where the installed system keeps its checkout.
 
 > [!TIP]
 > After the install, apply changes with `gjallarctl rebuild`. A plain
 > `sudo nixos-rebuild switch --flake` cannot see the untracked
-> `generated/` folder, see
-> [Rebuilds and removable disks](#rebuilds-and-removable-disks).
+> `generated/` folder, see [Rebuilds](docs/configuration.md#rebuilds).
 
 <div align="right"><a href="#gjallaros">Back to top</a></div>
 
@@ -197,18 +152,20 @@ Taken in a QEMU test VM at 1920×1080.</sub>
 
 ## Features
 
-| | |
+What a fresh install brings:
+
+| Area | What it does |
 | --- | --- |
-| **Desktop** | Hyprland-only, Home Manager user configuration, Noctalia shell, Stylix theming propagated to system apps |
-| **Disk encryption** | LUKS2 with TPM2 enrollment, optional TPM+PIN, recovery-key handling, SOPS/age secrets |
-| **Hardware policy** | [ODDC](https://github.com/JadeOpenServices/oddc)-backed device identity and capabilities; graphics, Wi-Fi, firmware, touchscreen, battery and clamshell detection |
-| **USB trust** | Review new USB devices, TPM-signed permanent trust, opt-in enforcement |
-| **VPN and network trust** | Tailscale with per-network trust levels and automatic exit nodes |
-| **App catalogue** | One list in `user.config.json` picks the apps; each app owns its whole module |
-| **Local AI** | Optional localhost-only Ollama with hardware-aware model selection, or a central HTTPS server with a sealed token |
-| **Recovery** | Trusted recovery boot entry, recovery ISO, generation rollback without deleting anything newer |
-| **Apps** | VSCodium, Thunderbird, web apps (Teams, Plane), Wine apps each in their own sandbox, optional Nemu |
-| **Maintenance** | Helpers for rebuilding, cleanup, thermal status, and updates |
+| Desktop | Hyprland with the Noctalia shell; Stylix themes the system apps as well |
+| Disk encryption | LUKS2 opened by the security chip (TPM2), an optional PIN and a recovery key |
+| Hardware | [ODDC](https://github.com/JadeOpenServices/oddc) knows each model's graphics, Wi-Fi, firmware and battery |
+| USB trust | New USB devices wait for review; lasting trust is signed by the security chip |
+| VPN and network trust | Tailscale with a trust level per network and an automatic exit node |
+| Apps | One list picks them: VSCodium, Thunderbird, web apps, Wine apps in their own sandbox and more |
+| Local AI | Optional Ollama on this machine, or a central HTTPS server with a sealed token |
+| Snapshots | Hourly `/home` snapshots and daily ones of the settings, restored one file at a time |
+| Recovery | A trusted recovery boot entry, a recovery ISO and rollback that keeps newer generations |
+| Maintenance | `gjallarctl` for rebuilds, updates, cleanup and thermal status |
 
 <details>
 <summary><b>Local AI details</b></summary>
@@ -241,12 +198,11 @@ with `systemd-creds` (TPM2-bound when present) into
 
 ## Keybindings
 
-`$mod` is the Super key. <kbd>Super</kbd> + <kbd>F1</kbd> shows every
-shortcut and gesture of the running session, searchable, also as
-"Keyboard shortcuts" in the launcher and as `gjallar-keybinds --print` in a
-terminal. The binds live in
-[`user/wm/hyprland/keybinds.json`](user/wm/hyprland/keybinds.json); each one
-needs a `desc`, which is what the list shows.
+<kbd>Super</kbd> + <kbd>F1</kbd> shows every shortcut and gesture of the
+running session, searchable. The launcher has the same list as "Keyboard
+shortcuts", and `gjallar-keybinds --print` prints it in a terminal.
+
+### Apps
 
 | Keys | Action |
 | --- | --- |
@@ -256,69 +212,65 @@ needs a `desc`, which is what the list shows.
 | <kbd>Super</kbd> + <kbd>E</kbd> | Editor |
 | <kbd>Super</kbd> + <kbd>B</kbd> | Browser |
 | <kbd>Super</kbd> + <kbd>N</kbd> | LibreOffice (when installed) |
+
+### Windows
+
+| Keys | Action |
+| --- | --- |
 | <kbd>Super</kbd> + <kbd>Q</kbd> | Close window |
 | <kbd>Super</kbd> + <kbd>W</kbd> | Fullscreen |
 | <kbd>Super</kbd> + <kbd>H</kbd> <kbd>J</kbd> <kbd>K</kbd> <kbd>L</kbd> | Move focus |
 | <kbd>Super</kbd> + <kbd>Shift</kbd> + <kbd>H</kbd> <kbd>J</kbd> <kbd>K</kbd> <kbd>L</kbd> | Move window |
-| <kbd>Super</kbd> + <kbd>Ctrl</kbd> + arrow keys | Resize window (hold to repeat) |
 | <kbd>Super</kbd> + left-drag | Move window |
+| <kbd>Super</kbd> + <kbd>Ctrl</kbd> + arrow keys | Resize window (hold to repeat) |
+| <kbd>Super</kbd> + right-drag | Resize window |
+| <kbd>Super</kbd> + <kbd>Shift</kbd> + left-drag | Resize window (easier on a touchpad) |
 | Drag the gap between windows | Resize window |
-| <kbd>Super</kbd> + right-drag or <kbd>Super</kbd> + <kbd>Shift</kbd> + left-drag | Resize window (the second is easier on a touchpad) |
-| <kbd>Super</kbd> + <kbd>1</kbd>…<kbd>0</kbd> | Switch workspace |
-| <kbd>Super</kbd> + <kbd>Shift</kbd> + <kbd>1</kbd>…<kbd>0</kbd> | Move window to workspace |
+
+### Workspaces and system
+
+| Keys | Action |
+| --- | --- |
+| <kbd>Super</kbd> + <kbd>1</kbd> to <kbd>0</kbd> | Switch workspace |
+| <kbd>Super</kbd> + <kbd>Shift</kbd> + <kbd>1</kbd> to <kbd>0</kbd> | Move window to workspace |
 | <kbd>Super</kbd> + <kbd>S</kbd> | Scratchpad workspace |
-| <kbd>Super</kbd> + <kbd>Shift</kbd> + <kbd>Z</kbd> or <kbd>Print</kbd> | Screenshot region |
+| <kbd>Super</kbd> + <kbd>Shift</kbd> + <kbd>Z</kbd> | Screenshot region |
+| <kbd>Print</kbd> | Screenshot region |
 | <kbd>Super</kbd> + <kbd>Escape</kbd> | Lock screen |
 | <kbd>Super</kbd> + <kbd>F1</kbd> | Show all shortcuts |
 | <kbd>Super</kbd> + <kbd>Ctrl</kbd> + <kbd>K</kbd> | On-screen keyboard (touch devices) |
+
+The binds live in
+[`user/wm/hyprland/keybinds.json`](user/wm/hyprland/keybinds.json), where
+`$mod` is the Super key. Each one needs a `desc`, which is what the list
+shows.
+
+### On-screen keyboard
 
 On touch devices the on-screen keyboard also opens when the device folds
 into tablet mode and on the keyboard key some convertibles have. With no
 keyboard attached, the login screen and the lock screen show their own
 touch keyboard; with one attached, touch the password field to open it, and
-a key on the keyboard closes it again. The disk unlock prompt shows its touch
-keyboard on every touch device. These keyboards
-have letters, numbers and symbols only: no clipboard, emoji or word
-suggestions. The HP ZBook
-x2 bezel Quick Keys have three presets, switched with the third key from the
-top. gjallarOS maps none of them: every key sends a macro key
-(`XF86Macro1` to `15`) that no other key sends, so you can bind it in Hyprland,
-a drawing app or any other program. The bar shows the active preset number
-next to the network widget after the first key press.
+a key on the keyboard closes it again. The disk unlock prompt shows its
+touch keyboard on every touch device. These keyboards have letters, numbers
+and symbols only: no clipboard, emoji or word suggestions.
+
+### HP ZBook x2 Quick Keys
+
+The bezel Quick Keys have three presets, switched with the third key from
+the top. gjallarOS maps none of them: every key sends a macro key
+(`XF86Macro1` to `15`) that no other key sends, so you can bind it in
+Hyprland, a drawing app or any other program. The bar shows the active
+preset number next to the network widget after the first key press.
 
 <div align="right"><a href="#gjallaros">Back to top</a></div>
 
-## Configuration
-
-`user.config.json` contains machine-local human intent. The installer normalizes
-that intent into `generated/state.nix`; machine hardware lives in
-`generated/hardware.nix`, and historical compatibility baselines live in
-`generated/install-state.nix`. `deployment/release-policy.json` records the supported release. The
-root flake, Home Manager, and Stylix follow 26.05; only the ComfyUI
-development shell intentionally uses unstable.
-
-Web apps are listed in `webApplications`, for example
-`[{"id": "teams"}, {"id": "plane", "endpoint": "https://plane.example"}]`.
-An older config with `planeEnable`/`planeHost` is moved into the list once on
-the next rebuild, and the rebuild says so. draw.io was removed; a rebuild drops
-it from older configs once and says so. Its browser profile in
-`~/.config/gjallarOS/chromium-drawio` stays until you delete it.
-
-`"dolphinDriveUsage": true` shows used and total space next to each drive in
-the Dolphin places panel. It patches KIO, so KIO, Dolphin and the file dialogs
-are compiled on the machine instead of downloaded. That adds a lot of time to
-a rebuild, so it is off by default.
-
-`"aarch64Emulation": true` lets this device build NixOS for ARM devices such as
-phones. The kernel then hands every aarch64 program to qemu-user, which runs it
-as the user who started it; set-user-ID bits on such programs are ignored.
-Nix also lists `aarch64-linux` (and `i686-linux`) in `extra-platforms`. It is a
-setting for one device and is off by default; turning it off applies at once.
+## Daily use
 
 ### Changing settings
 
-On a system that builds from `/etc/gjallar/system`, root owns
-`user.config.json`. Change it with `gjallarctl settings`, as your user:
+Your settings live in `user.config.json`, which root owns. Change them with
+`gjallarctl settings`, as your user:
 
 ```sh
 gjallarctl settings list
@@ -330,94 +282,55 @@ gjallarctl settings apply
 VALUE is JSON; a key that holds text takes plain text. Each key has a tier,
 and the tier decides how long a change waits before it can be written:
 
-- **everyday** (looks, input, apps): no wait
-- **security** (network, services, add-ons, hostname, user name): one hour,
-  or 10 s while a router of your tailnet proves this is your home network.
-- **critical** (disk unlock, recovery, firmware): one hour always, and the
-  password is asked when you ask for the change and again when you apply it.
-- **installer**: changes only with a new install
+| Tier | Covers | Wait |
+| --- | --- | --- |
+| everyday | Looks, input, apps | None |
+| security | Network, services, add-ons, hostname, user name | One hour, or 10 s while your tailnet router proves you are home |
+| critical | Disk unlock, recovery, firmware | One hour, and the password is asked at `set` and again at `apply` |
+| installer | Set by the installer | Changes only with a new install |
 
 The password dialog lists every key with its old and new value. Apply
 writes the file and starts the rebuild, and `set` follows it until the
 change is live. A waiting change lives only in your login session, so
 logging out or rebooting drops it.
 
-A new hostname must be free. The service refuses a name that a machine on
-your tailnet already uses, and, on a home, site or trusted Wi-Fi network, a
-name another device there answers for as `<name>.local`. Letter case does
-not count. It checks again before it writes the change. When Tailscale is
-off or the network is not trusted, `set` says that part was not checked. To
-hear the answers, the firewall lets in UDP from port 5353 to port 1015, only
-from private and link-local addresses; nothing listens there outside a
-check.
+[Configuration](docs/configuration.md) covers saving settings to a file,
+pairing two devices, signing with an OpenSSH key and how a new hostname is
+checked.
 
-To keep your settings, save them to a file and bring them back later:
+### Updates
 
-```sh
-gjallarctl settings export ~/settings.gjallar
-gjallarctl settings import ~/settings.gjallar
+To bring the system up to date with its release channel, run:
+
+```bash
+gjallarctl rebuild --update
 ```
 
-Export asks for your password and signs the file with a key that only
-the settings service holds. Import takes only files made on this device by
-your account, and refuses a file that was changed after it was made. It
-asks for the change the way `set` does, with the same tiers and waits, and
-says how old the file is.
+The channel is `releaseChannel`: `stable` (the default), `staging` or
+`dev`. Local commits or edits in the system checkout stop the update, and
+nothing is rebuilt. `gjallarctl rebuild --hardware-update` moves the
+hardware catalogue to its newest release. [Rebuilds](docs/configuration.md#rebuilds)
+explains channel moves and every option.
 
-To sign these files with your OpenSSH key instead (an `ssh-ed25519` key
-file or a FIDO `sk-ssh-ed25519` key), answer No to "Let gjallarOS sign your
-settings files for you?" in the installer, or set `settingsSigningKey` to
-your public key line later (critical tier). Export then writes a file you
-sign yourself, and import needs that signature next to the file:
-
-```sh
-gjallarctl settings export ~/settings.gjallar
-ssh-keygen -Y sign -n gjallaros-settings -f ~/.ssh/id_ed25519 ~/settings.gjallar
-gjallarctl settings import ~/settings.gjallar
-```
-
-The second line writes `~/settings.gjallar.sig`. With an own key, only that
-key counts for your account: files gjallarOS signed are refused, and pairing
-is off. A file made on another device brings only your personal settings.
-Settings that belong to that device (hostname, disk, boot and the like) stay
-behind.
-
-### App catalogue
-
-Optional applications live in `apps/<id>/`: `meta.json` (name, description,
-category, `default`, optional `installer` question, optional `package`, the
-nixpkgs attribute of its main program), and a `home.nix` and/or
-`nixos.nix` module. Each app owns its whole module, so removing an app removes
-everything it brought in.
-
-`user.config.json` selects apps with one list:
-
-```json
-"apps": ["ai", "btop", "containers", "dolphin", "tailscale"]
-```
-
-Without `apps`, every app with `"default": true` is installed. The installer
-asks each app's `installer` question (today `ai`, `containers`, `nemu`,
-`tailscale`, `thunderbird`) and uses `default` for the rest. `apps` drives
-`gjallar.apps.<id>.enable` on both the NixOS side (`apps/nixos-options.nix`)
-and the Home Manager side (`user/apps/default.nix`). The old `aiEnable`,
-`containersEnable` and `nemuEnable` keys are rejected; list `ai`,
-`containers` or `nemu` in `apps` instead.
+### Apps
 
 `gjallarctl apps list` shows the catalogue and what is installed;
 `gjallarctl apps add <id>` and `gjallarctl apps remove <id>` change the list
 and rebuild. `gjallarctl apps change +<id> -<id> ...` makes several changes
 with one password and one rebuild (`+` installs, `-` removes). The Apps page of
-the settings window does the same.
+the settings window does the same. [App catalogue](docs/configuration.md#app-catalogue)
+explains how an app is built, and [Web apps](docs/configuration.md#web-apps)
+how Teams, Plane and other web apps are listed.
 
 ### Settings window and gjallarHorn
 
 gjallarOS Settings (`gjallar-settings`) has two pages, also in the launcher on
 their own: Apps and gjallarHorn. gjallarHorn shows the security checks of this
 device (disk encryption, Secure Boot, USB devices, firewall, virus scan,
-updates, developer mode) and a fix button where one helps. `gjallarctl security status`
-prints the same checks. The window has no rights of its own; every change goes
-through `gjallarctl settings` and asks for the password.
+updates, developer mode) and a fix button where one helps.
+`gjallarctl security status` prints the same checks. The window has no
+rights of its own; every change goes through `gjallarctl settings` and asks
+for the password.
 
 Each row says its state in words and has one button: Install or Remove, Turn
 on or Turn off. A click only marks the change; the button turns into Undo and
@@ -435,9 +348,10 @@ homepage.
 
 Some protections can be turned off, for people who run their own:
 
-| Key | Default | Switch |
+| Key | Default | What it controls |
 | --- | --- | --- |
-| `usbguardEnable`, `usbTrustEnforce` | `true` | USB devices |
+| `usbguardEnable` | Asked at install | USB device review |
+| `usbTrustEnforce` | Asked at install | Blocking unknown USB devices |
 | `firewallEnable` | `true` | Firewall |
 | `virusScanEnable` | `true` | Virus scan |
 
@@ -445,8 +359,8 @@ These change security-tier keys, so turning one off waits an hour away
 from home, as above. Until then the card says when the change is ready and
 offers Apply now and Keep it on. Turning a protection back on is stricter, so
 it applies at once after the password. A protection that is off shows "Off
-(your choice)" and does not ask again. The recovery system always has the firewall
-on.
+(your choice)" and does not ask again. The recovery system always has the
+firewall on.
 
 The virus scan is ClamAV, on demand only: no scanner daemon and no scanning of
 files as they open. freshclam fetches the signatures about once an hour (the
@@ -460,9 +374,11 @@ Add-ons come in collections, listed in `apps/firefox-addons.json`: Privacy,
 Password managers, Comfort and Cookie banners. New installs start with uBlock
 Origin on and everything else off. Each add-on has one of three modes:
 
-- `off`: not installed. If gjallarOS installed it earlier, it is removed
-- `on`: installed, and you can turn it off in about:addons
-- `locked`: installed and always on
+| Mode | What it means |
+| --- | --- |
+| `off` | Not installed; if gjallarOS installed it earlier, it is removed |
+| `on` | Installed, and you can turn it off in about:addons |
+| `locked` | Installed and always on |
 
 The installer asks which collections you want, then the mode of each add-on in
 them. Afterwards `gjallarctl addons` changes them:
@@ -498,15 +414,12 @@ Firefox installs all of these through its enterprise policy, from the Nix
 store, and does not update them by itself; new versions arrive with
 `gjallarctl rebuild`. The rebuild, or the next login if Firefox was open,
 removes add-ons that left the list, but only those Firefox itself installed
-from the policy. gjallarOS
-keeps a list of them in `~/.local/state/gjallaros/managed/`. Add-ons you
-installed by hand stay untouched. JODS and unattended installs set both keys
-in the same way.
-
-Upgrading from a version that linked add-ons into the profile: close Firefox
-before `gjallarctl rebuild`. On the next start Firefox keeps uBlock Origin
-with its settings, at the version it had. The Stylix theme comes back on the
-second start. A rollback never downgrades an add-on; Firefox refuses that.
+from the policy. gjallarOS keeps a list of them in
+`~/.local/state/gjallaros/managed/`. Add-ons you installed by hand stay
+untouched. JODS and unattended installs set `firefoxAddons` and
+`firefoxStoreAddons` in the same way. Coming from an older version?
+[Firefox add-ons from older versions](docs/upgrading.md#firefox-add-ons-from-older-versions)
+says what to do.
 
 ### Nextcloud files
 
@@ -547,12 +460,12 @@ and its backup, and Nextcloud calendar and contacts.
 gjallarOS sets these through Thunderbird's enterprise policy:
 
 - A Primary Password is asked before the first saved password, and it cannot
-  be removed. It protects saved passwords, login tokens and OpenPGP keys.
+  be removed. It protects saved passwords, login tokens and OpenPGP keys
 - Remote content in mail stays blocked; you allow it per sender. Scam
   warnings stay on. Account autoconfig uses HTTPS only, and connections need
-  TLS 1.2 or newer.
+  TLS 1.2 or newer
 - Mail shows as simple HTML (View, Message Body As changes it). Chat,
-  telemetry, donation and survey messages are off.
+  telemetry, donation and survey messages are off
 - Only dictionaries, languages and themes can be added, no add-ons with code
 - Key servers are searched only when you ask for a key
 
@@ -570,238 +483,6 @@ This starts `pcscd` and `gpg-agent`, lets Thunderbird use a card key through
 GnuPG, and adds OpenSC for S/MIME cards. Approve the card reader when
 gjallarOS asks about the new USB device.
 
-<div align="right"><a href="#gjallaros">Back to top</a></div>
-
-### Old names
-
-Every rename lives in one table, `system/tools/legacy/renames.json`:
-commands, settings keys, config fields, partition labels, units and
-paths. A row holds the old name, the new name, where it was removed, the
-release after which it can go (`deleteAfter`, a tag like `v2026.10.70`)
-and the Plane or JODS item.
-
-- An old command is not run. The shell prints the new name and stops,
-  for example: gjallarOS: rebuild was removed; use gjallarctl rebuild
-- An old field in `user.config.json` is not read. Everything that reads
-  the file stops with "unknown field: OLD is now NEW; move the value there
-  in user.config.json", with the names from the table's config-field row.
-- The flake check `legacy-names` fails while an old name is still used
-  outside `system/tools/legacy/`, and once the release in `system/release`
-  is newer than a row's `deleteAfter` tag. Then the row and the last traces
-  are removed. A revision gives the same answer on every machine and day.
-- The system does not build when an old command name is a real command
-  again.
-
-A rename adds its row in the same commit. Tests and captured device
-output may still name the old name.
-
-## Hardware catalog (ODDC)
-
-[ODDC](https://github.com/JadeOpenServices/oddc) is a separate project,
-used like an API. The installer reads the machine's DMI identity and asks ODDC
-for its model; only that model's answer (referenced entities, evidence and the
-ODDC revision) lands in `generated/oddc`. Nothing else of the catalog reaches
-this repository or the machine. The `oddc` flake input supplies module code
-only, and the system configuration reads the answer as `oddc.catalog`. The
-installed system receives that model under `/etc/oddc`.
-
-When no ODDC model matches, the installer says the machine runs best effort.
-It lists the parts it found, checked against the ODDC catalog built into the
-installer, and names the parts ODDC marks as not working on Linux, with ODDC's
-reason. The machine gets the hardware-neutral base; nothing optional is
-switched on, and no part from that list becomes a built-in USB device.
-
-The answer comes from the ODDC commit `flake.lock` pins for the `oddc` input.
-Moving the ODDC pin on a device is one operation:
-
-```bash
-gjallarctl rebuild --hardware-update
-```
-
-<details>
-<summary><b>How ODDC updates work</b></summary>
-<br>
-
-`gjallarctl rebuild --hardware-update [--channel stable|staging] [--switch 0|1]`
-runs `oddc update --flake <checkout> [--channel CHANNEL]` on the system
-checkout first and stops with `nothing rebuilt` if that fails. `--channel`
-moves the oddc input to the newest commit of that ODDC channel (`stable` when
-left out); no commit hash is needed. `--switch 1` (the default) rebuilds and
-switches right away; `--switch 0` only moves the pin, and the next
-`gjallarctl rebuild` applies it. It needs an `oddc` that knows
-`update --flake`. When the pinned commit differs from
-`generated/oddc/revision`, the rebuild fetches the same model again at the new
-commit and swaps it in only once complete. If that fetch fails, for example
-offline, the rebuild stops with the error and changes nothing.
-`gjallarctl oddc doctor` shows the ODDC revision the installed model came
-from. `gjallarctl oddc update` is refused and points here, because
-plain `oddc update` moves only the pin of `/etc/nixos` and leaves the system checkout as it is. Always apply with `gjallarctl rebuild`. A plain `sudo nixos-rebuild switch
---flake` misses `generated/`: it is untracked, so a plain git flake cannot see it.
-
-A plain `gjallarctl rebuild` never moves the pin. It asks GitHub whether the branch the
-oddc input follows has a newer commit and, if so, prints
-`ODDC update available: OLD -> NEW. Apply with: gjallarctl rebuild --hardware-update`.
-Offline or on any error it says nothing. Managed endpoints skip the check: JODS moves their
-pin.
-
-`gjallarctl oddc COMMAND` passes ODDC commands to `oddc` unchanged, for example
-`gjallarctl oddc resolve` or `gjallarctl oddc explain --path PATH`. On the
-installed system these default to its model. `gjallarctl oddc validate-device`
-validates this checkout on the device. Validation evidence goes to ODDC through
-`oddc contribute` and never into this repository.
-
-</details>
-
-<div align="right"><a href="#gjallaros">Back to top</a></div>
-
-## Rebuilds and removable disks
-
-`gjallarctl rebuild` builds only the system checkout `/etc/gjallar/system`,
-from any directory. Root owns that checkout and builds it as it is on the
-official origin; with developer mode on it also builds local changes in it.
-A checkout anywhere else is never rebuilt: an install that still builds from
-a folder in your home is moved with `gjallarctl system move` (see below).
-Other commands find their checkout through `--repo PATH`, `GJALLAROS_REPO`,
-`/etc/gjallar/repository` (`dotfilesDir`) or the current directory, in that
-order. Direct host flake builds fail unless the
-source was staged by `gjallarctl`; installer and recovery deployment also use
-that staging path. This prevents skipping the normal preparation workflow. It
-is not an authorization boundary against root or someone who can change the
-source. Package builds and recovery ISO builds remain available directly.
-
-To bring an install up to date with upstream, run:
-
-```bash
-gjallarctl rebuild --update
-```
-
-It fast-forwards that checkout to its release channel and then rebuilds.
-The channel is `releaseChannel` in `user.config.json`: `stable` (the
-default), `staging` or `dev`. Change it with
-`gjallarctl settings set releaseChannel=staging`. A move to `stable` applies
-at once; any other move waits like other critical settings.
-Moving to `staging` or `dev`, or turning on `developerMode`, also asks for
-the startup PIN or the recovery key once, after the password. Without a PIN,
-press Enter and type the recovery key. Moving back to `stable` and turning
-developer mode off ask for neither, and the next move away asks again.
-A device that was on `staging` or `dev` before this check refuses changes
-and rebuilds until you run `gjallarctl settings confirm-developer` once.
-Local commits or uncommitted edits stop the update, and nothing is rebuilt.
-A checkout that is ahead of its channel stays where it is until the channel
-catches up; it never goes back to an older commit.
-`gjallarctl rebuild --help` lists every option.
-
-`--repo`, `--host`, `--update-inputs` and other `nixos-rebuild` arguments are
-refused; only `-- --override-input oddc COMMIT` may follow, and the oddc pin
-may move only to a commit of an official ODDC branch (ROADMAP §14).
-
-### Moving an older install to `/etc/gjallar/system`
-
-Installs made before the system checkout build from a checkout in your home
-folder. To move one over, run as your user:
-
-```sh
-gjallarctl system move
-```
-
-It shows the commit the system runs, and lists local commits and changes in
-your checkout that the move leaves behind. Your checkout keeps them; local
-`.nix` changes go into the developer-mode folder instead (see
-`gjallarctl system apply`). The running commit must be on an official
-release channel (`dev`, `staging` or `stable`); a system built with local
-changes refuses until you rebuild from a pushed commit. Set `releaseChannel`
-first: the new checkout follows that channel. Then, as root:
-
-```sh
-sudo gjallarctl system clone --from ~/Documents/gjallarOS
-sudo gjallar-system-rebuild
-```
-
-`system clone` clones the official repository at the running commit and
-copies `generated/` and `user.config.json` from the old checkout as files.
-It never runs git in the old checkout. The rebuild switches
-`/etc/gjallar/repository` to the new checkout; plain `gjallarctl rebuild` uses it from
-then on. The old checkout stays where it is.
-
-When `/etc/gjallar/system` is missing or broken, `gjallarctl rebuild` says so and names
-the same `system clone` step.
-
-To try a `gjallarctl` change before rebuilding, run it from the checkout with
-`go run ./cmd/gjallarctl rebuild` (or any other command). It uses the sudo
-helpers of the installed system, so this works only on a machine that already
-runs gjallarOS. If you need the package itself, build it with
-`nix build "git+file://$PWD#gjallarctl"`. A `path:` flake reference copies the
-whole directory into the Nix store, untracked files and VM disks included.
-
-### Release cache
-
-gjallarOS patches a few packages (Noctalia, its greeter, the Nextcloud client
-with OpenVFS, OpenCode, Hyprland, Ghostty, Dolphin and the KDE apps that
-come with it, and others), so cache.nixos.org does not have them and every
-machine compiled them itself. For each `v*` release tag,
-`.github/workflows/cache.yml` builds them (flake package `prebuilt`), signs
-them and uploads them as files of the `nix-cache` release. Those files are a
-plain Nix binary cache. Each tag adds to it, so a machine on any channel downloads a
-package whenever it matches one built for any tag. Anything missing still
-builds locally. The workflow itself downloads from the same cache, so a tag
-builds only the packages that changed since the tags before it.
-
-`system/release` holds the name of the last release tag. The commit that gets
-a new tag sets it to that tag first; the workflow stops when the two differ.
-Commits after a tag keep the last release name until the next one.
-
-`deployment/binary-cache.json` names the cache and its public key:
-
-```json
-{
-  "url": "https://github.com/JadeOpenServices/gjallarOS/releases/download/nix-cache",
-  "publicKey": "gjallaros-cache-1:..."
-}
-```
-
-Machines add it to `nix.conf`, and `gjallarctl rebuild` and the installer pass it on the
-command line too, so the first install uses it as well. Nix only accepts
-files signed with that key.
-
-The workflow reads the signing key (secret `NIX_SIGNING_KEY`) only through the
-`release-cache` environment, which should allow `v*` tags only and require a
-reviewer. Create the key on your machine; it never needs network:
-
-```sh
-nix key generate-secret --key-name gjallaros-cache-1 > cache.sec
-nix key convert-secret-to-public < cache.sec
-```
-
-Paste `cache.sec` into the secret, put the public key into
-`deployment/binary-cache.json`, then delete `cache.sec` or keep it offline.
-The key signs cache files and nothing else. Forks keep
-`deployment/binary-cache.json` empty or point it at their own cache.
-
-### Recovery and rollback
-
-With `recoveryEnable`, the boot menu lists only the newest generation and its
-recovery entries. To boot an older generation, start trusted recovery (or the
-recovery ISO, with the root mounted at `/mnt`) and run:
-
-```bash
-sudo gjallar-recover generations /
-sudo gjallar-recover rollback / N
-```
-
-This adds a new generation with that system; nothing newer is deleted.
-
-The recovery partition shows up in the same menu as "gjallarOS recovery
-(partition)". It has no firmware boot entry of its own and no loader at the
-removable-media path, so firmware that ignores the boot order still starts
-gjallarOS. If the ESP itself is broken, boot the recovery ISO from USB.
-
-> [!NOTE]
-> The installed system does not carry the installer. `gjallar-installer` and
-> `gjallar-recovery-maintenance` (package `pkgs/gjallar-installer`) can
-> repartition and reinstall a disk, so they exist only in the trusted-recovery
-> boot entry, the recovery-maintenance initrd and the recovery ISO. A reinstall
-> or reset therefore needs a deliberate boot into recovery.
-
 ### Snapshots
 
 Installs made with the subvolume layout keep read-only Btrfs snapshots of
@@ -811,11 +492,13 @@ snapshots: generations bring the system back, and the machine keys in
 `/var/lib` must not live on in old copies. Older installs get no snapshots
 until they are reinstalled.
 
+Three keys control them:
+
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `snapshotsEnable` | `true` | turn the snapshot timers on or off |
-| `snapshotsKeepHours` | `24` | hours of hourly `/home` snapshots to keep (0 to 168) |
-| `snapshotsKeepDays` | `7` | days of daily snapshots to keep (1 to 365) |
+| `snapshotsEnable` | `true` | Turns the snapshot timers on or off |
+| `snapshotsKeepHours` | `24` | Hours of hourly `/home` snapshots to keep (0 to 168) |
+| `snapshotsKeepDays` | `7` | Days of daily snapshots to keep (1 to 365) |
 
 Only root can reach the snapshots; they are mounted nowhere on the running
 system. When the disk is nearly full, no new snapshot is made and the
@@ -847,13 +530,45 @@ It asks you to type `ROLLBACK-HOME` (or `ROLLBACK-CONFIG` for a `config.`
 snapshot). The snapshot itself stays as it was; the current `/home` is kept
 as a read-only copy in the list under "replaced by a rollback". When `/home`
 is in use, the change takes effect at the next start. After a settings
-rollback, run `gjallarctl rebuild` once the system is up so the system matches the
-settings again. `sudo gjallar-recover snapshot-drop / NAME` deletes a kept
-copy once you no longer need it.
+rollback, run `gjallarctl rebuild` once the system is up so the system
+matches the settings again. `sudo gjallar-recover snapshot-drop / NAME`
+deletes a kept copy once you no longer need it.
 
 > [!WARNING]
 > A file you delete from `/home` stays in older snapshots until they age
 > out. Snapshots live on the same disk, so they are not a backup.
+
+### Recovery and rollback
+
+With `recoveryEnable`, the boot menu lists only the newest generation and its
+recovery entries. To boot an older generation, start trusted recovery (or the
+recovery ISO, with the root mounted at `/mnt`) and run:
+
+```bash
+sudo gjallar-recover generations /
+sudo gjallar-recover rollback / N
+```
+
+This adds a new generation with that system; nothing newer is deleted.
+
+The recovery partition shows up in the same menu as "gjallarOS recovery
+(partition)". It has no firmware boot entry of its own and no loader at the
+removable-media path, so firmware that ignores the boot order still starts
+gjallarOS. If the ESP itself is broken, boot the recovery ISO from USB.
+
+> [!NOTE]
+> The installed system does not carry the installer. `gjallar-installer` and
+> `gjallar-recovery-maintenance` (package `pkgs/gjallar-installer`) can
+> repartition and reinstall a disk, so they exist only in the trusted-recovery
+> boot entry, the recovery-maintenance initrd and the recovery ISO. A reinstall
+> or reset therefore needs a deliberate boot into recovery.
+
+<div align="right"><a href="#gjallaros">Back to top</a></div>
+
+## Security
+
+The gjallarHorn page of the settings window shows how each of these stands
+on this device.
 
 ### Secure Boot
 
@@ -868,7 +583,8 @@ cannot manage the machine. On a model without an ODDC Secure Boot setup the
 installer then offers shim (below) as an untested try, with no as the
 default. Yes builds shim and checks that this firmware would start it
 before the final question. With Secure Boot already on, the offer comes only
-when shim already starts the running system. A system installed without it gets it with:
+when shim already starts the running system. A system installed without it
+gets it with:
 
 ```bash
 gjallarctl secure-boot setup
@@ -882,12 +598,12 @@ also without an ODDC entry. The command checks that first: db must hold the
 certificate that signed shim, and dbx and shim's SBAT level must not revoke
 it. Each run does one step and says which restart comes next:
 
-1. Create the key, turn on `secureBootEnable` and `secureBootShim`, rebuild,
-   restart.
+1. Create the key, turn on `secureBootEnable` and `secureBootShim`, rebuild
+   and restart
 2. Queue the key for MokManager (`mokutil --import`, with a one-time
-   password), restart and confirm it on the blue MokManager screen.
+   password), restart and confirm it on the blue MokManager screen
 3. Turn on Secure Boot in the firmware setup. The first Secure Boot start
-   records the switch and verifies it.
+   records the switch and verifies it
 
 That check refuses unsigned files in the gjallarOS folders of the EFI system
 partition (`EFI/nixos`, `EFI/BOOT`, `EFI/systemd`, `EFI/Linux`). Unsigned files
@@ -902,13 +618,13 @@ Mode, or when db or dbx would stop shim.
 The own-keys path takes the installer's steps: it checks the firmware state,
 creates the keys and shows their recovery archive, turns on
 `secureBootEnable`, rebuilds and offers to restart into firmware setup. After
-the restart the boot services enroll the keys and verify them. On both paths,
+the restart the boot services enrol the keys and verify them. On both paths,
 run the command again after a step was interrupted; it picks up where it
 stopped. `gjallarctl secure-boot status` shows the current state.
 
 Some firmware empties its revocation list (dbx) along with its keys. When the
 ODDC setup wants dbx kept, the firmware's own default list is written back
-before enrolling, and enrollment stops if that fails. Firmware that only knows
+before enrolling, and enrolment stops if that fails. Firmware that only knows
 Microsoft's 2011 KEK (expired June 2026) also gets the 2023 one, so revocation
 updates signed with it still apply once gjallarOS owns the keys.
 
@@ -922,23 +638,6 @@ gjallarctl secure-boot update-dbx
 The new list takes effect at the next restart. With TPM disk unlock, the TPM
 accepts the current and the new state until then, so a rebuild in between
 still unlocks.
-
-### Reading the firmware flash chip
-
-`"firmwareFlashReadEntry": true` adds a boot menu entry tagged
-`firmware-flash-read`. It is for reading the firmware chip on machines whose
-firmware hides the SPI controller from Linux. Only that entry allows
-`flashrom`'s `internal` programmer (`iomem=relaxed`):
-
-```bash
-sudo flashrom -p internal -r flash.bin
-```
-
-Only read with it. With TPM disk unlock, this entry asks for the disk recovery
-key or disk passphrase, never the startup PIN: the TPM never unlocks the disk
-in a boot with these relaxed limits. Rebuilds stop in this entry; restart
-into the normal one first. The setting is off by default; turn it off again
-once the dump is done.
 
 ### USB trust
 
@@ -954,12 +653,12 @@ and review devices first.
 With an encrypted root, the installer also asks "Block unknown USB devices from
 the first boot?" (default no). Say no on a desktop with a USB keyboard: it is
 not built in, so it stays blocked until approved. Enforcement can be turned on
-later with `"usbTrustEnforce": true` in `user.config.json` and a `gjallarctl rebuild`. To
-turn it off, run `sudo gjallarctl usb disarm` first and enter the disk
-encryption passphrase, then set it back to `false` and `gjallarctl rebuild`. Disarm alone
-is temporary: the broker re-arms from the config on its next restart, or right
-away with `sudo gjallarctl usb arm`. The other
-order is refused by `gjallarctl settings`; done by hand, USBGuard keeps
+later with `"usbTrustEnforce": true` in `user.config.json` and a
+`gjallarctl rebuild`. To turn it off, run `sudo gjallarctl usb disarm` first
+and enter the disk encryption passphrase, then set it back to `false` and
+`gjallarctl rebuild`. Disarm alone is temporary: the broker re-arms from the
+config on its next restart, or right away with `sudo gjallarctl usb arm`. The
+other order is refused by `gjallarctl settings`; done by hand, USBGuard keeps
 blocking unknown devices at boot while the stored state still says armed.
 
 Turning USB trust off altogether (`"usbguardEnable": false`) takes effect for
@@ -991,28 +690,29 @@ choice stays until someone unticks it. Someone debugging the laptop can tick
 it, work, and untick it to give the user the simple view back. Editing the key
 by hand does the same.
 
-Unformatted USB disks offer an explicit exFAT setup prompt. Cancelling leaves the
-disk unchanged. Existing partitions, recognized filesystems, mounted devices,
-and readers with no media are excluded. Formatting uses UDisks/Polkit and
-requires confirmation; lack of a recognized filesystem does not prove a disk
-contains no valuable data.
+A USB disk with no file system offers to format it as exFAT. Cancel leaves
+it as it is. A disk that already has partitions or a known file system is
+never offered. gjallarOS cannot tell whether an unformatted disk holds data,
+so check first.
 
-<div align="right"><a href="#gjallaros">Back to top</a></div>
+### Tailscale VPN and network trust
 
-## Tailscale VPN and network trust
-
-The installer can enable Tailscale and use a tailnet exit node as VPN.
+The installer can turn on Tailscale and use a tailnet exit node as VPN.
 `gjallar-vpn-trust` then decides on every network change, tailnet change, and
 every five minutes how far to trust the current network:
 
-| Network | Recognized by | Local subnets | Exit node |
+| Network | Recognised by | Local network reachable | Exit node |
 | --- | --- | --- | --- |
-| home | a home subnet, proven by a trusted Wi-Fi name or your tailnet router answering on it | home subnets | off |
-| home | `routerHome`: any subnet router of your tailnet answering on this LAN, yours or a friend's | this LAN | off |
-| site | `siteRouterTrust`: a tailnet subnet router on this LAN that reaches every `siteRouterTargets` host | this LAN | off |
-| trusted-wifi | a `trustedWifis` name on a network that needs a key | this LAN | off, or its `wifiExitNodes` entry |
-| untrusted | anything else | none | `exitNode` |
-| offline | no default route | none | unchanged |
+| home | A home subnet, proven by a trusted Wi-Fi name or your tailnet router answering on it | Home subnets | Off |
+| home (router) | Any subnet router of your tailnet answering on this LAN, yours or a friend's | This LAN | Off |
+| site | A tailnet subnet router on this LAN that reaches every listed site host | This LAN | Off |
+| trusted Wi-Fi | A trusted Wi-Fi name on a network that needs a key | This LAN | Off, or the one set for that Wi-Fi |
+| untrusted | Anything else | None | The `exitNode` setting |
+| offline | No default route | None | Unchanged |
+
+The keys behind it: `routerHome` turns on home (router), `siteRouterTrust`
+and `siteRouterTargets` set up site, `trustedWifis` lists the trusted Wi-Fi
+names and `wifiExitNodes` their exit nodes.
 
 > [!WARNING]
 > A trusted name on an open network only produces a warning, since anyone can
@@ -1056,15 +756,15 @@ overrides DNS. `gjallarctl vpn status` shows the current decision.
 <summary><b>Change trust at runtime</b></summary>
 <br>
 
-As root:
+These commands run as root:
 
-```bash
-gjallarctl vpn trust-wifi                       # the current Wi-Fi
-gjallarctl vpn trust-wifi "Home WiFi" --exit-node OpenWrt   # trusted LAN, internet via OpenWrt
-gjallarctl vpn trust-wifi "Home WiFi" --exit-node default   # trusted LAN, exit node off
-gjallarctl vpn untrust-wifi "Home WiFi"
-gjallarctl vpn exit-node auto                   # or off, NAME, default
-```
+| Command | What it does |
+| --- | --- |
+| `gjallarctl vpn trust-wifi` | Trusts the current Wi-Fi |
+| `gjallarctl vpn trust-wifi "Home WiFi" --exit-node OpenWrt` | Trusts that LAN and sends the internet through OpenWrt |
+| `gjallarctl vpn trust-wifi "Home WiFi" --exit-node default` | Trusts that LAN with the exit node off |
+| `gjallarctl vpn untrust-wifi "Home WiFi"` | Takes the trust back |
+| `gjallarctl vpn exit-node auto` | Sets the exit node; also takes `off`, a name or `default` |
 
 Changes apply at once and are kept in `/var/lib/gjallar/vpn-trust-override.json`,
 layered over the built-in policy in `/etc/gjallar/vpn-trust.json`, so they
