@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -68,13 +69,23 @@ func selectFreshTargetDisk(
 
 	case 1:
 		selected := eligible[0]
-		fmt.Fprintf(
-			out,
-			"Automatically selected the only eligible target disk: %s — %s — %s\n",
-			selected.Path,
-			displayDiskModel(selected.Model),
-			formatDiskSize(selected.SizeBytes),
+		yes, err := ui.Confirm(
+			ctx,
+			fmt.Sprintf(
+				"Install gjallarOS on %s — %s — %s? It is the only disk found",
+				selected.Path,
+				displayDiskModel(selected.Model),
+				formatDiskSize(selected.SizeBytes),
+			),
+			true,
 		)
+		if err != nil {
+			return "", fmt.Errorf("confirm target disk: %w", err)
+		}
+		if !yes {
+			return "", errors.New("no disk chosen; nothing was changed")
+		}
+		fmt.Fprintf(out, "Selected target disk: %s\n", selected.Path)
 		return selected.Path, nil
 	}
 
