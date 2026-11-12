@@ -47,20 +47,24 @@ func TestFindmntSourceCallsIgnoreSubvolumeSuffix(t *testing.T) {
 }
 
 func TestLiveMediaNeverRebuildsTheRunningSystem(t *testing.T) {
-	if liveHostPreparationSkip(options{targetDisk: "/dev/disk/by-id/nvme-x"}, "") == "" {
+	if liveHostPreparationSkip(options{targetDisk: "/dev/disk/by-id/nvme-x"}, "", false) == "" {
 		t.Fatal("fresh --target-disk install would rebuild the live system")
 	}
-	if liveHostPreparationSkip(options{recovery: true}, "") == "" {
+	// The README command passes no --target-disk; the disk is picked later.
+	if liveHostPreparationSkip(options{}, "", false) == "" {
+		t.Fatal("fresh install without --target-disk would rebuild the live system")
+	}
+	if liveHostPreparationSkip(options{recovery: true}, "", false) == "" {
 		t.Fatal("recovery media would rebuild the live system")
 	}
-	if skip := liveHostPreparationSkip(options{}, ""); skip != "" {
+	if skip := liveHostPreparationSkip(options{}, "", true); skip != "" {
 		t.Fatalf("in-place deploy skipped host preparation: %q", skip)
 	}
-	if liveHostPreparationSkip(options{}, installerresume.StateMaintenanceReboot) == "" {
+	if liveHostPreparationSkip(options{}, installerresume.StateMaintenanceReboot, true) == "" {
 		t.Fatal("maintenance continuation would rebuild the deployed system from /etc/nixos")
 	}
 	// A staged release still needs the bootstrap before the flake deploys.
-	if skip := liveHostPreparationSkip(options{}, installerresume.StateReleaseReboot); skip != "" {
+	if skip := liveHostPreparationSkip(options{}, installerresume.StateReleaseReboot, true); skip != "" {
 		t.Fatalf("release continuation skipped host preparation: %q", skip)
 	}
 }

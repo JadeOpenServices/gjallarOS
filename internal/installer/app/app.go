@@ -427,6 +427,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 	if skip := liveHostPreparationSkip(
 		opt,
 		os.Getenv("GJALLAR_INSTALLER_RESUME_STATE"),
+		persistentInstalledHost,
 	); skip != "" {
 		fmt.Fprintln(out, skip)
 	} else if code := prepareHost(
@@ -1848,7 +1849,7 @@ func activateJODSEnrollment(ctx context.Context, installationSucceeded bool) err
 
 // liveHostPreparationSkip reports why the running system must not be
 // rebuilt, staged or rebooted before the installer operates on its target.
-func liveHostPreparationSkip(opt options, resumeState string) string {
+func liveHostPreparationSkip(opt options, resumeState string, persistentInstalledHost bool) string {
 	switch {
 	case resumeState == installerresume.StateMaintenanceReboot:
 		// The gjallarOS generation was deployed before the maintenance boot.
@@ -1859,10 +1860,11 @@ func liveHostPreparationSkip(opt options, resumeState string) string {
 		// Recovery media is a purpose-built execution environment. Never mutate
 		// or rebuild the live recovery system before operating on the target.
 		return "Recovery environment validated; live-host rebuild skipped."
-	case opt.targetDisk != "":
-		// Fresh installs run from live media (validateTargetDiskContext).
-		// nixos-install builds the target; rebuilding the live system only
-		// fills its RAM-backed store and was OOM-killed on 12 GiB machines.
+	case !persistentInstalledHost:
+		// Live media, with or without --target-disk: the disk is picked
+		// later. /etc/nixos there describes no bootable system, so its
+		// rebuild fails (no root file system, no boot loader), and it only
+		// fills the RAM-backed store; nixos-install builds the target.
 		return "Live installation media; live-host rebuild skipped (nixos-install builds the target)."
 	}
 	return ""
