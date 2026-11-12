@@ -27,8 +27,15 @@ NixOS 26.05 · Hyprland · Noctalia · ODDC hardware policy · TPM2 disk encrypt
 
 ## Quick start
 
-There are two ways in, and both start with the same command. Both need
-a machine that starts in UEFI mode; legacy BIOS (CSM) is not supported.
+There are two ways in, and both start with the same command.
+
+Before you start:
+
+- A 64-bit Intel or AMD machine (x86_64) that starts in UEFI mode;
+  legacy BIOS (CSM) and ARM boards are not supported
+- Internet for the whole install. A network cable is the easiest
+- Somewhere safe for the recovery key the installer shows, such as a
+  password manager on another device or a sheet of paper
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/JadeOpenServices/gjallarOS/stable/scripts/installation/install.sh | bash
@@ -53,25 +60,29 @@ the stick stays on the machine.
 
 What it takes:
 
-- A USB stick
+- A USB stick of 2 GB or more
 - A disk with nothing on it you still need
 - A network cable or Wi-Fi
 
 Steps:
 
-1. Write the NixOS minimal ISO from
-   [nixos.org/download](https://nixos.org/download) to the stick, for
-   example with GNOME Disks ("Restore Disk Image")
-2. Switch Secure Boot off in the firmware settings for now. The
+1. Download the NixOS minimal ISO for 64-bit Intel/AMD from
+   [nixos.org/download](https://nixos.org/download) and compare it with
+   the SHA-256 checksum listed there
+2. Write the ISO to the stick with an image writer. GNOME Disks
+   ("Restore Disk Image"), KDE ISO Image Writer, Fedora Media Writer,
+   balenaEtcher, Raspberry Pi Imager ("Use custom") and `dd` all do
+   this. Copying the file onto the stick does not make it bootable
+3. Switch Secure Boot off in the firmware settings for now. The
    installer can switch it back on later
    (see [Secure Boot](#secure-boot))
-3. Start the machine from the stick. The boot menu key is often F12,
+4. Start the machine from the stick. The boot menu key is often F12,
    F10 or Esc. Ethernet connects by itself, and `nmtui` sets up Wi-Fi
-4. Run the command above and answer the questions. The installer asks
+5. Run the command above and answer the questions. The installer asks
    twice before it erases the disk you pick
-5. Save the recovery key it shows somewhere off this machine. It opens
+6. Save the recovery key it shows somewhere off this machine. It opens
    the disk if the PIN or the security chip ever fails
-6. Shut down, take the stick out and start from the disk
+7. Shut down, take the stick out and start from the disk
 
 </td>
 <td valign="top">
@@ -80,12 +91,34 @@ Run the command on the machine itself, no stick needed. The
 installer asks once, adds the tools it needs to
 `/etc/nixos/configuration.nix`, rebuilds and carries on.
 
+On another NixOS release, it sets up NixOS 26.05 for the next start
+and leaves the running desktop alone. After the restart, it carries on
+where it stopped.
+
+On a machine that already runs gjallarOS, it offers to update it,
+install it again from scratch, or leave it as it is.
+
 In an existing checkout, `./scripts/installation/install.sh` does the
 same.
 
 </td>
 </tr>
 </table>
+
+### What the installer asks
+
+Each question shows its default, and Enter keeps it. In a desktop
+session the questions open as dialogs, otherwise they appear in the
+terminal.
+
+| Topic | Questions |
+| --- | --- |
+| You and your region | Username, password, hostname, timezone, language, keyboard layout and weather location |
+| Disk and startup (USB stick) | Which disk to use, and whether the security chip (TPM2) unlocks the disk by itself or asks for a PIN at startup. Both come with a recovery key |
+| Desktop and apps | Login shell, editors, browsers, Firefox add-on collections, apps from the catalogue, touchpad swipes, the closed lid on a dock, printing and scanning, and a smart card for mail keys |
+| Network | Tailscale as a VPN on networks you do not trust, and Nextcloud |
+| Security | USB device trust, Secure Boot, firmware updates, a recovery partition, and who signs the settings files |
+| AI (optional) | A local model, an AI server on your network, or none |
 
 ### Release channels
 
