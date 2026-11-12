@@ -51,7 +51,7 @@ background is the theme's base colour.
 
 The installer targets the NixOS release pinned in
 `deployment/release-policy.json`. On another release it upgrades or
-downgrades to the pinned one for the next boot, leaves the running desktop
+downgrades to the pinned one at the next start, leaves the running desktop
 alone, and carries on after the restart. The root
 flake and stable shell flakes track its `nixpkgsInput`; only the explicitly
 listed development shells (currently ComfyUI) intentionally use

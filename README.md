@@ -95,7 +95,7 @@ them and rebuilds. It keeps a copy of the file as
 fails. The disk layout stays as it is, so your home folder stays too.
 
 On another NixOS release, it upgrades or downgrades to the release
-gjallarOS pins, for the next start, and
+gjallarOS pins at the next start and
 leaves the running desktop alone. After the restart, it carries on where
 it stopped. On a machine that already runs gjallarOS, it offers to update
 it, install it again from scratch, or leave it as it is.
@@ -581,8 +581,9 @@ offers depends on the machine:
 | Your machine | What the installer offers | Default |
 | --- | --- | --- |
 | Model with an ODDC Secure Boot setup | Secure Boot | Yes |
-| Model without one | Shim (below) as an untested try, checked against this firmware before the final question | No |
-| Secure Boot already on | The offer only when shim already starts the running system | As above |
+| Model without one, Secure Boot off | Shim (below) as an untested try, checked against this firmware before the final question | No |
+| Model without one, Secure Boot already on | Shim, only when shim already starts the running system | No |
+| Secure Boot on, firmware setup locked with a password you do not know | Shim, only when shim already starts the running system; otherwise the install stops | Yes |
 
 Saying no, or a model without an ODDC Secure Boot setup, shows what the
 install goes without: nothing checks the startup files, the disk passphrase
