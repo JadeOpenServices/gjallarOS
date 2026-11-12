@@ -4,10 +4,11 @@
 //
 // Model space: X = right, Y = up, Z = towards the viewer.
 //
-//	go run . [out.svg]
+//	go run . [-variant gold|ember|patina] [out.svg]
 package main
 
 import (
+	"flag"
 	"fmt"
 	"math"
 	"os"
@@ -56,14 +57,45 @@ func hex(t float64, s string) stop {
 	return stop{t, float64(r), float64(g), float64(b)}
 }
 
-// Gjallarhorn: honeyed ivory, red gold, dark leather, warm skin
-var ivoryRamp = []stop{hex(0, "#1E1309"), hex(0.28, "#5A3E1E"), hex(0.5, "#A2804A"), hex(0.7, "#DCC593"), hex(0.88, "#F8EDD2"), hex(1, "#FFFFF6")}
-var goldRamp = []stop{hex(0, "#241503"), hex(0.28, "#6B460C"), hex(0.5, "#B07C22"), hex(0.7, "#E2B44C"), hex(0.88, "#FFE79A"), hex(1, "#FFFBE6")}
+// Gjallarhorn: ivory bone, a metal band, dark leather, warm skin.
 var leatherRamp = []stop{hex(0, "#0E0703"), hex(0.35, "#33190C"), hex(0.65, "#633A20"), hex(0.88, "#9C6B45"), hex(1, "#CDA27C")}
 var skinRamp = []stop{hex(0, "#1F0E07"), hex(0.3, "#5C301B"), hex(0.55, "#A06844"), hex(0.75, "#D2A07A"), hex(0.9, "#F0CDB0"), hex(1, "#FFF0E3")}
 var throatRamp = []stop{hex(0, "#0A0603"), hex(0.5, "#24170A"), hex(1, "#4E3819")}
 
-const ink = "#140C04"
+// Horn versions for the built-in themes (THEMEBRAIN section 0, Product
+// marks). A version changes only the metal, the bone and the outline;
+// leather, skin and throat are the same in all of them. gold is the
+// default and the one in the README.
+type variant struct {
+	gold, ivory []stop
+	ink         string
+}
+
+var ivoryBone = []stop{hex(0, "#1E1309"), hex(0.28, "#5A3E1E"), hex(0.5, "#A2804A"), hex(0.7, "#DCC593"), hex(0.88, "#F8EDD2"), hex(1, "#FFFFF6")}
+
+var variants = map[string]variant{
+	"gold": {
+		gold:  []stop{hex(0, "#251500"), hex(0.28, "#6D4602"), hex(0.5, "#B07C32"), hex(0.7, "#E3B464"), hex(0.88, "#FFCB8C"), hex(1, "#FFF5EC")},
+		ivory: ivoryBone,
+		ink:   "#1C211B",
+	},
+	"ember": {
+		gold:  []stop{hex(0, "#280105"), hex(0.28, "#571D1D"), hex(0.5, "#96452D"), hex(0.7, "#ED935C"), hex(0.88, "#FDD3B3"), hex(1, "#FFF5EC")},
+		ivory: ivoryBone,
+		ink:   "#1C211B",
+	},
+	"patina": {
+		gold:  []stop{hex(0, "#001A0F"), hex(0.28, "#1D5539"), hex(0.5, "#B07C32"), hex(0.7, "#E3B464"), hex(0.88, "#FFCB8C"), hex(1, "#FFF5EC")},
+		ivory: []stop{hex(0, "#001A0F"), hex(0.28, "#454B42"), hex(0.5, "#909689"), hex(0.7, "#C4CABD"), hex(0.88, "#EBEEE6"), hex(1, "#F6F7F2")},
+		ink:   "#1C211B",
+	},
+}
+
+// The chosen version, set in main before anything is drawn.
+var (
+	goldRamp, ivoryRamp []stop
+	ink                 string
+)
 
 func ramp(rs []stop, t float64) string {
 	t = math.Max(0, math.Min(1, t))
@@ -489,6 +521,14 @@ func handItems(fr []frame) (arm, back, fingers, thumb []item, edge string) {
 }
 
 func main() {
+	name := flag.String("variant", "gold", "horn version: gold, ember or patina")
+	flag.Parse()
+	v, ok := variants[*name]
+	if !ok {
+		fmt.Fprintf(os.Stderr, "unknown variant %q: use gold, ember or patina\n", *name)
+		os.Exit(2)
+	}
+	goldRamp, ivoryRamp, ink = v.gold, v.ivory, v.ink
 	horn := tube{
 		path:   hornPath(),
 		radius: hornRadius,
@@ -561,8 +601,8 @@ func main() {
 </svg>
 `, body.String())
 	out := "gjallarhorn.svg"
-	if len(os.Args) > 1 {
-		out = os.Args[1]
+	if flag.NArg() > 0 {
+		out = flag.Arg(0)
 	}
 	if err := os.WriteFile(out, []byte(svg), 0o644); err != nil {
 		fmt.Fprintln(os.Stderr, err)
