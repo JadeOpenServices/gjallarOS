@@ -10,12 +10,12 @@ NixOS 26.05 · Hyprland · Noctalia · ODDC hardware policy · TPM2 disk encrypt
 
 <br>
 
-<a href="#-quick-start"><kbd> <br> Quick start <br> </kbd></a>&ensp;
-<a href="#-screenshots"><kbd> <br> Screenshots <br> </kbd></a>&ensp;
+<a href="#quick-start"><kbd> <br> Quick start <br> </kbd></a>&ensp;
+<a href="#screenshots"><kbd> <br> Screenshots <br> </kbd></a>&ensp;
 <a href="#features"><kbd> <br> Features <br> </kbd></a>&ensp;
-<a href="#%EF%B8%8F-keybindings"><kbd> <br> Keybindings <br> </kbd></a>&ensp;
-<a href="#-configuration"><kbd> <br> Configuration <br> </kbd></a>&ensp;
-<a href="#-license"><kbd> <br> License <br> </kbd></a>
+<a href="#keybindings"><kbd> <br> Keybindings <br> </kbd></a>&ensp;
+<a href="#configuration"><kbd> <br> Configuration <br> </kbd></a>&ensp;
+<a href="#license"><kbd> <br> License <br> </kbd></a>
 
 <br><br>
 
@@ -25,7 +25,7 @@ NixOS 26.05 · Hyprland · Noctalia · ODDC hardware policy · TPM2 disk encrypt
 
 <br>
 
-## 🚀 Quick start
+## Quick start
 
 Needs a machine booted in UEFI mode (legacy BIOS/CSM is refused).
 
@@ -118,11 +118,11 @@ settings, generated hardware data and backups are excluded from Git.
 > [!TIP]
 > After the install, apply every change with `gjallarctl rebuild`, not
 > `sudo nixos-rebuild switch --flake`. See
-> [Rebuilds and removable disks](#-rebuilds-and-removable-disks).
+> [Rebuilds and removable disks](#rebuilds-and-removable-disks).
 
 <div align="right"><a href="#gjallaros">↑ back to top</a></div>
 
-## 📸 Screenshots
+## Screenshots
 
 <div align="center">
 <table>
@@ -192,7 +192,7 @@ with `systemd-creds` (TPM2-bound when present) into
 
 <div align="right"><a href="#gjallaros">↑ back to top</a></div>
 
-## ⌨️ Keybindings
+## Keybindings
 
 `$mod` is the Super key. <kbd>Super</kbd> + <kbd>F1</kbd> shows every
 shortcut and gesture of the running session, searchable, also as
@@ -235,13 +235,13 @@ have letters, numbers and symbols only: no clipboard, emoji or word
 suggestions. The HP ZBook
 x2 bezel Quick Keys have three presets, switched with the third key from the
 top. gjallarOS maps none of them: every key sends a macro key
-(`XF86Macro1`–`15`) that no other key sends, so you can bind it in Hyprland,
+(`XF86Macro1` to `15`) that no other key sends, so you can bind it in Hyprland,
 a drawing app or any other program. The bar shows the active preset number
 next to the network widget after the first key press.
 
 <div align="right"><a href="#gjallaros">↑ back to top</a></div>
 
-## 🔧 Configuration
+## Configuration
 
 `user.config.json` contains machine-local human intent. The installer normalizes
 that intent into `generated/state.nix`; machine hardware lives in
@@ -547,7 +547,7 @@ and the Plane or JODS item.
 A rename adds its row in the same commit. Tests and captured device
 output may still name the old name.
 
-## 🧬 Hardware catalog (ODDC)
+## Hardware catalog (ODDC)
 
 [ODDC](https://github.com/JadeOpenServices/oddc) is a separate project,
 used like an API. The installer reads the machine's DMI identity and asks ODDC
@@ -606,7 +606,7 @@ validates this checkout on the device. Validation evidence goes to ODDC through
 
 <div align="right"><a href="#gjallaros">↑ back to top</a></div>
 
-## 💾 Rebuilds and removable disks
+## Rebuilds and removable disks
 
 `gjallarctl rebuild` builds only the system checkout `/etc/gjallar/system`,
 from any directory. Root owns that checkout and builds it as it is on the
@@ -951,7 +951,7 @@ contains no valuable data.
 
 <div align="right"><a href="#gjallaros">↑ back to top</a></div>
 
-## 🛡️ Tailscale VPN and network trust
+## Tailscale VPN and network trust
 
 The installer can enable Tailscale and use a tailnet exit node as VPN.
 `gjallar-vpn-trust` then decides on every network change, tailnet change, and
@@ -1044,7 +1044,7 @@ next steps are in section 18 of
 
 <div align="right"><a href="#gjallaros">↑ back to top</a></div>
 
-## 💜 Credits
+## Credits
 
 gjallarOS builds on the ideas and groundwork of
 [AlfheimOS](https://github.com/Serpentian/AlfheimOS) and the
@@ -1058,7 +1058,7 @@ The desktop shell, greeter and default owl wallpaper come from
 [Noctalia](https://github.com/noctalia-dev/noctalia). The README layout
 takes inspiration from [HyDE](https://github.com/HyDE-Project/HyDE).
 
-## 📜 License
+## License
 
 gjallarOS is licensed under the GNU Affero General Public License v3.0 or
 later; see [LICENSE](LICENSE). Bundled parts keep their own licenses:
