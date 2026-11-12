@@ -2,7 +2,7 @@
 
 Run this from the repository root on an existing NixOS installation, or on
 the NixOS minimal ISO started from a USB stick to install onto a whole disk
-(see "New machine: install from a USB stick" in the main README):
+(see "New machine: from a USB stick" in the main README):
 
 ```bash
 ./scripts/installation/install.sh

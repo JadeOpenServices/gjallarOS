@@ -15,7 +15,7 @@ NixOS 26.05 · Hyprland · Noctalia · ODDC hardware policy · TPM2 disk encrypt
 <a href="#features"><kbd> <br> Features <br> </kbd></a>&ensp;
 <a href="#keybindings"><kbd> <br> Keybindings <br> </kbd></a>&ensp;
 <a href="#configuration"><kbd> <br> Configuration <br> </kbd></a>&ensp;
-<a href="#license"><kbd> <br> License <br> </kbd></a>
+<a href="#licence"><kbd> <br> Licence <br> </kbd></a>
 
 <br><br>
 
@@ -27,7 +27,8 @@ NixOS 26.05 · Hyprland · Noctalia · ODDC hardware policy · TPM2 disk encrypt
 
 ## Quick start
 
-Needs a machine booted in UEFI mode (legacy BIOS/CSM is refused).
+There are two ways in. Both need a machine that starts in UEFI mode;
+legacy BIOS (CSM) is not supported.
 
 <table>
 <tr>
@@ -37,87 +38,104 @@ Needs a machine booted in UEFI mode (legacy BIOS/CSM is refused).
 <tr>
 <td valign="top">
 
-Sets up a whole disk from nothing. You do not install NixOS first: the
-stick only runs the installer, and nothing from it ends up on the disk.
-GjallarOS is itself a NixOS system, built from this repository.
+Installs gjallarOS on a whole disk. Everything on that disk is
+replaced. NixOS does not need to be installed first, and nothing from
+the stick stays on the machine.
 
-1. Download the NixOS minimal ISO from
-   [nixos.org/download](https://nixos.org/download) and write it to a
-   USB stick, for example with GNOME Disks ("Restore Disk Image").
-2. Turn Secure Boot off in the firmware settings. The NixOS stick is
-   not signed; the installer offers to set Secure Boot up again
-   (see [Secure Boot](#secure-boot)).
-3. Start from the stick (the boot menu key is often F12, F10 or Esc)
-   Ethernet connects on its own; for Wi-Fi, run `nmtui`.
-4. Run the command below and answer the questions. The disk you pick
-   is erased completely; the installer asks twice before it touches
-   it. Write down the recovery key it shows.
-5. Shut down, pull the stick, and start from the disk
+What it takes:
+
+- A USB stick
+- A disk with nothing on it you still need
+- A network cable or Wi-Fi
+
+Steps:
+
+1. Write the NixOS minimal ISO from
+   [nixos.org/download](https://nixos.org/download) to the stick, for
+   example with GNOME Disks ("Restore Disk Image")
+2. Switch Secure Boot off in the firmware settings for now. The
+   installer can switch it back on later
+   (see [Secure Boot](#secure-boot))
+3. Start the machine from the stick. The boot menu key is often F12,
+   F10 or Esc. Ethernet connects by itself, and `nmtui` sets up Wi-Fi
+4. Run the command below and answer the questions. The installer asks
+   twice before it erases the disk you pick
+5. Save the recovery key it shows somewhere off this machine. It opens
+   the disk if the PIN or the security chip ever fails
+6. Shut down, take the stick out and start from the disk
 
 </td>
 <td valign="top">
 
-On a machine that already runs NixOS, run the same command there. No
-stick needed. After one approval the installer adds the tools it needs
-to `/etc/nixos/configuration.nix`, rebuilds, and carries on.
+Run the same command on the machine itself, no stick needed. The
+installer asks once, adds the tools it needs to
+`/etc/nixos/configuration.nix`, rebuilds and carries on.
 
-From an existing checkout, run `./scripts/installation/install.sh`
-directly.
+In an existing checkout, `./scripts/installation/install.sh` does the
+same.
 
 </td>
 </tr>
 </table>
 
-Both start with the same command:
+Both start with this command:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/JadeOpenServices/gjallarOS/stable/scripts/installation/install.sh | bash
 ```
 
-The script clones the repository with its submodules into
-`~/Documents/gjallarOS` (set `GJALLAR_DIR` to change it) and starts the
-interactive installer from that checkout. Re-running it reuses the checkout.
-`GJALLAR_CLONE_ONLY=1` stops after the clone.
+It clones the repository with its submodules into `~/Documents/gjallarOS`
+and starts the installer from there. `GJALLAR_DIR` sets another folder, and
+`GJALLAR_CLONE_ONLY=1` stops after the clone. Running it again reuses the
+checkout.
 
-To install from `staging` or `dev` instead of `stable`, add `--channel`
-(or set `GJALLAR_CHANNEL`):
+### Release channels
+
+`stable` is the default. For `staging` or `dev`, add `--channel` (or set
+`GJALLAR_CHANNEL`):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/JadeOpenServices/gjallarOS/staging/scripts/installation/install.sh | bash -s -- --channel staging
 ```
 
-The script then checks out that branch. A checkout left by an earlier run
-moves to the newest commit of the channel by fast-forward, so a run that
-stopped halfway picks up the current installer and resumes. Local edits or
-local commits on that branch stop the script, and nothing is changed. The
-installed system follows the same channel. With security chip unlock, the
-first start confirms the channel when you type the disk passphrase or
-recovery key and set the PIN. Without it, run `gjallarctl luks recovery-key`
-and then `gjallarctl settings confirm-developer` once with that key;
-rebuilds wait until then. Without a recovery key or startup PIN the command
-stops at once and says so; the disk passphrase is not accepted.
-A preset `user.config.json` with a different `releaseChannel` stops the
-installer.
+The installed system follows the same channel. When the script runs again,
+it moves its checkout forward to the newest commit of the channel and
+resumes where the last run stopped. Local edits or local commits on that
+branch stop it before anything changes.
 
-That checkout only runs the installer. The installed system gets its own
-clone of the official repository in `/etc/gjallar/system`, owned by root,
-at the commit the installer was built from, with this machine's
-`generated/` and `user.config.json` copied in. An installer built from a
-commit that is on none of the release branches (`stable`, `staging`,
-`dev`), or with local changes, stops before the clone.
+Choosing `staging` or `dev` needs one confirmation with the recovery key
+or the startup PIN. Rebuilds wait until it is done. With security chip
+(TPM2) unlock this happens at the first start, when you set the PIN.
+Without it, run `gjallarctl luks recovery-key`, then
+`gjallarctl settings confirm-developer` with that key. The disk passphrase
+does not count.
 
-For automated non-secret answers:
+### Preset answers
+
+The installer can take its non-secret answers from a file:
 
 ```bash
 cp scripts/installation/user_PresetJSON/default.user.config.json user.config.json
 ```
 
-Edit the copy, then run the installer. Secrets, LUKS passphrases, recovery
-settings, generated hardware data and backups are excluded from Git.
+Edit the copy, then run the installer. A preset with a different
+`releaseChannel` than the chosen channel stops the installer. Secrets, LUKS
+passphrases, recovery settings, generated hardware data and backups stay out
+of Git.
+
+### System checkout
+
+The checkout in `~/Documents` only runs the installer. The installed system
+gets a clone of the official repository in `/etc/gjallar/system`, owned by
+root, at the commit the installer was built from. This machine's
+`generated/` and `user.config.json` are copied in. An installer with local
+changes, or built from a commit outside `stable`, `staging` and `dev`,
+stops before this step.
 
 > [!TIP]
-> After the install, apply every change with `gjallarctl rebuild`, not
-> `sudo nixos-rebuild switch --flake`. See
+> After the install, apply changes with `gjallarctl rebuild`. A plain
+> `sudo nixos-rebuild switch --flake` cannot see the untracked
+> `generated/` folder, see
 > [Rebuilds and removable disks](#rebuilds-and-removable-disks).
 
 <div align="right"><a href="#gjallaros">Back to top</a></div>
@@ -329,8 +347,9 @@ gjallarctl settings import ~/settings.gjallar
 
 The second line writes `~/settings.gjallar.sig`. With an own key, only that
 key counts for your account: files gjallarOS signed are refused, and pairing
-is off. A file made on another device brings your personal settings, not
-that device's (hostname, disk, boot and the like).
+is off. A file made on another device brings only your personal settings.
+Settings that belong to that device (hostname, disk, boot and the like) stay
+behind.
 
 ### App catalogue
 
@@ -1056,14 +1075,14 @@ The desktop shell, greeter and default owl wallpaper come from
 [Noctalia](https://github.com/noctalia-dev/noctalia). The README layout
 takes inspiration from [HyDE](https://github.com/HyDE-Project/HyDE).
 
-## License
+## Licence
 
 gjallarOS is licensed under the GNU Affero General Public License v3.0 or
-later; see [LICENSE](LICENSE). Bundled parts keep their own licenses:
+later; see [LICENSE](LICENSE). Bundled parts keep their own licences:
 
 - [`pkgs/monique`](https://github.com/vardstein/monique): GPL-3.0
 - [`apps/nemu/module.nix`](apps/nemu/module.nix): nemu's upstream NixOS
-  module, BSD-2-Clause, license text in the file header
+  module, BSD-2-Clause, licence text in the file header
 - [`themes/brand/openjade`](themes/brand/openjade/README.md): the OpenJade
   logo is a trademark and not covered by the AGPL
 
