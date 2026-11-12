@@ -6,7 +6,7 @@
 
 **A secure, modular NixOS workstation on Hyprland**
 
-NixOS 26.05 · Hyprland · Noctalia · ODDC hardware policy · TPM2 disk encryption · reviewable installer
+NixOS · Hyprland · Noctalia · ODDC hardware policy · TPM2 disk encryption · reviewable installer
 
 [Quick start](#quick-start) · [Screenshots](#screenshots) · [Features](#features) · [Keybindings](#keybindings) · [Daily use](#daily-use) · [Security](#security) · [Docs](docs/README.md)
 
@@ -20,23 +20,15 @@ NixOS 26.05 · Hyprland · Noctalia · ODDC hardware policy · TPM2 disk encrypt
 
 ## Quick start
 
-There are two ways in. The main differences:
-
-| What differs | From a USB stick | On an existing NixOS |
-| --- | --- | --- |
-| The disk | Erased; gjallarOS takes the whole disk | Kept as it is, home folder included |
-| USB stick | 2 GB or more | Not needed |
-| NixOS first | Not needed | Needed; another release moves to 26.05 at the next start |
-
 Before you start:
 
 - A 64-bit Intel or AMD machine (x86_64) that starts in UEFI mode;
   legacy BIOS (CSM) and ARM boards are not supported
 - Internet for the whole install (a network cable is easiest)
-- Somewhere safe for the recovery key the installer shows, such as a
-  password manager on another device or a sheet of paper
+- Somewhere safe off this machine for the recovery key the installer
+  shows, such as a password manager on another device
 
-Both ways run this command on the machine that gets gjallarOS:
+Run this command on the machine that gets gjallarOS:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/JadeOpenServices/gjallarOS/stable/scripts/installation/install.sh | bash
@@ -62,6 +54,14 @@ Running it again reuses the checkout. In an existing checkout,
 `./scripts/installation/install.sh` does the same.
 
 </details>
+
+It installs from a USB stick or on an existing NixOS. The main differences:
+
+| What differs | From a USB stick | On an existing NixOS |
+| --- | --- | --- |
+| The disk | Erased; gjallarOS takes the whole disk | Kept as it is, home folder included |
+| USB stick | 2 GB or more | Not needed |
+| NixOS first | Not needed | Needed; another release is upgraded or downgraded to the pinned one |
 
 ### From a USB stick
 
@@ -94,7 +94,8 @@ them and rebuilds. It keeps a copy of the file as
 `configuration.nix.gjallar-backup.<time>` and puts it back if the rebuild
 fails. The disk layout stays as it is, so your home folder stays too.
 
-On another NixOS release, it sets up NixOS 26.05 for the next start and
+On another NixOS release, it upgrades or downgrades to the release
+gjallarOS pins, for the next start, and
 leaves the running desktop alone. After the restart, it carries on where
 it stopped. On a machine that already runs gjallarOS, it offers to update
 it, install it again from scratch, or leave it as it is.
@@ -145,7 +146,7 @@ and where the installed system keeps its checkout.
   </tr>
 </table>
 
-<sub>Tiling · launcher · control center · greeter · lock screen · disk unlock at boot.<br>
+<sub>Tiling · launcher · control center · greeter · lock screen · disk unlock at boot<br>
 Taken in a QEMU test VM at 1920×1080.</sub>
 
 <div align="right"><a href="#gjallaros">Back to top</a></div>
@@ -179,6 +180,7 @@ first under memory pressure) so a model load cannot take Hyprland down. Below
 AI, and local AI then runs only a model you name. From 8 GiB it picks a 7b
 model, from 24 GiB a 14b one, and with 32 GiB plus a 12 GiB graphics card a
 30b one.
+
 To turn local AI on after the install, run `gjallarctl ai enable`; the
 rebuild then picks the model the same way. A changed `overrideModelWith`
 takes effect with the next rebuild too.
@@ -279,15 +281,15 @@ gjallarctl settings pending
 gjallarctl settings apply
 ```
 
-VALUE is JSON; a key that holds text takes plain text. Each key has a tier,
-and the tier decides how long a change waits before it can be written:
+Each value is JSON; a key that holds text takes plain text. Each key has a
+tier, and the tier decides how long a change waits before it can be written:
 
 | Tier | Covers | Wait |
 | --- | --- | --- |
-| everyday | Looks, input, apps | None |
-| security | Network, services, add-ons, hostname, user name | One hour, or 10 s while your tailnet router proves you are home |
-| critical | Disk unlock, recovery, firmware | One hour, and the password is asked at `set` and again at `apply` |
-| installer | Set by the installer | Changes only with a new install |
+| `everyday` | Looks, input, apps | None |
+| `security` | Network, services, add-ons, hostname, user name | One hour, or 10 s while your tailnet router proves you are home |
+| `critical` | Disk unlock, recovery, firmware | One hour, and the password is asked at `set` and again at `apply` |
+| `installer` | Set by the installer | Changes only with a new install |
 
 The password dialog lists every key with its old and new value. Apply
 writes the file and starts the rebuild, and `set` follows it until the
@@ -572,19 +574,21 @@ on this device.
 
 ### Secure Boot
 
-The installer offers Secure Boot on models whose ODDC entry has a Secure Boot
-setup, with yes as the default. It asks this before the recovery questions:
-the recovery partition is signed with this machine's Secure Boot key, so
-without Secure Boot there is no recovery partition and the disk is not shrunk
-for one. Saying no, or a model without an ODDC Secure Boot setup, shows what
-the install goes without: nothing checks the startup files, the disk
-passphrase is typed at every startup, repairs start from a USB stick, and JODS
-cannot manage the machine. On a model without an ODDC Secure Boot setup the
-installer then offers shim (below) as an untested try, with no as the
-default. Yes builds shim and checks that this firmware would start it
-before the final question. With Secure Boot already on, the offer comes only
-when shim already starts the running system. A system installed without it
-gets it with:
+The installer asks about Secure Boot before the recovery questions, since the
+recovery partition is signed with this machine's Secure Boot key. What it
+offers depends on the machine:
+
+| Your machine | What the installer offers | Default |
+| --- | --- | --- |
+| Model with an ODDC Secure Boot setup | Secure Boot | Yes |
+| Model without one | Shim (below) as an untested try, checked against this firmware before the final question | No |
+| Secure Boot already on | The offer only when shim already starts the running system | As above |
+
+Saying no, or a model without an ODDC Secure Boot setup, shows what the
+install goes without: nothing checks the startup files, the disk passphrase
+is typed at every startup, repairs start from a USB stick, and JODS cannot
+manage the machine. Without Secure Boot there is no recovery partition and
+the disk is not shrunk for one. A system installed without it gets it with:
 
 ```bash
 gjallarctl secure-boot setup
@@ -701,18 +705,29 @@ The installer can turn on Tailscale and use a tailnet exit node as VPN.
 `gjallar-vpn-trust` then decides on every network change, tailnet change, and
 every five minutes how far to trust the current network:
 
-| Network | Recognised by | Local network reachable | Exit node |
-| --- | --- | --- | --- |
-| home | A home subnet, proven by a trusted Wi-Fi name or your tailnet router answering on it | Home subnets | Off |
-| home (router) | Any subnet router of your tailnet answering on this LAN, yours or a friend's | This LAN | Off |
-| site | A tailnet subnet router on this LAN that reaches every listed site host | This LAN | Off |
-| trusted Wi-Fi | A trusted Wi-Fi name on a network that needs a key | This LAN | Off, or the one set for that Wi-Fi |
-| untrusted | Anything else | None | The `exitNode` setting |
-| offline | No default route | None | Unchanged |
+| Network | Local network reachable | Exit node |
+| --- | --- | --- |
+| `home` | Home subnets, or this LAN when a router proved it | Off |
+| `site` | This LAN | Off |
+| `trusted-wifi` | This LAN | Off, or the one set for that Wi-Fi |
+| `untrusted` | None | The `exitNode` setting |
+| `offline` | None | Unchanged |
 
-The keys behind it: `routerHome` turns on home (router), `siteRouterTrust`
-and `siteRouterTargets` set up site, `trustedWifis` lists the trusted Wi-Fi
-names and `wifiExitNodes` their exit nodes.
+How each one is recognised:
+
+- `home` is a home subnet, proven by a trusted Wi-Fi name or your tailnet
+  router answering on it
+- `home` with `routerHome` is any LAN where a subnet router of your tailnet
+  answers, yours or a friend's
+- `site` is a LAN with a tailnet subnet router that reaches every listed site
+  host
+- `trusted-wifi` is a trusted Wi-Fi name on a network that needs a key
+- `untrusted` is anything else
+- `offline` means no default route
+
+The keys behind it: `routerHome` turns on the router case of `home`,
+`siteRouterTrust` and `siteRouterTargets` set up `site`, `trustedWifis` lists
+the trusted Wi-Fi names and `wifiExitNodes` their exit nodes.
 
 > [!WARNING]
 > A trusted name on an open network only produces a warning, since anyone can
@@ -756,14 +771,15 @@ overrides DNS. `gjallarctl vpn status` shows the current decision.
 <summary><b>Change trust at runtime</b></summary>
 <br>
 
-These commands run as root:
+These commands run as root. In the examples, `Home` is a Wi-Fi name and
+`router` an exit node of your tailnet:
 
 | Command | What it does |
 | --- | --- |
 | `gjallarctl vpn trust-wifi` | Trusts the current Wi-Fi |
-| `gjallarctl vpn trust-wifi "Home WiFi" --exit-node OpenWrt` | Trusts that LAN and sends the internet through OpenWrt |
-| `gjallarctl vpn trust-wifi "Home WiFi" --exit-node default` | Trusts that LAN with the exit node off |
-| `gjallarctl vpn untrust-wifi "Home WiFi"` | Takes the trust back |
+| `gjallarctl vpn trust-wifi Home --exit-node router` | Trusts that LAN and sends the internet through `router` |
+| `gjallarctl vpn trust-wifi Home --exit-node default` | Trusts that LAN with the exit node off |
+| `gjallarctl vpn untrust-wifi Home` | Takes the trust back |
 | `gjallarctl vpn exit-node auto` | Sets the exit node; also takes `off`, a name or `default` |
 
 Changes apply at once and are kept in `/var/lib/gjallar/vpn-trust-override.json`,

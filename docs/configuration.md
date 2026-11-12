@@ -12,7 +12,7 @@ turns them into `generated/state.nix`, which the system build reads.
 `generated/install-state.nix` keeps the NixOS and Home Manager versions the
 machine was first installed with, so later releases keep its old data
 formats. `deployment/release-policy.json` names the supported NixOS
-release: the root flake, Home Manager and Stylix follow 26.05, and only the
+release: the root flake, Home Manager and Stylix follow it, and only the
 ComfyUI development shell uses unstable.
 
 On a system that builds from `/etc/gjallar/system`, root owns

@@ -49,14 +49,15 @@ The wallpaper is picked in the Noctalia control centre and kept in Noctalia's
 own state. The repository ships no wallpapers; until one is picked the
 background is the theme's base colour.
 
-The installer targets NixOS 26.05 and stops before making changes if another
-release is detected. The release/channel policy is kept in
-`deployment/release-policy.json` for future centrally managed updates. The root
+The installer targets the NixOS release pinned in
+`deployment/release-policy.json`. On another release it upgrades or
+downgrades to the pinned one for the next boot, leaves the running desktop
+alone, and carries on after the restart. The root
 flake and stable shell flakes track its `nixpkgsInput`; only the explicitly
 listed development shells (currently ComfyUI) intentionally use
 `unstableNixpkgsInput` for fast-moving GPU/build tooling. Flake input URLs must
-remain literal by Nix design, so the installer validates the running release
-against this policy before proceeding.
+remain literal by Nix design, so the installer checks the running release
+against this policy before it changes anything.
 
 Every run offers an explicit firmware-update check. If accepted, it refreshes
 fwupd metadata and applies available updates before continuing; declining it or
