@@ -27,8 +27,17 @@ NixOS 26.05 · Hyprland · Noctalia · ODDC hardware policy · TPM2 disk encrypt
 
 ## Quick start
 
-There are two ways in. Both need a machine that starts in UEFI mode;
-legacy BIOS (CSM) is not supported.
+There are two ways in, and both start with the same command. Both need
+a machine that starts in UEFI mode; legacy BIOS (CSM) is not supported.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/JadeOpenServices/gjallarOS/stable/scripts/installation/install.sh | bash
+```
+
+It clones the repository with its submodules into `~/Documents/gjallarOS`
+and starts the installer from there. `GJALLAR_DIR` sets another folder, and
+`GJALLAR_CLONE_ONLY=1` stops after the clone. Running it again reuses the
+checkout.
 
 <table>
 <tr>
@@ -58,7 +67,7 @@ Steps:
    (see [Secure Boot](#secure-boot))
 3. Start the machine from the stick. The boot menu key is often F12,
    F10 or Esc. Ethernet connects by itself, and `nmtui` sets up Wi-Fi
-4. Run the command below and answer the questions. The installer asks
+4. Run the command above and answer the questions. The installer asks
    twice before it erases the disk you pick
 5. Save the recovery key it shows somewhere off this machine. It opens
    the disk if the PIN or the security chip ever fails
@@ -67,7 +76,7 @@ Steps:
 </td>
 <td valign="top">
 
-Run the same command on the machine itself, no stick needed. The
+Run the command on the machine itself, no stick needed. The
 installer asks once, adds the tools it needs to
 `/etc/nixos/configuration.nix`, rebuilds and carries on.
 
@@ -77,17 +86,6 @@ same.
 </td>
 </tr>
 </table>
-
-Both start with this command:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/JadeOpenServices/gjallarOS/stable/scripts/installation/install.sh | bash
-```
-
-It clones the repository with its submodules into `~/Documents/gjallarOS`
-and starts the installer from there. `GJALLAR_DIR` sets another folder, and
-`GJALLAR_CLONE_ONLY=1` stops after the clone. Running it again reuses the
-checkout.
 
 ### Release channels
 
