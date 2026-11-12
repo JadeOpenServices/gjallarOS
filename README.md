@@ -47,12 +47,12 @@ GjallarOS is itself a NixOS system, built from this repository.
 2. Turn Secure Boot off in the firmware settings. The NixOS stick is
    not signed; the installer offers to set Secure Boot up again
    (see [Secure Boot](#secure-boot)).
-3. Start from the stick (the boot menu key is often F12, F10 or Esc).
+3. Start from the stick (the boot menu key is often F12, F10 or Esc)
    Ethernet connects on its own; for Wi-Fi, run `nmtui`.
 4. Run the command below and answer the questions. The disk you pick
    is erased completely; the installer asks twice before it touches
    it. Write down the recovery key it shows.
-5. Shut down, pull the stick, and start from the disk.
+5. Shut down, pull the stick, and start from the disk
 
 </td>
 <td valign="top">
@@ -120,11 +120,10 @@ settings, generated hardware data and backups are excluded from Git.
 > `sudo nixos-rebuild switch --flake`. See
 > [Rebuilds and removable disks](#rebuilds-and-removable-disks).
 
-<div align="right"><a href="#gjallaros">↑ back to top</a></div>
+<div align="right"><a href="#gjallaros">Back to top</a></div>
 
 ## Screenshots
 
-<div align="center">
 <table>
   <tr>
     <td colspan="2"><img src="docs/screenshots/tiling.webp" alt="Tiled Ghostty with fastfetch, Dolphin and btop"></td>
@@ -144,24 +143,23 @@ settings, generated hardware data and backups are excluded from Git.
 
 <sub>Tiling · launcher · control center · greeter · lock screen · disk unlock at boot.<br>
 Taken in a QEMU test VM at 1920×1080.</sub>
-</div>
 
-<div align="right"><a href="#gjallaros">↑ back to top</a></div>
+<div align="right"><a href="#gjallaros">Back to top</a></div>
 
 ## Features
 
 | | |
 | --- | --- |
-| **Desktop** | Hyprland-only, Home Manager user configuration, Noctalia shell, Stylix theming propagated to system apps. |
-| **Disk encryption** | LUKS2 with TPM2 enrollment, optional TPM+PIN, recovery-key handling, SOPS/age secrets. |
-| **Hardware policy** | [ODDC](https://github.com/JadeOpenServices/oddc)-backed device identity and capabilities; graphics, Wi-Fi, firmware, touchscreen, battery and clamshell detection. |
-| **USB trust** | Review new USB devices, TPM-signed permanent trust, opt-in enforcement. |
-| **VPN and network trust** | Tailscale with per-network trust levels and automatic exit nodes. |
-| **App catalogue** | One list in `user.config.json` picks the apps; each app owns its whole module. |
-| **Local AI** | Optional localhost-only Ollama with hardware-aware model selection, or a central HTTPS server with a sealed token. |
-| **Recovery** | Trusted recovery boot entry, recovery ISO, generation rollback without deleting anything newer. |
-| **Apps** | VSCodium, Thunderbird, web apps (Teams, Plane), Wine apps each in their own sandbox, optional Nemu. |
-| **Maintenance** | Helpers for rebuilding, cleanup, thermal status, and updates. |
+| **Desktop** | Hyprland-only, Home Manager user configuration, Noctalia shell, Stylix theming propagated to system apps |
+| **Disk encryption** | LUKS2 with TPM2 enrollment, optional TPM+PIN, recovery-key handling, SOPS/age secrets |
+| **Hardware policy** | [ODDC](https://github.com/JadeOpenServices/oddc)-backed device identity and capabilities; graphics, Wi-Fi, firmware, touchscreen, battery and clamshell detection |
+| **USB trust** | Review new USB devices, TPM-signed permanent trust, opt-in enforcement |
+| **VPN and network trust** | Tailscale with per-network trust levels and automatic exit nodes |
+| **App catalogue** | One list in `user.config.json` picks the apps; each app owns its whole module |
+| **Local AI** | Optional localhost-only Ollama with hardware-aware model selection, or a central HTTPS server with a sealed token |
+| **Recovery** | Trusted recovery boot entry, recovery ISO, generation rollback without deleting anything newer |
+| **Apps** | VSCodium, Thunderbird, web apps (Teams, Plane), Wine apps each in their own sandbox, optional Nemu |
+| **Maintenance** | Helpers for rebuilding, cleanup, thermal status, and updates |
 
 <details>
 <summary><b>Local AI details</b></summary>
@@ -190,7 +188,7 @@ with `systemd-creds` (TPM2-bound when present) into
 
 </details>
 
-<div align="right"><a href="#gjallaros">↑ back to top</a></div>
+<div align="right"><a href="#gjallaros">Back to top</a></div>
 
 ## Keybindings
 
@@ -239,7 +237,7 @@ top. gjallarOS maps none of them: every key sends a macro key
 a drawing app or any other program. The bar shows the active preset number
 next to the network widget after the first key press.
 
-<div align="right"><a href="#gjallaros">↑ back to top</a></div>
+<div align="right"><a href="#gjallaros">Back to top</a></div>
 
 ## Configuration
 
@@ -271,7 +269,7 @@ setting for one device and is off by default; turning it off applies at once.
 ### Changing settings
 
 On a system that builds from `/etc/gjallar/system`, root owns
-`user.config.json`. Change it with `gjallarctl settings`, as your own user:
+`user.config.json`. Change it with `gjallarctl settings`, as your user:
 
 ```sh
 gjallarctl settings list
@@ -283,12 +281,12 @@ gjallarctl settings apply
 VALUE is JSON; a key that holds text takes plain text. Each key has a tier,
 and the tier decides how long a change waits before it can be written:
 
-- **everyday** (looks, input, apps): no wait.
+- **everyday** (looks, input, apps): no wait
 - **security** (network, services, add-ons, hostname, user name): one hour,
   or 10 s while a router of your tailnet proves this is your home network.
 - **critical** (disk unlock, recovery, firmware): one hour always, and the
   password is asked when you ask for the change and again when you apply it.
-- **installer**: changes only with a new install.
+- **installer**: changes only with a new install
 
 The password dialog lists every key with its old and new value. Apply
 writes the file and starts the rebuild, and `set` follows it until the
@@ -311,13 +309,13 @@ gjallarctl settings export ~/settings.gjallar
 gjallarctl settings import ~/settings.gjallar
 ```
 
-Export asks for your own password and signs the file with a key that only
+Export asks for your password and signs the file with a key that only
 the settings service holds. Import takes only files made on this device by
 your account, and refuses a file that was changed after it was made. It
 asks for the change the way `set` does, with the same tiers and waits, and
 says how old the file is.
 
-To sign these files with your own OpenSSH key instead (an `ssh-ed25519` key
+To sign these files with your OpenSSH key instead (an `ssh-ed25519` key
 file or a FIDO `sk-ssh-ed25519` key), answer No to "Let gjallarOS sign your
 settings files for you?" in the installer, or set `settingsSigningKey` to
 your public key line later (critical tier). Export then writes a file you
@@ -412,9 +410,9 @@ Add-ons come in collections, listed in `apps/firefox-addons.json`: Privacy,
 Password managers, Comfort and Cookie banners. New installs start with uBlock
 Origin on and everything else off. Each add-on has one of three modes:
 
-- `off`: not installed. If gjallarOS installed it earlier, it is removed.
-- `on`: installed, and you can turn it off in about:addons.
-- `locked`: installed and always on.
+- `off`: not installed. If gjallarOS installed it earlier, it is removed
+- `on`: installed, and you can turn it off in about:addons
+- `locked`: installed and always on
 
 The installer asks which collections you want, then the mode of each add-on in
 them. Afterwards `gjallarctl addons` changes them:
@@ -505,8 +503,8 @@ gjallarOS sets these through Thunderbird's enterprise policy:
   TLS 1.2 or newer.
 - Mail shows as simple HTML (View, Message Body As changes it). Chat,
   telemetry, donation and survey messages are off.
-- Only dictionaries, languages and themes can be added, no add-ons with code.
-- Key servers are searched only when you ask for a key.
+- Only dictionaries, languages and themes can be added, no add-ons with code
+- Key servers are searched only when you ask for a key
 
 Every `mailto` link opens Thunderbird, Firefox ones included.
 
@@ -522,7 +520,7 @@ This starts `pcscd` and `gpg-agent`, lets Thunderbird use a card key through
 GnuPG, and adds OpenSC for S/MIME cards. Approve the card reader when
 gjallarOS asks about the new USB device.
 
-<div align="right"><a href="#gjallaros">↑ back to top</a></div>
+<div align="right"><a href="#gjallaros">Back to top</a></div>
 
 ### Old names
 
@@ -587,24 +585,24 @@ commit and swaps it in only once complete. If that fetch fails, for example
 offline, the rebuild stops with the error and changes nothing.
 `gjallarctl oddc doctor` shows the ODDC revision the installed model came
 from. `gjallarctl oddc update` is refused and points here, because
-plain `oddc update` moves the pin of `/etc/nixos`, not the system checkout. Always apply with `gjallarctl rebuild`, not `sudo nixos-rebuild switch
---flake`: `generated/` is untracked, so a plain git flake cannot see it.
+plain `oddc update` moves only the pin of `/etc/nixos` and leaves the system checkout as it is. Always apply with `gjallarctl rebuild`. A plain `sudo nixos-rebuild switch
+--flake` misses `generated/`: it is untracked, so a plain git flake cannot see it.
 
 A plain `gjallarctl rebuild` never moves the pin. It asks GitHub whether the branch the
-oddc input follows has a newer commit and, if so, prints `ODDC update
-available: OLD -> NEW. Apply with: gjallarctl rebuild --hardware-update`. Offline or on
-any error it says nothing. Managed endpoints skip the check: JODS moves their
+oddc input follows has a newer commit and, if so, prints
+`ODDC update available: OLD -> NEW. Apply with: gjallarctl rebuild --hardware-update`.
+Offline or on any error it says nothing. Managed endpoints skip the check: JODS moves their
 pin.
 
 `gjallarctl oddc COMMAND` passes ODDC commands to `oddc` unchanged, for example
 `gjallarctl oddc resolve` or `gjallarctl oddc explain --path PATH`. On the
 installed system these default to its model. `gjallarctl oddc validate-device`
 validates this checkout on the device. Validation evidence goes to ODDC through
-`oddc contribute`, not into this repository.
+`oddc contribute` and never into this repository.
 
 </details>
 
-<div align="right"><a href="#gjallaros">↑ back to top</a></div>
+<div align="right"><a href="#gjallaros">Back to top</a></div>
 
 ## Rebuilds and removable disks
 
@@ -650,7 +648,7 @@ may move only to a commit of an official ODDC branch (ROADMAP §14).
 ### Moving an older install to `/etc/gjallar/system`
 
 Installs made before the system checkout build from a checkout in your home
-folder. To move one over, run as your own user:
+folder. To move one over, run as your user:
 
 ```sh
 gjallarctl system move
@@ -717,7 +715,7 @@ files signed with that key.
 
 The workflow reads the signing key (secret `NIX_SIGNING_KEY`) only through the
 `release-cache` environment, which should allow `v*` tags only and require a
-reviewer. Create the key on your own machine; it never needs network:
+reviewer. Create the key on your machine; it never needs network:
 
 ```sh
 nix key generate-secret --key-name gjallaros-cache-1 > cache.sec
@@ -784,7 +782,7 @@ gjallarctl snapshots restore ~/Documents/notes.txt
 file, or the one you name with `--from SNAPSHOT`. The copy goes next to the
 file, as `notes.restored-20261021T030000.txt`; your current file is never
 touched. If the folder is gone too, add `--to FOLDER`. Only plain files in
-your own home can be restored, one at a time.
+your home can be restored, one at a time.
 
 To put all of `/home` or the settings back, start the trusted recovery boot
 entry and run the lines below. From the recovery partition, unlock with
@@ -949,7 +947,7 @@ and readers with no media are excluded. Formatting uses UDisks/Polkit and
 requires confirmation; lack of a recognized filesystem does not prove a disk
 contains no valuable data.
 
-<div align="right"><a href="#gjallaros">↑ back to top</a></div>
+<div align="right"><a href="#gjallaros">Back to top</a></div>
 
 ## Tailscale VPN and network trust
 
@@ -1042,7 +1040,7 @@ for 24 hours while you are online, a card says so once. The design and the
 next steps are in section 18 of
 [ROADMAP.md](ROADMAP.md).
 
-<div align="right"><a href="#gjallaros">↑ back to top</a></div>
+<div align="right"><a href="#gjallaros">Back to top</a></div>
 
 ## Credits
 
@@ -1063,10 +1061,14 @@ takes inspiration from [HyDE](https://github.com/HyDE-Project/HyDE).
 gjallarOS is licensed under the GNU Affero General Public License v3.0 or
 later; see [LICENSE](LICENSE). Bundled parts keep their own licenses:
 
-- [`pkgs/monique`](https://github.com/vardstein/monique): GPL-3.0.
+- [`pkgs/monique`](https://github.com/vardstein/monique): GPL-3.0
 - [`apps/nemu/module.nix`](apps/nemu/module.nix): nemu's upstream NixOS
-  module, BSD-2-Clause, license text in the file header.
+  module, BSD-2-Clause, license text in the file header
 - [`themes/brand/openjade`](themes/brand/openjade/README.md): the OpenJade
-  logo is a trademark and not covered by the AGPL.
+  logo is a trademark and not covered by the AGPL
 
-<div align="right"><a href="#gjallaros">↑ back to top</a></div>
+<div align="right"><a href="#gjallaros">Back to top</a></div>
+
+---
+
+<sub><img src="docs/branding/openjade-stone.svg" alt="" width="16" height="16" align="top">&nbsp;<b>openJade</b> · gjallarOS</sub>

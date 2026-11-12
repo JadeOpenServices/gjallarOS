@@ -104,7 +104,7 @@ top-level README for changing these later.
 Local AI is optional. If disabled, Ollama, OpenCode, the AI wrapper commands,
 and AI profiling are all omitted from the generated system.
 
-Before rebuilding, make sure your own SOPS age key exists and that
+Before rebuilding, make sure your SOPS age key exists and that
 `secrets/default.yaml` is encrypted for it. The installer checks this and
 prints a warning when the secrets cannot be decrypted; it does not create or
 guess service credentials.
