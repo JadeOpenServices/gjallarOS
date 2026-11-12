@@ -4,7 +4,7 @@
 //
 // Model space: X = right, Y = up, Z = towards the viewer.
 //
-//	go run . [-variant gold|ember|patina] [out.svg]
+//	go run . [-variant gold|ember|silver|rose|verdigris|patina] [out.svg]
 package main
 
 import (
@@ -58,43 +58,68 @@ func hex(t float64, s string) stop {
 }
 
 // Gjallarhorn: ivory bone, a metal band, dark leather, warm skin.
-var leatherRamp = []stop{hex(0, "#0E0703"), hex(0.35, "#33190C"), hex(0.65, "#633A20"), hex(0.88, "#9C6B45"), hex(1, "#CDA27C")}
 var skinRamp = []stop{hex(0, "#1F0E07"), hex(0.3, "#5C301B"), hex(0.55, "#A06844"), hex(0.75, "#D2A07A"), hex(0.9, "#F0CDB0"), hex(1, "#FFF0E3")}
 var throatRamp = []stop{hex(0, "#0A0603"), hex(0.5, "#24170A"), hex(1, "#4E3819")}
 
 // Horn versions for the built-in themes (THEMEBRAIN section 0, Product
-// marks). A version changes only the metal, the bone and the outline;
-// leather, skin and throat are the same in all of them. gold is the
-// default and the one in the README.
+// marks): Obsidian gold, Ember ember, White silver, Sakura rose, Leaf
+// verdigris. patina has no theme. A version changes the metal, the bone,
+// the leather and the outline; skin and throat are the same in all of
+// them. gold is the default and the one in the README.
 type variant struct {
-	gold, ivory []stop
-	ink         string
+	gold, ivory, leather []stop
+	ink                  string
 }
+
+var brownLeather = []stop{hex(0, "#0E0703"), hex(0.35, "#33190C"), hex(0.65, "#633A20"), hex(0.88, "#9C6B45"), hex(1, "#CDA27C")}
 
 var ivoryBone = []stop{hex(0, "#1E1309"), hex(0.28, "#5A3E1E"), hex(0.5, "#A2804A"), hex(0.7, "#DCC593"), hex(0.88, "#F8EDD2"), hex(1, "#FFFFF6")}
 
+var greyBone = []stop{hex(0, "#001A0F"), hex(0.28, "#454B42"), hex(0.5, "#909689"), hex(0.7, "#C4CABD"), hex(0.88, "#EBEEE6"), hex(1, "#F6F7F2")}
+
 var variants = map[string]variant{
 	"gold": {
-		gold:  []stop{hex(0, "#251500"), hex(0.28, "#6D4602"), hex(0.5, "#B07C32"), hex(0.7, "#E3B464"), hex(0.88, "#FFCB8C"), hex(1, "#FFF5EC")},
-		ivory: ivoryBone,
-		ink:   "#1C211B",
+		gold:    []stop{hex(0, "#251500"), hex(0.28, "#6D4602"), hex(0.5, "#B07C32"), hex(0.7, "#E3B464"), hex(0.88, "#FFCB8C"), hex(1, "#FFF5EC")},
+		ivory:   ivoryBone,
+		leather: brownLeather,
+		ink:     "#1C211B",
 	},
 	"ember": {
-		gold:  []stop{hex(0, "#280105"), hex(0.28, "#571D1D"), hex(0.5, "#96452D"), hex(0.7, "#ED935C"), hex(0.88, "#FDD3B3"), hex(1, "#FFF5EC")},
-		ivory: ivoryBone,
-		ink:   "#1C211B",
+		gold:    []stop{hex(0, "#280105"), hex(0.28, "#571D1D"), hex(0.5, "#96452D"), hex(0.7, "#ED935C"), hex(0.88, "#FDD3B3"), hex(1, "#FFF5EC")},
+		ivory:   ivoryBone,
+		leather: brownLeather,
+		ink:     "#1C211B",
 	},
 	"patina": {
-		gold:  []stop{hex(0, "#001A0F"), hex(0.28, "#1D5539"), hex(0.5, "#B07C32"), hex(0.7, "#E3B464"), hex(0.88, "#FFCB8C"), hex(1, "#FFF5EC")},
-		ivory: []stop{hex(0, "#001A0F"), hex(0.28, "#454B42"), hex(0.5, "#909689"), hex(0.7, "#C4CABD"), hex(0.88, "#EBEEE6"), hex(1, "#F6F7F2")},
-		ink:   "#1C211B",
+		gold:    []stop{hex(0, "#001A0F"), hex(0.28, "#1D5539"), hex(0.5, "#B07C32"), hex(0.7, "#E3B464"), hex(0.88, "#FFCB8C"), hex(1, "#FFF5EC")},
+		ivory:   greyBone,
+		leather: brownLeather,
+		ink:     "#1C211B",
+	},
+	"silver": {
+		gold:    []stop{hex(0, "#131921"), hex(0.28, "#495059"), hex(0.5, "#818892"), hex(0.7, "#AAB1BA"), hex(0.88, "#CCD5E1"), hex(1, "#F5F7F9")},
+		ivory:   ivoryBone,
+		leather: brownLeather,
+		ink:     "#1C211B",
+	},
+	"rose": {
+		gold:    []stop{hex(0, "#34001A"), hex(0.28, "#7A3452"), hex(0.5, "#B96C8A"), hex(0.7, "#EDA6C0"), hex(0.88, "#FFBFD6"), hex(1, "#FEF4F7")},
+		ivory:   ivoryBone,
+		leather: brownLeather,
+		ink:     "#1C211B",
+	},
+	"verdigris": {
+		gold:    []stop{hex(0, "#001F0F"), hex(0.28, "#225C3D"), hex(0.5, "#5D9774"), hex(0.7, "#7BAD8E"), hex(0.88, "#A4E6BD"), hex(1, "#EEFBF2")},
+		ivory:   greyBone,
+		leather: []stop{hex(0, "#040B06"), hex(0.35, "#0D2719"), hex(0.65, "#255038"), hex(0.88, "#518566"), hex(1, "#89B99C")},
+		ink:     "#1C211B",
 	},
 }
 
 // The chosen version, set in main before anything is drawn.
 var (
-	goldRamp, ivoryRamp []stop
-	ink                 string
+	goldRamp, ivoryRamp, leatherRamp []stop
+	ink                              string
 )
 
 func ramp(rs []stop, t float64) string {
@@ -521,14 +546,14 @@ func handItems(fr []frame) (arm, back, fingers, thumb []item, edge string) {
 }
 
 func main() {
-	name := flag.String("variant", "gold", "horn version: gold, ember or patina")
+	name := flag.String("variant", "gold", "horn version: gold, ember, silver, rose, verdigris or patina")
 	flag.Parse()
 	v, ok := variants[*name]
 	if !ok {
-		fmt.Fprintf(os.Stderr, "unknown variant %q: use gold, ember or patina\n", *name)
+		fmt.Fprintf(os.Stderr, "unknown variant %q: use gold, ember, silver, rose, verdigris or patina\n", *name)
 		os.Exit(2)
 	}
-	goldRamp, ivoryRamp, ink = v.gold, v.ivory, v.ink
+	goldRamp, ivoryRamp, leatherRamp, ink = v.gold, v.ivory, v.leather, v.ink
 	horn := tube{
 		path:   hornPath(),
 		radius: hornRadius,
