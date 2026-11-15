@@ -8,6 +8,7 @@ import (
 
 	"github.com/JadeOpenServices/gjallarOS/internal/gittest"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/installlog"
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/targetdisk"
 )
 
 func TestMain(m *testing.M) {
@@ -17,5 +18,8 @@ func TestMain(m *testing.M) {
 	openInstallLog = func() (*installlog.Log, error) { return nil, nil }
 	reboot = func(context.Context, bool) error { return errors.New("reboot called in a test") }
 	writeRootFile = func(context.Context, []byte, string) error { return errors.New("root write called in a test") }
+	listSaveDrives = func(context.Context, string) ([]targetdisk.SaveDrive, error) {
+		return nil, errors.New("drive list called in a test")
+	}
 	os.Exit(m.Run())
 }

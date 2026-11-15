@@ -74,3 +74,18 @@ written to the log.
 Fixed points of the run carry a code such as `GJA-1012`. Search the log for
 a code to see how far a run got; [Install log anchors](install-log-anchors.md)
 lists them all.
+
+## When an install fails
+
+A failed run shows its install report on screen first. One question then
+offers to save the report and the install log, with the same personal values
+hidden, to a USB drive. The list shows only writable USB drives with a FAT
+or exFAT partition. It never shows the disk the run installs to or a drive
+the system uses. On a boot stick made by the USB maker, its `GJLOGS`
+partition comes first; a stick written with plain `dd` has no such
+partition, so plug in a second stick. The default answer saves nothing.
+
+The installer mounts the chosen partition for one moment, writes both files
+readable by their owner only, and unmounts it again. Read the files on
+another computer before you send them on. An installed system that runs the
+installer again offers its home folder instead of a drive.

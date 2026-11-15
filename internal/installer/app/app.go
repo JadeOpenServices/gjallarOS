@@ -92,6 +92,12 @@ type state struct {
 	// oddcChecked is true once the ODDC lookup ran, so a report about an
 	// earlier failure does not claim that no model matches.
 	oddcChecked bool
+	// saveToDrive is set on live and recovery runs: their home folder is
+	// gone at the next start, so a report goes to a USB drive (Plane 343).
+	saveToDrive bool
+	// targetDisk is the disk this run installs to, once known. The report
+	// step never offers it as a drive to save to.
+	targetDisk string
 }
 
 const (
@@ -321,6 +327,9 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 				oddcModel:   s.oddcModel,
 				oddcChecked: s.oddcChecked,
 				failure:     recorder.err,
+				log:         runLog,
+				toDrive:     s.saveToDrive,
+				targetDisk:  s.targetDisk,
 			})
 		}
 	}()
@@ -376,6 +385,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 	switch {
 	case opt.recovery:
 		installlog.Mark(installlog.RunHost, installlog.Choice("kind", "recovery"))
+		s.saveToDrive = true
 		if s.existing {
 			runLog.target = installedRoot
 		}
@@ -384,7 +394,9 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 		runLog.target = "/"
 	default:
 		installlog.Mark(installlog.RunHost, installlog.Choice("kind", "live"))
+		s.saveToDrive = true
 	}
+	s.targetDisk = opt.targetDisk
 	if err := validateTargetDiskContext(opt.targetDisk, persistentInstalledHost); err != nil {
 		return fail(errOut, err)
 	}
@@ -604,6 +616,8 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 				recovery:    opt.recovery,
 				user:        s.user,
 				oddcChecked: true,
+				toDrive:     s.saveToDrive,
+				targetDisk:  s.targetDisk,
 			})
 		}
 	} else {
@@ -697,6 +711,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 		if err != nil {
 			return fail(errOut, fmt.Errorf("select fresh installation target: %w", err))
 		}
+		s.targetDisk = freshTarget
 	}
 	usbSystemDisk := systemDiskOnUSB(ctx, persistentInstalledHost, root, freshTarget)
 	if s.preset {
@@ -1666,6 +1681,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 					)
 				}
 			}
+			s.targetDisk = targetDisk
 			if s.user.USBTrustEnforce {
 				if reason := systemDiskOnUSB(ctx, false, root, targetDisk); reason != "" {
 					return fail(errOut, fmt.Errorf("USB blocking is on, but %s Nothing was changed; run the installer again and leave USB blocking off", reason))

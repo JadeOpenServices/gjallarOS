@@ -168,6 +168,16 @@ func noLinkedFolders(root, rel string) error {
 	return nil
 }
 
+// export is the redacted log as it stands, for a report step to save with
+// the report; nil when this run has no log.
+func (k *logKeeper) export() ([]byte, error) {
+	if k == nil || k.log == nil {
+		return nil, nil
+	}
+	k.refreshKnown()
+	return k.log.Export()
+}
+
 // restart keeps the log in the target, then restarts the machine.
 func (k *logKeeper) restart(ctx context.Context, errOut io.Writer, firmwareSetup bool) error {
 	if firmwareSetup {

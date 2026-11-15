@@ -54,16 +54,16 @@ func SaveDestination() (Destination, error) {
 	return Destination{Dir: home, UID: -1, GID: -1}, nil
 }
 
-// Save writes data to a new file in dest.Dir, readable by the owner only.
-// It never replaces or follows an existing file or link, so nothing planted
-// at that name gets the report. When it saves for another user, the folder
-// itself must belong to that user, and the file is theirs before any byte
-// is written.
-func Save(dest Destination, data []byte, now time.Time) (string, error) {
-	if len(data) > MaxSize {
-		return "", fmt.Errorf("report is larger than %d bytes", MaxSize)
+// WriteNew writes data to a new file name in dest.Dir, readable by the
+// owner only. It never replaces or follows an existing file or link, so
+// nothing planted at that name gets the data. When it saves for another
+// user, the folder itself must belong to that user, and the file is theirs
+// before any byte is written.
+func WriteNew(dest Destination, name string, data []byte) (string, error) {
+	if name == "" || name != filepath.Base(name) || name == "." || name == ".." {
+		return "", fmt.Errorf("%q is not a file name", name)
 	}
-	path := filepath.Join(dest.Dir, FileName(now))
+	path := filepath.Join(dest.Dir, name)
 	dir, err := unix.Open(dest.Dir, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
 	if err != nil {
 		return "", fmt.Errorf("open %s: %w", dest.Dir, err)
@@ -79,7 +79,7 @@ func Save(dest Destination, data []byte, now time.Time) (string, error) {
 		}
 	}
 
-	fd, err := unix.Openat(dir, FileName(now), unix.O_WRONLY|unix.O_CREAT|unix.O_EXCL|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0o600)
+	fd, err := unix.Openat(dir, name, unix.O_WRONLY|unix.O_CREAT|unix.O_EXCL|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0o600)
 	if err != nil {
 		if errors.Is(err, unix.EEXIST) {
 			return "", fmt.Errorf("%s already exists; nothing written", path)
@@ -100,7 +100,7 @@ func Save(dest Destination, data []byte, now time.Time) (string, error) {
 		err = closeErr
 	}
 	if err != nil {
-		unix.Unlinkat(dir, FileName(now), 0)
+		unix.Unlinkat(dir, name, 0)
 		return "", err
 	}
 	return path, nil
