@@ -421,7 +421,7 @@ func TestForceRedeployPreservesExistingInstallState(t *testing.T) {
 		`f.BoolVar(&opt.forceRedeploy, "force-redeploy"`,
 		`forceRedeploy := opt.forceRedeploy || s.user.ForceRedeploy`,
 		`opt.forceRedeploy = forceRedeploy`,
-		`if opt.forceRedeploy {`,
+		`if opt.forceRedeploy || (!s.preset && !opt.noRebuild) {`,
 		`--force-redeploy cannot be combined with --no-rebuild`,
 	} {
 		if !strings.Contains(body, want) {

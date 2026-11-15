@@ -55,7 +55,6 @@ import (
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/targetdisk"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/zonecity"
 	"github.com/JadeOpenServices/gjallarOS/internal/installercheck"
-	"github.com/JadeOpenServices/gjallarOS/internal/sshsig"
 )
 
 type options struct {
@@ -722,7 +721,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 		if s.user.USBGuardEnable && s.user.USBTrustTPMHandle == "" && diskcrypto.TPMAvailable() {
 			s.user.USBTrustTPMHandle = config.DefaultUSBTrustTPMHandle
 		}
-	} else if err := collectInteractive(ctx, ui, root, partitionable, usbSystemDisk, resolvedDevice.ModelID != "", diskcrypto.TPMAvailable(), managementBlocker(s.secureBootFirmware.Policy.Supported, diskcrypto.TPMAvailable()), hardware, choices, running, &s.user); err != nil {
+	} else if err := collectInteractive(ctx, ui, root, managementBlocker(s.secureBootFirmware.Policy.Supported, diskcrypto.TPMAvailable()), hardware, choices, running, &s.user); err != nil {
 		return fail(errOut, err)
 	}
 	if !s.existing {
@@ -737,6 +736,9 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 	normalizeManagementSafety(&s.user)
 
 	tpmAvailable := diskcrypto.TPMAvailable()
+	// Set when the TPM-dependent security is turned off below; the USB
+	// choice, asked after Secure Boot, then offers no blocking either.
+	tpmSecurityOff := false
 	securityRequested := s.user.SecureBootPrompt ||
 		s.user.SecureBootEnable ||
 		s.user.LUKSTPM2Enable ||
@@ -792,6 +794,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 		}
 
 		disableTPMDependentSecurity(&s.user)
+		tpmSecurityOff = true
 
 		if s.preset {
 			if err := config.WriteAtomic(presetPath, s.user); err != nil {
@@ -973,6 +976,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 			}
 
 			disableTPMDependentSecurity(&s.user)
+			tpmSecurityOff = true
 
 			if s.preset {
 				if err := config.WriteAtomic(presetPath, s.user); err != nil {
@@ -1037,9 +1041,13 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 	}
 
 	// Asked only now: the recovery partition depends on the Secure Boot
-	// decision, and nothing is partitioned or shrunk without it.
+	// decision, and nothing is partitioned or shrunk without it. USB comes
+	// last in the security block, after the TPM decision.
 	if !s.preset {
 		if err := collectRecovery(ctx, ui, partitionable, s.user.SecureBootEnable, &s.user); err != nil {
+			return fail(errOut, err)
+		}
+		if err := collectUSBTrust(ctx, ui, resolvedDevice.ModelID != "", partitionable, tpmAvailable && !tpmSecurityOff, usbSystemDisk, running, &s.user); err != nil {
 			return fail(errOut, err)
 		}
 	} else if s.user.RecoveryPartitionEnable && !s.user.SecureBootEnable {
@@ -1103,16 +1111,21 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 	if err := configureSecrets(ctx, root, &s, errOut); err != nil {
 		return fail(errOut, err)
 	}
-	fmt.Fprintf(out, "\nSelected: hostname=%s user=%s shell=%s\n", s.user.Hostname, s.user.Username, s.user.Shell)
 	write := s.user.WriteConfig
 	if !s.preset {
-		write, err = ui.Confirm(ctx, "Write configuration to "+filepath.Join(root, "generated", "state.nix")+"?", false)
+		// Q-O: one summary and one question for writing and installing.
+		write, err = confirmInstall(ctx, ui, s.user, installTarget{
+			disk:          freshTarget,
+			redeploy:      opt.forceRedeploy,
+			encryptedRoot: partitionable,
+			writeOnly:     opt.noRebuild,
+		})
 		if err != nil {
 			return fail(errOut, err)
 		}
 	}
 	if !write {
-		fmt.Fprintln(out, "Nothing changed: the answers were not written and nothing was installed. Run the installer again and answer y to write them.")
+		fmt.Fprintln(out, "Nothing changed: nothing was written or installed. Run the installer again to install.")
 		return 0
 	}
 	var compatibilitySource *installstate.Existing
@@ -1381,14 +1394,9 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 	}
 
 	runRebuild := s.user.RunRebuild && !opt.noRebuild
-	if opt.forceRedeploy {
+	if opt.forceRedeploy || (!s.preset && !opt.noRebuild) {
+		// An interactive run said yes to "Install now?" above.
 		runRebuild = true
-	}
-	if !s.preset && !opt.noRebuild && !opt.forceRedeploy {
-		runRebuild, err = ui.Confirm(ctx, "Install the next NixOS boot generation now?", false)
-		if err != nil {
-			return fail(errOut, err)
-		}
 	}
 	if needsDeviceRebind && !runRebuild {
 		return fail(
@@ -2070,7 +2078,7 @@ func containsValue(values []string, want string) bool {
 // machine or the checkout; the prompts show made-up examples instead. On a
 // rerun, running holds the installed system's own answers (runningAnswers),
 // and every question offers them; nil on a new install.
-func collectInteractive(ctx context.Context, ui prompt.UI, root string, partitionable bool, usbSystemDisk string, modelSelected, tpm2 bool, managedBlocker string, hardware discovery.Hardware, o discovery.Options, running *config.User, u *config.User) error {
+func collectInteractive(ctx context.Context, ui prompt.UI, root string, managedBlocker string, hardware discovery.Hardware, o discovery.Options, running *config.User, u *config.User) error {
 	var err error
 	a := interviewDefaults(running, o)
 	if running != nil {
@@ -2082,10 +2090,15 @@ func collectInteractive(ctx context.Context, ui prompt.UI, root string, partitio
 		// the user turned the weather off.
 		u.WeatherCity, u.WeatherCountry = running.WeatherCity, running.WeatherCountry
 	}
-	if u.Hostname, err = ui.Value(ctx, "Hostname", a.Hostname); err != nil {
+	// O1 order: region, account, management, then the security block in
+	// the main flow (Secure Boot, unlock, recovery, USB) and the summary.
+	if err := collectRegion(ctx, ui, running, a, u); err != nil {
 		return err
 	}
 	if u.Username, err = askPersonal(ctx, ui, "Username", a.Username, "alex", true); err != nil {
+		return err
+	}
+	if u.Hostname, err = ui.Value(ctx, "Hostname", a.Hostname); err != nil {
 		return err
 	}
 	if err := collectJODSManagement(ctx, ui, managedBlocker, running, u); err != nil {
@@ -2145,27 +2158,6 @@ func collectInteractive(ctx context.Context, ui prompt.UI, root string, partitio
 	if err != nil {
 		return err
 	}
-	u.Timezone, err = ui.Value(ctx, "Timezone (IANA name)", a.Timezone)
-	if err != nil {
-		return err
-	}
-	u.Locale, err = ui.Value(ctx, "Locale", a.Locale)
-	if err != nil {
-		return err
-	}
-	layout, err := ui.Value(ctx, "Keyboard layout", a.KeyboardLayout)
-	if err != nil {
-		return err
-	}
-	normalized, err := xkb.Normalize(layout)
-	if err != nil {
-		return err
-	}
-	u.KeyboardLayout, u.KeyboardVariant = normalized.Name, normalized.Variant
-	if running != nil && normalized.Name == running.KeyboardLayout && normalized.Variant == "" {
-		// The prompt takes no variant; the running one stays with its layout.
-		u.KeyboardVariant = running.KeyboardVariant
-	}
 	// Not asked; Settings changes them. Clamshell mode only helps a laptop,
 	// so a new install turns it on for a laptop chassis only.
 	u.TouchpadWorkspaceSwipe = a.TouchpadWorkspaceSwipe
@@ -2173,15 +2165,13 @@ func collectInteractive(ctx context.Context, ui prompt.UI, root string, partitio
 	if running == nil {
 		u.ClamshellEnable = hardware.FormFactor == "laptop"
 	}
-	if err := collectUSBTrust(ctx, ui, modelSelected, partitionable, tpm2, usbSystemDisk, running, u); err != nil {
-		return err
-	}
 	// Not asked: the git name and email stay empty on a new install (git
 	// then sets none) until Settings fills them; a rerun keeps them.
 	u.Name, u.Email, u.GitHubUsername = a.Name, a.Email, a.GitHubUsername
-	if u.SettingsSigningKey, err = askSigningKey(ctx, ui, a.SettingsSigningKey); err != nil {
-		return err
-	}
+	// Not asked (Q-L): gjallarOS signs the settings files. An own OpenSSH
+	// key is a Settings > Security change (settingsd ownkey), and a rerun
+	// keeps the key the running system has.
+	u.SettingsSigningKey = a.SettingsSigningKey
 	// Not asked: a rerun keeps the running system's checkout, and a new
 	// install gets the system checkout once collection is done.
 	u.DotfilesDir = defaultDotfilesDir(u.Username, root)
@@ -2228,31 +2218,53 @@ func freshRecoveryPartition(u config.User) bool {
 	return u.RecoveryEnable && u.RecoveryPartitionEnable
 }
 
-// collectRecovery asks for the recovery boot entry and, where the root can
-// take one and gjallarOS Secure Boot is on, the recovery partition.
+// The recovery choices (Q-N). Only the allowed ones are shown.
+const (
+	recoveryFull      = "Boot entry and recovery partition (recommended)"
+	recoveryEntryOnly = "Boot entry only"
+	recoveryNone      = "None"
+)
+
+// collectRecovery asks for recovery as one choice: the trusted boot entry
+// with or without its partition, or none. The partition needs gjallarOS
+// Secure Boot with its own keys and a root on encrypted Btrfs; without them
+// the choice says why and leaves the partition out. A managed machine is
+// not asked: it always gets the boot entry, and the partition where it can.
 func collectRecovery(ctx context.Context, ui prompt.UI, partitionable, secureBoot bool, u *config.User) error {
-	var err error
-	u.RecoveryEnable, err = ui.Confirm(ctx, "Install the trusted local gjallarOS recovery/JODS boot entry?", true)
+	partition := secureBoot && !u.SecureBootShim && partitionable
+	why := ""
+	switch {
+	case !secureBoot:
+		why = noRecoveryPartitionNotice
+	case u.SecureBootShim:
+		why = shimNoRecoveryPartitionNotice
+	case !partitionable:
+		why = "No recovery partition: this root is not on encrypted Btrfs, which the recovery partition needs."
+	}
+	if u.Management.Enable {
+		u.RecoveryEnable, u.RecoveryPartitionEnable = true, partition
+		fmt.Fprintln(ui.Out, "Recovery: a managed machine always gets the trusted gjallarOS recovery/JODS boot entry.")
+		if why != "" {
+			fmt.Fprintln(ui.Out, why)
+		}
+		return nil
+	}
+	fmt.Fprintln(ui.Out, "Recovery: a trusted gjallarOS recovery/JODS boot entry, and a recovery partition that keeps working when the system does not start.")
+	if why != "" {
+		fmt.Fprintln(ui.Out, why)
+	}
+	options := []string{recoveryEntryOnly, recoveryNone}
+	def := recoveryEntryOnly
+	if partition {
+		options = append([]string{recoveryFull}, options...)
+		def = recoveryFull
+	}
+	choice, err := ui.Choice(ctx, "Recovery", def, options)
 	if err != nil {
 		return err
 	}
-	u.RecoveryPartitionEnable = false
-	if u.RecoveryEnable && !secureBoot {
-		fmt.Fprintln(ui.Out, noRecoveryPartitionNotice)
-	} else if u.RecoveryEnable && u.SecureBootShim {
-		fmt.Fprintln(ui.Out, shimNoRecoveryPartitionNotice)
-	} else if u.RecoveryEnable && !partitionable {
-		fmt.Fprintln(ui.Out, "No recovery partition: this root is not on encrypted Btrfs, which recovery partitioning needs. The recovery boot entry is still installed.")
-	} else if u.RecoveryEnable {
-		u.RecoveryPartitionEnable, err = ui.Confirm(
-			ctx,
-			"Create and maintain a dedicated gjallarOS recovery partition (recommended):",
-			true,
-		)
-		if err != nil {
-			return err
-		}
-	}
+	u.RecoveryEnable = choice != recoveryNone
+	u.RecoveryPartitionEnable = choice == recoveryFull
 	return nil
 }
 
@@ -2336,29 +2348,6 @@ func appChoices(running, u *config.User) error {
 		u.FirefoxStoreAddons = []apps.FirefoxStoreAddon{}
 	}
 	return apps.ValidateFirefoxAddons(u.FirefoxAddons, u.FirefoxStoreAddons)
-}
-
-// askSigningKey asks who signs the main user's settings files: gjallarOS,
-// or the user's own OpenSSH key (settingsSigningKey). running is the key of
-// the installed system on a rerun. The example is made up and never filled
-// in.
-func askSigningKey(ctx context.Context, ui prompt.UI, running string) (string, error) {
-	managed, err := ui.Confirm(ctx, "Let gjallarOS sign your settings files for you? (recommended; No: you sign them yourself with your own OpenSSH key, ssh-ed25519 or a FIDO sk-ssh-ed25519 key)", running == "")
-	if err != nil || managed {
-		return "", err
-	}
-	for {
-		line, err := askPersonal(ctx, ui, "Your OpenSSH public key line, from your .pub file", running, "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA... alex@example", true)
-		if err != nil {
-			return "", err
-		}
-		if _, err := sshsig.ParseKey(line); err != nil {
-			fmt.Fprintf(ui.Out, "%v\n", err)
-			running = ""
-			continue
-		}
-		return line, nil
-	}
 }
 
 // defaultDotfilesDir is where the new user's checkout lives. The checkout the
@@ -2642,13 +2631,25 @@ func managementBlocker(secureBootSupported, tpm2 bool) string {
 	return ""
 }
 
-// collectUSBTrust offers USB trust review only with an ODDC model: the
-// system refuses USB trust without one, since the model names the internal
-// devices that must stay trusted. Blocking is offered only with TPM2 (the
-// approved-device list is signed by a TPM key the system creates on first
-// boot), an encrypted root (turning blocking off asks for the disk
-// passphrase) and a system disk that is not on USB (usbSystemDisk says why
-// not, see systemDiskOnUSB).
+// The USB trust choices (Q-K). Blocking is listed only where it can work.
+const (
+	usbTrustOff    = "Off"
+	usbTrustReview = "Review new devices"
+	usbTrustBlock  = "Review and block unknown devices from the first boot"
+)
+
+// DefaultUSBTrustLapseDays is how long an approved USB device stays
+// approved without use on a new install. Settings > Security changes it.
+const DefaultUSBTrustLapseDays = 30
+
+// collectUSBTrust asks for USB trust as one choice. It is offered only with
+// an ODDC model: the system refuses USB trust without one, since the model
+// names the internal devices that must stay trusted. Blocking is offered
+// only with TPM2 (the approved-device list is signed by a TPM key the
+// system creates on first boot), an encrypted root (turning blocking off
+// asks for the disk passphrase) and a system disk that is not on USB
+// (usbSystemDisk says why not, see systemDiskOnUSB). Approvals expire after
+// DefaultUSBTrustLapseDays without use; a rerun keeps the running value.
 func collectUSBTrust(ctx context.Context, ui prompt.UI, modelSelected, encryptedRoot, tpm2 bool, usbSystemDisk string, running, u *config.User) error {
 	was := config.User{}
 	if running != nil {
@@ -2662,61 +2663,53 @@ func collectUSBTrust(ctx context.Context, ui prompt.UI, modelSelected, encrypted
 		fmt.Fprintln(ui.Out, "No USB trust review: ODDC has no model for this machine, and USB trust needs one to know its internal devices.")
 		return nil
 	}
-	var err error
-	u.USBGuardEnable, err = ui.Confirm(ctx, "Enable USB trust review? New USB devices are logged and you can approve them.", was.USBGuardEnable)
-	if err != nil || !u.USBGuardEnable {
-		u.USBTrustTPMHandle = ""
+	noBlock := ""
+	switch {
+	case !tpm2:
+		noBlock = "it needs TPM2 to sign the list of approved devices."
+	case usbSystemDisk != "":
+		noBlock = usbSystemDisk
+	case !encryptedRoot:
+		noBlock = "turning it off again needs the disk passphrase, and this root is not encrypted."
+	}
+	fmt.Fprintln(ui.Out, "USB devices: review logs each new USB device so you can approve it.")
+	options := []string{usbTrustOff, usbTrustReview}
+	if noBlock == "" {
+		options = append(options, usbTrustBlock)
+		fmt.Fprintln(ui.Out, "With blocking, only built-in devices and devices you approve work. A USB keyboard or mouse that is not built in stays blocked until you approve it with the built-in keyboard.")
+	} else {
+		fmt.Fprintf(ui.Out, "Blocking is not offered: %s\n", noBlock)
+	}
+	def := usbTrustOff
+	if was.USBGuardEnable {
+		def = usbTrustReview
+	}
+	if was.USBTrustEnforce && noBlock == "" {
+		def = usbTrustBlock
+	}
+	choice, err := ui.Choice(ctx, "USB devices", def, options)
+	if err != nil {
 		return err
 	}
-	if !tpm2 {
+	u.USBGuardEnable = choice != usbTrustOff
+	u.USBTrustEnforce = choice == usbTrustBlock
+	if !u.USBGuardEnable || !tpm2 {
+		// Approvals are kept only under the TPM key.
 		u.USBTrustTPMHandle = ""
-		fmt.Fprintln(ui.Out, "USB blocking stays off: it needs TPM2 to sign the list of approved devices.")
 		return nil
 	}
 	if u.USBTrustTPMHandle == "" {
 		u.USBTrustTPMHandle = config.DefaultUSBTrustTPMHandle
 	}
-	if usbSystemDisk != "" {
-		fmt.Fprintf(ui.Out, "USB blocking stays off: %s\n", usbSystemDisk)
-	} else if !encryptedRoot {
-		fmt.Fprintln(ui.Out, "USB blocking stays off: turning it off again needs the disk passphrase, and this root is not encrypted.")
-	} else {
-		fmt.Fprintln(ui.Out, "With blocking on, only built-in devices and devices you approve work.")
-		fmt.Fprintln(ui.Out, "A USB keyboard or mouse that is not built in stays blocked until you approve it with the built-in keyboard.")
-		if u.USBTrustEnforce, err = ui.Confirm(ctx, "Block unknown USB devices from the first boot?", was.USBTrustEnforce); err != nil {
-			return err
-		}
+	u.USBTrustLapseDays = DefaultUSBTrustLapseDays
+	if was.USBGuardEnable && was.USBTrustTPMHandle != "" {
+		u.USBTrustLapseDays = was.USBTrustLapseDays
 	}
-	return collectUSBTrustLapse(ctx, ui, was.USBTrustLapseDays, u)
-}
-
-// collectUSBTrustLapse asks whether approved USB devices expire after some
-// days without use. It needs the TPM key, since only then are approvals
-// stored at all. Off by default; running is the lapse a rerun offers, 0 for
-// none.
-func collectUSBTrustLapse(ctx context.Context, ui prompt.UI, running int, u *config.User) error {
-	fmt.Fprintln(ui.Out, "Approved USB devices can expire when they are not used for some days. An expired device asks for approval again.")
-	fmt.Fprintln(ui.Out, "Without a built-in USB keyboard, the keyboard and mouse you used last never expire, so you cannot lock yourself out.")
-	expire, err := ui.Confirm(ctx, "Let approved USB devices expire when unused?", running > 0)
-	if err != nil || !expire {
-		return err
+	if u.USBTrustLapseDays > 0 {
+		fmt.Fprintf(ui.Out, "Approved devices expire after %d days without use and then ask again; Settings > Security changes this.\n", u.USBTrustLapseDays)
+		fmt.Fprintln(ui.Out, "Without a built-in USB keyboard, the keyboard and mouse you used last never expire, so you cannot lock yourself out.")
 	}
-	days := "30"
-	if running > 0 {
-		days = strconv.Itoa(running)
-	}
-	for {
-		answer, err := ui.Value(ctx, fmt.Sprintf("Days without use before a device expires (1 to %d)", config.MaxUSBTrustLapseDays), days)
-		if err != nil {
-			return err
-		}
-		days, err := strconv.Atoi(answer)
-		if err == nil && days >= 1 && days <= config.MaxUSBTrustLapseDays {
-			u.USBTrustLapseDays = days
-			return nil
-		}
-		fmt.Fprintf(ui.Out, "Enter a whole number from 1 to %d.\n", config.MaxUSBTrustLapseDays)
-	}
+	return nil
 }
 
 func discoverInstalledRecoveryTopology(

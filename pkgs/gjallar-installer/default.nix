@@ -4,7 +4,12 @@
 # ISO include this package.
 #
 # tzdata gives the zone and country tables the installer uses to guess the
-# weather city from the timezone, without asking the network.
+# weather city from the timezone, without asking the network. With
+# glibcLocales and xkeyboard_config it also gives the region step its lists:
+# the step only accepts a timezone, locale or keyboard layout these tables
+# name, so nothing typed or read from the live session reaches state.nix
+# unchecked. Only the two list files are copied in (regionLists): the
+# glibcLocales package alone is over 200 MiB.
 #
 # oddc is the full ODDC source (the flake's oddc input). With it the
 # installer drafts a model for machines ODDC does not match; without it
@@ -12,11 +17,18 @@
 {
   callPackage,
   lib,
+  runCommand,
   tzdata,
+  glibcLocales,
+  xkeyboard_config,
   oddc ? null,
 }:
 let
   gjallarctl = callPackage ../gjallarctl { };
+  regionLists = runCommand "gjallar-installer-region-lists" { } ''
+    install -Dm444 ${glibcLocales}/share/i18n/SUPPORTED $out/SUPPORTED
+    install -Dm444 ${xkeyboard_config}/share/X11/xkb/rules/base.lst $out/base.lst
+  '';
 in
 gjallarctl.overrideAttrs (old: {
   pname = "gjallar-installer";
@@ -32,6 +44,9 @@ gjallarctl.overrideAttrs (old: {
     ++ [
       "-X github.com/JadeOpenServices/gjallarOS/internal/installer/control.Path=${gjallarctl}/bin/gjallarctl"
       "-X github.com/JadeOpenServices/gjallarOS/internal/installer/zonecity.Dir=${tzdata}/share/zoneinfo"
+      "-X github.com/JadeOpenServices/gjallarOS/internal/installer/region.ZoneDir=${tzdata}/share/zoneinfo"
+      "-X github.com/JadeOpenServices/gjallarOS/internal/installer/region.LocaleList=${regionLists}/SUPPORTED"
+      "-X github.com/JadeOpenServices/gjallarOS/internal/installer/region.XKBRules=${regionLists}/base.lst"
     ]
     ++ lib.optional (
       oddc != null

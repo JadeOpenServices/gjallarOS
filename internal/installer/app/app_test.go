@@ -155,66 +155,96 @@ func TestManagedPresetForcesBootRecoveryContract(t *testing.T) {
 	}
 }
 
-// On an unencrypted in-place root the partition question is skipped: the
+func runRecovery(t *testing.T, input string, partitionable, secureBoot bool, u *config.User) string {
+	t.Helper()
+	var output bytes.Buffer
+	if err := collectRecovery(context.Background(), prompt.New(strings.NewReader(input), &output), partitionable, secureBoot, u); err != nil {
+		t.Fatalf("%v\n%s", err, output.String())
+	}
+	return output.String()
+}
+
+// On an unencrypted in-place root the partition is not offered: the
 // install used to fail after every question (e2e-generic, 2026-10-07).
 func TestCollectRecoverySkipsPartitionOnUnencryptedRoot(t *testing.T) {
-	var output bytes.Buffer
 	u := config.User{}
-	if err := collectRecovery(context.Background(), prompt.New(strings.NewReader("yes\n"), &output), false, true, &u); err != nil {
-		t.Fatal(err)
-	}
+	output := runRecovery(t, "\n", false, true, &u)
 	if !u.RecoveryEnable || u.RecoveryPartitionEnable {
 		t.Fatalf("recovery=%t partition=%t", u.RecoveryEnable, u.RecoveryPartitionEnable)
 	}
-	if strings.Contains(output.String(), "recovery partition (recommended)") {
-		t.Fatalf("partition question asked:\n%s", output.String())
+	if strings.Contains(output, recoveryFull) || !strings.Contains(output, "encrypted Btrfs") {
+		t.Fatalf("partition offered or reason missing:\n%s", output)
 	}
 }
 
-func TestCollectRecoveryAsksPartitionWhenPossible(t *testing.T) {
-	var output bytes.Buffer
-	u := config.User{}
-	if err := collectRecovery(context.Background(), prompt.New(strings.NewReader("yes\nyes\n"), &output), true, true, &u); err != nil {
-		t.Fatal(err)
-	}
-	if !u.RecoveryEnable || !u.RecoveryPartitionEnable {
-		t.Fatalf("recovery=%t partition=%t", u.RecoveryEnable, u.RecoveryPartitionEnable)
+// Q-N: one choice; the full setup is the default where it is allowed.
+func TestCollectRecoveryOneChoice(t *testing.T) {
+	for _, tc := range []struct {
+		input               string
+		recovery, partition bool
+	}{
+		{"\n", true, true},
+		{"2\n", true, false},
+		{recoveryNone + "\n", false, false},
+	} {
+		u := config.User{}
+		output := runRecovery(t, tc.input, true, true, &u)
+		if u.RecoveryEnable != tc.recovery || u.RecoveryPartitionEnable != tc.partition {
+			t.Fatalf("input %q: recovery=%t partition=%t\n%s", tc.input, u.RecoveryEnable, u.RecoveryPartitionEnable, output)
+		}
+		if strings.Count(output, "Recovery [") != 1 {
+			t.Fatalf("recovery asked more than once:\n%s", output)
+		}
 	}
 }
 
 // Jade 2026-10-19: no recovery partition and no shrink without gjallarOS
-// Secure Boot; the partition question is not even asked.
+// Secure Boot; the partition is not even offered.
 func TestCollectRecoverySkipsPartitionWithoutSecureBoot(t *testing.T) {
-	var output bytes.Buffer
 	u := config.User{RecoveryPartitionEnable: true}
-	if err := collectRecovery(context.Background(), prompt.New(strings.NewReader("yes\nyes\n"), &output), true, false, &u); err != nil {
-		t.Fatal(err)
-	}
+	output := runRecovery(t, "\n", true, false, &u)
 	if !u.RecoveryEnable || u.RecoveryPartitionEnable {
 		t.Fatalf("recovery=%t partition=%t", u.RecoveryEnable, u.RecoveryPartitionEnable)
 	}
-	if strings.Contains(output.String(), "recovery partition (recommended)") || !strings.Contains(output.String(), "Secure Boot") {
-		t.Fatalf("output:\n%s", output.String())
+	if strings.Contains(output, recoveryFull) || !strings.Contains(output, noRecoveryPartitionNotice) {
+		t.Fatalf("output:\n%s", output)
 	}
 }
 
 // A fresh disk without gjallarOS Secure Boot got a recovery partition anyway: the
 // plan followed the boot entry answer, not the partition answer.
 func TestFreshDiskGetsRecoveryPartitionOnlyWhenChosen(t *testing.T) {
-	var output bytes.Buffer
 	u := config.User{}
-	if err := collectRecovery(context.Background(), prompt.New(strings.NewReader("yes\n"), &output), true, false, &u); err != nil {
-		t.Fatal(err)
-	}
+	runRecovery(t, "\n", true, false, &u)
 	if freshRecoveryPartition(u) {
 		t.Fatal("fresh disk plan gets a recovery partition without Secure Boot")
 	}
 	u = config.User{}
-	if err := collectRecovery(context.Background(), prompt.New(strings.NewReader("yes\nyes\n"), &output), true, true, &u); err != nil {
-		t.Fatal(err)
-	}
+	runRecovery(t, "\n", true, true, &u)
 	if !freshRecoveryPartition(u) {
 		t.Fatal("fresh disk plan lost the chosen recovery partition")
+	}
+}
+
+// K13: a managed machine is not asked and never gets "None"; the old two
+// questions could turn recovery off after normalizeManagementSafety.
+func TestCollectRecoveryManagedIsNotAsked(t *testing.T) {
+	for _, tc := range []struct {
+		partitionable, secureBoot, shim bool
+		partition                       bool
+	}{
+		{true, true, false, true},
+		{true, true, true, false},
+		{false, true, false, false},
+	} {
+		u := config.User{Management: config.ManagementIntent{Enable: true}, SecureBootShim: tc.shim}
+		output := runRecovery(t, "", tc.partitionable, tc.secureBoot, &u)
+		if !u.RecoveryEnable || u.RecoveryPartitionEnable != tc.partition {
+			t.Fatalf("%+v: recovery=%t partition=%t\n%s", tc, u.RecoveryEnable, u.RecoveryPartitionEnable, output)
+		}
+		if strings.Contains(output, recoveryNone) || strings.Contains(output, "Recovery [") {
+			t.Fatalf("managed machine was asked:\n%s", output)
+		}
 	}
 }
 
@@ -236,75 +266,79 @@ func TestCollectUSBTrust(t *testing.T) {
 		input                   string
 		wantReview, wantEnforce bool
 		wantHandle              string
-		wantBlockQuestion       bool
+		wantLapse               int
+		wantBlockOption         bool
 	}{
-		{name: "review declined", encryptedRoot: true, tpm2: true, input: "no\n"},
-		{name: "blocking asked, default no", encryptedRoot: true, tpm2: true, input: "yes\n\n\n",
-			wantReview: true, wantHandle: config.DefaultUSBTrustTPMHandle, wantBlockQuestion: true},
-		{name: "blocking chosen", encryptedRoot: true, tpm2: true, input: "yes\nyes\n\n",
-			wantReview: true, wantEnforce: true, wantHandle: config.DefaultUSBTrustTPMHandle, wantBlockQuestion: true},
-		{name: "no TPM2: review only, no key", encryptedRoot: true, input: "yes\nyes\n", wantReview: true},
-		{name: "plain root: key, no blocking", tpm2: true, input: "yes\n\n",
-			wantReview: true, wantHandle: config.DefaultUSBTrustTPMHandle},
+		{name: "default off", encryptedRoot: true, tpm2: true, input: "\n", wantBlockOption: true},
+		{name: "review", encryptedRoot: true, tpm2: true, input: "2\n",
+			wantReview: true, wantHandle: config.DefaultUSBTrustTPMHandle, wantLapse: DefaultUSBTrustLapseDays, wantBlockOption: true},
+		{name: "blocking chosen", encryptedRoot: true, tpm2: true, input: "3\n",
+			wantReview: true, wantEnforce: true, wantHandle: config.DefaultUSBTrustTPMHandle, wantLapse: DefaultUSBTrustLapseDays, wantBlockOption: true},
+		{name: "no TPM2: review only, no key, nothing to expire", encryptedRoot: true, input: "2\n", wantReview: true},
+		{name: "no TPM2: blocking cannot be typed in", encryptedRoot: true, input: usbTrustBlock + "\n2\n", wantReview: true},
+		{name: "plain root: key, no blocking", tpm2: true, input: "2\n",
+			wantReview: true, wantHandle: config.DefaultUSBTrustTPMHandle, wantLapse: DefaultUSBTrustLapseDays},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			var output bytes.Buffer
-			u := config.User{}
+			u := config.User{USBTrustLapseDays: 9}
 			if err := collectUSBTrust(context.Background(), prompt.New(strings.NewReader(test.input), &output), true, test.encryptedRoot, test.tpm2, "", nil, &u); err != nil {
-				t.Fatal(err)
+				t.Fatalf("%v\n%s", err, output.String())
 			}
-			if u.USBGuardEnable != test.wantReview || u.USBTrustEnforce != test.wantEnforce || u.USBTrustTPMHandle != test.wantHandle {
-				t.Fatalf("review=%t enforce=%t handle=%q output:\n%s", u.USBGuardEnable, u.USBTrustEnforce, u.USBTrustTPMHandle, output.String())
+			if u.USBGuardEnable != test.wantReview || u.USBTrustEnforce != test.wantEnforce || u.USBTrustTPMHandle != test.wantHandle || u.USBTrustLapseDays != test.wantLapse {
+				t.Fatalf("review=%t enforce=%t handle=%q lapse=%d output:\n%s", u.USBGuardEnable, u.USBTrustEnforce, u.USBTrustTPMHandle, u.USBTrustLapseDays, output.String())
 			}
-			if strings.Contains(output.String(), "Block unknown USB devices") != test.wantBlockQuestion {
-				t.Fatalf("block question shown=%t output:\n%s", !test.wantBlockQuestion, output.String())
+			if strings.Contains(output.String(), ") "+usbTrustBlock) != test.wantBlockOption {
+				t.Fatalf("block option shown=%t output:\n%s", !test.wantBlockOption, output.String())
+			}
+			if strings.Count(output.String(), "USB devices [") != 1+strings.Count(test.input, usbTrustBlock) {
+				t.Fatalf("USB asked more than once:\n%s", output.String())
 			}
 		})
+	}
+}
+
+// A rerun starts from the running choice and keeps its expiry, 0 included.
+func TestCollectUSBTrustRerunKeepsRunningChoice(t *testing.T) {
+	for _, running := range []config.User{
+		{USBGuardEnable: true, USBTrustEnforce: true, USBTrustLapseDays: 14, USBTrustTPMHandle: "0x81000043"},
+		{USBGuardEnable: true, USBTrustLapseDays: 0, USBTrustTPMHandle: "0x81000043"},
+	} {
+		var output bytes.Buffer
+		u := config.User{USBTrustTPMHandle: running.USBTrustTPMHandle}
+		if err := collectUSBTrust(context.Background(), prompt.New(strings.NewReader("\n"), &output), true, true, true, "", &running, &u); err != nil {
+			t.Fatal(err)
+		}
+		if u.USBGuardEnable != running.USBGuardEnable || u.USBTrustEnforce != running.USBTrustEnforce ||
+			u.USBTrustLapseDays != running.USBTrustLapseDays || u.USBTrustTPMHandle != running.USBTrustTPMHandle {
+			t.Fatalf("rerun changed USB trust: %+v, running %+v\n%s", u, running, output.String())
+		}
+	}
+	// Review turned on in a rerun gets the default expiry.
+	running := config.User{}
+	var output bytes.Buffer
+	u := config.User{}
+	if err := collectUSBTrust(context.Background(), prompt.New(strings.NewReader("2\n"), &output), true, true, true, "", &running, &u); err != nil {
+		t.Fatal(err)
+	}
+	if u.USBTrustLapseDays != DefaultUSBTrustLapseDays || !strings.Contains(output.String(), "Settings > Security") {
+		t.Fatalf("lapse=%d output:\n%s", u.USBTrustLapseDays, output.String())
 	}
 }
 
 func TestCollectUSBTrustUSBSystemDisk(t *testing.T) {
 	var output bytes.Buffer
 	u := config.User{}
-	running := config.User{USBTrustEnforce: true}
+	running := config.User{USBGuardEnable: true, USBTrustEnforce: true}
 	reason := "the system disk (/dev/sda) is a USB drive, and blocking could cut off the disk the system runs from."
-	if err := collectUSBTrust(context.Background(), prompt.New(strings.NewReader("yes\n\n"), &output), true, true, true, reason, &running, &u); err != nil {
+	if err := collectUSBTrust(context.Background(), prompt.New(strings.NewReader("\n"), &output), true, true, true, reason, &running, &u); err != nil {
 		t.Fatal(err)
 	}
 	if !u.USBGuardEnable || u.USBTrustEnforce || u.USBTrustTPMHandle != config.DefaultUSBTrustTPMHandle {
 		t.Fatalf("review=%t enforce=%t handle=%q output:\n%s", u.USBGuardEnable, u.USBTrustEnforce, u.USBTrustTPMHandle, output.String())
 	}
-	if strings.Contains(output.String(), "Block unknown USB devices") || !strings.Contains(output.String(), "USB blocking stays off: "+reason) {
+	if strings.Contains(output.String(), usbTrustBlock) || !strings.Contains(output.String(), "Blocking is not offered: "+reason) {
 		t.Fatalf("blocking was offered or the reason is missing; output:\n%s", output.String())
-	}
-}
-
-func TestCollectUSBTrustLapse(t *testing.T) {
-	for _, test := range []struct {
-		name         string
-		tpm2         bool
-		input        string
-		want         int
-		wantQuestion bool
-	}{
-		{name: "default off", tpm2: true, input: "yes\n\n\n", wantQuestion: true},
-		{name: "on with the default 30", tpm2: true, input: "yes\n\nyes\n\n", want: 30, wantQuestion: true},
-		{name: "any N, asked again until valid", tpm2: true, input: "yes\n\nyes\n0\nmany\n36501\n400\n", want: 400, wantQuestion: true},
-		{name: "no TPM2: nothing stored, nothing to expire", input: "yes\nyes\n"},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			var output bytes.Buffer
-			u := config.User{USBTrustLapseDays: 9}
-			if err := collectUSBTrust(context.Background(), prompt.New(strings.NewReader(test.input), &output), true, true, test.tpm2, "", nil, &u); err != nil {
-				t.Fatal(err)
-			}
-			if u.USBTrustLapseDays != test.want {
-				t.Fatalf("lapse days = %d, want %d; output:\n%s", u.USBTrustLapseDays, test.want, output.String())
-			}
-			if strings.Contains(output.String(), "expire when unused") != test.wantQuestion {
-				t.Fatalf("lapse question shown=%t output:\n%s", !test.wantQuestion, output.String())
-			}
-		})
 	}
 }
 
@@ -487,16 +521,13 @@ func TestDefaultDotfilesDirFollowsNewUser(t *testing.T) {
 // Recovery through shim is not tested yet: the boot entry stays, the
 // partition is not offered (Plane 293).
 func TestShimInstallGetsNoRecoveryPartition(t *testing.T) {
-	var output bytes.Buffer
 	u := config.User{SecureBootEnable: true, SecureBootShim: true}
-	if err := collectRecovery(context.Background(), prompt.New(strings.NewReader("yes\n"), &output), true, true, &u); err != nil {
-		t.Fatal(err)
-	}
+	output := runRecovery(t, "\n", true, true, &u)
 	if !u.RecoveryEnable || u.RecoveryPartitionEnable {
 		t.Fatalf("recovery entry=%v partition=%v", u.RecoveryEnable, u.RecoveryPartitionEnable)
 	}
-	if !strings.Contains(output.String(), shimNoRecoveryPartitionNotice) {
-		t.Fatalf("output misses the shim notice:\n%s", output.String())
+	if !strings.Contains(output, shimNoRecoveryPartitionNotice) || strings.Contains(output, recoveryFull) {
+		t.Fatalf("output misses the shim notice or offers the partition:\n%s", output)
 	}
 }
 

@@ -15,6 +15,7 @@ import (
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/config"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/discovery"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/prompt"
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/region"
 	"github.com/JadeOpenServices/gjallarOS/internal/installercheck"
 )
 
@@ -66,15 +67,16 @@ func readRunningAnswers(ctx context.Context, repositoryFile string) (*config.Use
 
 // interviewDefaults are the answers the interview offers. A new install
 // gets fixed starting points and leaves personal values empty, so their
-// prompts show made-up examples. A rerun on an installed system gets the
+// prompts show made-up examples; the region step starts from the live
+// session instead (collectRegion). A rerun on an installed system gets the
 // running answers; a value the running system lacks, or one this checkout
 // no longer offers, falls back to the new-install default.
 func interviewDefaults(running *config.User, o discovery.Options) config.User {
 	fresh := config.User{
 		Hostname:               "gjallarOS",
-		Timezone:               "Europe/Berlin",
-		Locale:                 "en_US.UTF-8",
-		KeyboardLayout:         "de",
+		Timezone:               region.DefaultTimezone,
+		Locale:                 region.DefaultLocale,
+		KeyboardLayout:         region.DefaultKeyboard,
 		TouchpadWorkspaceSwipe: true,
 		ClamshellEnable:        true,
 		// Printing on this computer only: CUPS listens on localhost and

@@ -112,11 +112,17 @@ terminal.
 
 | Topic | Questions |
 | --- | --- |
-| You and your region | Username, password, hostname, timezone, language and keyboard layout |
+| Region | Timezone, language and keyboard layout, picked from lists; a new install starts from what the live session uses |
+| You | Username, password, hostname |
+| Management | Whether JODS manages this machine (only offered with TPM2 and Secure Boot) |
 | Disk (USB stick) | Which disk to erase |
-| Startup (USB stick) | Whether the security chip (TPM2) unlocks the disk alone or asks a PIN; both add a recovery key |
 | Printing | Printers and scanners: off, plugged into this computer, or also on the local network |
-| Security | USB device trust, Secure Boot, firmware updates, a recovery partition, who signs settings files |
+| Security | Secure Boot, firmware updates, how the disk unlocks (TPM2 alone or with a PIN, both add a recovery key), recovery (boot entry and partition, boot entry only, or none; the partition needs Secure Boot), USB devices (off, review new devices, or review and block unknown devices) |
+
+USB device approvals expire after 30 days without use; Settings changes
+that. A managed machine always gets recovery. At the end the installer
+shows every answer once and asks "Install now?"; Enter means no, and
+nothing is written or installed.
 
 The installer does not ask about apps. A new install gets the default
 apps from the catalogue, Tailscale with no home network set, and Firefox

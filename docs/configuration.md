@@ -54,9 +54,9 @@ password. `gjallarctl settings pair list` shows the pairings, and
 ### Signing with an OpenSSH key
 
 To sign these files with your OpenSSH key instead (an `ssh-ed25519` key
-file or a FIDO `sk-ssh-ed25519` key), answer No to "Let gjallarOS sign your
-settings files for you?" in the installer, or set `settingsSigningKey` to
-your public key line later (critical tier). Export then writes a file you
+file or a FIDO `sk-ssh-ed25519` key), set `settingsSigningKey` to your
+public key line (critical tier). The installer does not ask; a new install
+signs with the key gjallarOS makes. Export then writes a file you
 sign yourself, and import needs that signature next to the file:
 
 ```sh

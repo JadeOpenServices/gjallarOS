@@ -645,6 +645,64 @@ func (u UI) Choice(ctx context.Context, label, def string, options []string) (st
 	}
 }
 
+// pickShown caps how many matches Pick lists at once.
+const pickShown = 20
+
+// Pick chooses one value from a long list, such as all timezones. In the
+// terminal, Enter takes def, an exact name is taken as typed, and any
+// other text lists the names that contain it; a number then picks from that
+// list, and a single match is taken at once.
+func (u UI) Pick(ctx context.Context, label, def string, options []string) (string, error) {
+	if len(options) == 0 {
+		return "", fmt.Errorf("no options for %s", label)
+	}
+	if u.GTK {
+		return u.Choice(ctx, label, def, options)
+	}
+	var shown []string
+	for {
+		value, err := u.Value(ctx, label, def)
+		if err != nil {
+			return "", err
+		}
+		if n, e := strconv.Atoi(value); e == nil && n > 0 && n <= len(shown) {
+			return shown[n-1], nil
+		}
+		matches := []string{}
+		for _, candidate := range options {
+			if candidate == value {
+				return candidate, nil
+			}
+			if strings.EqualFold(candidate, value) {
+				matches = []string{candidate}
+				break
+			}
+			if strings.Contains(strings.ToLower(candidate), strings.ToLower(value)) {
+				matches = append(matches, candidate)
+			}
+		}
+		switch {
+		case len(matches) == 1:
+			fmt.Fprintf(u.Out, "Using %s.\n", matches[0])
+			return matches[0], nil
+		case len(matches) == 0:
+			shown = nil
+			fmt.Fprintf(u.Out, "Nothing matches %q. Type part of a name, such as a city or country code.\n", value)
+		default:
+			shown = matches
+			if len(shown) > pickShown {
+				shown = shown[:pickShown]
+			}
+			for i, v := range shown {
+				fmt.Fprintf(u.Out, "  %d) %s\n", i+1, v)
+			}
+			if len(matches) > len(shown) {
+				fmt.Fprintf(u.Out, "  ... %d more; type more letters to narrow it down.\n", len(matches)-len(shown))
+			}
+		}
+	}
+}
+
 func (u UI) Multi(ctx context.Context, label string, defaults, options []string) ([]string, error) {
 	selected := map[string]bool{}
 	for _, v := range defaults {

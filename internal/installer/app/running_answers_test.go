@@ -14,6 +14,7 @@ import (
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/config"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/discovery"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/prompt"
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/region"
 )
 
 // runningFixture is a made-up installed system whose answers all differ
@@ -34,6 +35,7 @@ func runningFixture(t *testing.T) config.User {
 	u.USBGuardEnable, u.USBTrustEnforce, u.USBTrustLapseDays = true, true, 14
 	u.USBTrustTPMHandle = "0x81000043"
 	u.Theme = "example-theme"
+	u.SettingsSigningKey = syntheticSigningKey()
 	u.NextcloudEnable, u.NextcloudHost = true, "https://cloud.example.test"
 	u.ThunderbirdSmartCard = true
 	u.Apps = append(slices.DeleteFunc(slices.Clone(u.Apps), func(id string) bool { return id == "ai" || id == "tailscale" }), "ai", "tailscale")
@@ -60,10 +62,11 @@ func TestRerunInterviewOffersRunningAnswers(t *testing.T) {
 	}
 	o := discovery.Options{Shells: []string{"zsh", "bash"}, Editors: []string{"vscodium", "neovim"}, Browsers: []string{"firefox"}, Themes: []string{"noctalia"}}
 	running.Shell, running.Editors, running.PreferredEditor = "bash", []string{"neovim"}, "neovim"
+	stubLiveRegion(t, region.Session{Timezone: "Asia/Tokyo", Locale: "ja_JP.UTF-8", KeyboardLayout: "jp"})
 
 	var output bytes.Buffer
 	ui := prompt.New(strings.NewReader(strings.Repeat("\n", 200)), &output)
-	if err := collectInteractive(context.Background(), ui, "/home/alex/gjallarOS", true, "", true, true, "SYNTHETIC: no JODS in this test", discovery.Hardware{}, o, &running, &u); err != nil {
+	if err := collectInteractive(context.Background(), ui, "/home/alex/gjallarOS", "SYNTHETIC: no JODS in this test", discovery.Hardware{}, o, &running, &u); err != nil {
 		t.Fatalf("%v\n%s", err, output.String())
 	}
 
@@ -71,7 +74,7 @@ func TestRerunInterviewOffersRunningAnswers(t *testing.T) {
 		"Hostname", "Username", "Name", "Email", "GitHubUsername", "Timezone", "Locale",
 		"KeyboardLayout", "KeyboardVariant", "TouchpadWorkspaceSwipe", "ClamshellEnable",
 		"DotfilesDir", "Shell", "Editors", "PreferredEditor", "Browsers", "PreferredBrowser", "PrintingEnable", "NetworkPrintingEnable",
-		"USBGuardEnable", "USBTrustEnforce", "USBTrustLapseDays", "USBTrustTPMHandle", "Theme",
+		"USBTrustTPMHandle", "Theme", "SettingsSigningKey",
 		"NextcloudEnable", "NextcloudHost", "Apps", "AIEndpoint", "AIRemoteModel",
 		"AIRemoteContextTokens", "AIAgentMode", "Tailscale", "ThunderbirdSmartCard",
 	} {
@@ -91,6 +94,12 @@ func TestRerunInterviewOffersRunningAnswers(t *testing.T) {
 var droppedQuestions = []string{
 	"Full name", "Git email", "GitHub username", "Login shell", "Editors", "Browsers",
 	"Preferred editor", "Preferred browser", "workspace swipes", "clamshell",
+	// Q-L: gjallarOS signs; an own key is a Settings > Security change.
+	"signing key", "OpenSSH",
+	// Q-K: approvals expire after 30 days; Settings changes it.
+	"expire when unused", "Days without use",
+	// Q-O: one summary and "Install now?" replace these.
+	"Write configuration to", "Install the next NixOS boot generation",
 }
 
 func assertNoDroppedQuestions(t *testing.T, output string) {
@@ -113,12 +122,21 @@ func TestNewInstallInterviewSetsDroppedValues(t *testing.T) {
 			t.Fatal(err)
 		}
 		var output bytes.Buffer
-		// Hostname: Enter; Username: alex (required on a new install); then Enter.
-		ui := prompt.New(strings.NewReader("\nalex\n"+strings.Repeat("\n", 200)), &output)
-		if err := collectInteractive(context.Background(), ui, "/home/alex/gjallarOS", true, "", true, true, "SYNTHETIC: no JODS in this test", discovery.Hardware{FormFactor: form.factor}, o, nil, &u); err != nil {
+		// Region: Enter three times; Username: alex (required on a new
+		// install); then Enter.
+		stubLiveRegion(t, region.Session{})
+		ui := prompt.New(strings.NewReader("\n\n\nalex\n"+strings.Repeat("\n", 200)), &output)
+		if err := collectInteractive(context.Background(), ui, "/home/alex/gjallarOS", "SYNTHETIC: no JODS in this test", discovery.Hardware{FormFactor: form.factor}, o, nil, &u); err != nil {
 			t.Fatalf("%s: %v\n%s", form.factor, err, output.String())
 		}
 		assertNoDroppedQuestions(t, output.String())
+		if u.Username != "alex" || u.Hostname != "gjallarOS" || u.Timezone != "Etc/UTC" || u.KeyboardLayout != "us" {
+			t.Errorf("new install: user=%q host=%q tz=%q kbd=%q", u.Username, u.Hostname, u.Timezone, u.KeyboardLayout)
+		}
+		if strings.Index(output.String(), "Timezone") > strings.Index(output.String(), "Username") ||
+			strings.Index(output.String(), "Username") > strings.Index(output.String(), "Hostname") {
+			t.Errorf("questions are not in the O1 order (region, username, hostname):\n%s", output.String())
+		}
 		if u.ClamshellEnable != form.clamshell || !u.TouchpadWorkspaceSwipe {
 			t.Errorf("%q chassis: clamshell=%v swipes=%v, want clamshell=%v swipes=true", form.factor, u.ClamshellEnable, u.TouchpadWorkspaceSwipe, form.clamshell)
 		}
@@ -137,7 +155,7 @@ func TestNewInstallInterviewKeepsPersonalValuesEmpty(t *testing.T) {
 	if a.Username != "" || a.Name != "" || a.Email != "" || a.GitHubUsername != "" {
 		t.Fatalf("new-install defaults carry personal values: %+v", a)
 	}
-	if a.Hostname != "gjallarOS" || a.KeyboardLayout != "de" || !a.TouchpadWorkspaceSwipe {
+	if a.Hostname != "gjallarOS" || a.KeyboardLayout != "us" || a.Timezone != "Etc/UTC" || !a.TouchpadWorkspaceSwipe {
 		t.Fatalf("new-install defaults changed: %+v", a)
 	}
 }
@@ -148,7 +166,7 @@ func TestInterviewDefaultsDropWhatTheCheckoutNoLongerOffers(t *testing.T) {
 	if a.Shell != "zsh" || !reflect.DeepEqual(a.Editors, []string{"vscodium"}) || !reflect.DeepEqual(a.Browsers, []string{"firefox"}) {
 		t.Fatalf("defaults offer values the options lack: %+v", a)
 	}
-	if a.Hostname != "gjallarOS" || a.Timezone != "Europe/Berlin" {
+	if a.Hostname != "gjallarOS" || a.Timezone != "Etc/UTC" {
 		t.Fatalf("empty running values did not fall back: %+v", a)
 	}
 }
@@ -231,30 +249,90 @@ func TestJoinListRoundTrips(t *testing.T) {
 	}
 }
 
-func TestAskSigningKey(t *testing.T) {
-	// SYNTHETIC: 32 bytes of "k" as an Ed25519 key, not a real key.
+// syntheticSigningKey is 32 bytes of "k" as an Ed25519 key, not a real key.
+func syntheticSigningKey() string {
 	blob := []byte{0, 0, 0, 11}
 	blob = append(blob, "ssh-ed25519"...)
 	blob = append(blob, 0, 0, 0, 32)
 	blob = append(blob, strings.Repeat("k", 32)...)
-	line := "ssh-ed25519 " + base64.StdEncoding.EncodeToString(blob) + " SYNTHETIC"
+	return "ssh-ed25519 " + base64.StdEncoding.EncodeToString(blob) + " SYNTHETIC"
+}
+
+// stubLiveRegion makes the region step see session instead of the machine
+// the test runs on.
+func stubLiveRegion(t *testing.T, session region.Session) {
+	t.Helper()
+	old := liveRegion
+	liveRegion = func(context.Context) region.Session { return session }
+	t.Cleanup(func() { liveRegion = old })
+}
+
+// setRegionLists points the region lists at small made-up tables.
+func setRegionLists(t *testing.T) {
+	t.Helper()
+	dir := t.TempDir()
+	write := func(name, body string) string {
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	write("zone.tab", "AT\t+4813+01620\tEurope/Vienna\nJP\t+353916+1394441\tAsia/Tokyo\nJP\t+0000+00000\tAsia/Example\n")
+	locales := write("SUPPORTED", "de_AT.UTF-8/UTF-8 \\\nja_JP.UTF-8/UTF-8 \\\n")
+	rules := write("base.lst", "! layout\n  us  English (US)\n  jp  Japanese\n  at  Example\n")
+	oldZone, oldLocale, oldRules := region.ZoneDir, region.LocaleList, region.XKBRules
+	region.ZoneDir, region.LocaleList, region.XKBRules = dir, locales, rules
+	t.Cleanup(func() { region.ZoneDir, region.LocaleList, region.XKBRules = oldZone, oldLocale, oldRules })
+}
+
+func TestRegionStepStartsFromTheLiveSession(t *testing.T) {
+	setRegionLists(t)
 	for _, tc := range []struct {
-		name, running, input, want, shows string
+		name               string
+		live               region.Session
+		input              string
+		tz, locale, layout string
 	}{
-		{"managed by default", "", "\n", "", "[Y/n]"},
-		{"own key", "", "n\n" + line + "\n", line, "alex@example"},
-		{"bad key asked again", "", "n\nssh-rsa AAAA\n" + line + "\n", line, "not an OpenSSH"},
-		{"rerun keeps the own key", line, "\n\n", line, "[y/N]"},
-		{"rerun back to managed", line, "y\n", "", "[y/N]"},
+		{"live values", region.Session{Timezone: "Asia/Tokyo", Locale: "ja_JP.UTF-8", KeyboardLayout: "jp"}, "\n\n\n", "Asia/Tokyo", "ja_JP.UTF-8", "jp"},
+		{"nothing live", region.Session{}, "\n\n\n", "Etc/UTC", "en_US.UTF-8", "us"},
+		{"unknown live values", region.Session{Timezone: "../../etc/shadow", Locale: "xx_XX.UTF-8", KeyboardLayout: "$(id)"}, "\n\n\n", "Etc/UTC", "en_US.UTF-8", "us"},
+		{"search", region.Session{}, "Tokyo\nja\njp\n", "Asia/Tokyo", "ja_JP.UTF-8", "jp"},
+		{"search with several matches", region.Session{}, "Asia\n1\n\n\n", "Asia/Example", "en_US.UTF-8", "us"},
 	} {
+		stubLiveRegion(t, tc.live)
 		var output bytes.Buffer
+		u := config.User{}
 		ui := prompt.New(strings.NewReader(tc.input), &output)
-		got, err := askSigningKey(context.Background(), ui, tc.running)
-		if err != nil {
+		if err := collectRegion(context.Background(), ui, nil, interviewDefaults(nil, discovery.Options{}), &u); err != nil {
 			t.Fatalf("%s: %v\n%s", tc.name, err, output.String())
 		}
-		if got != tc.want || !strings.Contains(output.String(), tc.shows) {
-			t.Errorf("%s: key %q, want %q; output:\n%s", tc.name, got, tc.want, output.String())
+		if u.Timezone != tc.tz || u.Locale != tc.locale || u.KeyboardLayout != tc.layout || u.KeyboardVariant != "" {
+			t.Errorf("%s: got %q %q %q/%q, want %q %q %q\n%s", tc.name, u.Timezone, u.Locale, u.KeyboardLayout, u.KeyboardVariant, tc.tz, tc.locale, tc.layout, output.String())
 		}
+	}
+}
+
+func TestRegionStepRerunKeepsRunningValues(t *testing.T) {
+	setRegionLists(t)
+	stubLiveRegion(t, region.Session{Timezone: "Asia/Tokyo", Locale: "ja_JP.UTF-8", KeyboardLayout: "jp"})
+	// "de,us" and Europe/Berlin are not in the made-up lists; a rerun still
+	// keeps them, and the running variant stays with its layout.
+	running := config.User{Timezone: "Europe/Berlin", Locale: "de_AT.UTF-8", KeyboardLayout: "de,us", KeyboardVariant: "nodeadkeys,"}
+	var output bytes.Buffer
+	u := config.User{}
+	if err := collectRegion(context.Background(), prompt.New(strings.NewReader("\n\n\n"), &output), &running, interviewDefaults(&running, discovery.Options{}), &u); err != nil {
+		t.Fatalf("%v\n%s", err, output.String())
+	}
+	if u.Timezone != running.Timezone || u.Locale != running.Locale || u.KeyboardLayout != running.KeyboardLayout || u.KeyboardVariant != running.KeyboardVariant {
+		t.Fatalf("rerun changed the region: %+v\n%s", u, output.String())
+	}
+	// A new layout drops the running variant.
+	u = config.User{}
+	if err := collectRegion(context.Background(), prompt.New(strings.NewReader("\n\njp\n"), &output), &running, interviewDefaults(&running, discovery.Options{}), &u); err != nil {
+		t.Fatal(err)
+	}
+	if u.KeyboardLayout != "jp" || u.KeyboardVariant != "" {
+		t.Fatalf("new layout kept the old variant: %q/%q", u.KeyboardLayout, u.KeyboardVariant)
 	}
 }
