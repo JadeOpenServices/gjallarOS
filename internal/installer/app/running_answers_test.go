@@ -53,10 +53,6 @@ func runningFixture(t *testing.T) config.User {
 }
 
 func TestRerunInterviewOffersRunningAnswers(t *testing.T) {
-	original := aiMemoryGB
-	t.Cleanup(func() { aiMemoryGB = original })
-	aiMemoryGB = func() (int, error) { return 32, nil }
-
 	running := runningFixture(t)
 	u, err := config.Defaults()
 	if err != nil {
@@ -107,9 +103,6 @@ func assertNoDroppedQuestions(t *testing.T, output string) {
 }
 
 func TestNewInstallInterviewSetsDroppedValues(t *testing.T) {
-	original := aiMemoryGB
-	t.Cleanup(func() { aiMemoryGB = original })
-	aiMemoryGB = func() (int, error) { return 32, nil }
 	o := discovery.Options{Shells: []string{"zsh"}, Editors: []string{"vscode", "vscodium"}, Browsers: []string{"firefox"}, Themes: []string{"noctalia"}}
 	for _, form := range []struct {
 		factor    string

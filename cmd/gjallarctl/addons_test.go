@@ -149,3 +149,41 @@ func TestAddonsPinAndUpdate(t *testing.T) {
 		t.Fatal("updated without a yes")
 	}
 }
+
+func TestAddonsNeedFirefox(t *testing.T) {
+	path := addonsConfig(t)
+	user, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	user.Browsers, user.PreferredBrowser = []string{"chromium"}, "chromium"
+	if err := config.WriteAtomic(path, user); err != nil {
+		t.Fatal(err)
+	}
+	fakeAddonsPin(t, "1")
+	var out bytes.Buffer
+	for name, run := range map[string]func() error{
+		"list":  func() error { return addonsList(path, false, &out) },
+		"names": func() error { return addonsList(path, true, &out) },
+		"set":   func() error { return addonsSet(path, []string{"passwords.passbolt", "on"}, &out) },
+		"pin": func() error {
+			return addonsPinNew(context.Background(), answers("y"), path, addonsArgs{rest: []string{"addon@example.org"}}, &out)
+		},
+		"update": func() error { return addonsUpdate(context.Background(), answers("y"), path, addonsArgs{}, &out) },
+	} {
+		err := run()
+		if err == nil || !strings.Contains(err.Error(), `browsers=["chromium","firefox"]`) {
+			t.Errorf("%s without Firefox: %v", name, err)
+		}
+	}
+	if out.Len() != 0 {
+		t.Errorf("printed without Firefox:\n%s", out.String())
+	}
+	after, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.FirefoxAddons["passwords"].Addons["passbolt"] != apps.AddonOff || len(after.FirefoxStoreAddons) != 0 {
+		t.Fatalf("changed without Firefox: %+v %+v", after.FirefoxAddons["passwords"], after.FirefoxStoreAddons)
+	}
+}

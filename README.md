@@ -115,10 +115,15 @@ terminal.
 | You and your region | Username, password, hostname, timezone, language and keyboard layout |
 | Disk (USB stick) | Which disk to erase |
 | Startup (USB stick) | Whether the security chip (TPM2) unlocks the disk alone or asks a PIN; both add a recovery key |
-| Apps | Apps from the catalogue, Firefox add-ons, printers and scanners (off, plugged into this computer, or also on the local network), a smart card for mail keys |
-| Network | Tailscale as a VPN on networks you do not trust, and Nextcloud |
+| Printing | Printers and scanners: off, plugged into this computer, or also on the local network |
 | Security | USB device trust, Secure Boot, firmware updates, a recovery partition, who signs settings files |
-| AI (optional) | A local model, an AI server on your network, or none |
+
+The installer does not ask about apps. A new install gets the default
+apps from the catalogue, Tailscale with no home network set, and Firefox
+with uBlock Origin locked on. Optional apps, AI, web apps, Nextcloud, a
+smart card for mail keys and the other Firefox add-ons come later, in the
+first-boot guide or with `gjallarctl`. Installing again over gjallarOS
+keeps the apps and add-ons the running system has.
 
 A new install ships zsh, VSCodium and Firefox, turns on touchpad
 workspace swipes, and keeps a laptop running with the lid closed on a
@@ -186,8 +191,8 @@ AI is optional and localhost-only, with hardware-aware model selection. On AMD
 integrated graphics it runs on Vulkan instead of ROCm, and it is confined
 below the desktop (memory capped at 65% of RAM, low CPU/IO priority, killed
 first under memory pressure) so a model load cannot take Hyprland down. Below
-8 GiB RAM no local model fits: the installer offers a central server or no
-AI, and local AI then runs only a model you name. From 8 GiB it picks a 7b
+8 GiB RAM no local model fits, so local AI then runs only a model you
+name. The installer does not set up AI. From 8 GiB it picks a 7b
 model, from 24 GiB a 14b one, and with 32 GiB plus a 12 GiB graphics card a
 30b one.
 
@@ -198,8 +203,8 @@ takes effect with the next rebuild too.
 Instead of a local model, AI can use a central server: set `aiEndpoint`
 (`https://host[:port]` only), `aiRemoteModel` and `aiRemoteContextTokens`.
 The server must sit behind HTTPS and check a bearer token (Ollama itself has
-no login); http endpoints and missing tokens are refused. The installer asks
-for the token hidden; on an installed system run `gjallarctl ai set-token`.
+no login); http endpoints and missing tokens are refused. Set the token
+with `gjallarctl ai set-token`, which asks for it hidden.
 The token never enters the Nix store or `user.config.json`: it is encrypted
 with `systemd-creds` (TPM2-bound when present) into
 `/var/lib/gjallarOS/ai/endpoint-token.cred`.
@@ -384,7 +389,7 @@ in a sandbox without network that sees the system and your home read-only.
 
 Add-ons come in collections, listed in `apps/firefox-addons.json`: Privacy,
 Password managers, Comfort and Cookie banners. New installs start with uBlock
-Origin on and everything else off. Each add-on has one of three modes:
+Origin locked on and everything else off. Each add-on has one of three modes:
 
 | Mode | What it means |
 | --- | --- |
@@ -392,8 +397,10 @@ Origin on and everything else off. Each add-on has one of three modes:
 | `on` | Installed, and you can turn it off in about:addons |
 | `locked` | Installed and always on |
 
-The installer asks which collections you want, then the mode of each add-on in
-them. Afterwards `gjallarctl addons` changes them:
+The installer does not ask about add-ons; `gjallarctl addons` changes them.
+It works only while `firefox` is one of your `browsers`, and `gjallarctl
+settings` refuses add-on changes without it, since they would change
+nothing:
 
 ```sh
 gjallarctl addons list
@@ -464,8 +471,8 @@ Nextcloud from the app menu or log in again to bring it back.
 
 ### Thunderbird
 
-Thunderbird (latest release) is in the default apps; the installer asks
-before it installs it. You set up every account yourself. On the first start a
+Thunderbird (latest release) is in the default apps, so a new install has
+it. You set up every account yourself. On the first start a
 local page walks through the account, the Primary Password, your OpenPGP key
 and its backup, and Nextcloud calendar and contacts.
 
@@ -483,8 +490,8 @@ gjallarOS sets these through Thunderbird's enterprise policy:
 
 Every `mailto` link opens Thunderbird, Firefox ones included.
 
-Smart cards are off by default. The installer asks after Thunderbird, or set
-it later (security tier):
+Smart cards are off by default. Turn them on after the install (security
+tier):
 
 ```sh
 gjallarctl settings set thunderbirdSmartCard=true
@@ -712,7 +719,7 @@ so check first.
 
 ### Tailscale VPN and network trust
 
-The installer can turn on Tailscale and use a tailnet exit node as VPN.
+Tailscale is on by default and can use a tailnet exit node as VPN.
 `gjallar-vpn-trust` then decides on every network change, tailnet change, and
 every five minutes how far to trust the current network:
 

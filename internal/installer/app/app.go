@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/control"
 	"io"
-	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -35,7 +34,6 @@ import (
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/discovery"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/diskcrypto"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/diskplan"
-	"github.com/JadeOpenServices/gjallarOS/internal/installer/firefoxstore"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/firmware"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/flakesource"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/hardwareconfig"
@@ -2080,7 +2078,6 @@ func collectInteractive(ctx context.Context, ui prompt.UI, root string, partitio
 		// USB trust key stays at the TPM handle it was created at.
 		u.Theme = running.Theme
 		u.USBTrustTPMHandle = running.USBTrustTPMHandle
-		u.FirefoxAddons, u.FirefoxStoreAddons = running.FirefoxAddons, running.FirefoxStoreAddons
 		// The weather city is answered in the bar, and an empty one means
 		// the user turned the weather off.
 		u.WeatherCity, u.WeatherCountry = running.WeatherCity, running.WeatherCountry
@@ -2196,9 +2193,6 @@ func collectInteractive(ctx context.Context, ui prompt.UI, root string, partitio
 	u.Shell, u.Editors, u.Browsers = a.Shell, a.Editors, a.Browsers
 	u.PreferredEditor = offeredOr(a.PreferredEditor, u.Editors, u.Editors[0])
 	u.PreferredBrowser = offeredOr(a.PreferredBrowser, u.Browsers, u.Browsers[0])
-	if err := collectProjectTools(ctx, ui, running, u); err != nil {
-		return err
-	}
 	// Theme selection belongs to the desktop shell after installation.
 	// Keep the default theme only as the bootstrap rendering contract.
 	if u.Theme == "" {
@@ -2207,10 +2201,7 @@ func collectInteractive(ctx context.Context, ui prompt.UI, root string, partitio
 	if err := collectPrinting(ctx, ui, a, u); err != nil {
 		return err
 	}
-	if err := collectApps(ctx, ui, running, u); err != nil {
-		return err
-	}
-	if err := collectFirefoxAddons(ctx, ui, u); err != nil {
+	if err := appChoices(running, u); err != nil {
 		return err
 	}
 	// Device-specific hardware policy is resolved through ODDC.
@@ -2265,46 +2256,6 @@ func collectRecovery(ctx context.Context, ui prompt.UI, partitionable, secureBoo
 	return nil
 }
 
-// collectAIServer points AI at a central Ollama server. Nothing runs or is
-// downloaded locally then; the server picks hardware and holds the model.
-func collectAIServer(ctx context.Context, ui prompt.UI, running, u *config.User) error {
-	u.OverrideAISelection, u.OverrideModelWith = false, ""
-	fmt.Fprintln(ui.Out, "The central AI server must use HTTPS and a bearer token (e.g. Ollama behind a TLS proxy that checks it). The token is asked for later, hidden.")
-	endpoint, model, tokens := "", "qwen3-coder:30b", "32768"
-	if running != nil && running.AIEndpoint != "" {
-		endpoint, model = running.AIEndpoint, running.AIRemoteModel
-		if running.AIRemoteContextTokens > 0 {
-			tokens = strconv.Itoa(running.AIRemoteContextTokens)
-		}
-	}
-	for {
-		endpoint, err := ui.Value(ctx, "AI server URL (e.g. https://ai.example.lan)", endpoint)
-		if err != nil {
-			return err
-		}
-		model, err := ui.Value(ctx, "Ollama model on the server", model)
-		if err != nil {
-			return err
-		}
-		tokens, err := ui.Value(ctx, "Context tokens", tokens)
-		if err != nil {
-			return err
-		}
-		u.AIEndpoint, u.AIRemoteModel = strings.TrimRight(strings.TrimSpace(endpoint), "/"), strings.TrimSpace(model)
-		u.AIRemoteContextTokens, err = strconv.Atoi(strings.TrimSpace(tokens))
-		if err == nil && u.AIEndpoint == "" {
-			err = errors.New("enter the AI server URL")
-		}
-		if err == nil {
-			err = config.ValidateAIEndpoint(*u)
-		}
-		if err == nil {
-			return nil
-		}
-		fmt.Fprintf(ui.Out, "%v\n", err)
-	}
-}
-
 // ensureAIToken asks for the central AI server token, hidden, unless one is
 // already staged or sealed. It stays root-only at aitoken.Pending until the
 // installed system seals it with systemd-creds.
@@ -2332,478 +2283,59 @@ func ensureAIToken(ctx context.Context, out io.Writer) error {
 	}
 }
 
-// collectApps asks each catalogue app's installer question; apps without
-// one take their default, or keep their running choice on a rerun. Some
-// apps ask follow-up questions.
-func collectApps(ctx context.Context, ui prompt.UI, running, u *config.User) error {
+// appChoices fills in what the installer no longer asks (Q-H, Q-I, Q-J):
+// optional apps, their own settings, web apps and Firefox add-ons. A new
+// install gets the catalogue defaults; a rerun keeps the running choices.
+// The first-boot guide (Plane 354) and gjallarctl change them later.
+func appChoices(running, u *config.User) error {
 	catalogue, err := apps.Catalogue()
 	if err != nil {
 		return err
 	}
-	followUp := map[string]func(context.Context, prompt.UI, *config.User, *config.User) error{
-		"ai":          collectAI,
-		"tailscale":   collectTailscale,
-		"thunderbird": collectThunderbird,
-	}
 	u.Apps = []string{}
-	u.Tailscale = nil
-	u.ThunderbirdSmartCard = false
-	u.AIAgentMode, u.OverrideAISelection, u.OverrideModelWith = "", false, ""
-	u.AIEndpoint, u.AIRemoteModel, u.AIRemoteContextTokens = "", "", 0
 	for _, app := range catalogue {
 		selected := app.Default
 		if running != nil {
 			selected = running.HasApp(app.ID)
 		}
-		if app.Installer != "" {
-			selected, err = ui.Confirm(ctx, app.Installer, selected)
-			if err != nil {
-				return err
-			}
-		}
-		if !selected {
-			continue
-		}
-		u.Apps = append(u.Apps, app.ID)
-		if collect := followUp[app.ID]; collect != nil {
-			if err := collect(ctx, ui, running, u); err != nil {
-				return err
-			}
+		if selected {
+			u.Apps = append(u.Apps, app.ID)
 		}
 	}
-	return nil
-}
-
-// collectFirefoxAddons asks which add-on collections Firefox gets, then
-// one question per ticked collection for its add-ons, so an add-on is only
-// offered while its collection is on. Earlier answers are the defaults; an
-// add-on that was locked stays locked while it is still ticked.
-func collectFirefoxAddons(ctx context.Context, ui prompt.UI, u *config.User) error {
-	previous := apps.CompleteFirefoxAddons(u.FirefoxAddons)
-	previousStore := u.FirefoxStoreAddons
-	u.FirefoxAddons, u.FirefoxStoreAddons = previous, []apps.FirefoxStoreAddon{}
-	if !slices.Contains(u.Browsers, "firefox") {
-		return nil
+	keep := running
+	if keep == nil {
+		keep = &config.User{}
 	}
-	collections := apps.FirefoxCollections()
-	items := []prompt.Item{}
-	for _, c := range collections {
-		items = append(items, prompt.Item{Value: c.ID, Name: c.Name, Description: c.Description, On: previous[c.ID].Enable})
+	// Tailscale on a new install: no home subnets, no exit node, no
+	// trusted Wi-Fi. gjallarctl vpn reads that the same as no intent.
+	u.Tailscale = nil
+	if u.HasApp("tailscale") {
+		u.Tailscale = &config.TailscaleIntent{HomeSubnets: []string{}, TrustedWifis: []string{}, SiteRouterTargets: []string{}}
+		if keep.Tailscale != nil {
+			t := *keep.Tailscale
+			u.Tailscale = &t
+		}
 	}
-	chosen, err := ui.Checklist(ctx, "Firefox add-ons. Tick the collections you want to pick from.", items)
-	if err != nil {
+	u.ThunderbirdSmartCard = u.HasApp("thunderbird") && keep.ThunderbirdSmartCard
+	u.AIAgentMode, u.OverrideAISelection, u.OverrideModelWith = "", false, ""
+	u.AIEndpoint, u.AIRemoteModel, u.AIRemoteContextTokens = "", "", 0
+	if u.HasApp("ai") {
+		u.AIAgentMode, u.OverrideAISelection, u.OverrideModelWith = keep.AIAgentMode, keep.OverrideAISelection, keep.OverrideModelWith
+		u.AIEndpoint, u.AIRemoteModel, u.AIRemoteContextTokens = keep.AIEndpoint, keep.AIRemoteModel, keep.AIRemoteContextTokens
+	}
+	u.WebApplications = slices.Clone(keep.WebApplications)
+	u.NextcloudEnable, u.NextcloudHost = keep.NextcloudEnable, keep.NextcloudHost
+	if err := config.NormalizeProjectTools(u); err != nil {
 		return err
 	}
-	for _, c := range collections {
-		choice := apps.FirefoxCollectionChoice{Addons: maps.Clone(previous[c.ID].Addons)}
-		u.FirefoxAddons[c.ID] = choice
-		if !slices.Contains(chosen, c.ID) {
-			// Off, but the add-on choices stay for when it is turned on again.
-			continue
-		}
-		items = []prompt.Item{}
-		for _, a := range c.Addons {
-			items = append(items, prompt.Item{Value: a.ID, Name: a.Name, Description: a.Description, On: choice.Addons[a.ID] != apps.AddonOff})
-		}
-		picked, err := ui.Checklist(ctx, c.Name+": tick the add-ons you want.", items)
-		if err != nil {
-			return err
-		}
-		for _, a := range c.Addons {
-			switch {
-			case !slices.Contains(picked, a.ID):
-				choice.Addons[a.ID] = apps.AddonOff
-			case choice.Addons[a.ID] != apps.AddonLocked:
-				choice.Addons[a.ID] = apps.AddonOn
-			}
-		}
-		// A collection with nothing ticked stays off.
-		choice.Enable = len(picked) > 0
-		u.FirefoxAddons[c.ID] = choice
+	// uBlock Origin is locked on by default; the other add-ons are offered
+	// in the first-boot guide and by gjallarctl addons.
+	u.FirefoxAddons = apps.CompleteFirefoxAddons(keep.FirefoxAddons)
+	u.FirefoxStoreAddons = slices.Clone(keep.FirefoxStoreAddons)
+	if u.FirefoxStoreAddons == nil {
+		u.FirefoxStoreAddons = []apps.FirefoxStoreAddon{}
 	}
-	return collectStoreAddons(ctx, ui, u, previousStore)
-}
-
-// pinStoreAddon is swapped in tests; the installer asks addons.mozilla.org.
-var pinStoreAddon = firefoxstore.Pin
-
-// collectStoreAddons asks for more add-ons by ID. A listed add-on that was
-// pinned before keeps its pin; a new one is pinned to its current version
-// after the user has seen what it may do.
-func collectStoreAddons(ctx context.Context, ui prompt.UI, u *config.User, previous []apps.FirefoxStoreAddon) error {
-	const storeLabel = "More add-ons from addons.mozilla.org by add-on ID, comma-separated (optional). about:support lists the ID of each installed add-on."
-	ids := []string{}
-	for _, a := range previous {
-		ids = append(ids, a.ID)
-	}
-	label, answer := storeLabel, strings.Join(ids, ", ")
-	for {
-		var err error
-		answer, err = ui.Value(ctx, label, answer)
-		if err != nil {
-			return err
-		}
-		store, err := storeAddonsFor(ctx, ui, u, previous, answer)
-		if err == nil {
-			u.FirefoxStoreAddons = store
-			return nil
-		}
-		if errors.Is(err, prompt.ErrCancelled) || ctx.Err() != nil {
-			return err
-		}
-		label = err.Error() + "\n\n" + storeLabel
-	}
-}
-
-func storeAddonsFor(ctx context.Context, ui prompt.UI, u *config.User, previous []apps.FirefoxStoreAddon, answer string) ([]apps.FirefoxStoreAddon, error) {
-	store := []apps.FirefoxStoreAddon{}
-	for _, id := range strings.Split(answer, ",") {
-		if id = strings.TrimSpace(id); id == "" {
-			continue
-		}
-		if i := slices.IndexFunc(previous, func(a apps.FirefoxStoreAddon) bool { return a.ID == id }); i >= 0 {
-			a := previous[i]
-			if a.Mode == apps.AddonOff {
-				a.Mode = apps.AddonOn
-			}
-			store = append(store, a)
-			continue
-		}
-		// Check the ID before asking the network about it.
-		if err := apps.CheckStoreAddonID(id); err != nil {
-			return nil, fmt.Errorf("firefoxStoreAddons: %w", err)
-		}
-		if slices.ContainsFunc(store, func(a apps.FirefoxStoreAddon) bool { return a.ID == id }) {
-			return nil, fmt.Errorf("firefoxStoreAddons: %q listed twice", id)
-		}
-		a, err := pinStoreAddon(ctx, id, apps.AddonOn)
-		if err != nil {
-			return nil, err
-		}
-		ok, err := ui.Confirm(ctx, fmt.Sprintf("Install %s %s (%s)? It may use: %s", a.Name, a.Version, a.ID, permissionList(a.Permissions)), true)
-		if err != nil {
-			return nil, err
-		}
-		if !ok {
-			return nil, fmt.Errorf("%s left out; remove it from the list or confirm it", id)
-		}
-		store = append(store, a)
-	}
-	if err := apps.ValidateFirefoxAddons(u.FirefoxAddons, store); err != nil {
-		return nil, err
-	}
-	return store, nil
-}
-
-func permissionList(permissions []string) string {
-	if len(permissions) == 0 {
-		return "nothing special"
-	}
-	return strings.Join(permissions, ", ")
-}
-
-// aiMemoryGB is swapped in tests; the installer runs on the target machine.
-var aiMemoryGB = profile.MemoryGB
-
-func collectAI(ctx context.Context, ui prompt.UI, running, u *config.User) error {
-	backend, choices := "local", []string{"local", "central-server"}
-	ramGB, err := aiMemoryGB()
-	if err != nil {
-		return err
-	}
-	lowMemory := !profile.LocalFits(ramGB)
-	if lowMemory {
-		fmt.Fprintf(ui.Out, "No local AI model fits %d GiB RAM; local AI needs 8 GiB. Use a central server, turn AI off, or name a small model yourself.\n", ramGB)
-		backend, choices = "off", []string{"off", "central-server", "local"}
-	}
-	if running != nil && running.HasApp("ai") {
-		backend = "local"
-		if running.AIEndpoint != "" {
-			backend = "central-server"
-		}
-	}
-	backend, err = ui.Choice(ctx, "AI backend", backend, choices)
-	if err != nil {
-		return err
-	}
-	if backend == "off" {
-		u.Apps = slices.DeleteFunc(u.Apps, func(id string) bool { return id == "ai" })
-		return nil
-	}
-	if backend == "central-server" {
-		if err := collectAIServer(ctx, ui, running, u); err != nil {
-			return err
-		}
-	} else {
-		u.OverrideAISelection = lowMemory
-		if !lowMemory {
-			u.OverrideAISelection, err = ui.Confirm(ctx, "Override automatic hardware-aware AI model selection?", running != nil && running.OverrideAISelection)
-			if err != nil {
-				return err
-			}
-		}
-		if u.OverrideAISelection {
-			model := "qwen2.5-coder:14b"
-			if lowMemory {
-				model = "qwen2.5-coder:1.5b"
-			}
-			if running != nil && running.OverrideModelWith != "" {
-				model = running.OverrideModelWith
-			}
-			for {
-				value, err := ui.Value(ctx, "Exact Ollama model identifier", model)
-				if err != nil {
-					return err
-				}
-				override, err := profile.NewOverride(true, value)
-				if err == nil {
-					u.OverrideModelWith = override.Model
-					break
-				}
-				fmt.Fprintf(ui.Out, "%v\n", err)
-			}
-		}
-	}
-	modes := []string{"workspace", "owner-conservative", "owner-full-local"}
-	mode := "workspace"
-	if running != nil {
-		mode = offeredOr(running.AIAgentMode, modes, mode)
-	}
-	u.AIAgentMode, err = ui.Choice(ctx, "AI permission profile", mode, modes)
-	return err
-}
-
-// collectThunderbird offers smart card support for mail keys. It stays off
-// unless the user has a card: it starts pcscd and gpg-agent for them.
-func collectThunderbird(ctx context.Context, ui prompt.UI, running, u *config.User) error {
-	was := running != nil && running.ThunderbirdSmartCard
-	var err error
-	u.ThunderbirdSmartCard, err = ui.Confirm(ctx, "Use a smart card for mail encryption keys?", was)
-	return err
-}
-
-func collectTailscale(ctx context.Context, ui prompt.UI, running, u *config.User) error {
-	t := &config.TailscaleIntent{HomeSubnets: []string{}, TrustedWifis: []string{}, SiteRouterTargets: []string{}}
-	u.Tailscale = t
-	// was holds the running answers on a rerun, else what a new install offers.
-	was := config.TailscaleIntent{HomeSubnets: []string{}, RouterHome: true, SiteRouterTrust: true}
-	if running != nil && running.Tailscale != nil {
-		was = *running.Tailscale
-	}
-
-	ask := func(label, def string, set func(string) error) error {
-		for {
-			value, err := ui.Value(ctx, label, def)
-			if err != nil {
-				return err
-			}
-			err = set(value)
-			if err == nil {
-				err = config.ValidateTailscale(t)
-			}
-			if err != nil {
-				fmt.Fprintf(ui.Out, "%v\n", err)
-				continue
-			}
-			return nil
-		}
-	}
-
-	if err := ask("Home LAN subnets kept out of the tunnel at home, comma-separated (e.g. 192.168.1.0/24)", config.JoinList(was.HomeSubnets), func(v string) (err error) {
-		t.HomeSubnets, err = config.SplitList(v)
-		return err
-	}); err != nil {
-		return err
-	}
-
-	vpn, err := ui.Confirm(ctx, "Use a Tailscale exit node as VPN on networks that are not yours?", was.ExitNode != "")
-	if err != nil || !vpn {
-		return err
-	}
-	for t.ExitNode == "" {
-		// The tailnet is not reachable before the first login, so "auto"
-		// picks the home router's exit node at runtime.
-		exitNode := "auto"
-		if was.ExitNode != "" {
-			exitNode = was.ExitNode
-		}
-		if err := ask("Exit node (auto = your home router's, or a tailnet host name or 100.x address)", exitNode, func(v string) error {
-			t.ExitNode = strings.TrimSpace(v)
-			return nil
-		}); err != nil {
-			return err
-		}
-	}
-	if err := ask("Your Wi-Fi names where no VPN is needed, comma-separated, quote names with commas (e.g. home-5Ghz, home-2.4Ghz, \"cafe, upstairs\")", config.JoinList(was.TrustedWifis), func(v string) (err error) {
-		t.TrustedWifis, err = config.SplitList(v)
-		return err
-	}); err != nil {
-		return err
-	}
-	if len(t.TrustedWifis) > 0 {
-		// e.g. a relative's Wi-Fi: its printer stays usable while the
-		// internet still goes through home. gjallarctl vpn trust-wifi
-		// --exit-node picks another node per Wi-Fi later.
-		routed := slices.Sorted(maps.Keys(was.WifiExitNodes))
-		if err := ask("Of these, Wi-Fis that still send the internet through the exit node (comma-separated, empty = none)", config.JoinList(routed), func(v string) error {
-			names, err := config.SplitList(v)
-			t.WifiExitNodes = nil
-			for _, ssid := range names {
-				if t.WifiExitNodes == nil {
-					t.WifiExitNodes = map[string]string{}
-				}
-				t.WifiExitNodes[ssid] = t.ExitNode
-				if node := was.WifiExitNodes[ssid]; node != "" {
-					// gjallarctl vpn trust-wifi --exit-node may have picked another one.
-					t.WifiExitNodes[ssid] = node
-				}
-			}
-			return err
-		}); err != nil {
-			return err
-		}
-	}
-	// Any subnet router of the tailnet counts, a friend's too: the tailnet
-	// admin approved its routes, and the signed ping shows it is here.
-	t.RouterHome, err = ui.Confirm(ctx, "Switch the VPN off on any LAN where a subnet router of your tailnet is (yours or a friend's in the same tailnet)?", was.RouterHome)
-	if err != nil || t.RouterHome {
-		return err
-	}
-	t.SiteRouterTrust, err = ui.Confirm(ctx, "Then switch it off near such a router only when it reaches your home LAN?", was.SiteRouterTrust)
-	if err != nil || !t.SiteRouterTrust {
-		return err
-	}
-	targets := config.DefaultSiteRouterTarget(t.HomeSubnets)
-	if len(was.SiteRouterTargets) > 0 {
-		targets = config.JoinList(was.SiteRouterTargets)
-	}
-	return ask("Home hosts that router must reach (host:port, comma-separated, e.g. 192.168.1.1:53)", targets, func(v string) (err error) {
-		t.SiteRouterTargets, err = config.SplitList(v)
-		return err
-	})
-}
-
-func collectProjectTools(ctx context.Context, ui prompt.UI, running, u *config.User) error {
-	u.WebApplications = nil
-	was := map[string]config.WebApplicationIntent{}
-	if running != nil {
-		for _, application := range running.WebApplications {
-			was[application.ID] = application
-		}
-	}
-
-	for _, id := range config.SupportedWebApplicationIDs() {
-		label := id
-
-		switch id {
-		case config.WebApplicationPlane:
-			label = "Plane"
-		case config.WebApplicationTeams:
-			label = "Microsoft Teams"
-		}
-
-		previous, enabledBefore := was[id]
-		enabled, err := ui.Confirm(
-			ctx,
-			"Enable "+label+" web application integration?",
-			enabledBefore,
-		)
-		if err != nil {
-			return err
-		}
-		if !enabled {
-			continue
-		}
-
-		application := config.WebApplicationIntent{ID: id}
-
-		switch id {
-		case config.WebApplicationPlane:
-			application.Endpoint, err = askEndpoint(
-				ctx,
-				ui,
-				"Plane endpoint (blank skips Plane)",
-				previous.Endpoint,
-				checkEndpoint,
-			)
-			if err != nil {
-				return err
-			}
-			if application.Endpoint == "" {
-				continue
-			}
-
-		case config.WebApplicationTeams:
-			// Teams owns its default service endpoint.
-
-		default:
-			return fmt.Errorf(
-				"unsupported web application integration: %q",
-				id,
-			)
-		}
-
-		u.WebApplications = append(
-			u.WebApplications,
-			application,
-		)
-	}
-
-	var err error
-
-	u.NextcloudEnable, err = ui.Confirm(
-		ctx,
-		"Enable Nextcloud integration?",
-		running != nil && running.NextcloudEnable,
-	)
-	if err != nil {
-		return err
-	}
-
-	if u.NextcloudEnable {
-		nextcloudHost := ""
-		if running != nil {
-			nextcloudHost = running.NextcloudHost
-		}
-		u.NextcloudHost, err = askEndpoint(
-			ctx,
-			ui,
-			"Nextcloud server (blank skips Nextcloud)",
-			nextcloudHost,
-			func(host string) error {
-				probe := config.User{NextcloudEnable: true, NextcloudHost: host}
-				return config.NormalizeProjectTools(&probe)
-			},
-		)
-		if err != nil {
-			return err
-		}
-		u.NextcloudEnable = u.NextcloudHost != ""
-	}
-
-	return config.NormalizeProjectTools(u)
-}
-
-// askEndpoint asks for label until check accepts the answer, so an invalid
-// endpoint is asked again instead of failing the whole install. A blank answer
-// returns "" so the caller can skip the service; re-asking it trapped anyone
-// who said yes without having a server. def is the running endpoint on a
-// rerun.
-func askEndpoint(ctx context.Context, ui prompt.UI, label, def string, check func(string) error) (string, error) {
-	for {
-		value, err := ui.Value(ctx, label, def)
-		if err != nil {
-			return "", err
-		}
-		if strings.TrimSpace(value) == "" {
-			return "", nil
-		}
-		if err := check(value); err != nil {
-			fmt.Fprintf(ui.Out, "%v\n", err)
-			continue
-		}
-		return value, nil
-	}
+	return apps.ValidateFirefoxAddons(u.FirefoxAddons, u.FirefoxStoreAddons)
 }
 
 // askSigningKey asks who signs the main user's settings files: gjallarOS,
@@ -2827,11 +2359,6 @@ func askSigningKey(ctx context.Context, ui prompt.UI, running string) (string, e
 		}
 		return line, nil
 	}
-}
-
-func checkEndpoint(endpoint string) error {
-	_, err := config.NormalizeExternalServiceEndpoint(endpoint)
-	return err
 }
 
 // defaultDotfilesDir is where the new user's checkout lives. The checkout the
@@ -3588,7 +3115,7 @@ func detectAndRenderState(
 			return err
 		}
 		if ai.Model == "" {
-			// Only a preset gets here; collectAI sets an override. Rebuilds sync
+			// A preset or a rerun of such a config gets here. Rebuilds sync
 			// apps from user.config.json, so the file itself has to change.
 			return fmt.Errorf("user.config.json enables local AI, but no local model fits %d GiB RAM (8 GiB needed): set aiEndpoint, set overrideAiSelection with overrideModelWith, or remove \"ai\" from apps", ai.RAMGB)
 		}

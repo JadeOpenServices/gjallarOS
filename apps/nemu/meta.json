@@ -4,6 +4,5 @@
   "category": "system",
   "package": "nemu",
   "icon": "qemu",
-  "default": false,
-  "installer": "Enable Nemu virtual machines?"
+  "default": false
 }

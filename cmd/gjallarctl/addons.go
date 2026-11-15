@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -33,7 +34,8 @@ const addonsUsage = `usage: gjallarctl addons list [--names] [--repo PATH]
                                            no longer wants (run by the session)
 
 Modes: on installs the add-on and lets you turn it off in Firefox, locked
-keeps it on, off removes it again. Changes go to user.config.json; run
+keeps it on, off removes it again. list, set, pin and update only work
+while firefox is one of your browsers. Changes go to user.config.json; run
 gjallarctl rebuild to apply them.`
 
 var addonsPin = firefoxstore.Pin
@@ -128,8 +130,26 @@ func runAddons(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-func addonsList(path string, names bool, out io.Writer) error {
+// loadFirefoxUser reads user.config.json for the add-on commands. They only
+// work while Firefox is one of the browsers: without it the add-on choices
+// change nothing, so the commands stay out of the way.
+func loadFirefoxUser(path string) (config.User, error) {
 	user, err := config.Load(path)
+	if err != nil {
+		return user, err
+	}
+	if !slices.Contains(user.Browsers, "firefox") {
+		browsers, err := json.Marshal(append(slices.Clone(user.Browsers), "firefox"))
+		if err != nil {
+			return user, err
+		}
+		return user, fmt.Errorf("Firefox is not one of your browsers, so it has no add-ons to change; add it first: gjallarctl settings set 'browsers=%s'", browsers)
+	}
+	return user, nil
+}
+
+func addonsList(path string, names bool, out io.Writer) error {
+	user, err := loadFirefoxUser(path)
 	if err != nil {
 		return err
 	}
@@ -172,7 +192,7 @@ func addonsSet(path string, rest []string, out io.Writer) error {
 		return errors.New("set needs a target and a mode; see gjallarctl addons --help")
 	}
 	target, mode := rest[0], rest[1]
-	user, err := config.Load(path)
+	user, err := loadFirefoxUser(path)
 	if err != nil {
 		return err
 	}
@@ -237,7 +257,7 @@ func addonsPinNew(ctx context.Context, ui prompt.UI, path string, a addonsArgs, 
 	if err := apps.CheckStoreAddonID(id); err != nil {
 		return err
 	}
-	user, err := config.Load(path)
+	user, err := loadFirefoxUser(path)
 	if err != nil {
 		return err
 	}
@@ -257,7 +277,7 @@ func addonsPinNew(ctx context.Context, ui prompt.UI, path string, a addonsArgs, 
 }
 
 func addonsUpdate(ctx context.Context, ui prompt.UI, path string, a addonsArgs, out io.Writer) error {
-	user, err := config.Load(path)
+	user, err := loadFirefoxUser(path)
 	if err != nil {
 		return err
 	}

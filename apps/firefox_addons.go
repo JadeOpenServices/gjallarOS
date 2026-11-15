@@ -16,7 +16,7 @@ import (
 //go:embed firefox-addons.json
 var firefoxAddonsJSON []byte
 
-// UBlockOriginID is the add-on ID of uBlock Origin, which is on by default.
+// UBlockOriginID is the add-on ID of uBlock Origin, locked on by default.
 const UBlockOriginID = "uBlock0@raymondhill.net"
 
 // Add-on modes. "on" installs the add-on and lets the user turn it off in

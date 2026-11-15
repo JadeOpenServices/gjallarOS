@@ -98,13 +98,11 @@ palette owns normal desktop theming.
 Closing or pressing Escape in a GTK prompt opens a quit confirmation; choosing
 No returns to the interrupted prompt.
 
-Tailscale is enabled by default. The installer asks for the home LAN subnets
-that stay local at home and, if Tailscale should act as VPN, for the exit node
-(`auto` finds the home router's once the tailnet is reachable), the trusted
-Wi-Fi names, which of those still route the internet through the exit node,
-and whether a nearby tailnet subnet router proves a trusted site. Quote Wi-Fi
-names that contain commas. See "Tailscale VPN and network trust" in the
-top-level README for changing these later.
+The installer does not ask about apps. A new install gets the catalogue
+defaults, uBlock Origin locked on in Firefox, and Tailscale with no home
+subnets, exit node or trusted Wi-Fi set; `gjallarctl vpn` sets those later.
+Installing again over gjallarOS keeps the running choices. See "Tailscale
+VPN and network trust" in the top-level README.
 
 Local AI is optional. If disabled, Ollama, OpenCode, the AI wrapper commands,
 and AI profiling are all omitted from the generated system.

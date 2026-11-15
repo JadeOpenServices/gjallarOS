@@ -91,7 +91,7 @@ Web apps are listed in `webApplications`, for example:
 ## App catalogue
 
 Optional applications live in `apps/<id>/`: `meta.json` (name, description,
-category, `default`, optional `installer` question, optional `package`, the
+category, `default`, optional `package`, the
 nixpkgs attribute of its main program), and a `home.nix` and/or
 `nixos.nix` module. Each app owns its whole module, so removing an app removes
 everything it brought in.
@@ -103,8 +103,8 @@ everything it brought in.
 ```
 
 Without `apps`, every app with `"default": true` is installed. The installer
-asks each app's `installer` question (today `ai`, `containers`, `nemu`,
-`tailscale`, `thunderbird`) and uses `default` for the rest. `apps` drives
+does not ask about apps: a new install takes `default`, and installing again
+keeps the running list. `apps` drives
 `gjallar.apps.<id>.enable` on both the NixOS side (`apps/nixos-options.nix`)
 and the Home Manager side (`user/apps/default.nix`).
 

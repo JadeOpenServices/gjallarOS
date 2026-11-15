@@ -29,9 +29,6 @@ type App struct {
 	Category    string `json:"category"`
 	// Default selects the app when nobody chose otherwise.
 	Default bool `json:"default"`
-	// Installer is the installer's yes/no question; empty means the
-	// installer never asks and takes Default.
-	Installer string `json:"installer"`
 	// Icon is the icon theme name; empty means the app ID. A repo icon
 	// (apps/<id>/icon.svg) comes first when the app has one (Plane 273).
 	Icon string `json:"icon"`
