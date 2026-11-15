@@ -117,10 +117,11 @@ terminal.
 | Management | Whether JODS manages this machine (only offered with TPM2 and Secure Boot) |
 | Disk (USB stick) | Which disk to erase |
 | Printing | Printers and scanners: off, plugged into this computer, or also on the local network |
-| Security | Secure Boot, firmware updates, how the disk unlocks (TPM2 alone or with a PIN, both add a recovery key), recovery (boot entry and partition, boot entry only, or none; the partition needs Secure Boot), USB devices (off, review new devices, or review and block unknown devices; a new install offers review) |
+| Security | Secure Boot, how the disk unlocks (TPM2 alone or with a PIN, both add a recovery key), recovery (boot entry and partition, boot entry only, or none; the partition needs Secure Boot), USB devices (off, review new devices, or review and block unknown devices; a new install offers review) |
 
-USB device approvals expire after 30 days without use; Settings changes
-that. A managed machine always gets recovery. At the end the installer
+Before the region questions, the installer offers to check for firmware
+updates and installs them right away. USB device approvals expire after 30
+days without use; Settings changes that. A managed machine always gets recovery. At the end the installer
 shows every answer once and asks "Install now?"; Enter means no, and
 nothing is written or installed.
 
@@ -669,8 +670,11 @@ still unlocks.
 
 ### USB trust
 
-The installer asks for USB trust review on machines with an ODDC model. On a
-machine with TPM2 it sets the signing handle (`usbTrustTpmHandle`, default
+On machines with an ODDC model the installer asks about USB devices as one
+choice: off, review new devices, or review and block unknown devices. A new
+install offers review; installing again keeps what the machine runs.
+Blocking is offered only with TPM2, an encrypted root and a system disk that
+is not on USB. On a machine with TPM2 the installer sets the signing handle (`usbTrustTpmHandle`, default
 `0x81000042`), and the broker creates the TPM signing key on its first start.
 A key left at that handle by an earlier install on the same TPM is reused; any
 other object there is never overwritten, and permanent trust stays off until
@@ -678,9 +682,8 @@ you pick a free handle. `sudo gjallarctl usb provision-key` does the same step
 by hand. Creating the key trusts no devices; inspect `gjallarctl usb status`
 and review devices first.
 
-With an encrypted root, the installer also asks "Block unknown USB devices from
-the first boot?" (default no). Say no on a desktop with a USB keyboard: it is
-not built in, so it stays blocked until approved. Enforcement can be turned on
+Do not pick blocking on a desktop with a USB keyboard: it is not built in,
+so it stays blocked until approved. Enforcement can be turned on
 later with `"usbTrustEnforce": true` in `user.config.json` and a
 `gjallarctl rebuild`. To turn it off, run `sudo gjallarctl usb disarm` first
 and enter the disk encryption passphrase, then set it back to `false` and
@@ -694,10 +697,10 @@ new USB devices at the next reboot. Until then a newly plugged device stays
 off: USBGuard does not hand the ports back to the kernel's default when it
 stops, because anything that stops it would then let every device in.
 
-On a machine with TPM2 the installer also asks "Let approved USB devices expire
-when unused?" (default no). With it on, an approved external device that was
-not connected for `usbTrustLapseDays` days (30 by default, any number from 1)
-asks for approval again. The days count from the last connection, and from the
+On a machine with TPM2, approved USB devices expire when unused: an approved
+external device that was not connected for `usbTrustLapseDays` days (30 when
+the installer turns USB trust on, any number from 1, `0` for never) asks for
+approval again. Installing again keeps the expiry the machine has. The days count from the last connection, and from the
 moment the setting was turned on, so old devices do not all ask at once. Three
 days before a device expires, a notice offers to renew it. Built-in devices
 never expire. Without a built-in USB keyboard, the keyboard and mouse used last

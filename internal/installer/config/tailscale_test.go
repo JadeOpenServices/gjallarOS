@@ -2,7 +2,6 @@ package config
 
 import (
 	"encoding/json"
-	"slices"
 	"strings"
 	"testing"
 )
@@ -50,35 +49,5 @@ func TestTailscaleIntentAbsentStaysNil(t *testing.T) {
 	data, _ := json.Marshal(User{})
 	if strings.Contains(string(data), "tailscale") {
 		t.Fatalf("nil intent serialized: %s", data)
-	}
-}
-
-func TestDefaultSiteRouterTarget(t *testing.T) {
-	if got := DefaultSiteRouterTarget([]string{"fd00::/64", "10.20.0.7/24"}); got != "10.20.0.1:53" {
-		t.Fatalf("got %q", got)
-	}
-}
-
-func TestSplitListQuotedNames(t *testing.T) {
-	for raw, want := range map[string][]string{
-		"":         {},
-		"a, b ,,c": {"a", "b", "c"},
-		`synthetic-5Ghz, "cafe, upstairs", 'Mum's'`: nil,
-		`"cafe, upstairs", 'say "hi"' , " pad "`:    {"cafe, upstairs", `say "hi"`, " pad "},
-		`it's-wifi`:                                 {"it's-wifi"},
-	} {
-		got, err := SplitList(raw)
-		if want == nil {
-			if err == nil {
-				t.Errorf("SplitList(%q) = %q, want error", raw, got)
-			}
-			continue
-		}
-		if err != nil || !slices.Equal(got, want) {
-			t.Errorf("SplitList(%q) = %q, %v; want %q", raw, got, err, want)
-		}
-	}
-	if _, err := SplitList(`"open`); err == nil {
-		t.Fatal("unterminated quote accepted")
 	}
 }

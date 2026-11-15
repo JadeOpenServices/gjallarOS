@@ -328,6 +328,18 @@ func TestCollectUSBTrustRerunKeepsRunningChoice(t *testing.T) {
 			t.Fatalf("rerun turned USB trust on: %+v\n%s", u, output.String())
 		}
 	}
+	// An expiry set while USB trust was off is the machine's own value.
+	{
+		running := config.User{USBTrustLapseDays: 7}
+		var output bytes.Buffer
+		u := config.User{}
+		if err := collectUSBTrust(context.Background(), prompt.New(strings.NewReader("2\n"), &output), true, true, true, "", &running, &u); err != nil {
+			t.Fatal(err)
+		}
+		if !u.USBGuardEnable || u.USBTrustLapseDays != 7 {
+			t.Fatalf("review=%t lapse=%d, want review with 7\n%s", u.USBGuardEnable, u.USBTrustLapseDays, output.String())
+		}
+	}
 	// Review turned on in a rerun gets the default expiry.
 	running := config.User{}
 	var output bytes.Buffer

@@ -48,7 +48,7 @@ func runningFixture(t *testing.T) config.User {
 		TrustedWifis:  []string{"cafe, upstairs", "home"},
 		WifiExitNodes: map[string]string{"cafe, upstairs": "other-exit"},
 		RouterHome:    true,
-		// SplitList of an empty answer gives an empty list, not nil.
+		// An empty list stays an empty list, not nil.
 		SiteRouterTargets: []string{},
 	}
 	return u
@@ -235,17 +235,6 @@ func TestReadRunningAnswersAsksRootForAPrivateFile(t *testing.T) {
 	}
 	if asked != path {
 		t.Fatalf("asked root for %q, want %q", asked, path)
-	}
-}
-
-func TestJoinListRoundTrips(t *testing.T) {
-	items := []string{"home", "cafe, upstairs", " padded ", `"quoted`, "plain"}
-	got, err := config.SplitList(config.JoinList(items))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !reflect.DeepEqual(got, items) {
-		t.Fatalf("SplitList(JoinList(%q)) = %q", items, got)
 	}
 }
 

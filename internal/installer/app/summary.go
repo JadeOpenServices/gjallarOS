@@ -39,7 +39,7 @@ func writeSummary(out io.Writer, u config.User, t installTarget) {
 	}
 	rows := [][2]string{
 		{"Region", fmt.Sprintf("%s, %s, keyboard %s", u.Timezone, u.Locale, keyboard)},
-		{"Account", fmt.Sprintf("%s on %s, shell %s", u.Username, u.Hostname, u.Shell)},
+		{"Account", fmt.Sprintf("%s on %s", u.Username, u.Hostname)},
 		{"Management", summaryManagement(u)},
 		{"Printing", summaryPrinting(u)},
 		{"Secure Boot", summarySecureBoot(u)},

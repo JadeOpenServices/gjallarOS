@@ -729,7 +729,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 		// repository into the root-owned system checkout.
 		s.user.DotfilesDir = systemcheckout.Path
 	}
-	configureWeatherLocation(&s.user, running == nil, out)
+	configureWeatherLocation(&s.user, running == nil && !s.existing, out)
 	// Resolve managed security requirements before checking the physical TPM
 	// boundary so policy normalization cannot re-enable TPM-dependent features
 	// after a no-TPM decision.
@@ -1105,6 +1105,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 		&s,
 		hardware,
 		resolvedDevice,
+		out,
 	); err != nil {
 		return fail(errOut, err)
 	}
@@ -2703,8 +2704,10 @@ func collectUSBTrust(ctx context.Context, ui prompt.UI, modelSelected, encrypted
 	if u.USBTrustTPMHandle == "" {
 		u.USBTrustTPMHandle = config.DefaultUSBTrustTPMHandle
 	}
+	// A rerun keeps the expiry the machine has, 0 included, once USB trust
+	// ran with a signed list; a value set while it was off counts too.
 	u.USBTrustLapseDays = DefaultUSBTrustLapseDays
-	if was.USBGuardEnable && was.USBTrustTPMHandle != "" {
+	if (was.USBGuardEnable && was.USBTrustTPMHandle != "") || was.USBTrustLapseDays > 0 {
 		u.USBTrustLapseDays = was.USBTrustLapseDays
 	}
 	if u.USBTrustLapseDays > 0 {
@@ -3084,6 +3087,7 @@ func detectAndRenderState(
 	s *state,
 	hardware discovery.Hardware,
 	resolvedDevice oddc.Resolved,
+	out io.Writer,
 ) error {
 	u := s.user
 	if u.AIAgentMode == "" {
@@ -3093,28 +3097,11 @@ func detectAndRenderState(
 	if err != nil {
 		return err
 	}
-	// Without local AI there is no model to pick. An empty aiModel makes a
-	// later switch to local AI stop at the Nix assertion instead of pulling a
-	// model sized for some other machine.
-	var ai profile.Result
-	// A central AI server holds the model; local hardware does not matter.
-	if u.HasApp("ai") && u.AIEndpoint == "" {
-		// u holds the override from either the preset file or the answers;
-		// the file does not exist yet in an interactive install.
-		override, err := profile.NewOverride(u.OverrideAISelection, u.OverrideModelWith)
-		if err != nil {
-			return fmt.Errorf("overrideModelWith: %w", err)
-		}
-		ai, err = profile.DetectWith(ctx, override)
-		if err != nil {
-			return err
-		}
-		if ai.Model == "" {
-			// A preset or a rerun of such a config gets here. Rebuilds sync
-			// apps from user.config.json, so the file itself has to change.
-			return fmt.Errorf("user.config.json enables local AI, but no local model fits %d GiB RAM (8 GiB needed): set aiEndpoint, set overrideAiSelection with overrideModelWith, or remove \"ai\" from apps", ai.RAMGB)
-		}
+	ai, err := pickLocalAI(ctx, &s.user, s.preset, out)
+	if err != nil {
+		return err
 	}
+	u.Apps = s.user.Apps
 	system, err := detectedNixSystem()
 	if err != nil {
 		return err
@@ -3139,6 +3126,44 @@ func detectAndRenderState(
 	s.render.WMs = []string{"hyprland"}
 
 	return nil
+}
+
+// detectLocalAI is profile.DetectWith; tests swap it.
+var detectLocalAI = profile.DetectWith
+
+// pickLocalAI picks the local AI model for the ai app. Without local AI, or
+// with a central AI server, there is no model to pick: an empty aiModel makes
+// a later switch to local AI stop at the Nix assertion instead of pulling a
+// model sized for some other machine.
+//
+// The interview no longer asks about AI (O4), so a rerun keeps the running
+// apps. When no model fits this machine (a disk moved to a smaller one), an
+// interactive run turns local AI off and says so; gjallarctl ai enable
+// explains the ways to turn it on anyway. A preset names its apps itself and
+// stops instead.
+func pickLocalAI(ctx context.Context, u *config.User, preset bool, out io.Writer) (profile.Result, error) {
+	if !u.HasApp("ai") || u.AIEndpoint != "" {
+		return profile.Result{}, nil
+	}
+	// u holds the override from either the preset file or the running
+	// config; the file does not exist yet in a new install.
+	override, err := profile.NewOverride(u.OverrideAISelection, u.OverrideModelWith)
+	if err != nil {
+		return profile.Result{}, fmt.Errorf("overrideModelWith: %w", err)
+	}
+	ai, err := detectLocalAI(ctx, override)
+	if err != nil {
+		return profile.Result{}, err
+	}
+	if ai.Model != "" {
+		return ai, nil
+	}
+	if preset {
+		return profile.Result{}, fmt.Errorf("the preset enables local AI, but no local model fits %d GiB RAM (8 GiB needed): set aiEndpoint, set overrideAiSelection with overrideModelWith, or remove \"ai\" from apps", ai.RAMGB)
+	}
+	u.Apps = slices.DeleteFunc(slices.Clone(u.Apps), func(id string) bool { return id == "ai" })
+	fmt.Fprintf(out, "Local AI is turned off: no local model fits %d GiB RAM (8 GiB needed). After the install, gjallarctl ai enable lists the ways to turn it on anyway.\n", ai.RAMGB)
+	return profile.Result{}, nil
 }
 
 func configureSecrets(context.Context, string, *state, io.Writer) error {

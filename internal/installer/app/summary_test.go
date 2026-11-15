@@ -32,7 +32,7 @@ func TestConfirmInstallShowsEveryAnswerOnce(t *testing.T) {
 	}
 	for _, want := range []string{
 		"Region:      Etc/UTC, en_US.UTF-8, keyboard us (intl)",
-		"Account:     alex on gjallarOS, shell zsh",
+		"Account:     alex on gjallarOS",
 		"Management:  not managed",
 		"Printing:    printers and scanners plugged into this computer",
 		"Secure Boot: on, gjallarOS keys",
@@ -49,7 +49,7 @@ func TestConfirmInstallShowsEveryAnswerOnce(t *testing.T) {
 	}
 }
 
-func TestConfirmInstallNoChangesNothing(t *testing.T) {
+func TestConfirmInstallEnterAnswersNo(t *testing.T) {
 	var output bytes.Buffer
 	ok, err := confirmInstall(context.Background(), prompt.New(strings.NewReader("\n"), &output), summaryUser(), installTarget{encryptedRoot: true})
 	if err != nil || ok {
