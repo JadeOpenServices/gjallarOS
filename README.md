@@ -119,8 +119,9 @@ terminal.
 | Printing | Printers and scanners: off, plugged into this computer, or also on the local network |
 | Security | Secure Boot, how the disk unlocks (TPM2 alone or with a PIN, both add a recovery key), recovery (boot entry and partition, boot entry only, or none; the partition needs Secure Boot), USB devices (off, review new devices, or review and block unknown devices; a new install offers review) |
 
-Before the region questions, the installer offers to check for firmware
-updates and installs them right away. USB device approvals expire after 30
+On a running system, the installer offers to check for firmware updates
+before the region questions and installs them right away. The USB stick
+skips this step; on the installed system `fwupdmgr update` installs them. USB device approvals expire after 30
 days without use; Settings changes that. A managed machine always gets recovery. At the end the installer
 shows every answer once and asks "Install now?"; Enter means no, and
 nothing is written or installed.
