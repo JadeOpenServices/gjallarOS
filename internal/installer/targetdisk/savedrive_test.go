@@ -25,7 +25,7 @@ func saveTree(t *testing.T, targetPath string) []byte {
 			"label": nil, "model": model, "size": 16000000000, "ro": ro, "mountpoints": []any{nil}, "children": children}
 	}
 	bootStick := disk("/dev/sdc", "usb", "Boot Stick", false,
-		part("/dev/sdc1", "iso9660", "2026-11-15-00-00-00-00", "NIXOS_ISO", "/iso"),
+		part("/dev/sdc1", "iso9660", "2026-11-15-00-00-00-00", "GJALLAR_STICK", "/iso"),
 		part("/dev/sdc2", "vfat", "AAAA-0001", "EFIBOOT"),
 		part("/dev/sdc3", "vfat", "AAAA-0002", LogsLabel),
 	)

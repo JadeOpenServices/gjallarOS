@@ -187,7 +187,7 @@ func saveSystemUse(device saveDevice) bool {
 }
 
 func saveInstallMedia(device saveDevice) bool {
-	if strings.EqualFold(strings.TrimSpace(device.Label), nixOSISOLabel) || device.FSType == "iso9660" {
+	if bootMediaLabel(device.Label) || device.FSType == "iso9660" {
 		return true
 	}
 	for _, mount := range device.MountPoints {

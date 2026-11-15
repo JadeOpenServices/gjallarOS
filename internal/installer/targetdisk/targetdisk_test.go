@@ -169,21 +169,49 @@ func TestValidateRejectsCurrentRootDisk(t *testing.T) {
 }
 
 func TestValidateRejectsInstallationMediaByLabel(t *testing.T) {
+	// Unmounted, as after copytoram: only the label marks the medium.
+	for _, label := range []string{"GJALLAR_STICK", "gjallar-recovery-26.05-x86_64"} {
+		data := `{
+		  "blockdevices": [{
+		    "path": "/dev/sdb",
+		    "type": "disk",
+		    "model": "USB Stick",
+		    "serial": "INSTALLER-USB",
+		    "size": 32000000000,
+		    "label": "` + label + `",
+		    "mountpoints": [null],
+		    "children": [{
+		      "path": "/dev/sdb2",
+		      "type": "part",
+		      "size": 3000000,
+		      "label": "EFIBOOT",
+		      "mountpoints": [null]
+		    }]
+		  }]
+		}`
+
+		_, err, _ := runValidation(
+			t,
+			data,
+			Input{Path: "/dev/sdb"},
+		)
+		if err == nil || !strings.Contains(err.Error(), "installation media") {
+			t.Fatalf("installation medium %s unexpectedly accepted: %v", label, err)
+		}
+	}
+}
+
+func TestValidateAcceptsAStockNixOSStick(t *testing.T) {
+	// A stock NixOS stick is not ours; it may be the install target.
 	data := `{
 	  "blockdevices": [{
 	    "path": "/dev/sdb",
 	    "type": "disk",
 	    "model": "USB Stick",
-	    "serial": "INSTALLER-USB",
+	    "serial": "OTHER-USB",
 	    "size": 32000000000,
-	    "mountpoints": [null],
-	    "children": [{
-	      "path": "/dev/sdb1",
-	      "type": "part",
-	      "size": 3000000000,
-	      "label": "NIXOS_ISO",
-	      "mountpoints": ["/iso"]
-	    }]
+	    "label": "nixos-minimal-26.05-x86_64",
+	    "mountpoints": [null]
 	  }]
 	}`
 
@@ -192,8 +220,8 @@ func TestValidateRejectsInstallationMediaByLabel(t *testing.T) {
 		data,
 		Input{Path: "/dev/sdb"},
 	)
-	if err == nil || !strings.Contains(err.Error(), "installation media") {
-		t.Fatalf("installation medium unexpectedly accepted: %v", err)
+	if err != nil && strings.Contains(err.Error(), "installation media") {
+		t.Fatalf("stock NixOS stick taken for our boot medium: %v", err)
 	}
 }
 

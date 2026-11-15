@@ -16,7 +16,14 @@ import (
 	"strings"
 )
 
-const nixOSISOLabel = "NIXOS_ISO"
+// Volume labels of gjallarOS boot media: the installer stick, and the
+// recovery ISO (gjallar-recovery-<release>-<arch>). After copytoram the
+// medium has no mount left, so the label is what still keeps it off the
+// target list.
+const (
+	stickLabel          = "GJALLAR_STICK"
+	recoveryLabelPrefix = "gjallar-recovery-"
+)
 
 var installationMediaMounts = map[string]bool{
 	"/iso":               true,
@@ -227,8 +234,13 @@ func activeUse(device blockDevice) []string {
 	return active
 }
 
+func bootMediaLabel(label string) bool {
+	label = strings.TrimSpace(label)
+	return strings.EqualFold(label, stickLabel) || strings.HasPrefix(strings.ToLower(label), recoveryLabelPrefix)
+}
+
 func containsInstallationMedia(device blockDevice) bool {
-	if strings.EqualFold(strings.TrimSpace(device.Label), nixOSISOLabel) {
+	if bootMediaLabel(device.Label) {
 		return true
 	}
 	for _, mount := range device.MountPoints {
