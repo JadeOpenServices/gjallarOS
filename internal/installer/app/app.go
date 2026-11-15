@@ -2972,9 +2972,9 @@ func provisionRecoveryPartition(ctx context.Context, root string, s state) error
 		}
 		s.recoveryPartition = found
 	}
-	// The recovery configuration imports untracked generated/state.nix, so a
-	// git+file build never evaluates; build from the staged source as
-	// deploy.Apply does. That also works when installer-resume.service runs
+	// The recovery image reads the untracked keyboard file written into the
+	// stage below, so a git+file build would miss it; build from the staged
+	// source as deploy.Apply does. That also works when installer-resume.service runs
 	// as root, where Nix refuses the user-owned Git repository (e2e-full,
 	// 2026-10-05).
 	keyboard, err := recoveryKeyboardFor(s.user.KeyboardLayout, s.user.KeyboardVariant)
