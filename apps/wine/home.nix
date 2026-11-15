@@ -53,7 +53,10 @@ let
     # is its switch for wrappers.
     export WINE_BIN="${winePackage}/bin/.wine"
 
-    unset WINEDLLOVERRIDES
+    # Only Wine's menu builder is named, and it stays off as in the sandbox
+    # (internal/winesandbox). Its "Open with" entries would start .vbs, .reg
+    # and similar files on this prefix outside the sandbox (L51).
+    export WINEDLLOVERRIDES="winemenubuilder.exe=d"
 
     state="''${XDG_STATE_HOME:-$HOME/.local/state}/gjallar-wine"
     log="$state/setup.log"
