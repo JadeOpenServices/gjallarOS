@@ -62,6 +62,9 @@ same system replaces it. A live run that never reached a target disk keeps
 its log in RAM only.
 
 The log is the terminal text, cleaned of colour codes and progress lines.
+The Nix build steps (`nixos-install`, `nixos-rebuild`, `nix-channel`) keep
+their progress bar on screen; the log gets only the last state of each bar
+line. Only their output is logged, never what you type while they run.
 Before a line is written, URL credentials, tokens and key-like strings are
 hidden, and so are your user name, name, host name, email, GitHub name and
 disk serials. Passwords are typed with echo off and never reach it. The

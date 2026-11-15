@@ -9,6 +9,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/installlog"
 )
 
 type Policy struct {
@@ -131,11 +133,7 @@ func Align(ctx context.Context, repo, expected, nixosConfig string) error {
 		return fmt.Errorf("fetch pinned nixpkgs %s: unexpected result %q", src.URL, strings.TrimSpace(string(out)))
 	}
 	for _, args := range Commands(src, tree, nixosConfig) {
-		cmd := exec.CommandContext(ctx, "sudo", args...)
-		cmd.Stdin = os.Stdin
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		if err := cmd.Run(); err != nil {
+		if err := installlog.Run(ctx, os.Stdin, os.Stdout, os.Stderr, "sudo", args...); err != nil {
 			return fmt.Errorf("sudo %s: %w", strings.Join(args, " "), err)
 		}
 	}
