@@ -109,7 +109,7 @@ func TestGenerateTargetUsesMountedMnt(t *testing.T) {
 		content: nixModule(),
 	}
 
-	backup, err := generate(
+	generated, err := generate(
 		context.Background(),
 		root,
 		target,
@@ -120,8 +120,8 @@ func TestGenerateTargetUsesMountedMnt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if backup != "" {
-		t.Fatalf("unexpected backup %q", backup)
+	if generated.Backup != "" || len(generated.DroppedSwap) != 0 {
+		t.Fatalf("unexpected result %+v", generated)
 	}
 
 	joined := callsText(r.calls)
@@ -256,7 +256,7 @@ func TestGenerateTargetBacksUpExistingHardwareState(t *testing.T) {
 		time.UTC,
 	)
 
-	backup, err := generate(
+	generated, err := generate(
 		context.Background(),
 		root,
 		target,
@@ -267,6 +267,7 @@ func TestGenerateTargetBacksUpExistingHardwareState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	backup := generated.Backup
 
 	expectedBackup := target + ".bak.20260907213045"
 	if backup != expectedBackup {
@@ -407,5 +408,109 @@ func TestBackupFileNumbersSameSecondReruns(t *testing.T) {
 	}
 	if first != target+".bak.20261008124129" || second != first+".1" {
 		t.Fatalf("backups %s, %s", first, second)
+	}
+}
+
+// The shape nixos-generate-config prints for the stock NixOS installer's
+// encrypted root plus encrypted swap (multiLineList in
+// nixos-generate-config.pl): only the root's LUKS mapping, and the swap
+// as a device that appears only after an unlock gjallarOS never does.
+func calamaresRootAndSwap() []byte {
+	return []byte(`{ config, lib, pkgs, modulesPath, ... }:
+
+{
+  boot.initrd.availableKernelModules = [ "nvme" "xhci_pci" ];
+  boot.initrd.luks.devices."luks-root-example".device = "/dev/disk/by-uuid/root-example";
+
+  fileSystems."/" =
+    { device = "/dev/mapper/luks-root-example";
+      fsType = "ext4";
+    };
+
+  swapDevices =
+    [ { device = "/dev/disk/by-uuid/swap-example"; }
+    ];
+
+  networking.useDHCP = lib.mkDefault true;
+}
+`)
+}
+
+func TestDropDiskSwapLeavesOnlyZram(t *testing.T) {
+	cleaned, dropped, err := dropDiskSwap(calamaresRootAndSwap())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(dropped) != 1 || dropped[0] != "/dev/disk/by-uuid/swap-example" {
+		t.Fatalf("dropped = %v", dropped)
+	}
+	text := string(cleaned)
+	if !strings.Contains(text, "  swapDevices = [ ];\n") || strings.Contains(text, "swap-example") {
+		t.Fatalf("swap left in:\n%s", text)
+	}
+	for _, kept := range []string{
+		`boot.initrd.luks.devices."luks-root-example".device = "/dev/disk/by-uuid/root-example";`,
+		`{ device = "/dev/mapper/luks-root-example";`,
+		"networking.useDHCP = lib.mkDefault true;",
+	} {
+		if !strings.Contains(text, kept) {
+			t.Fatalf("lost %q:\n%s", kept, text)
+		}
+	}
+}
+
+func TestDropDiskSwapKeepsEmptyAndMissingLists(t *testing.T) {
+	for name, module := range map[string][]byte{
+		"empty":   []byte("{ ... }:\n{\n  swapDevices = [ ];\n}\n"),
+		"missing": nixModule(),
+	} {
+		cleaned, dropped, err := dropDiskSwap(module)
+		if err != nil || len(dropped) != 0 || string(cleaned) != string(module) {
+			t.Fatalf("%s: changed to %q, dropped %v, err %v", name, cleaned, dropped, err)
+		}
+	}
+}
+
+func TestDropDiskSwapRefusesUnknownShapes(t *testing.T) {
+	for name, module := range map[string]string{
+		"twice":        "{ ... }:\n{\n  swapDevices = [ ];\n  swapDevices = [ ];\n}\n",
+		"unterminated": "{ ... }:\n{\n  swapDevices =\n    [ { device = \"/dev/sda2\"; }\n}\n",
+	} {
+		if _, _, err := dropDiskSwap([]byte(module)); err == nil {
+			t.Fatalf("%s: accepted", name)
+		}
+	}
+}
+
+func TestGenerateDropsDiskSwap(t *testing.T) {
+	root := t.TempDir()
+	target := Target(root)
+	r := &fakeRunner{
+		outputs: map[string][]byte{
+			commandKey("findmnt", "-nro", "TARGET", "--mountpoint", "/mnt"): []byte("/mnt\n"),
+		},
+		errors:  map[string]error{},
+		content: calamaresRootAndSwap(),
+	}
+	generated, err := generate(context.Background(), root, target, time.Unix(0, 0), "/mnt", r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(generated.DroppedSwap) != 1 || generated.DroppedSwap[0] != "/dev/disk/by-uuid/swap-example" {
+		t.Fatalf("dropped = %v", generated.DroppedSwap)
+	}
+	written, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(written), "swap-example") || !strings.Contains(string(written), "swapDevices = [ ];") {
+		t.Fatalf("written hardware configuration keeps the swap:\n%s", written)
+	}
+	notice := DroppedSwapNotice(generated.DroppedSwap)
+	if !strings.Contains(notice, "/dev/disk/by-uuid/swap-example") || !strings.Contains(notice, "nothing on it was changed") {
+		t.Fatalf("notice %q", notice)
+	}
+	if DroppedSwapNotice(nil) != "" {
+		t.Fatal("notice without dropped swap")
 	}
 }

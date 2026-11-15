@@ -22,6 +22,7 @@ const (
 	DiskChosen           ID = 1012
 	TargetValidated      ID = 1020
 	TargetRootReady      ID = 1021
+	HardwareSwapDropped  ID = 1025
 	NixOSInstallStarted  ID = 1030
 	NixOSInstallFinished ID = 1031
 	CheckoutCloned       ID = 1040
@@ -97,6 +98,9 @@ var Registry = []Anchor{
 	{ID: TargetRootReady, Name: "install.target.root-ready",
 		Meaning: "The new root file system is mounted at /mnt.",
 		Fields:  []FieldSpec{{Name: "encrypted", Kind: KindBool, Meaning: "root is inside LUKS"}}},
+	{ID: HardwareSwapDropped, Name: "install.hardware.disk-swap-dropped",
+		Meaning: "Swap partitions that were on while the hardware configuration was made are left out; gjallarOS swaps to zram only. The partitions are not changed.",
+		Fields:  []FieldSpec{{Name: "swaps", Kind: KindCount, Meaning: "how many swap partitions were left out"}}},
 	{ID: NixOSInstallStarted, Name: "install.nixos-install.started",
 		Meaning: "nixos-install started building and copying the system."},
 	{ID: NixOSInstallFinished, Name: "install.nixos-install.finished",

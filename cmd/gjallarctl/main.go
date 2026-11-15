@@ -336,13 +336,16 @@ func runTPM2(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stdout, "luks_tpm2_enable=false\n[NOTE] No TPM2 device detected; startup keeps asking for the recovery key or passphrase.")
 		return 0
 	}
-	device, err := diskcrypto.DetectDevice(context.Background())
+	// Only the LUKS device under / counts. Other LUKS disks (an old swap
+	// partition, a USB stick) are not the system disk and must not block
+	// the check (locked laptop, 2026-11-15).
+	device, err := diskcrypto.RootDevice(context.Background())
 	if err != nil {
 		fmt.Fprintf(stderr, "ERROR: refusing TPM2 enrollment: %v\n", err)
 		return 1
 	}
 	if device == "" {
-		fmt.Fprintln(stdout, "luks_tpm2_enable=false\n[NOTE] No active crypto_LUKS device found; skipping TPM2 enrollment.")
+		fmt.Fprintln(stdout, "luks_tpm2_enable=false\n[NOTE] The root file system is not on a LUKS device; skipping TPM2 enrollment.")
 		return 0
 	}
 	if err := diskcrypto.VerifyDeviceIdentity(mappingInfo.Device, device); err != nil {
@@ -867,7 +870,7 @@ func runGenerateHardware(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "ERROR: %v\n", err)
 		return 1
 	}
-	backup, err := hardwareconfig.Generate(context.Background(), *repo, *target, time.Now())
+	generated, err := hardwareconfig.Generate(context.Background(), *repo, *target, time.Now())
 	if repairErr := checkoutowner.Repair(*repo); repairErr != nil {
 		fmt.Fprintf(stderr, "WARNING: %v\n", repairErr)
 	}
@@ -875,9 +878,10 @@ func runGenerateHardware(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "ERROR: %v\n", err)
 		return 1
 	}
-	if backup != "" {
-		fmt.Fprintf(stdout, "Backup: %s\n", backup)
+	if generated.Backup != "" {
+		fmt.Fprintf(stdout, "Backup: %s\n", generated.Backup)
 	}
+	fmt.Fprint(stdout, hardwareconfig.DroppedSwapNotice(generated.DroppedSwap))
 	fmt.Fprintf(stdout, "Generated hardware configuration: %s\n", resolved)
 	return 0
 }

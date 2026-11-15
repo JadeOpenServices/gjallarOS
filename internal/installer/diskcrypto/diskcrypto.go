@@ -1,11 +1,9 @@
 package diskcrypto
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -56,21 +54,6 @@ func VerifyDeviceIdentity(expected, detected string) error {
 		return fmt.Errorf("refusing disk-key operation: configured LUKS device %s resolves to %s, but detected %s", expected, expectedResolved, detectedResolved)
 	}
 	return nil
-}
-
-func DetectDevice(ctx context.Context) (string, error) {
-	out, err := exec.CommandContext(ctx, "lsblk", "-pnro", "NAME,FSTYPE").Output()
-	if err != nil {
-		return "", fmt.Errorf("lsblk: %w", err)
-	}
-	devices := parseLUKSDevices(string(out))
-	if len(devices) > 1 {
-		return "", fmt.Errorf("multiple LUKS devices detected (%s); refusing ambiguous automatic selection", strings.Join(devices, ", "))
-	}
-	if len(devices) == 1 {
-		return devices[0], nil
-	}
-	return "", nil
 }
 
 func parseLUKSDevices(output string) []string {

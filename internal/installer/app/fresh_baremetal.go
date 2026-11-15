@@ -228,17 +228,19 @@ func runFreshBareMetal(
 
 	fmt.Fprintln(out, "STAGE: generating target hardware configuration")
 
-	if _, err := hardwareconfig.GenerateTarget(
+	generated, err := hardwareconfig.GenerateTarget(
 		ctx,
 		repo,
 		hardwarePath,
 		time.Now(),
-	); err != nil {
+	)
+	if err != nil {
 		return freshBareMetalResult{}, fmt.Errorf(
 			"generate fresh target hardware configuration: %w",
 			err,
 		)
 	}
+	reportDroppedSwap(out, generated.DroppedSwap)
 
 	fmt.Fprintln(out, "STAGE: installing gjallarOS into prepared target")
 	installlog.Mark(installlog.NixOSInstallStarted)

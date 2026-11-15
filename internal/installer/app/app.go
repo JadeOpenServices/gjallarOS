@@ -1251,6 +1251,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 		if hardwareResult.backup != "" {
 			fmt.Fprintln(out, "Backup:", hardwareResult.backup)
 		}
+		reportDroppedSwap(out, hardwareResult.droppedSwap)
 		if !tpm2AllowedForSecureBoot(s.render.SecureBootEnable) {
 			s.render.LUKSTPM2Enable = false
 			if err := saveTPM2Off(&s.user, presetPath, out); err != nil {

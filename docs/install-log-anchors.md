@@ -17,6 +17,7 @@ or one of the words listed here, never text a user typed.
 | GJA-1012 | `install.disk.chosen` | The user picked the target from several disks. | `disks` (count): how many disks qualified |
 | GJA-1020 | `install.target.validated` | The target disk passed the safety checks; the disk plan is next. | none |
 | GJA-1021 | `install.target.root-ready` | The new root file system is mounted at /mnt. | `encrypted` (yes/no): root is inside LUKS |
+| GJA-1025 | `install.hardware.disk-swap-dropped` | Swap partitions that were on while the hardware configuration was made are left out; gjallarOS swaps to zram only. The partitions are not changed. | `swaps` (count): how many swap partitions were left out |
 | GJA-1030 | `install.nixos-install.started` | nixos-install started building and copying the system. | none |
 | GJA-1031 | `install.nixos-install.finished` | nixos-install finished without an error. | none |
 | GJA-1040 | `install.checkout.cloned` | The system checkout was cloned into the target. | none |
