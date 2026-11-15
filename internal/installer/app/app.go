@@ -330,12 +330,13 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 		}
 	}()
 	installedRoot := "/"
-	presetRoot := root
+	presetPath := filepath.Join(root, "user.config.json")
 	if opt.recovery && opt.acceptExisting {
 		installedRoot = "/mnt"
-		presetRoot = installedRoot
+		if err := importInstalledAnswers(installedRoot, presetPath, out); err != nil {
+			return fail(errOut, err)
+		}
 	}
-	presetPath := filepath.Join(presetRoot, "user.config.json")
 	if _, err := os.Stat(presetPath); err == nil {
 		s.user, err = config.Load(presetPath)
 		if err != nil {
@@ -2976,11 +2977,18 @@ func provisionRecoveryPartition(ctx context.Context, root string, s state) error
 	// deploy.Apply does. That also works when installer-resume.service runs
 	// as root, where Nix refuses the user-owned Git repository (e2e-full,
 	// 2026-10-05).
+	keyboard, err := recoveryKeyboardFor(s.user.KeyboardLayout, s.user.KeyboardVariant)
+	if err != nil {
+		return fmt.Errorf("build recovery image: %w", err)
+	}
 	source, err := flakesource.Stage(root, "")
 	if err != nil {
 		return fmt.Errorf("build recovery image: %w", err)
 	}
 	defer source.Close()
+	if err := writeRecoveryKeyboard(source.Dir, keyboard); err != nil {
+		return fmt.Errorf("build recovery image: %w", err)
+	}
 	storePath, err := buildStaged(ctx, source, "gjallar-recovery-iso")
 	if err != nil {
 		return fmt.Errorf("build recovery image: %w", err)

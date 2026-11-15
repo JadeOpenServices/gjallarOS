@@ -113,6 +113,68 @@
 
       installState = import (./. + "/generated/install-state.nix");
 
+      # The recovery image goes onto an unencrypted partition, so it is built
+      # without this machine's settings and without generated/ or
+      # user.config.json in its copy of the source. The installer writes the
+      # keyboard layout, the only machine value it carries, into
+      # generated/recovery-keyboard.json (L78). Without it the image types US.
+      recoveryKeyboard =
+        let
+          file = self.outPath + "/generated/recovery-keyboard.json";
+          keyboard =
+            if builtins.pathExists file then
+              builtins.fromJSON (builtins.readFile file)
+            else
+              {
+                layout = "us";
+                variant = "";
+              };
+        in
+        assert lib.assertMsg (
+          builtins.isAttrs keyboard
+          && builtins.attrNames keyboard == [
+            "layout"
+            "variant"
+          ]
+          && builtins.isString keyboard.layout
+          && builtins.isString keyboard.variant
+          && builtins.match "[a-z][a-z0-9_]{0,31}" keyboard.layout != null
+          && builtins.match "[A-Za-z0-9_-]{0,48}" keyboard.variant != null
+        ) "generated/recovery-keyboard.json must hold only a valid layout and variant";
+        keyboard;
+
+      recoverySource = builtins.path {
+        name = "gjallaros-recovery-source";
+        path = self.outPath;
+        filter =
+          path: _type:
+          let
+            relative = lib.removePrefix (toString self.outPath + "/") (toString path);
+          in
+          !(
+            relative == "generated"
+            || relative == "user.config.json"
+            || lib.hasPrefix ".user.config.json-" relative
+          );
+      };
+
+      recoverySystem =
+        extraModules:
+        nixpkgs.lib.nixosSystem {
+          inherit system;
+          modules = [ ./system/recovery/image.nix ] ++ extraModules;
+          specialArgs = {
+            releaseVersion = releasePolicy.release;
+            repoSource = recoverySource;
+            inherit recoveryKeyboard sourceRevision;
+          };
+        };
+
+      # Plain let bindings: nixosConfigurations has a key from the settings,
+      # and reading any attribute of it would load generated/state.nix.
+      recoveryImage = recoverySystem [ ];
+      installerLabImage = recoverySystem [ ./system/recovery/installer-lab.nix ];
+
       pkgs = basePkgs;
     in
     {
@@ -127,9 +189,8 @@
           inherit (inputs.lanzaboote.packages.${system}) lzbt;
         };
         "gjallar-installer" = pkgs.callPackage ./pkgs/gjallar-installer { inherit (inputs) oddc; };
-        "gjallar-recovery-iso" = self.nixosConfigurations.gjallar-recovery.config.system.build.isoImage;
-        "gjallar-installer-lab-iso" =
-          self.nixosConfigurations.gjallar-installer-lab.config.system.build.isoImage;
+        "gjallar-recovery-iso" = recoveryImage.config.system.build.isoImage;
+        "gjallar-installer-lab-iso" = installerLabImage.config.system.build.isoImage;
 
         # Packages that cache.nixos.org does not have because gjallarOS patches
         # them. The modules use the same files with the same pkgs, so a build
@@ -367,28 +428,8 @@
       };
 
       nixosConfigurations = {
-        gjallar-recovery = nixpkgs.lib.nixosSystem {
-          inherit system;
-          modules = [ ./system/recovery/image.nix ];
-          specialArgs = {
-            releaseVersion = releasePolicy.release;
-            repoSource = self.outPath;
-            inherit settings sourceRevision;
-          };
-        };
-
-        gjallar-installer-lab = nixpkgs.lib.nixosSystem {
-          inherit system;
-          modules = [
-            ./system/recovery/image.nix
-            ./system/recovery/installer-lab.nix
-          ];
-          specialArgs = {
-            releaseVersion = releasePolicy.release;
-            repoSource = self.outPath;
-            inherit settings sourceRevision;
-          };
-        };
+        gjallar-recovery = recoveryImage;
+        gjallar-installer-lab = installerLabImage;
 
         ${settings.hostname} = nixpkgs.lib.nixosSystem {
           modules = [

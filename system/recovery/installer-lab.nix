@@ -21,7 +21,8 @@
     script = ''
       set -eu
 
-      src=/etc/gjallar/installer-fallback-user.config.json
+      # The checked-in neutral preset; the image carries no machine answers.
+      src=${../../scripts/installation/user_PresetJSON/default.user.config.json}
       dst=/run/gjallarOS/device-config/user.config.json
 
       test -s "$src"

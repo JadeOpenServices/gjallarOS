@@ -583,6 +583,12 @@ The recovery partition shows up in the same menu as "gjallarOS recovery
 removable-media path, so firmware that ignores the boot order still starts
 gjallarOS. If the ESP itself is broken, boot the recovery ISO from USB.
 
+The recovery partition is not encrypted, so it holds no answers from the
+install: no names, host, email or network settings, only the keyboard
+layout. A reinstall from recovery reads the answers from
+`/etc/gjallar/system/user.config.json` on the installed disk after you
+unlock it, and asks for them when that file is missing.
+
 > [!NOTE]
 > The installed system does not carry the installer. `gjallar-installer` and
 > `gjallar-recovery-maintenance` (package `pkgs/gjallar-installer`) can

@@ -4,89 +4,13 @@
   pkgs,
   modulesPath,
   releaseVersion,
-  settings,
+  recoveryKeyboard,
   repoSource,
   sourceRevision,
   ...
 }:
 let
   tools = import ./tools.nix { inherit config pkgs sourceRevision; };
-
-  getSetting =
-    name: fallback: if builtins.hasAttr name settings then builtins.getAttr name settings else fallback;
-
-  sourceUserConfig = repoSource + "/user.config.json";
-
-  generatedInstallerPresetData = {
-      system = getSetting "system" pkgs.stdenv.hostPlatform.system;
-      hostname = getSetting "hostname" "gjallarOS";
-      username = getSetting "username" "user";
-
-      timezone = getSetting "timezone" "UTC";
-      locale = getSetting "locale" "en_US.UTF-8";
-      keyboardLayout = getSetting "keyboardLayout" "de";
-      keyboardVariant = getSetting "keyboardVariant" "";
-
-      touchpadWorkspaceSwipe = getSetting "touchpadWorkspaceSwipe" true;
-      clamshellEnable = getSetting "clamshellEnable" true;
-      consoleLoginEnable = getSetting "consoleLoginEnable" false;
-      usbguardEnable = getSetting "usbguardEnable" false;
-      usbTrustEnforce = getSetting "usbTrustEnforce" false;
-      usbTrustTpmHandle = getSetting "usbTrustTpmHandle" "";
-      dolphinDriveUsage = getSetting "dolphinDriveUsage" false;
-      firmwareFlashReadEntry = getSetting "firmwareFlashReadEntry" false;
-
-      name = getSetting "name" "";
-      email = getSetting "email" "";
-      githubUsername = getSetting "githubUsername" "";
-
-      dotfilesDir = "";
-
-      apps = settings.apps;
-      debugFunctions = getSetting "debugFunctions" false;
-
-      shell = getSetting "shell" "zsh";
-      editors = getSetting "editors" [ "vscodium" ];
-      browsers = getSetting "browsers" [ "firefox" ];
-      preferredEditor = getSetting "preferredEditor" "vscodium";
-      preferredBrowser = getSetting "preferredBrowser" "firefox";
-
-      theme = getSetting "theme" "noctalia";
-
-
-      aiAgentMode = getSetting "aiAgentMode" "workspace";
-      overrideAiSelection = false;
-      overrideModelWith = "";
-
-      luksTpm2Enable = getSetting "luksTpm2Enable" false;
-
-      recoveryEnable = getSetting "recoveryEnable" true;
-      recoveryPartitionEnable = getSetting "recoveryPartitionEnable" true;
-
-      secureBootEnable = getSetting "secureBootEnable" false;
-      # As in config.Defaults(): a reinstall from recovery is offered
-      # Secure Boot like any other install. Generated state does not carry
-      # this key, so a fixed false here meant never.
-      secureBootPrompt = true;
-      secureBootShim = getSetting "secureBootShim" false;
-
-      management.enable = false;
-      prebootLock.enable = false;
-
-      autoReboot = false;
-      runUpdateChecks = false;
-      writeConfig = true;
-      runRebuild = true;
-      unattendedInstall = false;
-      webApplications = getSetting "webApplications" [ ];
-    };
-
-  generatedInstallerPreset = pkgs.writeText "gjallar-installer-fallback.json" (
-    builtins.toJSON generatedInstallerPresetData
-  );
-
-  installerFallbackPreset =
-    if builtins.pathExists sourceUserConfig then sourceUserConfig else generatedInstallerPreset;
 
   # The ISO's store, built here instead of by isoImage so its dm-verity
   # root hash can go on the partition UKI's command line. The squashfs holds
@@ -322,15 +246,16 @@ in
   '';
   boot.zfs.forceImportRoot = false;
 
+  # The image knows the keyboard and nothing else about the machine; the
+  # answers stay inside the encrypted root (L78).
   services.xserver.xkb = {
-    layout = settings.keyboardLayout;
-    variant = settings.keyboardVariant;
+    inherit (recoveryKeyboard) layout variant;
   };
 
   console =
-    if settings.keyboardVariant == "" then
+    if recoveryKeyboard.variant == "" then
       {
-        keyMap = settings.keyboardLayout;
+        keyMap = recoveryKeyboard.layout;
       }
     else
       {
@@ -520,21 +445,20 @@ in
     "d /run/gjallarOS/device-config 0700 root root - -"
   ];
 
-  environment.etc."gjallar/installer-fallback-user.config.json".source = installerFallbackPreset;
-
   environment.etc."gjallar/device-config-contract".text = ''
     gjallarOS fresh-install device configuration handoff
 
     Runtime provider path:
       /run/gjallarOS/device-config/user.config.json
 
-    Embedded fallback:
-      /etc/gjallar/installer-fallback-user.config.json
-
     Resolution order:
       1. Runtime device configuration
-      2. Embedded device configuration
-      3. Interactive installer fallback
+      2. Reinstall only: the installed system's answers, read from
+         /mnt/etc/gjallar/system/user.config.json after the root is unlocked
+      3. Interactive installer
+
+    The image carries no answers of its own: it sits on an unencrypted
+    partition and knows only the keyboard layout.
 
     The runtime provider may later be JODS, local recovery storage, or another
     trusted provisioning component.

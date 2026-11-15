@@ -188,7 +188,6 @@ let
       prepare_installer_device_config() {
         live_repo=/run/gjallarOS/repo
         runtime_config=/run/gjallarOS/device-config/user.config.json
-        fallback_config=/etc/gjallar/installer-fallback-user.config.json
         target_config="$live_repo/user.config.json"
 
         [ -f "$live_repo/flake.nix" ] || return 0
@@ -198,7 +197,7 @@ let
         if [ -e "$runtime_config" ]; then
           if [ ! -s "$runtime_config" ]; then
             printf '%s\n' \
-              'ERROR: runtime device configuration exists but is empty; refusing embedded fallback.' >&2
+              'ERROR: runtime device configuration exists but is empty.' >&2
             return 1
           fi
 
@@ -212,19 +211,10 @@ let
           return 0
         fi
 
-        if [ -s "$fallback_config" ]; then
-          ${pkgs.coreutils}/bin/install \
-            -m 0600 \
-            "$fallback_config" \
-            "$target_config"
-
-          printf '%s\n' \
-            'Installer configuration source: embedded device configuration.'
-          return 0
-        fi
-
+        # The image carries no answers (L78). A reinstall reads the installed
+        # system's after unlock; everything else is asked.
         printf '%s\n' \
-          'Installer configuration source: interactive fallback.'
+          'Installer configuration source: none given to recovery.'
       }
 
       run_installer() {
