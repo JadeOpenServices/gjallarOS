@@ -117,7 +117,7 @@ terminal.
 | Management | Whether JODS manages this machine (only offered with TPM2 and Secure Boot) |
 | Disk (USB stick) | Which disk to erase |
 | Printing | Printers and scanners: off, plugged into this computer, or also on the local network |
-| Security | Secure Boot, firmware updates, how the disk unlocks (TPM2 alone or with a PIN, both add a recovery key), recovery (boot entry and partition, boot entry only, or none; the partition needs Secure Boot), USB devices (off, review new devices, or review and block unknown devices) |
+| Security | Secure Boot, firmware updates, how the disk unlocks (TPM2 alone or with a PIN, both add a recovery key), recovery (boot entry and partition, boot entry only, or none; the partition needs Secure Boot), USB devices (off, review new devices, or review and block unknown devices; a new install offers review) |
 
 USB device approvals expire after 30 days without use; Settings changes
 that. A managed machine always gets recovery. At the end the installer

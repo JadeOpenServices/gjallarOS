@@ -269,7 +269,9 @@ func TestCollectUSBTrust(t *testing.T) {
 		wantLapse               int
 		wantBlockOption         bool
 	}{
-		{name: "default off", encryptedRoot: true, tpm2: true, input: "\n", wantBlockOption: true},
+		{name: "new install defaults to review", encryptedRoot: true, tpm2: true, input: "\n",
+			wantReview: true, wantHandle: config.DefaultUSBTrustTPMHandle, wantLapse: DefaultUSBTrustLapseDays, wantBlockOption: true},
+		{name: "off", encryptedRoot: true, tpm2: true, input: "1\n", wantBlockOption: true},
 		{name: "review", encryptedRoot: true, tpm2: true, input: "2\n",
 			wantReview: true, wantHandle: config.DefaultUSBTrustTPMHandle, wantLapse: DefaultUSBTrustLapseDays, wantBlockOption: true},
 		{name: "blocking chosen", encryptedRoot: true, tpm2: true, input: "3\n",
@@ -312,6 +314,18 @@ func TestCollectUSBTrustRerunKeepsRunningChoice(t *testing.T) {
 		if u.USBGuardEnable != running.USBGuardEnable || u.USBTrustEnforce != running.USBTrustEnforce ||
 			u.USBTrustLapseDays != running.USBTrustLapseDays || u.USBTrustTPMHandle != running.USBTrustTPMHandle {
 			t.Fatalf("rerun changed USB trust: %+v, running %+v\n%s", u, running, output.String())
+		}
+	}
+	// A rerun of a machine without USB trust keeps it off on Enter.
+	{
+		running := config.User{}
+		var output bytes.Buffer
+		u := config.User{}
+		if err := collectUSBTrust(context.Background(), prompt.New(strings.NewReader("\n"), &output), true, true, true, "", &running, &u); err != nil {
+			t.Fatal(err)
+		}
+		if u.USBGuardEnable || u.USBTrustLapseDays != 0 || u.USBTrustTPMHandle != "" {
+			t.Fatalf("rerun turned USB trust on: %+v\n%s", u, output.String())
 		}
 	}
 	// Review turned on in a rerun gets the default expiry.

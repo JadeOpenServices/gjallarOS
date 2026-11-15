@@ -2680,9 +2680,11 @@ func collectUSBTrust(ctx context.Context, ui prompt.UI, modelSelected, encrypted
 	} else {
 		fmt.Fprintf(ui.Out, "Blocking is not offered: %s\n", noBlock)
 	}
-	def := usbTrustOff
-	if was.USBGuardEnable {
-		def = usbTrustReview
+	// A new install defaults to review (Jade 2026-11-15); a rerun keeps
+	// what the machine runs.
+	def := usbTrustReview
+	if running != nil && !was.USBGuardEnable {
+		def = usbTrustOff
 	}
 	if was.USBTrustEnforce && noBlock == "" {
 		def = usbTrustBlock
