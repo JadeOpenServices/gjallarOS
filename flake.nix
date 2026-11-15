@@ -132,10 +132,11 @@
         in
         assert lib.assertMsg (
           builtins.isAttrs keyboard
-          && builtins.attrNames keyboard == [
-            "layout"
-            "variant"
-          ]
+          &&
+            builtins.attrNames keyboard == [
+              "layout"
+              "variant"
+            ]
           && builtins.isString keyboard.layout
           && builtins.isString keyboard.variant
           && builtins.match "[a-z][a-z0-9_]{0,31}" keyboard.layout != null
@@ -175,6 +176,18 @@
       recoveryImage = recoverySystem [ ];
       installerLabImage = recoverySystem [ ./system/recovery/installer-lab.nix ];
 
+      # The installer stick is the same for everyone: no recoveryKeyboard,
+      # nothing from generated/.
+      stickImage = nixpkgs.lib.nixosSystem {
+        inherit system;
+        modules = [ ./system/installer-media/stick.nix ];
+        specialArgs = {
+          releaseVersion = releasePolicy.release;
+          repoSource = recoverySource;
+          inherit sourceRevision;
+        };
+      };
+
       pkgs = basePkgs;
     in
     {
@@ -191,6 +204,7 @@
         "gjallar-installer" = pkgs.callPackage ./pkgs/gjallar-installer { inherit (inputs) oddc; };
         "gjallar-recovery-iso" = recoveryImage.config.system.build.isoImage;
         "gjallar-installer-lab-iso" = installerLabImage.config.system.build.isoImage;
+        "gjallar-stick-iso" = stickImage.config.system.build.gjallarStickIso;
 
         # Packages that cache.nixos.org does not have because gjallarOS patches
         # them. The modules use the same files with the same pkgs, so a build
@@ -430,6 +444,7 @@
       nixosConfigurations = {
         gjallar-recovery = recoveryImage;
         gjallar-installer-lab = installerLabImage;
+        gjallar-stick = stickImage;
 
         ${settings.hostname} = nixpkgs.lib.nixosSystem {
           modules = [

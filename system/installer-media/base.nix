@@ -3,6 +3,7 @@
   lib,
   pkgs,
   utils,
+  modulesPath,
   ...
 }:
 # Stage 1 for every gjallarOS boot medium (recovery ISO, recovery
@@ -26,6 +27,53 @@
 # A failure ends in emergency mode, which has no shell here.
 let
   util-linux = config.boot.initrd.systemd.package.util-linux;
+  # The medium's store, built here instead of by isoImage so its dm-verity
+  # root hash can go on the UKI command line. The squashfs holds the initrd,
+  # so the hash cannot live inside it; under Secure Boot the UKI command
+  # line is signed (loophole 9).
+  store = pkgs.callPackage "${modulesPath}/../lib/make-squashfs.nix" {
+    storeContents = [ config.system.build.toplevel ];
+    comp = config.isoImage.squashfsCompression;
+  };
+
+  storeVerity =
+    pkgs.runCommand "gjallar-media-store-verity" { nativeBuildInputs = [ pkgs.cryptsetup ]; }
+      ''
+        size=$(stat -c %s ${store})
+        [ $((size % 4096)) -eq 0 ] || { echo "squashfs size $size is not 4K aligned" >&2; exit 1; }
+        mkdir $out
+        touch $out/nix-store.squashfs.verity
+        # Fixed salt keeps the build reproducible.
+        salt=$(printf gjallar-media-store | sha256sum | cut -d' ' -f1)
+        veritysetup format --no-superblock --hash=sha256 \
+          --data-block-size=4096 --hash-block-size=4096 --salt="$salt" \
+          ${store} $out/nix-store.squashfs.verity > $out/format.log
+        root=$(sed -n 's/^Root hash:[[:space:]]*//p' $out/format.log)
+        [ -n "$root" ] || { cat $out/format.log >&2; exit 1; }
+        printf '%s,%s,%s' "$((size / 4096))" "$salt" "$root" > $out/params
+      '';
+
+  # A UKI that boots this system with the store pinned by gjallar.verity=.
+  # prettyName is what boot menus show (os-release PRETTY_NAME).
+  mkUki =
+    {
+      name,
+      prettyName,
+      cmdline,
+    }:
+    pkgs.runCommand name { } ''
+      sed 's/^PRETTY_NAME=.*/PRETTY_NAME="${prettyName}"/' \
+        ${config.system.build.etc}/etc/os-release > os-release
+      ${pkgs.buildPackages.systemdUkify}/lib/systemd/ukify build \
+        --linux=${config.boot.kernelPackages.kernel}/${config.system.boot.loader.kernelFile} \
+        --initrd=${config.system.build.initialRamdisk}/${config.system.boot.loader.initrdFile} \
+        --cmdline="init=${config.system.build.toplevel}/init ${toString config.boot.kernelParams} gjallar.verity=$(cat ${storeVerity}/params) ${cmdline}" \
+        --stub=${pkgs.systemd}/lib/systemd/boot/efi/linux${pkgs.stdenv.hostPlatform.efiArch}.efi.stub \
+        --uname=${config.boot.kernelPackages.kernel.modDirVersion} \
+        --os-release=@os-release \
+        --output=$out
+    '';
+
   storeMount = "${utils.escapeSystemdPath "/sysroot/nix/.ro-store"}.mount";
   isoMount = "${utils.escapeSystemdPath "/sysroot/iso"}.mount";
 
@@ -46,6 +94,10 @@ let
   '';
 in
 {
+  system.build.gjallarMedia = {
+    inherit store storeVerity mkUki;
+  };
+
   boot.initrd.systemd = {
     enable = true;
     # installation-cd-base turns this on for the live ISO; the recovery
