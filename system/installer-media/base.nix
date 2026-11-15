@@ -77,6 +77,15 @@ in
       script = ''
         set -euo pipefail
         ${cmdline}
+        # A failed run takes down what it set up, so a retry from the
+        # emergency prompt (Enter) checks again from the start.
+        mnt=
+        loop=
+        undo() {
+          [ -z "$loop" ] || losetup -d "$loop" || true
+          [ -z "$mnt" ] || umount /run/gjallar/src || true
+        }
+        trap '[ $? -eq 0 ] || undo' EXIT
         if [ -n "$iso" ]; then
           [ -n "$verity" ] || fail "gjallar.iso= without gjallar.verity="
           [[ $iso =~ ^/[A-Za-z0-9_-][A-Za-z0-9._-]*$ ]] || fail "gjallar.iso=$iso is not a plain file name"
@@ -105,8 +114,10 @@ in
           # readable and the installer sees this disk as in use.
           mkdir -p /run/gjallar/src
           mount -t vfat -o ro,nodev,nosuid,noexec "$dev" /run/gjallar/src
+          mnt=1
           [ -f "/run/gjallar/src$iso" ] || fail "$dev: no recovery image matching this boot entry."
-          src=$(losetup -f --show -r "/run/gjallar/src$iso")
+          loop=$(losetup -f --show -r "/run/gjallar/src$iso")
+          src=$loop
         else
           label=/dev/disk/by-label/${config.isoImage.volumeID}
           udevadm wait --timeout=90 "$label" || fail "No medium labelled ${config.isoImage.volumeID} appeared."
@@ -142,6 +153,17 @@ in
       script = ''
         set -euo pipefail
         ${cmdline}
+        # Same as above: a failed check leaves nothing behind, so Enter at
+        # the emergency prompt runs it again instead of "device busy".
+        data=
+        hash=
+        dm=
+        undo() {
+          [ -z "$dm" ] || dmsetup remove --retry gjallar-store || true
+          [ -z "$hash" ] || losetup -d "$hash" || true
+          [ -z "$data" ] || losetup -d "$data" || true
+        }
+        trap '[ $? -eq 0 ] || undo' EXIT
         data=$(losetup -f --show -r /sysroot/iso/nix-store.squashfs)
         size=$(blockdev --getsz "$data")
         if [ -n "$verity" ]; then
@@ -152,6 +174,7 @@ in
           hash=$(losetup -f --show -r /sysroot/iso/nix-store.squashfs.verity)
           dmsetup create gjallar-store --readonly \
             --table "0 $size verity 1 $data $hash 4096 4096 $blocks 0 sha256 $root $salt"
+          dm=1
           # The first block is checked against the root hash here, so a
           # wrong image stops now with a clear message.
           dd if=/dev/mapper/gjallar-store of=/dev/null bs=4096 count=1 status=none \
