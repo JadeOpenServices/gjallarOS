@@ -50,8 +50,12 @@ curl -fsSL https://raw.githubusercontent.com/JadeOpenServices/gjallarOS/stable/s
 The script clones the repository with its submodules into
 `~/Documents/gjallarOS` and starts the installer from there. `GJALLAR_DIR`
 sets another folder, and `GJALLAR_CLONE_ONLY=1` stops after the clone.
-Running it again reuses the checkout. In an existing checkout,
-`./scripts/installation/install.sh` does the same.
+Running it again reuses the checkout and first updates it to the latest
+commit of its channel (`dev`, `staging` or `stable`), so a fix released since
+the last run is always included. A checkout on any other branch, or with local
+changes, stops with a message and stays as it is. In an existing checkout,
+`./scripts/installation/install.sh` uses that checkout as it is;
+`--channel stable` (or `staging`, `dev`) updates it first.
 
 </details>
 

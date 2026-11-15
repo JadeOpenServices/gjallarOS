@@ -34,7 +34,7 @@ command -v git >/dev/null 2>&1 ||
 # Release channel: --channel dev|staging|stable or GJALLAR_CHANNEL picks the
 # branch the checkout follows, and the installer records the same channel.
 # Without either, a new clone follows the default branch (stable) and an
-# existing checkout stays on the branch it has.
+# existing checkout keeps its channel branch, updated to the latest commit.
 channel="${GJALLAR_CHANNEL:-}"
 channel_flag=""
 expect_channel=0
@@ -145,11 +145,21 @@ if [[ ! -f "$script_file" || ! -f "$(dirname "$script_file")/../../flake.nix" ]]
     checkout="${GJALLAR_DIR:-$HOME/Documents/gjallarOS}"
     if [[ -e "$checkout/.git" ]]; then
         printf 'Using the existing checkout in %s\n' "$checkout"
-        if [[ -n "$channel" ]]; then
-            sync_channel "$checkout"
-        else
-            "${git_cmd[@]}" -C "$checkout" submodule update --init --recursive
+        # A rerun always gets the latest commit of the channel; without
+        # --channel that is the channel branch the checkout is on. Any
+        # other branch stops here, so nothing old is installed by mistake.
+        if [[ -z "$channel" ]]; then
+            branch="$("${git_cmd[@]}" -C "$checkout" symbolic-ref --quiet --short HEAD || true)"
+            case "$branch" in
+                dev | staging | stable) channel="$branch" ;;
+                *)
+                    printf 'ERROR: %s is not on a release channel branch (dev, staging or stable); nothing was changed. Run again with --channel stable (or staging, dev).\n' "$checkout" >&2
+                    exit 1
+                    ;;
+            esac
+            set -- "$@" --channel "$channel"
         fi
+        sync_channel "$checkout"
     else
         [[ ! -e "$checkout" ]] || {
             printf 'ERROR: %s exists and is not a git checkout. Set GJALLAR_DIR to another directory.\n' "$checkout" >&2
