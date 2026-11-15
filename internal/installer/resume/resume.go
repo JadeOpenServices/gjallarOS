@@ -5,13 +5,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/JadeOpenServices/gjallarOS/internal/installer/control"
 	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/control"
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/rootfile"
 )
 
 const (
@@ -407,20 +409,8 @@ func arm(ctx context.Context, executable string, tx Transaction) error {
 	return nil
 }
 
-func sudoWrite(ctx context.Context, data []byte, mode, path string) error {
-	tempDir, err := os.MkdirTemp("", "gjallar-installer-resume-*")
-	if err != nil {
-		return err
-	}
-	defer os.RemoveAll(tempDir)
-
-	temp := filepath.Join(tempDir, filepath.Base(path))
-	if err := os.WriteFile(temp, data, 0600); err != nil {
-		return err
-	}
-
-	return sudo(ctx, "install", "-m", mode, temp, path)
-}
+// sudoWrite writes data to path as root (L54). Tests replace it.
+var sudoWrite = rootfile.Write
 
 func sudo(ctx context.Context, args ...string) error {
 	cmd := exec.CommandContext(ctx, "sudo", args...)

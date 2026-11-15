@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
-	"os"
 	"strings"
 	"syscall"
 )
@@ -334,25 +333,24 @@ func sha1Fingerprint(der []byte) string {
 	return line(sum[:10]) + "\n     " + line(sum[10:])
 }
 
+// mokImportPath is where root keeps the key mokutil imports. /run belongs
+// to root.
+const mokImportPath = "/run/gjallar-mok-import.der"
+
 // queueMOK asks shim, through mokutil, to show der in MokManager at the next
 // start. mokutil asks for a one-time password that MokManager asks again.
 func queueMOK(ctx context.Context, der []byte, out io.Writer) error {
 	if err := efiSpaceFor(liveFirmware.efivars, len(der)); err != nil {
 		return err
 	}
-	file, err := os.CreateTemp("", "gjallar-mok-*.der")
-	if err != nil {
-		return err
+	// Root mokutil reads the key from a root-owned file written from
+	// memory. A file the user session made could be swapped for another
+	// key, which MokManager would then offer to trust (L54).
+	path := mokImportPath
+	if err := writeRootFile(ctx, der, "0600", path); err != nil {
+		return fmt.Errorf("stage the gjallarOS key for mokutil: %w", err)
 	}
-	path := file.Name()
-	defer os.Remove(path)
-	if _, err := file.Write(der); err != nil {
-		file.Close()
-		return err
-	}
-	if err := file.Close(); err != nil {
-		return err
-	}
+	defer func() { _ = run(context.WithoutCancel(ctx), "sudo", "rm", "-f", "--", path) }()
 	fmt.Fprintln(out, "Choose a one-time password for MokManager. MokManager reads the keyboard as US layout; letters and digits are safe.")
 	if err := run(ctx, "sudo", privilegedTool("mokutil"), "--import", path); err != nil {
 		return fmt.Errorf("queue the gjallarOS key for MokManager: %w", err)

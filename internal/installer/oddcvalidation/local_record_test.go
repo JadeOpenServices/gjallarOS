@@ -32,6 +32,15 @@ func TestWriteLocalValidationUsesProtectedPermissions(t *testing.T) {
 		return nil, nil
 	}
 
+	var written []byte
+	prev := writeRootFile
+	t.Cleanup(func() { writeRootFile = prev })
+	writeRootFile = func(_ context.Context, data []byte, mode, dst string) error {
+		calls = append(calls, []string{"rootfile", mode, dst})
+		written = data
+		return nil
+	}
+
 	err := writeLocalValidation(
 		context.Background(),
 		validTestValidation(),
@@ -40,6 +49,9 @@ func TestWriteLocalValidationUsesProtectedPermissions(t *testing.T) {
 	)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if !strings.Contains(string(written), "git:oddc456") {
+		t.Fatalf("record not passed to root: %q", written)
 	}
 
 	joined := make([]string, 0, len(calls))
@@ -55,7 +67,9 @@ func TestWriteLocalValidationUsesProtectedPermissions(t *testing.T) {
 		t.Fatalf("missing protected directory creation:\n%s", all)
 	}
 
-	if !strings.Contains(all, "sudo install -m 0600") {
+	// L54: the record reaches root from memory, never from a user file.
+	if !strings.Contains(all, "rootfile 0600 /var/lib/gjallarOS/oddc/.validation.json.tmp") ||
+		strings.Contains(all, "sudo install -m") {
 		t.Fatalf("missing protected file installation:\n%s", all)
 	}
 

@@ -13,6 +13,8 @@ import (
 	"regexp"
 	"strings"
 	"syscall"
+
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/rootfile"
 )
 
 var usernamePattern = regexp.MustCompile(`^[a-z_][a-z0-9_-]*$`)
@@ -162,45 +164,23 @@ func chpasswdLine(username, hash string) (string, error) {
 }
 
 func Store(ctx context.Context, target, hash string) error {
-	tmp, err := os.CreateTemp("", "gjallar-password-*.hash")
-	if err != nil {
-		return err
+	cmd := exec.CommandContext(ctx, "sudo", storeDirCommand(target)...)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("store password hash: %w", err)
 	}
-	name := tmp.Name()
-	defer os.Remove(name)
-	if err := tmp.Chmod(0600); err != nil {
-		tmp.Close()
-		return err
-	}
-	if _, err := fmt.Fprintln(tmp, hash); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Sync(); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	for _, args := range storeCommands(name, target) {
-		cmd := exec.CommandContext(ctx, "sudo", args...)
-		cmd.Stdin = os.Stdin
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		if err := cmd.Run(); err != nil {
-			return fmt.Errorf("store password hash: %w", err)
-		}
+	// The hash goes to root through a pipe, never through a file (L54).
+	if err := rootfile.Write(ctx, []byte(hash+"\n"), "0600", target); err != nil {
+		return fmt.Errorf("store password hash: %w", err)
 	}
 	return nil
 }
 
-// storeCommands installs the hash root-only. `install -D` alone would create
-// the password directory 0755 and expose which accounts have stored hashes;
-// `install -d` also tightens a directory an earlier version created.
-func storeCommands(source, target string) [][]string {
-	return [][]string{
-		{"install", "-d", "-m", "0700", "-o", "root", "-g", "root", "--", filepath.Dir(target)},
-		{"install", "-m", "0600", "-o", "root", "-g", "root", "--", source, target},
-	}
+// storeDirCommand makes the password folder root-only. `install -D` alone
+// would create it 0755 and expose which accounts have stored hashes;
+// `install -d` also tightens a folder an earlier version created.
+func storeDirCommand(target string) []string {
+	return []string{"install", "-d", "-m", "0700", "-o", "root", "-g", "root", "--", filepath.Dir(target)}
 }
