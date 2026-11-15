@@ -149,7 +149,9 @@ func Discover(repo string) (Options, error) {
 		return Options{}, err
 	}
 	kept := onlyRetired(browsers, retiredBrowsers)
-	browsers = withoutRetired(browsers, retiredBrowsers)
+	// login.nix is the login window module user/default.nix always
+	// imports, not a browser anyone picks.
+	browsers = withoutRetired(browsers, append([]string{"login"}, retiredBrowsers...))
 	themes, err := nixFiles(filepath.Join(repo, "themes"))
 	if err != nil {
 		return Options{}, err

@@ -2169,29 +2169,19 @@ func collectInteractive(ctx context.Context, ui prompt.UI, root string, partitio
 		// The prompt takes no variant; the running one stays with its layout.
 		u.KeyboardVariant = running.KeyboardVariant
 	}
-	u.TouchpadWorkspaceSwipe, err = ui.Confirm(ctx, "Enable three-finger workspace swipes?", a.TouchpadWorkspaceSwipe)
-	if err != nil {
-		return err
-	}
-	u.ClamshellEnable, err = ui.Confirm(ctx, "Enable dock-aware clamshell mode?", a.ClamshellEnable)
-	if err != nil {
-		return err
+	// Not asked; Settings changes them. Clamshell mode only helps a laptop,
+	// so a new install turns it on for a laptop chassis only.
+	u.TouchpadWorkspaceSwipe = a.TouchpadWorkspaceSwipe
+	u.ClamshellEnable = a.ClamshellEnable
+	if running == nil {
+		u.ClamshellEnable = hardware.FormFactor == "laptop"
 	}
 	if err := collectUSBTrust(ctx, ui, modelSelected, partitionable, tpm2, usbSystemDisk, running, u); err != nil {
 		return err
 	}
-	u.Name, err = askPersonal(ctx, ui, "Full name", a.Name, "Alex Example", true)
-	if err != nil {
-		return err
-	}
-	u.Email, err = askPersonal(ctx, ui, "Git email", a.Email, "alex@example.com", true)
-	if err != nil {
-		return err
-	}
-	u.GitHubUsername, err = askPersonal(ctx, ui, "GitHub username", a.GitHubUsername, "alex-example", false)
-	if err != nil {
-		return err
-	}
+	// Not asked: the git name and email stay empty on a new install (git
+	// then sets none) until Settings fills them; a rerun keeps them.
+	u.Name, u.Email, u.GitHubUsername = a.Name, a.Email, a.GitHubUsername
 	if u.SettingsSigningKey, err = askSigningKey(ctx, ui, a.SettingsSigningKey); err != nil {
 		return err
 	}
@@ -2201,26 +2191,11 @@ func collectInteractive(ctx context.Context, ui prompt.UI, root string, partitio
 	if running != nil && running.DotfilesDir != "" && running.Username == u.Username {
 		u.DotfilesDir = running.DotfilesDir
 	}
-	u.Shell, err = ui.Choice(ctx, "Login shell", a.Shell, o.Shells)
-	if err != nil {
-		return err
-	}
-	u.Editors, err = ui.Multi(ctx, "Editors", a.Editors, o.Editors)
-	if err != nil {
-		return err
-	}
-	u.Browsers, err = ui.Multi(ctx, "Browsers", a.Browsers, o.Browsers)
-	if err != nil {
-		return err
-	}
-	u.PreferredEditor, err = ui.Value(ctx, "Preferred editor", offeredOr(a.PreferredEditor, u.Editors, u.Editors[0]))
-	if err != nil {
-		return err
-	}
-	u.PreferredBrowser, err = ui.Value(ctx, "Preferred browser", offeredOr(a.PreferredBrowser, u.Browsers, u.Browsers[0]))
-	if err != nil {
-		return err
-	}
+	// Not asked: one shell exists, and a new install ships VSCodium and
+	// Firefox. A rerun keeps the running choices this checkout still offers.
+	u.Shell, u.Editors, u.Browsers = a.Shell, a.Editors, a.Browsers
+	u.PreferredEditor = offeredOr(a.PreferredEditor, u.Editors, u.Editors[0])
+	u.PreferredBrowser = offeredOr(a.PreferredBrowser, u.Browsers, u.Browsers[0])
 	if err := collectProjectTools(ctx, ui, running, u); err != nil {
 		return err
 	}

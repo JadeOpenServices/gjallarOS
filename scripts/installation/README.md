@@ -41,9 +41,10 @@ for city and country explicitly. The detected value is never accepted silently.
 
 In the preset, `username` is the Linux account and the single identity input.
 `dotfilesDir` is derived automatically as `/home/<username>/Documents/gjallarOS`.
-The `name` field is the human-readable Git commit author name; it is not the
-Linux username or GitHub username. `githubUsername` is a separate optional
-account label.
+The `name` and `email` fields are the Git commit author. The installer does
+not ask them: a new install leaves both empty, and git sets no author until
+`gjallarctl settings set name=... email=...` fills them. A rerun keeps them.
+`githubUsername` is a separate optional account label.
 
 The wallpaper is picked in the Noctalia control centre and kept in Noctalia's
 own state. The repository ships no wallpapers; until one is picked the

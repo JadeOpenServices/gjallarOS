@@ -79,7 +79,7 @@ func interviewDefaults(running *config.User, o discovery.Options) config.User {
 		ClamshellEnable:        true,
 		Shell:                  first(o.Shells),
 		Editors:                []string{"vscodium"},
-		Browsers:               []string{first(o.Browsers)},
+		Browsers:               []string{"firefox"},
 	}
 	if running == nil {
 		return fresh

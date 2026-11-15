@@ -74,7 +74,7 @@ func TestRerunInterviewOffersRunningAnswers(t *testing.T) {
 	for _, field := range []string{
 		"Hostname", "Username", "Name", "Email", "GitHubUsername", "Timezone", "Locale",
 		"KeyboardLayout", "KeyboardVariant", "TouchpadWorkspaceSwipe", "ClamshellEnable",
-		"DotfilesDir", "Shell", "Editors", "PreferredEditor", "PrintingEnable", "NetworkPrintingEnable",
+		"DotfilesDir", "Shell", "Editors", "PreferredEditor", "Browsers", "PreferredBrowser", "PrintingEnable", "NetworkPrintingEnable",
 		"USBGuardEnable", "USBTrustEnforce", "USBTrustLapseDays", "USBTrustTPMHandle", "Theme",
 		"NextcloudEnable", "NextcloudHost", "Apps", "AIEndpoint", "AIRemoteModel",
 		"AIRemoteContextTokens", "AIAgentMode", "Tailscale", "ThunderbirdSmartCard",
@@ -85,9 +85,56 @@ func TestRerunInterviewOffersRunningAnswers(t *testing.T) {
 			t.Errorf("%s = %#v after Enter everywhere, want the running %#v", field, got, want)
 		}
 	}
-	for _, prompt := range []string{"Username [alex]:", "Full name [Alex Example]:", "Git email [alex@example.com]:", "GitHub username [alex-example]:"} {
-		if !strings.Contains(output.String(), prompt) {
-			t.Errorf("no %q prompt; a personal question did not offer the running answer:\n%s", prompt, output.String())
+	if !strings.Contains(output.String(), "Username [alex]:") {
+		t.Errorf("the username question did not offer the running answer:\n%s", output.String())
+	}
+	assertNoDroppedQuestions(t, output.String())
+}
+
+// droppedQuestions left the installer; Settings changes their values.
+var droppedQuestions = []string{
+	"Full name", "Git email", "GitHub username", "Login shell", "Editors", "Browsers",
+	"Preferred editor", "Preferred browser", "workspace swipes", "clamshell",
+}
+
+func assertNoDroppedQuestions(t *testing.T, output string) {
+	t.Helper()
+	for _, question := range droppedQuestions {
+		if strings.Contains(output, question) {
+			t.Errorf("the installer still asks %q:\n%s", question, output)
+		}
+	}
+}
+
+func TestNewInstallInterviewSetsDroppedValues(t *testing.T) {
+	original := aiMemoryGB
+	t.Cleanup(func() { aiMemoryGB = original })
+	aiMemoryGB = func() (int, error) { return 32, nil }
+	o := discovery.Options{Shells: []string{"zsh"}, Editors: []string{"vscode", "vscodium"}, Browsers: []string{"firefox"}, Themes: []string{"noctalia"}}
+	for _, form := range []struct {
+		factor    string
+		clamshell bool
+	}{{"laptop", true}, {"desktop", false}, {"", false}} {
+		u, err := config.Defaults()
+		if err != nil {
+			t.Fatal(err)
+		}
+		var output bytes.Buffer
+		// Hostname: Enter; Username: alex (required on a new install); then Enter.
+		ui := prompt.New(strings.NewReader("\nalex\n"+strings.Repeat("\n", 200)), &output)
+		if err := collectInteractive(context.Background(), ui, "/home/alex/gjallarOS", true, "", true, true, "SYNTHETIC: no JODS in this test", discovery.Hardware{FormFactor: form.factor}, o, nil, &u); err != nil {
+			t.Fatalf("%s: %v\n%s", form.factor, err, output.String())
+		}
+		assertNoDroppedQuestions(t, output.String())
+		if u.ClamshellEnable != form.clamshell || !u.TouchpadWorkspaceSwipe {
+			t.Errorf("%q chassis: clamshell=%v swipes=%v, want clamshell=%v swipes=true", form.factor, u.ClamshellEnable, u.TouchpadWorkspaceSwipe, form.clamshell)
+		}
+		if u.Name != "" || u.Email != "" || u.GitHubUsername != "" {
+			t.Errorf("new install filled personal values: %q %q %q", u.Name, u.Email, u.GitHubUsername)
+		}
+		if u.Shell != "zsh" || !reflect.DeepEqual(u.Editors, []string{"vscodium"}) || !reflect.DeepEqual(u.Browsers, []string{"firefox"}) ||
+			u.PreferredEditor != "vscodium" || u.PreferredBrowser != "firefox" {
+			t.Errorf("new install apps: shell=%q editors=%v browsers=%v preferred=%q/%q", u.Shell, u.Editors, u.Browsers, u.PreferredEditor, u.PreferredBrowser)
 		}
 	}
 }
