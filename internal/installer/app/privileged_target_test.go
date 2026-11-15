@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -112,6 +113,62 @@ func TestInstallTreePrivilegedRealFilesystem(t *testing.T) {
 		if _, err := os.Stat(gone); !os.IsNotExist(err) {
 			t.Fatalf("%s left behind: %v", gone, err)
 		}
+	}
+}
+
+// L55: the user can plant a link or a pipe in the staged tree, or swap the
+// whole tree for a link, before root copies it. The copy is refused and the
+// installed tree stays as it was.
+func TestInstallTreePrivilegedRefusesPlantedLinksAndPipes(t *testing.T) {
+	withPrivilegedCommand(t, func(args []string) ([]byte, error) {
+		output, err := runUnprivileged(args)
+		if err != nil {
+			return output, fmt.Errorf("%w: %s", err, output)
+		}
+		return output, nil
+	})
+	plants := map[string]func(source string) error{
+		"link": func(source string) error {
+			return os.Symlink("/etc/hostname", filepath.Join(source, "oddc", "link"))
+		},
+		"pipe": func(source string) error {
+			return exec.Command("mkfifo", filepath.Join(source, "oddc", "pipe")).Run()
+		},
+		"swapped tree": func(source string) error {
+			if err := os.Rename(source, source+".real"); err != nil {
+				return err
+			}
+			return os.Symlink(source+".real", source)
+		},
+	}
+	for name, plant := range plants {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			source := filepath.Join(dir, "stage", "profile")
+			destination := filepath.Join(dir, "target", "profile")
+			for _, err := range []error{
+				os.MkdirAll(filepath.Join(source, "oddc"), 0o700),
+				os.WriteFile(filepath.Join(source, "oddc", "new"), []byte("new"), 0o600),
+				os.MkdirAll(destination, 0o700),
+				os.WriteFile(filepath.Join(destination, "old"), []byte("old"), 0o600),
+				plant(source),
+			} {
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			err := installTreePrivileged(context.Background(), source, destination)
+			if err == nil || !strings.Contains(err.Error(), "plain") {
+				t.Fatalf("planted %s accepted: %v", name, err)
+			}
+			if data, err := os.ReadFile(filepath.Join(destination, "old")); err != nil || string(data) != "old" {
+				t.Fatalf("installed tree changed: %q %v", data, err)
+			}
+			if _, err := os.Lstat(filepath.Join(dir, "target", ".profile.incoming")); !os.IsNotExist(err) {
+				t.Fatalf("refused copy left behind: %v", err)
+			}
+		})
 	}
 }
 
