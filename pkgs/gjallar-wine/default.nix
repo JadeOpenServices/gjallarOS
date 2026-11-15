@@ -29,6 +29,9 @@ buildGoModule {
       (lib.fileset.fileFilter (f: f.hasExt "go" || f.name == "meta.json") ../../apps)
       ../../apps/firefox-addons.json
       ../../apps/retired.json
+      # cmd/gjallar-wine checks the base setup script keeps the menu builder
+      # off (L51).
+      ../../apps/wine/home.nix
       ../../cmd/gjallar-wine
       ../../internal/installer/config
       ../../internal/localchanges
