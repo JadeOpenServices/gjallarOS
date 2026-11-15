@@ -3512,8 +3512,13 @@ func provisionRecoveryPartition(ctx context.Context, root string, s state) error
 	if err := attached(ctx, signScript, images[0], s.recoverySigningKey, s.recoverySigningPublicKey, releaseDir); err != nil {
 		return fmt.Errorf("sign recovery image release: %w", err)
 	}
-	manifest := filepath.Join(releaseDir, filepath.Base(images[0])+".manifest")
-	if err := attached(ctx, "sudo", installScript, s.recoveryPartition, images[0], manifest, manifest+".sig", filepath.Join(releaseDir, "recovery-signing-public.pem")); err != nil {
+	staged, release, err := stageRecoveryRelease(ctx, releaseDir, images[0])
+	if err != nil {
+		return fmt.Errorf("stage recovery image release: %w", err)
+	}
+	defer privilegedCommand(context.WithoutCancel(ctx), "rm", "-rf", "--", staged)
+	args := append([]string{installScript, s.recoveryPartition, images[0]}, release...)
+	if err := attached(ctx, "sudo", args...); err != nil {
 		return fmt.Errorf("install recovery partition: %w", err)
 	}
 	return nil

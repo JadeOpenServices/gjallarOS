@@ -143,17 +143,22 @@ func writeToDrive(ctx context.Context, target string, drive targetdisk.SaveDrive
 	return names, err
 }
 
-// makeSaveMountPoint has root create a new empty folder below /run and
-// checks that the name root reports is one of ours.
+// makeSaveMountPoint has root create a new empty folder below /run.
 func makeSaveMountPoint(ctx context.Context) (string, error) {
-	output, err := privilegedCommand(ctx, "mktemp", "-d", saveMountPrefix+"XXXXXX")
+	return makeRootTempDir(ctx, saveMountPrefix)
+}
+
+// makeRootTempDir has root create a new empty folder named prefix plus a
+// random part, and checks that the name root reports is one of ours.
+func makeRootTempDir(ctx context.Context, prefix string) (string, error) {
+	output, err := privilegedCommand(ctx, "mktemp", "-d", prefix+"XXXXXX")
 	if err != nil {
 		return "", err
 	}
 	dir := strings.TrimSpace(string(output))
-	rest := strings.TrimPrefix(dir, saveMountPrefix)
+	rest := strings.TrimPrefix(dir, prefix)
 	if rest == dir || rest == "" || strings.ContainsAny(rest, "/\n") || filepath.Clean(dir) != dir {
-		return "", fmt.Errorf("mount folder %q is not below %s", dir, saveMountPrefix)
+		return "", fmt.Errorf("folder %q is not below %s", dir, prefix)
 	}
 	return dir, nil
 }
