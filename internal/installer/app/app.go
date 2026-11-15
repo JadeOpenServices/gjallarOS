@@ -891,7 +891,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 			return fail(errOut, err)
 		}
 		if !s.user.SecureBootEnable {
-			fmt.Fprint(out, secureBootDeclinedNotice("You can set it up later with: gjallarctl secure-boot setup"))
+			fmt.Fprint(out, secureBootDeclinedNotice(partitionable, "You can set it up later with: gjallarctl secure-boot setup"))
 		}
 
 		if s.user.SecureBootEnable {
@@ -930,7 +930,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 			}
 		}
 		if !shimOK {
-			fmt.Fprint(out, secureBootDeclinedNotice("After the install, gjallarctl secure-boot setup can try it through shim while the firmware keeps its factory keys."))
+			fmt.Fprint(out, secureBootDeclinedNotice(partitionable, "After the install, gjallarctl secure-boot setup can try it through shim while the firmware keeps its factory keys."))
 		}
 	} else if s.user.SecureBootEnable &&
 		!s.user.SecureBootShim &&

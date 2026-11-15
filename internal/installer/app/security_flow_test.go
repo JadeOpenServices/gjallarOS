@@ -115,6 +115,22 @@ func TestNoSecureBootPolicyNoticeNamesTheCause(t *testing.T) {
 	}
 }
 
+func TestSecureBootDeclinedNoticeFollowsEncryption(t *testing.T) {
+	encrypted := secureBootDeclinedNotice(true, "later")
+	if !strings.Contains(encrypted, "passphrase is typed at every startup") {
+		t.Fatalf("encrypted root must mention the startup passphrase:\n%s", encrypted)
+	}
+	plain := secureBootDeclinedNotice(false, "later")
+	if strings.Contains(plain, "passphrase") {
+		t.Fatalf("unencrypted root has no passphrase to mention:\n%s", plain)
+	}
+	for _, want := range []string{"Nothing checks the startup files", "No recovery partition", "JODS cannot manage", "later"} {
+		if !strings.Contains(plain, want) {
+			t.Errorf("unencrypted notice lost %q:\n%s", want, plain)
+		}
+	}
+}
+
 func TestFirmwareSecureBootNotice(t *testing.T) {
 	if off := firmwareSecureBootNotice(false, nil); !strings.Contains(off, "Secure Boot is off") {
 		t.Fatalf("firmware-off notice does not report the state:\n%s", off)

@@ -612,8 +612,8 @@ offers depends on the machine:
 
 Saying no, or a model without an ODDC Secure Boot setup, shows what the
 install goes without: nothing checks the startup files, the disk passphrase
-is typed at every startup, repairs start from a USB stick, and JODS cannot
-manage the machine. Without Secure Boot there is no recovery partition and
+is typed at every startup (on an encrypted disk), repairs start from a USB
+stick, and JODS cannot manage the machine. Without Secure Boot there is no recovery partition and
 the disk is not shrunk for one. A system installed without it gets it with:
 
 ```bash
