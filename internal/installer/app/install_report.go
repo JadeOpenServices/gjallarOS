@@ -105,19 +105,7 @@ func buildReport(input reportInput, now time.Time) installreport.Report {
 	report.ODDCModel = input.oddcModel
 	report.ODDCChecked = input.oddcChecked
 	if input.failure != nil {
-		host, _ := os.Hostname()
-		known := installreport.Known{
-			User:     input.user.Username,
-			Name:     input.user.Name,
-			Host:     input.user.Hostname,
-			Email:    input.user.Email,
-			GitHub:   input.user.GitHubUsername,
-			LiveHost: host,
-			LiveUser: os.Getenv("USER"),
-			Serials:  installreport.DiskSerials("/"),
-		}
-		raw := input.failure.Error()
-		report.Error = installreport.ErrorText(raw, known)
+		report.Error = installreport.ErrorText(input.failure.Error(), knownValues(input.user))
 	}
 	return report
 }

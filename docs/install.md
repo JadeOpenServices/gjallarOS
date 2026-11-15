@@ -52,3 +52,22 @@ stops before this step.
 > After the install, apply changes with `gjallarctl rebuild`. A plain
 > `sudo nixos-rebuild switch --flake` cannot see the untracked
 > `generated/` folder, see [Rebuilds](configuration.md#rebuilds).
+
+## Run log
+
+Each installer run keeps a log in RAM while it runs. When the run ends, or
+before it restarts the machine, the installed system gets a copy at
+`/var/log/gjallar-install.log`, readable by root only. A later run on the
+same system replaces it. A live run that never reached a target disk keeps
+its log in RAM only.
+
+The log is the terminal text, cleaned of colour codes and progress lines.
+Before a line is written, URL credentials, tokens and key-like strings are
+hidden, and so are your user name, name, host name, email, GitHub name and
+disk serials. Passwords are typed with echo off and never reach it. The
+Secure Boot recovery passphrase is shown on the terminal only, never
+written to the log.
+
+Fixed points of the run carry a code such as `GJA-1012`. Search the log for
+a code to see how far a run got; [Install log anchors](install-log-anchors.md)
+lists them all.

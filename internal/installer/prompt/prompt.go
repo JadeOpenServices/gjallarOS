@@ -95,11 +95,28 @@ func gtkConfirmationWidth(message string) int {
 	}
 }
 
+// terminalWriter is a writer that copies output somewhere else, such as the
+// install log. Terminal is the writer behind it.
+type terminalWriter interface {
+	Terminal() io.Writer
+}
+
+// terminal returns the writer behind any logging writers around out.
+func terminal(out io.Writer) io.Writer {
+	for {
+		t, ok := out.(terminalWriter)
+		if !ok {
+			return out
+		}
+		out = t.Terminal()
+	}
+}
+
 func New(in io.Reader, out io.Writer) UI {
 	gtk := false
 
 	input, inputOK := in.(*os.File)
-	output, outputOK := out.(*os.File)
+	output, outputOK := terminal(out).(*os.File)
 	if inputOK && outputOK &&
 		input == os.Stdin &&
 		(output == os.Stdout || output == os.Stderr) {
@@ -288,14 +305,16 @@ Do not continue until you have saved both.
 // output file is not a terminal it is a log: installer-resume.service sends
 // stdout to the journal, which kept the Secure Boot recovery passphrase
 // (e2e-full, 2026-10-05). The secret then goes to the controlling terminal
-// only, or nowhere.
+// only, or nowhere. A writer that logs (the install log) is skipped: the
+// secret goes to the terminal behind it and never into the log.
 func (u UI) secretOut() (io.Writer, func(), error) {
-	file, ok := u.Out.(*os.File)
+	out := terminal(u.Out)
+	file, ok := out.(*os.File)
 	if !ok {
-		return u.Out, func() {}, nil
+		return out, func() {}, nil
 	}
 	if tty.Is(file) {
-		return u.Out, func() {}, nil
+		return out, func() {}, nil
 	}
 	tty, err := os.OpenFile("/dev/tty", os.O_WRONLY, 0)
 	if err != nil {

@@ -7,6 +7,7 @@ import (
 	"io"
 	"strings"
 
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/installlog"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/prompt"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/targetdisk"
 )
@@ -36,6 +37,7 @@ func selectFreshTargetDisk(
 	explicit = strings.TrimSpace(explicit)
 	if explicit != "" {
 		fmt.Fprintf(out, "Using explicitly configured target disk: %s\n", explicit)
+		installlog.Mark(installlog.DiskGiven)
 		return explicit, nil
 	}
 
@@ -86,6 +88,7 @@ func selectFreshTargetDisk(
 			return "", errors.New("no disk chosen; nothing was changed")
 		}
 		fmt.Fprintf(out, "Selected target disk: %s\n", selected.Path)
+		installlog.Mark(installlog.DiskOnlyOneConfirmed)
 		return selected.Path, nil
 	}
 
@@ -124,6 +127,7 @@ func selectFreshTargetDisk(
 	}
 
 	fmt.Fprintf(out, "Selected target disk: %s\n", path)
+	installlog.Mark(installlog.DiskChosen, installlog.Count("disks", len(eligible)))
 	return path, nil
 }
 

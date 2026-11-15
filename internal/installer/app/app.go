@@ -40,6 +40,7 @@ import (
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/flakesource"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/geolocation"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/hardwareconfig"
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/installlog"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/installreport"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/installstate"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/localgit"
@@ -271,6 +272,10 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 	if f.NArg() != 0 {
 		return 2
 	}
+	// The run's log (Plane 343) sees what the installer prints from here on.
+	// It runs last, after the report offer, so the copy holds the whole run.
+	runLog, out, errOut := startInstallLog(out, errOut)
+	defer func() { runLog.finish(ctx, errOut, code) }()
 	root, err := installercheck.ResolveRepository(opt.repo)
 	if err != nil {
 		return fail(errOut, err)
@@ -300,6 +305,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 	}()
 	ui := prompt.New(in, out)
 	s := state{control: controlBinary()}
+	runLog.user = &s.user
 	// A failure from here on may become an install report the user saves
 	// (Plane 292). Failures before this point are about the checkout, not
 	// the machine, and get no report.
@@ -340,6 +346,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 	if err := applyChannelFlag(&s.user, opt.channel, s.preset, presetPath); err != nil {
 		return fail(errOut, err)
 	}
+	runLog.refreshKnown()
 	if opt.recovery {
 		if opt.acceptExisting {
 			s.existing, err = detectRecoveryInstalledRoot(ctx, installedRoot)
@@ -365,6 +372,18 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 		if err != nil {
 			return fail(errOut, err)
 		}
+	}
+	switch {
+	case opt.recovery:
+		installlog.Mark(installlog.RunHost, installlog.Choice("kind", "recovery"))
+		if s.existing {
+			runLog.target = installedRoot
+		}
+	case persistentInstalledHost:
+		installlog.Mark(installlog.RunHost, installlog.Choice("kind", "installed"))
+		runLog.target = "/"
+	default:
+		installlog.Mark(installlog.RunHost, installlog.Choice("kind", "live"))
 	}
 	if err := validateTargetDiskContext(opt.targetDisk, persistentInstalledHost); err != nil {
 		return fail(errOut, err)
@@ -436,6 +455,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 		opt,
 		s,
 		originalArgs,
+		runLog,
 		out,
 		errOut,
 	); code != 0 {
@@ -995,7 +1015,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 			case secureBootOffReboot:
 				fmt.Fprintln(out, "Nothing has been installed yet. Turn Secure Boot off in firmware setup, then start the installer again.")
 				fmt.Fprintln(out, "Rebooting directly into firmware setup...")
-				if err := attached(ctx, "sudo", "systemctl", "reboot", "--firmware-setup"); err != nil {
+				if err := runLog.restart(ctx, errOut, true); err != nil {
 					return fail(errOut, fmt.Errorf("reboot into firmware setup: %w", err))
 				}
 				return 0
@@ -1338,6 +1358,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 			return fail(errOut, err)
 		}
 	}
+	runLog.refreshKnown()
 	hostOverlayToCommit, err := hostOverlayForCommit(
 		activeHostOverlay,
 		hostOverlayChanged,
@@ -1679,6 +1700,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 
 			// The Secure Boot continuation below still works on the target.
 			defer result.ReleaseTargetState()
+			runLog.target = result.MountPoint
 			s.recoveryPartition = result.RecoveryPartition
 		}
 	}
@@ -1696,17 +1718,19 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 		shimSBOff = !sbOn
 	}
 	if shimSBOff {
+		installlog.Mark(installlog.SecureBootContinue, installlog.Choice("path", "shim-sb-off"))
 		// The rest of the switch runs from gjallarOS itself; until Secure
 		// Boot enforces, each start shows the next step.
 		if err := armSecureBootResume(ctx, out); err != nil {
 			return fail(errOut, err)
 		}
 		fmt.Fprintln(out, "Restarting into gjallarOS through shim. Then run gjallarctl secure-boot setup in a terminal: it puts the gjallarOS key into shim's list.")
-		if err := attached(ctx, "sudo", "systemctl", "reboot"); err != nil {
+		if err := runLog.restart(ctx, errOut, false); err != nil {
 			return fail(errOut, fmt.Errorf("restart: %w", err))
 		}
 		return 0
 	} else if s.render.SecureBootEnable && s.render.SecureBootShim {
+		installlog.Mark(installlog.SecureBootContinue, installlog.Choice("path", "shim"))
 		next, err := secureboot.ContinueShimInstall(
 			ctx,
 			ui,
@@ -1721,12 +1745,13 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 				return fail(errOut, err)
 			}
 			fmt.Fprintln(out, "Restarting into gjallarOS through shim...")
-			if err := attached(ctx, "sudo", "systemctl", "reboot"); err != nil {
+			if err := runLog.restart(ctx, errOut, false); err != nil {
 				return fail(errOut, fmt.Errorf("restart: %w", err))
 			}
 			return 0
 		}
 	} else if s.render.SecureBootEnable {
+		installlog.Mark(installlog.SecureBootContinue, installlog.Choice("path", "own-keys"))
 		next, err := secureboot.Continue(
 			ctx,
 			ui,
@@ -1755,11 +1780,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 				"Rebooting directly into firmware setup...",
 			)
 
-			if err := attached(
-				ctx,
-				"sudo", "systemctl",
-				"reboot", "--firmware-setup",
-			); err != nil {
+			if err := runLog.restart(ctx, errOut, true); err != nil {
 				return fail(
 					errOut,
 					fmt.Errorf("reboot into firmware setup: %w", err),
@@ -1785,7 +1806,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 			}
 		}
 		if s.user.AutoReboot {
-			_ = attached(ctx, "sudo", "systemctl", "reboot")
+			_ = runLog.restart(ctx, errOut, false)
 		} else if !s.render.Management.Enable {
 			yes, _ := ui.Confirm(
 				ctx,
@@ -1793,7 +1814,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 				false,
 			)
 			if yes {
-				_ = attached(ctx, "sudo", "systemctl", "reboot")
+				_ = runLog.restart(ctx, errOut, false)
 			}
 		}
 	}
@@ -1876,6 +1897,7 @@ func prepareHost(
 	opt options,
 	s state,
 	originalArgs []string,
+	runLog *logKeeper,
 	out,
 	errOut io.Writer,
 ) int {
@@ -1947,12 +1969,7 @@ func prepareHost(
 			"Rebooting into the staged release; installation will resume automatically.",
 		)
 
-		if err := attached(
-			ctx,
-			"sudo",
-			"systemctl",
-			"reboot",
-		); err != nil {
+		if err := runLog.restart(ctx, errOut, false); err != nil {
 			return fail(
 				errOut,
 				fmt.Errorf(
@@ -3767,6 +3784,7 @@ func fail(out io.Writer, err error) int {
 	}
 	recordFailure(out, err)
 	fmt.Fprintln(out, "ERROR:", err)
+	installlog.Mark(installlog.RunFailed)
 	return 1
 }
 
