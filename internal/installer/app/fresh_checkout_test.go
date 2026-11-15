@@ -9,7 +9,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/installlog"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/systemcheckout"
 )
 
@@ -458,5 +460,71 @@ func TestCheckoutFree(t *testing.T) {
 	}
 	if err := checkoutFree(target); err == nil || !strings.Contains(err.Error(), "nothing was changed") {
 		t.Fatalf("dangling link accepted: %v", err)
+	}
+}
+
+// openTestLog makes a fresh current run log and returns a reader for it.
+func openTestLog(t *testing.T) func() string {
+	t.Helper()
+	log, err := installlog.Open(filepath.Join(t.TempDir(), "gjallar-install"), time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	installlog.SetCurrent(log)
+	t.Cleanup(func() {
+		installlog.SetCurrent(nil)
+		_ = log.Close()
+	})
+	return func() string {
+		data, err := os.ReadFile(log.Path())
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(data)
+	}
+}
+
+func TestDeployInPlaceLogsAnchors(t *testing.T) {
+	_, target, _ := cloneFixture(t)
+	withPrivilegedCommand(t, nil)
+	previous := systemRebuild
+	t.Cleanup(func() { systemRebuild = previous })
+
+	read := openTestLog(t)
+	withDeployApply(t, func(context.Context, string, string) error { return nil })
+	if err := deployInPlace(context.Background(), "/nonexistent", target, "example-host", "not-a-commit", "stable", false, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if got := read(); !strings.Contains(got, "GJA-1060 install.inplace.started path=repo") || !strings.Contains(got, "GJA-1061 install.inplace.finished") {
+		t.Fatalf("repo path log:\n%s", got)
+	}
+
+	read = openTestLog(t)
+	systemRebuild = func(context.Context, io.Writer) error { return errors.New("build failed") }
+	if err := deployInPlace(context.Background(), systemcheckout.Path, target, "example-host", "not-a-commit", "stable", false, io.Discard); err == nil {
+		t.Fatal("failed rebuild reported as done")
+	}
+	if got := read(); !strings.Contains(got, "GJA-1060 install.inplace.started path=system-checkout") || strings.Contains(got, "GJA-1061") {
+		t.Fatalf("failed rebuild log:\n%s", got)
+	}
+}
+
+func TestDeployInPlaceFirstInstallLogsClone(t *testing.T) {
+	repo, target, revision := cloneFixture(t)
+	withProfile(t)
+	withDeployApply(t, func(context.Context, string, string) error { return nil })
+	read := openTestLog(t)
+	if err := deployInPlace(context.Background(), repo, target, "example-host", revision, "staging", true, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	got := read()
+	order := []string{"GJA-1060 install.inplace.started path=first", "GJA-1040 install.checkout.cloned", "GJA-1061 install.inplace.finished"}
+	at := 0
+	for _, want := range order {
+		i := strings.Index(got[at:], want)
+		if i < 0 {
+			t.Fatalf("missing or out of order %q in:\n%s", want, got)
+		}
+		at += i + len(want)
 	}
 }

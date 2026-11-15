@@ -28,6 +28,8 @@ const (
 	CheckoutCloned       ID = 1040
 	FreshInstallFinished ID = 1041
 	SecureBootContinue   ID = 1050
+	InPlaceStarted       ID = 1060
+	InPlaceFinished      ID = 1061
 	RunRestart           ID = 1090
 	RunFailed            ID = 1098
 	RunFinished          ID = 1099
@@ -113,6 +115,12 @@ var Registry = []Anchor{
 		Meaning: "The Secure Boot part of the run started.",
 		Fields: []FieldSpec{{Name: "path", Kind: KindChoice, Choices: []string{"shim", "shim-sb-off", "own-keys"},
 			Meaning: "signed through shim, shim while firmware Secure Boot is off, or own keys"}}},
+	{ID: InPlaceStarted, Name: "install.inplace.started",
+		Meaning: "The in-place install on the running system started building.",
+		Fields: []FieldSpec{{Name: "path", Kind: KindChoice, Choices: []string{"first", "system-checkout", "repo"},
+			Meaning: "first install with a new system checkout, an update of the system checkout, or a build from the installer's own checkout"}}},
+	{ID: InPlaceFinished, Name: "install.inplace.finished",
+		Meaning: "The in-place build and switch finished without an error."},
 	{ID: RunRestart, Name: "install.run.restart",
 		Meaning: "The installer restarts the machine to go on.",
 		Fields: []FieldSpec{{Name: "into", Kind: KindChoice, Choices: []string{"system", "firmware-setup"},

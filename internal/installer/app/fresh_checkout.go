@@ -15,6 +15,7 @@ import (
 
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/deploy"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/flakesource"
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/installlog"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/systemcheckout"
 )
 
@@ -226,18 +227,22 @@ func deployInPlace(
 ) error {
 	if !first {
 		if repo == systemcheckout.Path {
-			return systemRebuild(ctx, out)
+			installlog.Mark(installlog.InPlaceStarted, installlog.Choice("path", "system-checkout"))
+			return markInPlaceFinished(systemRebuild(ctx, out))
 		}
-		return deployApply(ctx, repo, hostname)
+		installlog.Mark(installlog.InPlaceStarted, installlog.Choice("path", "repo"))
+		return markInPlaceFinished(deployApply(ctx, repo, hostname))
 	}
+	installlog.Mark(installlog.InPlaceStarted, installlog.Choice("path", "first"))
 	before, beforeErr := os.Readlink(systemProfile)
 	fmt.Fprintln(out, "STAGE: cloning the system checkout")
 	if err := cloneSystemCheckout(ctx, repo, targetRoot, revision, channel, out); err != nil {
 		return err
 	}
+	installlog.Mark(installlog.CheckoutCloned)
 	err := deployApply(ctx, repo, hostname)
 	if err == nil {
-		return nil
+		return markInPlaceFinished(nil)
 	}
 	after, afterErr := os.Readlink(systemProfile)
 	if beforeErr != nil || afterErr != nil || before != after {
@@ -249,6 +254,15 @@ func deployInPlace(
 		return fmt.Errorf("%w; removing %s again also failed: %v", err, systemcheckout.Path, rmErr)
 	}
 	fmt.Fprintf(out, "%s removed again; no system generation uses it.\n", systemcheckout.Path)
+	return err
+}
+
+// markInPlaceFinished logs the finish anchor when the build succeeded and
+// hands err back unchanged.
+func markInPlaceFinished(err error) error {
+	if err == nil {
+		installlog.Mark(installlog.InPlaceFinished)
+	}
 	return err
 }
 
