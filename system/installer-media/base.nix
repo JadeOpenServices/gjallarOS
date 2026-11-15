@@ -183,6 +183,20 @@ in
         else
           dmsetup create gjallar-store --readonly --table "0 $size linear $data 0"
         fi
+        # copytoram left the image in RAM. Let go of the medium so it can be
+        # pulled, like upstream does; /iso stays mounted (no BindsTo).
+        if [ "$(findmnt -n -o FSTYPE /sysroot/iso)" = tmpfs ]; then
+          deps=$(dmsetup deps -o devname gjallar-iso)
+          back=''${deps##*(}
+          back=''${back%)}
+          if dmsetup remove --retry gjallar-iso; then
+            case $back in
+              loop[0-9]*) losetup -d "/dev/$back" || echo "Could not free /dev/$back." >&2 ;;
+            esac
+          else
+            echo "The boot medium stays in use; do not pull it." >&2
+          fi
+        fi
       '';
     };
   };

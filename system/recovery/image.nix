@@ -70,6 +70,10 @@ in
   # isoImage builds its file name from image.baseName; image.fileName alone
   # left it nixos-minimal-*.iso.
   image.baseName = lib.mkForce "gjallar-recovery-${config.system.nixos.label}-${pkgs.stdenv.hostPlatform.system}";
+  # Started from a stick, stage 1 finds the medium by this label. Upstream's
+  # nixos-minimal-<release>-<arch> also matches a stock NixOS stick of the
+  # same release. ISO 9660 allows 32 characters.
+  isoImage.volumeID = "gjallar-recovery-${config.system.nixos.release}-${pkgs.stdenv.hostPlatform.linuxArch}";
   isoImage.squashfsCompression = "zstd -Xcompression-level 15";
   isoImage.storeContents = lib.mkForce [ ];
   isoImage.contents = [
