@@ -158,14 +158,14 @@ func TestDetectHardwareDoesNotTreatALSAsOrientationSensor(t *testing.T) {
 	}
 }
 
-func TestDiscoverSkipsRetiredBrowsers(t *testing.T) {
+func TestDiscoverSkipsRetiredBrowsersAndTheLoginModule(t *testing.T) {
 	repo := t.TempDir()
 	for _, dir := range []string{"user/shells", "user/editors/vscodium", "user/browsers", "themes"} {
 		if err := os.MkdirAll(filepath.Join(repo, dir), 0o755); err != nil {
 			t.Fatal(err)
 		}
 	}
-	for _, name := range []string{"firefox", "librewolf"} {
+	for _, name := range []string{"firefox", "librewolf", "login"} {
 		if err := os.WriteFile(filepath.Join(repo, "user/browsers", name+".nix"), []byte("{ }\n"), 0o644); err != nil {
 			t.Fatal(err)
 		}

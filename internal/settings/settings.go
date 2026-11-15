@@ -162,6 +162,9 @@ func Plan(data []byte, values map[string]json.RawMessage) (Change, error) {
 	if len(change.Keys) == 0 {
 		return Change{}, fmt.Errorf("nothing changes; every value is already set")
 	}
+	if err := firefoxAddonsNeedFirefox(current.Browsers, wanted); err != nil {
+		return Change{}, err
+	}
 	if _, _, err := config.ChangeText(data, wanted); err != nil {
 		return Change{}, err
 	}
@@ -170,6 +173,26 @@ func Plan(data []byte, values map[string]json.RawMessage) (Change, error) {
 	})
 	change.ID, err = newID()
 	return change, err
+}
+
+// firefoxAddonsNeedFirefox refuses add-on changes while Firefox is not one
+// of the browsers the change leaves in place: they would do nothing.
+func firefoxAddonsNeedFirefox(browsers []string, wanted map[string]json.RawMessage) error {
+	_, addons := wanted["firefoxAddons"]
+	_, store := wanted["firefoxStoreAddons"]
+	if !addons && !store {
+		return nil
+	}
+	if raw, ok := wanted["browsers"]; ok {
+		browsers = nil
+		if err := json.Unmarshal(raw, &browsers); err != nil {
+			return fmt.Errorf("browsers: %w", err)
+		}
+	}
+	if !slices.Contains(browsers, "firefox") {
+		return fmt.Errorf("Firefox add-ons only change while firefox is one of the browsers")
+	}
+	return nil
 }
 
 // PlanLocal is the change that turns root's copy of the developer-mode

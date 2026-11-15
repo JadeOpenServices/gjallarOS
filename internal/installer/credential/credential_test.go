@@ -36,13 +36,10 @@ func TestPath(t *testing.T) {
 }
 
 func TestStoreCommandsKeepPasswordDirectoryRootOnly(t *testing.T) {
-	got := storeCommands("/tmp/gjallar-password-1.hash", "/var/lib/gjallarOS/passwords/root.hash")
-	want := [][]string{
-		{"install", "-d", "-m", "0700", "-o", "root", "-g", "root", "--", "/var/lib/gjallarOS/passwords"},
-		{"install", "-m", "0600", "-o", "root", "-g", "root", "--", "/tmp/gjallar-password-1.hash", "/var/lib/gjallarOS/passwords/root.hash"},
-	}
+	got := storeDirCommand("/var/lib/gjallarOS/passwords/root.hash")
+	want := []string{"install", "-d", "-m", "0700", "-o", "root", "-g", "root", "--", "/var/lib/gjallarOS/passwords"}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("storeCommands = %q, want %q", got, want)
+		t.Fatalf("storeDirCommand = %q, want %q", got, want)
 	}
 }
 

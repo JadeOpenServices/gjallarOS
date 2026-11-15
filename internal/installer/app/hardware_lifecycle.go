@@ -3,8 +3,12 @@ package app
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"time"
+
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/hardwareconfig"
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/installlog"
 )
 
 type hardwareLifecycleAction int
@@ -20,12 +24,13 @@ type hardwareGenerateFunc func(
 	string,
 	string,
 	time.Time,
-) (string, error)
+) (hardwareconfig.Result, error)
 
 type hardwareLifecycleResult struct {
-	action  hardwareLifecycleAction
-	existed bool
-	backup  string
+	action      hardwareLifecycleAction
+	existed     bool
+	backup      string
+	droppedSwap []string
 }
 
 func decideHardwareLifecycle(
@@ -113,11 +118,12 @@ func reconcileHardwareConfiguration(
 		return result, nil
 
 	case hardwareGenerate:
-		backup, err := generate(ctx, repo, target, now)
+		generated, err := generate(ctx, repo, target, now)
 		if err != nil {
 			return result, err
 		}
-		result.backup = backup
+		result.backup = generated.Backup
+		result.droppedSwap = generated.DroppedSwap
 		return result, nil
 
 	default:
@@ -126,4 +132,14 @@ func reconcileHardwareConfiguration(
 			action,
 		)
 	}
+}
+
+// reportDroppedSwap prints and logs the old swap partitions the new
+// hardware configuration leaves out.
+func reportDroppedSwap(out io.Writer, dropped []string) {
+	if len(dropped) == 0 {
+		return
+	}
+	fmt.Fprint(out, hardwareconfig.DroppedSwapNotice(dropped))
+	installlog.Mark(installlog.HardwareSwapDropped, installlog.Count("swaps", len(dropped)))
 }

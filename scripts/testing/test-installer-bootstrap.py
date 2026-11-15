@@ -192,6 +192,49 @@ exit 97
         self.assertIn("copy the complete repository", result.stderr)
         self.assertFalse((repo / "sudo-invoked").exists())
 
+    def curl_origin(self):
+        # SYNTHETIC origin with a stable branch and one later commit on it.
+        origin = self.root / "curl-origin"
+        origin.mkdir()
+        self.git(origin, "init", "-q", "-b", "stable")
+        (origin / "flake.nix").write_text("{}\n")
+        self.git(origin, "add", ".")
+        self.git(origin, "commit", "-qm", "first")
+        checkout = self.root / "curl-checkout"
+        self.git(self.root, "clone", "-q", str(origin), str(checkout))
+        (origin / "fix").write_text("fixed\n")
+        self.git(origin, "add", ".")
+        self.git(origin, "commit", "-qm", "fix")
+        return origin, checkout
+
+    def run_curl(self):
+        # Outside a checkout, like curl ... | bash; stop after the source step.
+        script = self.root / "standalone/install.sh"
+        script.parent.mkdir(exist_ok=True)
+        shutil.copy2(BOOTSTRAP, script)
+        return subprocess.run(["bash", str(script)],
+                              env=dict(self.env, GJALLAR_CLONE_ONLY="1", TEST_REPO=str(self.root)),
+                              text=True, capture_output=True,
+                              stdin=subprocess.DEVNULL, start_new_session=True)
+
+    def test_rerun_without_channel_gets_the_latest_commit(self):
+        origin, checkout = self.curl_origin()
+        result = self.run_curl()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.git(checkout, "rev-parse", "HEAD").stdout,
+                         self.git(origin, "rev-parse", "HEAD").stdout)
+        self.assertEqual(self.git(checkout, "symbolic-ref", "--short", "HEAD").stdout.strip(), b"stable")
+
+    def test_rerun_on_another_branch_stops_unchanged(self):
+        origin, checkout = self.curl_origin()
+        self.git(checkout, "switch", "-q", "-c", "my-work")
+        before = self.git(checkout, "rev-parse", "HEAD").stdout
+        result = self.run_curl()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("not on a release channel branch", result.stderr)
+        self.assertEqual(self.git(checkout, "rev-parse", "HEAD").stdout, before)
+        self.assertEqual(self.git(checkout, "symbolic-ref", "--short", "HEAD").stdout.strip(), b"my-work")
+
 
 if __name__ == "__main__":
     unittest.main()

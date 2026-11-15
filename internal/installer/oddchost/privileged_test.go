@@ -144,18 +144,14 @@ func TestSavePrivilegedUsesProtectedAtomicReplacement(t *testing.T) {
 		call := append([]string{name}, args...)
 		calls = append(calls, call)
 
-		if len(args) >= 5 &&
-			name == "sudo" &&
-			args[0] == "install" &&
-			args[1] == "-m" &&
-			args[2] == "0600" {
-			stagedBody, err = os.ReadFile(args[3])
-			if err != nil {
-				t.Fatal(err)
-			}
-		}
-
 		return nil, nil
+	}
+	prev := writeRootFile
+	t.Cleanup(func() { writeRootFile = prev })
+	writeRootFile = func(_ context.Context, data []byte, mode, dst string) error {
+		calls = append(calls, []string{"rootfile", mode, dst})
+		stagedBody = data
+		return nil
 	}
 
 	path := "/mnt/var/lib/gjallarOS/oddc/host-overlay.json"
@@ -204,8 +200,8 @@ func TestSavePrivilegedUsesProtectedAtomicReplacement(t *testing.T) {
 
 	if !strings.Contains(
 		joined,
-		"sudo install -m 0600",
-	) {
+		"rootfile 0600 /mnt/var/lib/gjallarOS/oddc/.host-overlay.json.tmp",
+	) || strings.Contains(joined, "sudo install -m") {
 		t.Fatalf(
 			"protected file staging missing:\n%s",
 			joined,

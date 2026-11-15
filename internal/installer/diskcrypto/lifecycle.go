@@ -102,14 +102,21 @@ func ReadKeyslots(ctx context.Context, device string) (Keyslots, error) {
 	return ParseKeyslots(out)
 }
 
+// rootLookup runs the read-only lookups behind RootDevice; tests replace it.
+var rootLookup = func(ctx context.Context, name string, args ...string) ([]byte, error) {
+	return exec.CommandContext(ctx, name, args...).Output()
+}
+
 // RootDevice returns the LUKS partition under the root file system,
 // through LVM or any other mapping in between.
+// Other LUKS devices on the machine (an old swap partition, a USB stick)
+// are not looked at.
 func RootDevice(ctx context.Context) (string, error) {
-	src, err := exec.CommandContext(ctx, "findmnt", "-nvo", "SOURCE", "/").Output()
+	src, err := rootLookup(ctx, "findmnt", "-nvo", "SOURCE", "/")
 	if err != nil {
 		return "", fmt.Errorf("findmnt /: %w", err)
 	}
-	out, err := exec.CommandContext(ctx, "lsblk", "-spnro", "NAME,FSTYPE", strings.TrimSpace(string(src))).Output()
+	out, err := rootLookup(ctx, "lsblk", "-spnro", "NAME,FSTYPE", strings.TrimSpace(string(src)))
 	if err != nil {
 		return "", fmt.Errorf("lsblk: %w", err)
 	}

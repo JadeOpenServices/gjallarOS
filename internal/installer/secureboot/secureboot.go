@@ -1,6 +1,7 @@
 package secureboot
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -10,6 +11,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/rootfile"
 )
 
 const ArchivePath = "/var/lib/gjallarOS/recovery/secure-boot-keys.tar.enc"
@@ -43,27 +46,6 @@ func Provision(ctx context.Context) (Recovery, error) {
 
 	passphrase, err := generatePassphrase()
 	if err != nil {
-		return Recovery{}, err
-	}
-
-	passFile, err := os.CreateTemp("", "gjallar-secure-boot-passphrase-*")
-	if err != nil {
-		return Recovery{}, err
-	}
-	passPath := passFile.Name()
-	defer os.Remove(passPath)
-
-	if err := passFile.Chmod(0600); err != nil {
-		_ = passFile.Close()
-		return Recovery{}, err
-	}
-
-	if _, err := passFile.WriteString(passphrase); err != nil {
-		_ = passFile.Close()
-		return Recovery{}, err
-	}
-
-	if err := passFile.Close(); err != nil {
 		return Recovery{}, err
 	}
 
@@ -128,8 +110,11 @@ func Provision(ctx context.Context) (Recovery, error) {
 		)
 	}
 
-	if err := run(
+	// openssl reads the passphrase from a pipe, never from a file the
+	// user session could swap (L54).
+	if err := runWithInput(
 		ctx,
+		[]byte(passphrase+"\n"),
 		"sudo", privilegedTool("openssl"),
 		"enc",
 		"-aes-256-cbc",
@@ -137,7 +122,7 @@ func Provision(ctx context.Context) (Recovery, error) {
 		"-salt",
 		"-in", raw,
 		"-out", ArchivePath,
-		"-pass", "file:"+passPath,
+		"-pass", "stdin",
 	); err != nil {
 		_ = run(
 			ctx,
@@ -159,13 +144,7 @@ func Provision(ctx context.Context) (Recovery, error) {
 
 	// This is intentionally temporary. It exists only so Ctrl+C before the
 	// recovery confirmation can resume with the exact same passphrase.
-	if err := run(
-		ctx,
-		"sudo", "install",
-		"-m", "0600",
-		passPath,
-		RecoveryPassphrasePath,
-	); err != nil {
+	if err := writeRootFile(ctx, []byte(passphrase), "0600", RecoveryPassphrasePath); err != nil {
 		return Recovery{}, fmt.Errorf(
 			"save temporary Secure Boot recovery checkpoint: %w",
 			err,
@@ -301,7 +280,7 @@ func MarkRecoveryConfirmed(ctx context.Context) error {
 	return nil
 }
 
-func sudoTest(ctx context.Context, args ...string) (bool, error) {
+var sudoTest = func(ctx context.Context, args ...string) (bool, error) {
 	cmdArgs := append([]string{"test"}, args...)
 	cmd := commandContext(ctx, "sudo", cmdArgs...)
 
@@ -511,7 +490,20 @@ func privilegedTool(name string) string {
 	return path
 }
 
-func run(ctx context.Context, name string, args ...string) error {
+// writeRootFile writes a root-only record from memory (L54). Tests
+// replace it.
+var writeRootFile = rootfile.Write
+
+// runWithInput is run with input on stdin instead of the terminal.
+var runWithInput = func(ctx context.Context, input []byte, name string, args ...string) error {
+	cmd := commandContext(ctx, name, args...)
+	cmd.Stdin = bytes.NewReader(input)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
+var run = func(ctx context.Context, name string, args ...string) error {
 	cmd := commandContext(ctx, name, args...)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout

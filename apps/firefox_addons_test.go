@@ -51,7 +51,7 @@ func TestFirefoxAddonDefaults(t *testing.T) {
 	if err := ValidateFirefoxAddons(defaults, nil); err != nil {
 		t.Fatal(err)
 	}
-	if got := ActiveFirefoxAddons(defaults); !maps.Equal(got, map[string]string{"ublock-origin": AddonOn}) {
+	if got := ActiveFirefoxAddons(defaults); !maps.Equal(got, map[string]string{"ublock-origin": AddonLocked}) {
 		t.Fatalf("defaults install %v", got)
 	}
 	if !defaults["privacy"].Enable || defaults["passwords"].Enable {

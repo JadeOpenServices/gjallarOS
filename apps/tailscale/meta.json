@@ -3,6 +3,5 @@
   "description": "Tailnet VPN that switches by network trust.",
   "category": "network",
   "package": "tailscale",
-  "default": true,
-  "installer": "Enable Tailscale?"
+  "default": true
 }

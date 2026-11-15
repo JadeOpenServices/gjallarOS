@@ -41,11 +41,15 @@ in
 
     hardware.sane.enable = true;
 
-    services.avahi = lib.mkIf networkPrinting {
+    # ipp-usb turns avahi on, and avahi opens UDP 5353 by default. Local
+    # printing only needs avahi on this computer, so the port opens only
+    # when the user asks to find printers on the network (L57).
+    services.avahi = {
+      openFirewall = networkPrinting;
+    }
+    // lib.optionalAttrs networkPrinting {
       enable = true;
       nssmdns4 = true;
-
-      openFirewall = true;
     };
   };
 }

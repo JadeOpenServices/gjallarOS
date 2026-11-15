@@ -1,6 +1,8 @@
 # gjallarOS installer
 
-Run this from the repository root on an existing NixOS installation:
+Run this from the repository root on an existing NixOS installation, or on
+the NixOS minimal ISO started from a USB stick to install onto a whole disk
+(see "From a USB stick" in the main README):
 
 ```bash
 ./scripts/installation/install.sh
@@ -33,28 +35,33 @@ The preset answers the non-secret configuration automatically. Hardware
 profiling remains dynamic and GPU passthrough IDs are detected automatically.
 Remove or rename the file to return to fully interactive mode.
 
-The installer estimates the weather location from the current public network
-address and asks the user to confirm it. If rejected or unavailable, it asks
-for city and country explicitly. The detected value is never accepted silently.
+The installer does not ask for the weather city and sends nothing to the
+network for it. A new install guesses the city from the timezone, using the
+zone tables that ship with tzdata, and leaves it empty for zones such as UTC.
+A pin in the bar then asks once whether the city is right; the user keeps it,
+types another one, or leaves it empty to turn the weather off. A rerun keeps
+`weatherCity` and `weatherCountry` as they are.
 
 In the preset, `username` is the Linux account and the single identity input.
 `dotfilesDir` is derived automatically as `/home/<username>/Documents/gjallarOS`.
-The `name` field is the human-readable Git commit author name; it is not the
-Linux username or GitHub username. `githubUsername` is a separate optional
-account label.
+The `name` and `email` fields are the Git commit author. The installer does
+not ask them: a new install leaves both empty, and git sets no author until
+`gjallarctl settings set name=... email=...` fills them. A rerun keeps them.
+`githubUsername` is a separate optional account label.
 
 The wallpaper is picked in the Noctalia control centre and kept in Noctalia's
 own state. The repository ships no wallpapers; until one is picked the
 background is the theme's base colour.
 
-The installer targets NixOS 26.05 and stops before making changes if another
-release is detected. The release/channel policy is kept in
-`deployment/release-policy.json` for future centrally managed updates. The root
+The installer targets the NixOS release pinned in
+`deployment/release-policy.json`. On another release it upgrades or
+downgrades to the pinned one at the next start, leaves the running desktop
+alone, and carries on after the restart. The root
 flake and stable shell flakes track its `nixpkgsInput`; only the explicitly
 listed development shells (currently ComfyUI) intentionally use
 `unstableNixpkgsInput` for fast-moving GPU/build tooling. Flake input URLs must
-remain literal by Nix design, so the installer validates the running release
-against this policy before proceeding.
+remain literal by Nix design, so the installer checks the running release
+against this policy before it changes anything.
 
 Every run offers an explicit firmware-update check. If accepted, it refreshes
 fwupd metadata and applies available updates before continuing; declining it or
@@ -91,18 +98,16 @@ palette owns normal desktop theming.
 Closing or pressing Escape in a GTK prompt opens a quit confirmation; choosing
 No returns to the interrupted prompt.
 
-Tailscale is enabled by default. The installer asks for the home LAN subnets
-that stay local at home and, if Tailscale should act as VPN, for the exit node
-(`auto` finds the home router's once the tailnet is reachable), the trusted
-Wi-Fi names, which of those still route the internet through the exit node,
-and whether a nearby tailnet subnet router proves a trusted site. Quote Wi-Fi
-names that contain commas. See "Tailscale VPN and network trust" in the
-top-level README for changing these later.
+The installer does not ask about apps. A new install gets the catalogue
+defaults, uBlock Origin locked on in Firefox, and Tailscale with no home
+subnets, exit node or trusted Wi-Fi set; `gjallarctl vpn` sets those later.
+Installing again over gjallarOS keeps the running choices. See "Tailscale
+VPN and network trust" in the top-level README.
 
 Local AI is optional. If disabled, Ollama, OpenCode, the AI wrapper commands,
 and AI profiling are all omitted from the generated system.
 
-Before rebuilding, make sure your own SOPS age key exists and that
+Before rebuilding, make sure your SOPS age key exists and that
 `secrets/default.yaml` is encrypted for it. The installer checks this and
 prints a warning when the secrets cannot be decrypted; it does not create or
 guess service credentials.

@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/control"
 	"io"
-	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -35,11 +34,10 @@ import (
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/discovery"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/diskcrypto"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/diskplan"
-	"github.com/JadeOpenServices/gjallarOS/internal/installer/firefoxstore"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/firmware"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/flakesource"
-	"github.com/JadeOpenServices/gjallarOS/internal/installer/geolocation"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/hardwareconfig"
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/installlog"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/installreport"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/installstate"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/localgit"
@@ -55,8 +53,8 @@ import (
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/sourcerevision"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/systemcheckout"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/targetdisk"
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/zonecity"
 	"github.com/JadeOpenServices/gjallarOS/internal/installercheck"
-	"github.com/JadeOpenServices/gjallarOS/internal/sshsig"
 )
 
 type options struct {
@@ -91,6 +89,12 @@ type state struct {
 	// oddcChecked is true once the ODDC lookup ran, so a report about an
 	// earlier failure does not claim that no model matches.
 	oddcChecked bool
+	// saveToDrive is set on live and recovery runs: their home folder is
+	// gone at the next start, so a report goes to a USB drive (Plane 343).
+	saveToDrive bool
+	// targetDisk is the disk this run installs to, once known. The report
+	// step never offers it as a drive to save to.
+	targetDisk string
 }
 
 const (
@@ -98,7 +102,6 @@ const (
 	installerReleaseRebootScheduled = 75
 )
 
-var detectNetworkLocation = geolocation.Detect
 var runJODSCommand = attached
 
 func Run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer) int {
@@ -271,6 +274,10 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 	if f.NArg() != 0 {
 		return 2
 	}
+	// The run's log (Plane 343) sees what the installer prints from here on.
+	// It runs last, after the report offer, so the copy holds the whole run.
+	runLog, out, errOut := startInstallLog(out, errOut)
+	defer func() { runLog.finish(ctx, errOut, code) }()
 	root, err := installercheck.ResolveRepository(opt.repo)
 	if err != nil {
 		return fail(errOut, err)
@@ -300,6 +307,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 	}()
 	ui := prompt.New(in, out)
 	s := state{control: controlBinary()}
+	runLog.user = &s.user
 	// A failure from here on may become an install report the user saves
 	// (Plane 292). Failures before this point are about the checkout, not
 	// the machine, and get no report.
@@ -315,6 +323,9 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 				oddcModel:   s.oddcModel,
 				oddcChecked: s.oddcChecked,
 				failure:     recorder.err,
+				log:         runLog,
+				toDrive:     s.saveToDrive,
+				targetDisk:  s.targetDisk,
 			})
 		}
 	}()
@@ -340,6 +351,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 	if err := applyChannelFlag(&s.user, opt.channel, s.preset, presetPath); err != nil {
 		return fail(errOut, err)
 	}
+	runLog.refreshKnown()
 	if opt.recovery {
 		if opt.acceptExisting {
 			s.existing, err = detectRecoveryInstalledRoot(ctx, installedRoot)
@@ -366,6 +378,21 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 			return fail(errOut, err)
 		}
 	}
+	switch {
+	case opt.recovery:
+		installlog.Mark(installlog.RunHost, installlog.Choice("kind", "recovery"))
+		s.saveToDrive = true
+		if s.existing {
+			runLog.target = installedRoot
+		}
+	case persistentInstalledHost:
+		installlog.Mark(installlog.RunHost, installlog.Choice("kind", "installed"))
+		runLog.target = "/"
+	default:
+		installlog.Mark(installlog.RunHost, installlog.Choice("kind", "live"))
+		s.saveToDrive = true
+	}
+	s.targetDisk = opt.targetDisk
 	if err := validateTargetDiskContext(opt.targetDisk, persistentInstalledHost); err != nil {
 		return fail(errOut, err)
 	}
@@ -427,6 +454,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 	if skip := liveHostPreparationSkip(
 		opt,
 		os.Getenv("GJALLAR_INSTALLER_RESUME_STATE"),
+		persistentInstalledHost,
 	); skip != "" {
 		fmt.Fprintln(out, skip)
 	} else if code := prepareHost(
@@ -435,6 +463,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 		opt,
 		s,
 		originalArgs,
+		runLog,
 		out,
 		errOut,
 	); code != 0 {
@@ -583,6 +612,8 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 				recovery:    opt.recovery,
 				user:        s.user,
 				oddcChecked: true,
+				toDrive:     s.saveToDrive,
+				targetDisk:  s.targetDisk,
 			})
 		}
 	} else {
@@ -676,6 +707,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 		if err != nil {
 			return fail(errOut, fmt.Errorf("select fresh installation target: %w", err))
 		}
+		s.targetDisk = freshTarget
 	}
 	usbSystemDisk := systemDiskOnUSB(ctx, persistentInstalledHost, root, freshTarget)
 	if s.preset {
@@ -689,7 +721,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 		if s.user.USBGuardEnable && s.user.USBTrustTPMHandle == "" && diskcrypto.TPMAvailable() {
 			s.user.USBTrustTPMHandle = config.DefaultUSBTrustTPMHandle
 		}
-	} else if err := collectInteractive(ctx, ui, root, partitionable, usbSystemDisk, resolvedDevice.ModelID != "", diskcrypto.TPMAvailable(), managementBlocker(s.secureBootFirmware.Policy.Supported, diskcrypto.TPMAvailable()), hardware, choices, running, &s.user); err != nil {
+	} else if err := collectInteractive(ctx, ui, root, managementBlocker(s.secureBootFirmware.Policy.Supported, diskcrypto.TPMAvailable()), hardware, choices, running, &s.user); err != nil {
 		return fail(errOut, err)
 	}
 	if !s.existing {
@@ -697,15 +729,16 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 		// repository into the root-owned system checkout.
 		s.user.DotfilesDir = systemcheckout.Path
 	}
-	if err := configureWeatherLocation(ctx, ui, &s.user, out); err != nil {
-		return fail(errOut, err)
-	}
+	configureWeatherLocation(&s.user, running == nil && !s.existing, out)
 	// Resolve managed security requirements before checking the physical TPM
 	// boundary so policy normalization cannot re-enable TPM-dependent features
 	// after a no-TPM decision.
 	normalizeManagementSafety(&s.user)
 
 	tpmAvailable := diskcrypto.TPMAvailable()
+	// Set when the TPM-dependent security is turned off below; the USB
+	// choice, asked after Secure Boot, then offers no blocking either.
+	tpmSecurityOff := false
 	securityRequested := s.user.SecureBootPrompt ||
 		s.user.SecureBootEnable ||
 		s.user.LUKSTPM2Enable ||
@@ -761,6 +794,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 		}
 
 		disableTPMDependentSecurity(&s.user)
+		tpmSecurityOff = true
 
 		if s.preset {
 			if err := config.WriteAtomic(presetPath, s.user); err != nil {
@@ -857,7 +891,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 			return fail(errOut, err)
 		}
 		if !s.user.SecureBootEnable {
-			fmt.Fprint(out, secureBootDeclinedNotice("You can set it up later with: gjallarctl secure-boot setup"))
+			fmt.Fprint(out, secureBootDeclinedNotice(partitionable, "You can set it up later with: gjallarctl secure-boot setup"))
 		}
 
 		if s.user.SecureBootEnable {
@@ -896,7 +930,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 			}
 		}
 		if !shimOK {
-			fmt.Fprint(out, secureBootDeclinedNotice("After the install, gjallarctl secure-boot setup can try it through shim while the firmware keeps its factory keys."))
+			fmt.Fprint(out, secureBootDeclinedNotice(partitionable, "After the install, gjallarctl secure-boot setup can try it through shim while the firmware keeps its factory keys."))
 		}
 	} else if s.user.SecureBootEnable &&
 		!s.user.SecureBootShim &&
@@ -942,6 +976,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 			}
 
 			disableTPMDependentSecurity(&s.user)
+			tpmSecurityOff = true
 
 			if s.preset {
 				if err := config.WriteAtomic(presetPath, s.user); err != nil {
@@ -994,7 +1029,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 			case secureBootOffReboot:
 				fmt.Fprintln(out, "Nothing has been installed yet. Turn Secure Boot off in firmware setup, then start the installer again.")
 				fmt.Fprintln(out, "Rebooting directly into firmware setup...")
-				if err := attached(ctx, "sudo", "systemctl", "reboot", "--firmware-setup"); err != nil {
+				if err := runLog.restart(ctx, errOut, true); err != nil {
 					return fail(errOut, fmt.Errorf("reboot into firmware setup: %w", err))
 				}
 				return 0
@@ -1006,9 +1041,13 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 	}
 
 	// Asked only now: the recovery partition depends on the Secure Boot
-	// decision, and nothing is partitioned or shrunk without it.
+	// decision, and nothing is partitioned or shrunk without it. USB comes
+	// last in the security block, after the TPM decision.
 	if !s.preset {
 		if err := collectRecovery(ctx, ui, partitionable, s.user.SecureBootEnable, &s.user); err != nil {
+			return fail(errOut, err)
+		}
+		if err := collectUSBTrust(ctx, ui, resolvedDevice.ModelID != "", partitionable, tpmAvailable && !tpmSecurityOff, usbSystemDisk, running, &s.user); err != nil {
 			return fail(errOut, err)
 		}
 	} else if s.user.RecoveryPartitionEnable && !s.user.SecureBootEnable {
@@ -1066,22 +1105,28 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 		&s,
 		hardware,
 		resolvedDevice,
+		out,
 	); err != nil {
 		return fail(errOut, err)
 	}
 	if err := configureSecrets(ctx, root, &s, errOut); err != nil {
 		return fail(errOut, err)
 	}
-	fmt.Fprintf(out, "\nSelected: hostname=%s user=%s shell=%s\n", s.user.Hostname, s.user.Username, s.user.Shell)
 	write := s.user.WriteConfig
 	if !s.preset {
-		write, err = ui.Confirm(ctx, "Write configuration to "+filepath.Join(root, "generated", "state.nix")+"?", false)
+		// Q-O: one summary and one question for writing and installing.
+		write, err = confirmInstall(ctx, ui, s.user, installTarget{
+			disk:          freshTarget,
+			redeploy:      opt.forceRedeploy,
+			encryptedRoot: partitionable,
+			writeOnly:     opt.noRebuild,
+		})
 		if err != nil {
 			return fail(errOut, err)
 		}
 	}
 	if !write {
-		fmt.Fprintln(out, "Nothing changed: the answers were not written and nothing was installed. Run the installer again and answer y to write them.")
+		fmt.Fprintln(out, "Nothing changed: nothing was written or installed. Run the installer again to install.")
 		return 0
 	}
 	var compatibilitySource *installstate.Existing
@@ -1215,6 +1260,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 		if hardwareResult.backup != "" {
 			fmt.Fprintln(out, "Backup:", hardwareResult.backup)
 		}
+		reportDroppedSwap(out, hardwareResult.droppedSwap)
 		if !tpm2AllowedForSecureBoot(s.render.SecureBootEnable) {
 			s.render.LUKSTPM2Enable = false
 			if err := saveTPM2Off(&s.user, presetPath, out); err != nil {
@@ -1337,6 +1383,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 			return fail(errOut, err)
 		}
 	}
+	runLog.refreshKnown()
 	hostOverlayToCommit, err := hostOverlayForCommit(
 		activeHostOverlay,
 		hostOverlayChanged,
@@ -1348,14 +1395,9 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 	}
 
 	runRebuild := s.user.RunRebuild && !opt.noRebuild
-	if opt.forceRedeploy {
+	if opt.forceRedeploy || (!s.preset && !opt.noRebuild) {
+		// An interactive run said yes to "Install now?" above.
 		runRebuild = true
-	}
-	if !s.preset && !opt.noRebuild && !opt.forceRedeploy {
-		runRebuild, err = ui.Confirm(ctx, "Install the next NixOS boot generation now?", false)
-		if err != nil {
-			return fail(errOut, err)
-		}
 	}
 	if needsDeviceRebind && !runRebuild {
 		return fail(
@@ -1644,6 +1686,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 					)
 				}
 			}
+			s.targetDisk = targetDisk
 			if s.user.USBTrustEnforce {
 				if reason := systemDiskOnUSB(ctx, false, root, targetDisk); reason != "" {
 					return fail(errOut, fmt.Errorf("USB blocking is on, but %s Nothing was changed; run the installer again and leave USB blocking off", reason))
@@ -1678,6 +1721,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 
 			// The Secure Boot continuation below still works on the target.
 			defer result.ReleaseTargetState()
+			runLog.target = result.MountPoint
 			s.recoveryPartition = result.RecoveryPartition
 		}
 	}
@@ -1695,17 +1739,19 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 		shimSBOff = !sbOn
 	}
 	if shimSBOff {
+		installlog.Mark(installlog.SecureBootContinue, installlog.Choice("path", "shim-sb-off"))
 		// The rest of the switch runs from gjallarOS itself; until Secure
 		// Boot enforces, each start shows the next step.
 		if err := armSecureBootResume(ctx, out); err != nil {
 			return fail(errOut, err)
 		}
 		fmt.Fprintln(out, "Restarting into gjallarOS through shim. Then run gjallarctl secure-boot setup in a terminal: it puts the gjallarOS key into shim's list.")
-		if err := attached(ctx, "sudo", "systemctl", "reboot"); err != nil {
+		if err := runLog.restart(ctx, errOut, false); err != nil {
 			return fail(errOut, fmt.Errorf("restart: %w", err))
 		}
 		return 0
 	} else if s.render.SecureBootEnable && s.render.SecureBootShim {
+		installlog.Mark(installlog.SecureBootContinue, installlog.Choice("path", "shim"))
 		next, err := secureboot.ContinueShimInstall(
 			ctx,
 			ui,
@@ -1720,12 +1766,13 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 				return fail(errOut, err)
 			}
 			fmt.Fprintln(out, "Restarting into gjallarOS through shim...")
-			if err := attached(ctx, "sudo", "systemctl", "reboot"); err != nil {
+			if err := runLog.restart(ctx, errOut, false); err != nil {
 				return fail(errOut, fmt.Errorf("restart: %w", err))
 			}
 			return 0
 		}
 	} else if s.render.SecureBootEnable {
+		installlog.Mark(installlog.SecureBootContinue, installlog.Choice("path", "own-keys"))
 		next, err := secureboot.Continue(
 			ctx,
 			ui,
@@ -1754,11 +1801,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 				"Rebooting directly into firmware setup...",
 			)
 
-			if err := attached(
-				ctx,
-				"sudo", "systemctl",
-				"reboot", "--firmware-setup",
-			); err != nil {
+			if err := runLog.restart(ctx, errOut, true); err != nil {
 				return fail(
 					errOut,
 					fmt.Errorf("reboot into firmware setup: %w", err),
@@ -1784,7 +1827,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 			}
 		}
 		if s.user.AutoReboot {
-			_ = attached(ctx, "sudo", "systemctl", "reboot")
+			_ = runLog.restart(ctx, errOut, false)
 		} else if !s.render.Management.Enable {
 			yes, _ := ui.Confirm(
 				ctx,
@@ -1792,7 +1835,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 				false,
 			)
 			if yes {
-				_ = attached(ctx, "sudo", "systemctl", "reboot")
+				_ = runLog.restart(ctx, errOut, false)
 			}
 		}
 	}
@@ -1848,7 +1891,7 @@ func activateJODSEnrollment(ctx context.Context, installationSucceeded bool) err
 
 // liveHostPreparationSkip reports why the running system must not be
 // rebuilt, staged or rebooted before the installer operates on its target.
-func liveHostPreparationSkip(opt options, resumeState string) string {
+func liveHostPreparationSkip(opt options, resumeState string, persistentInstalledHost bool) string {
 	switch {
 	case resumeState == installerresume.StateMaintenanceReboot:
 		// The gjallarOS generation was deployed before the maintenance boot.
@@ -1859,10 +1902,11 @@ func liveHostPreparationSkip(opt options, resumeState string) string {
 		// Recovery media is a purpose-built execution environment. Never mutate
 		// or rebuild the live recovery system before operating on the target.
 		return "Recovery environment validated; live-host rebuild skipped."
-	case opt.targetDisk != "":
-		// Fresh installs run from live media (validateTargetDiskContext).
-		// nixos-install builds the target; rebuilding the live system only
-		// fills its RAM-backed store and was OOM-killed on 12 GiB machines.
+	case !persistentInstalledHost:
+		// Live media, with or without --target-disk: the disk is picked
+		// later. /etc/nixos there describes no bootable system, so its
+		// rebuild fails (no root file system, no boot loader), and it only
+		// fills the RAM-backed store; nixos-install builds the target.
 		return "Live installation media; live-host rebuild skipped (nixos-install builds the target)."
 	}
 	return ""
@@ -1874,6 +1918,7 @@ func prepareHost(
 	opt options,
 	s state,
 	originalArgs []string,
+	runLog *logKeeper,
 	out,
 	errOut io.Writer,
 ) int {
@@ -1945,12 +1990,7 @@ func prepareHost(
 			"Rebooting into the staged release; installation will resume automatically.",
 		)
 
-		if err := attached(
-			ctx,
-			"sudo",
-			"systemctl",
-			"reboot",
-		); err != nil {
+		if err := runLog.restart(ctx, errOut, false); err != nil {
 			return fail(
 				errOut,
 				fmt.Errorf(
@@ -2039,7 +2079,7 @@ func containsValue(values []string, want string) bool {
 // machine or the checkout; the prompts show made-up examples instead. On a
 // rerun, running holds the installed system's own answers (runningAnswers),
 // and every question offers them; nil on a new install.
-func collectInteractive(ctx context.Context, ui prompt.UI, root string, partitionable bool, usbSystemDisk string, modelSelected, tpm2 bool, managedBlocker string, hardware discovery.Hardware, o discovery.Options, running *config.User, u *config.User) error {
+func collectInteractive(ctx context.Context, ui prompt.UI, root string, managedBlocker string, hardware discovery.Hardware, o discovery.Options, running *config.User, u *config.User) error {
 	var err error
 	a := interviewDefaults(running, o)
 	if running != nil {
@@ -2047,12 +2087,19 @@ func collectInteractive(ctx context.Context, ui prompt.UI, root string, partitio
 		// USB trust key stays at the TPM handle it was created at.
 		u.Theme = running.Theme
 		u.USBTrustTPMHandle = running.USBTrustTPMHandle
-		u.FirefoxAddons, u.FirefoxStoreAddons = running.FirefoxAddons, running.FirefoxStoreAddons
+		// The weather city is answered in the bar, and an empty one means
+		// the user turned the weather off.
+		u.WeatherCity, u.WeatherCountry = running.WeatherCity, running.WeatherCountry
 	}
-	if u.Hostname, err = ui.Value(ctx, "Hostname", a.Hostname); err != nil {
+	// O1 order: region, account, management, then the security block in
+	// the main flow (Secure Boot, unlock, recovery, USB) and the summary.
+	if err := collectRegion(ctx, ui, running, a, u); err != nil {
 		return err
 	}
 	if u.Username, err = askPersonal(ctx, ui, "Username", a.Username, "alex", true); err != nil {
+		return err
+	}
+	if u.Hostname, err = ui.Value(ctx, "Hostname", a.Hostname); err != nil {
 		return err
 	}
 	if err := collectJODSManagement(ctx, ui, managedBlocker, running, u); err != nil {
@@ -2112,102 +2159,40 @@ func collectInteractive(ctx context.Context, ui prompt.UI, root string, partitio
 	if err != nil {
 		return err
 	}
-	u.Timezone, err = ui.Value(ctx, "Timezone (IANA name)", a.Timezone)
-	if err != nil {
-		return err
+	// Not asked; Settings changes them. Clamshell mode only helps a laptop,
+	// so a new install turns it on for a laptop chassis only.
+	u.TouchpadWorkspaceSwipe = a.TouchpadWorkspaceSwipe
+	u.ClamshellEnable = a.ClamshellEnable
+	if running == nil {
+		u.ClamshellEnable = hardware.FormFactor == "laptop"
 	}
-	u.Locale, err = ui.Value(ctx, "Locale", a.Locale)
-	if err != nil {
-		return err
-	}
-	layout, err := ui.Value(ctx, "Keyboard layout", a.KeyboardLayout)
-	if err != nil {
-		return err
-	}
-	normalized, err := xkb.Normalize(layout)
-	if err != nil {
-		return err
-	}
-	u.KeyboardLayout, u.KeyboardVariant = normalized.Name, normalized.Variant
-	if running != nil && normalized.Name == running.KeyboardLayout && normalized.Variant == "" {
-		// The prompt takes no variant; the running one stays with its layout.
-		u.KeyboardVariant = running.KeyboardVariant
-	}
-	u.TouchpadWorkspaceSwipe, err = ui.Confirm(ctx, "Enable three-finger workspace swipes?", a.TouchpadWorkspaceSwipe)
-	if err != nil {
-		return err
-	}
-	u.ClamshellEnable, err = ui.Confirm(ctx, "Enable dock-aware clamshell mode?", a.ClamshellEnable)
-	if err != nil {
-		return err
-	}
-	if err := collectUSBTrust(ctx, ui, modelSelected, partitionable, tpm2, usbSystemDisk, running, u); err != nil {
-		return err
-	}
-	u.Name, err = askPersonal(ctx, ui, "Full name", a.Name, "Alex Example", true)
-	if err != nil {
-		return err
-	}
-	u.Email, err = askPersonal(ctx, ui, "Git email", a.Email, "alex@example.com", true)
-	if err != nil {
-		return err
-	}
-	u.GitHubUsername, err = askPersonal(ctx, ui, "GitHub username", a.GitHubUsername, "alex-example", false)
-	if err != nil {
-		return err
-	}
-	if u.SettingsSigningKey, err = askSigningKey(ctx, ui, a.SettingsSigningKey); err != nil {
-		return err
-	}
+	// Not asked: the git name and email stay empty on a new install (git
+	// then sets none) until Settings fills them; a rerun keeps them.
+	u.Name, u.Email, u.GitHubUsername = a.Name, a.Email, a.GitHubUsername
+	// Not asked (Q-L): gjallarOS signs the settings files. An own OpenSSH
+	// key is a Settings > Security change (settingsd ownkey), and a rerun
+	// keeps the key the running system has.
+	u.SettingsSigningKey = a.SettingsSigningKey
 	// Not asked: a rerun keeps the running system's checkout, and a new
 	// install gets the system checkout once collection is done.
 	u.DotfilesDir = defaultDotfilesDir(u.Username, root)
 	if running != nil && running.DotfilesDir != "" && running.Username == u.Username {
 		u.DotfilesDir = running.DotfilesDir
 	}
-	u.Shell, err = ui.Choice(ctx, "Login shell", a.Shell, o.Shells)
-	if err != nil {
-		return err
-	}
-	u.Editors, err = ui.Multi(ctx, "Editors", a.Editors, o.Editors)
-	if err != nil {
-		return err
-	}
-	u.Browsers, err = ui.Multi(ctx, "Browsers", a.Browsers, o.Browsers)
-	if err != nil {
-		return err
-	}
-	u.PreferredEditor, err = ui.Value(ctx, "Preferred editor", offeredOr(a.PreferredEditor, u.Editors, u.Editors[0]))
-	if err != nil {
-		return err
-	}
-	u.PreferredBrowser, err = ui.Value(ctx, "Preferred browser", offeredOr(a.PreferredBrowser, u.Browsers, u.Browsers[0]))
-	if err != nil {
-		return err
-	}
-	if err := collectProjectTools(ctx, ui, running, u); err != nil {
-		return err
-	}
+	// Not asked: one shell exists, and a new install ships VSCodium and
+	// Firefox. A rerun keeps the running choices this checkout still offers.
+	u.Shell, u.Editors, u.Browsers = a.Shell, a.Editors, a.Browsers
+	u.PreferredEditor = offeredOr(a.PreferredEditor, u.Editors, u.Editors[0])
+	u.PreferredBrowser = offeredOr(a.PreferredBrowser, u.Browsers, u.Browsers[0])
 	// Theme selection belongs to the desktop shell after installation.
 	// Keep the default theme only as the bootstrap rendering contract.
 	if u.Theme == "" {
 		u.Theme = first(o.Themes)
 	}
-	u.PrintingEnable, err = ui.Confirm(ctx, "Enable printing and scanning support?", a.PrintingEnable)
-	if err != nil {
+	if err := collectPrinting(ctx, ui, a, u); err != nil {
 		return err
 	}
-	u.NetworkPrintingEnable = false
-	if u.PrintingEnable {
-		u.NetworkPrintingEnable, err = ui.Confirm(ctx, "Enable network printer discovery?", a.NetworkPrintingEnable)
-		if err != nil {
-			return err
-		}
-	}
-	if err := collectApps(ctx, ui, running, u); err != nil {
-		return err
-	}
-	if err := collectFirefoxAddons(ctx, ui, u); err != nil {
+	if err := appChoices(running, u); err != nil {
 		return err
 	}
 	// Device-specific hardware policy is resolved through ODDC.
@@ -2234,72 +2219,54 @@ func freshRecoveryPartition(u config.User) bool {
 	return u.RecoveryEnable && u.RecoveryPartitionEnable
 }
 
-// collectRecovery asks for the recovery boot entry and, where the root can
-// take one and gjallarOS Secure Boot is on, the recovery partition.
+// The recovery choices (Q-N). Only the allowed ones are shown.
+const (
+	recoveryFull      = "Boot entry and recovery partition (recommended)"
+	recoveryEntryOnly = "Boot entry only"
+	recoveryNone      = "None"
+)
+
+// collectRecovery asks for recovery as one choice: the trusted boot entry
+// with or without its partition, or none. The partition needs gjallarOS
+// Secure Boot with its own keys and a root on encrypted Btrfs; without them
+// the choice says why and leaves the partition out. A managed machine is
+// not asked: it always gets the boot entry, and the partition where it can.
 func collectRecovery(ctx context.Context, ui prompt.UI, partitionable, secureBoot bool, u *config.User) error {
-	var err error
-	u.RecoveryEnable, err = ui.Confirm(ctx, "Install the trusted local gjallarOS recovery/JODS boot entry?", true)
+	partition := secureBoot && !u.SecureBootShim && partitionable
+	why := ""
+	switch {
+	case !secureBoot:
+		why = noRecoveryPartitionNotice
+	case u.SecureBootShim:
+		why = shimNoRecoveryPartitionNotice
+	case !partitionable:
+		why = "No recovery partition: this root is not on encrypted Btrfs, which the recovery partition needs."
+	}
+	if u.Management.Enable {
+		u.RecoveryEnable, u.RecoveryPartitionEnable = true, partition
+		fmt.Fprintln(ui.Out, "Recovery: a managed machine always gets the trusted gjallarOS recovery/JODS boot entry.")
+		if why != "" {
+			fmt.Fprintln(ui.Out, why)
+		}
+		return nil
+	}
+	fmt.Fprintln(ui.Out, "Recovery: a trusted gjallarOS recovery/JODS boot entry, and a recovery partition that keeps working when the system does not start.")
+	if why != "" {
+		fmt.Fprintln(ui.Out, why)
+	}
+	options := []string{recoveryEntryOnly, recoveryNone}
+	def := recoveryEntryOnly
+	if partition {
+		options = append([]string{recoveryFull}, options...)
+		def = recoveryFull
+	}
+	choice, err := ui.Choice(ctx, "Recovery", def, options)
 	if err != nil {
 		return err
 	}
-	u.RecoveryPartitionEnable = false
-	if u.RecoveryEnable && !secureBoot {
-		fmt.Fprintln(ui.Out, noRecoveryPartitionNotice)
-	} else if u.RecoveryEnable && u.SecureBootShim {
-		fmt.Fprintln(ui.Out, shimNoRecoveryPartitionNotice)
-	} else if u.RecoveryEnable && !partitionable {
-		fmt.Fprintln(ui.Out, "No recovery partition: this root is not on encrypted Btrfs, which recovery partitioning needs. The recovery boot entry is still installed.")
-	} else if u.RecoveryEnable {
-		u.RecoveryPartitionEnable, err = ui.Confirm(
-			ctx,
-			"Create and maintain a dedicated gjallarOS recovery partition (recommended):",
-			true,
-		)
-		if err != nil {
-			return err
-		}
-	}
+	u.RecoveryEnable = choice != recoveryNone
+	u.RecoveryPartitionEnable = choice == recoveryFull
 	return nil
-}
-
-// collectAIServer points AI at a central Ollama server. Nothing runs or is
-// downloaded locally then; the server picks hardware and holds the model.
-func collectAIServer(ctx context.Context, ui prompt.UI, running, u *config.User) error {
-	u.OverrideAISelection, u.OverrideModelWith = false, ""
-	fmt.Fprintln(ui.Out, "The central AI server must use HTTPS and a bearer token (e.g. Ollama behind a TLS proxy that checks it). The token is asked for later, hidden.")
-	endpoint, model, tokens := "", "qwen3-coder:30b", "32768"
-	if running != nil && running.AIEndpoint != "" {
-		endpoint, model = running.AIEndpoint, running.AIRemoteModel
-		if running.AIRemoteContextTokens > 0 {
-			tokens = strconv.Itoa(running.AIRemoteContextTokens)
-		}
-	}
-	for {
-		endpoint, err := ui.Value(ctx, "AI server URL (e.g. https://ai.example.lan)", endpoint)
-		if err != nil {
-			return err
-		}
-		model, err := ui.Value(ctx, "Ollama model on the server", model)
-		if err != nil {
-			return err
-		}
-		tokens, err := ui.Value(ctx, "Context tokens", tokens)
-		if err != nil {
-			return err
-		}
-		u.AIEndpoint, u.AIRemoteModel = strings.TrimRight(strings.TrimSpace(endpoint), "/"), strings.TrimSpace(model)
-		u.AIRemoteContextTokens, err = strconv.Atoi(strings.TrimSpace(tokens))
-		if err == nil && u.AIEndpoint == "" {
-			err = errors.New("enter the AI server URL")
-		}
-		if err == nil {
-			err = config.ValidateAIEndpoint(*u)
-		}
-		if err == nil {
-			return nil
-		}
-		fmt.Fprintf(ui.Out, "%v\n", err)
-	}
 }
 
 // ensureAIToken asks for the central AI server token, hidden, unless one is
@@ -2329,506 +2296,59 @@ func ensureAIToken(ctx context.Context, out io.Writer) error {
 	}
 }
 
-// collectApps asks each catalogue app's installer question; apps without
-// one take their default, or keep their running choice on a rerun. Some
-// apps ask follow-up questions.
-func collectApps(ctx context.Context, ui prompt.UI, running, u *config.User) error {
+// appChoices fills in what the installer no longer asks (Q-H, Q-I, Q-J):
+// optional apps, their own settings, web apps and Firefox add-ons. A new
+// install gets the catalogue defaults; a rerun keeps the running choices.
+// The first-boot guide (Plane 354) and gjallarctl change them later.
+func appChoices(running, u *config.User) error {
 	catalogue, err := apps.Catalogue()
 	if err != nil {
 		return err
 	}
-	followUp := map[string]func(context.Context, prompt.UI, *config.User, *config.User) error{
-		"ai":          collectAI,
-		"tailscale":   collectTailscale,
-		"thunderbird": collectThunderbird,
-	}
 	u.Apps = []string{}
-	u.Tailscale = nil
-	u.ThunderbirdSmartCard = false
-	u.AIAgentMode, u.OverrideAISelection, u.OverrideModelWith = "", false, ""
-	u.AIEndpoint, u.AIRemoteModel, u.AIRemoteContextTokens = "", "", 0
 	for _, app := range catalogue {
 		selected := app.Default
 		if running != nil {
 			selected = running.HasApp(app.ID)
 		}
-		if app.Installer != "" {
-			selected, err = ui.Confirm(ctx, app.Installer, selected)
-			if err != nil {
-				return err
-			}
-		}
-		if !selected {
-			continue
-		}
-		u.Apps = append(u.Apps, app.ID)
-		if collect := followUp[app.ID]; collect != nil {
-			if err := collect(ctx, ui, running, u); err != nil {
-				return err
-			}
+		if selected {
+			u.Apps = append(u.Apps, app.ID)
 		}
 	}
-	return nil
-}
-
-// collectFirefoxAddons asks which add-on collections Firefox gets, then
-// one question per ticked collection for its add-ons, so an add-on is only
-// offered while its collection is on. Earlier answers are the defaults; an
-// add-on that was locked stays locked while it is still ticked.
-func collectFirefoxAddons(ctx context.Context, ui prompt.UI, u *config.User) error {
-	previous := apps.CompleteFirefoxAddons(u.FirefoxAddons)
-	previousStore := u.FirefoxStoreAddons
-	u.FirefoxAddons, u.FirefoxStoreAddons = previous, []apps.FirefoxStoreAddon{}
-	if !slices.Contains(u.Browsers, "firefox") {
-		return nil
+	keep := running
+	if keep == nil {
+		keep = &config.User{}
 	}
-	collections := apps.FirefoxCollections()
-	items := []prompt.Item{}
-	for _, c := range collections {
-		items = append(items, prompt.Item{Value: c.ID, Name: c.Name, Description: c.Description, On: previous[c.ID].Enable})
+	// Tailscale on a new install: no home subnets, no exit node, no
+	// trusted Wi-Fi. gjallarctl vpn reads that the same as no intent.
+	u.Tailscale = nil
+	if u.HasApp("tailscale") {
+		u.Tailscale = &config.TailscaleIntent{HomeSubnets: []string{}, TrustedWifis: []string{}, SiteRouterTargets: []string{}}
+		if keep.Tailscale != nil {
+			t := *keep.Tailscale
+			u.Tailscale = &t
+		}
 	}
-	chosen, err := ui.Checklist(ctx, "Firefox add-ons. Tick the collections you want to pick from.", items)
-	if err != nil {
+	u.ThunderbirdSmartCard = u.HasApp("thunderbird") && keep.ThunderbirdSmartCard
+	u.AIAgentMode, u.OverrideAISelection, u.OverrideModelWith = "", false, ""
+	u.AIEndpoint, u.AIRemoteModel, u.AIRemoteContextTokens = "", "", 0
+	if u.HasApp("ai") {
+		u.AIAgentMode, u.OverrideAISelection, u.OverrideModelWith = keep.AIAgentMode, keep.OverrideAISelection, keep.OverrideModelWith
+		u.AIEndpoint, u.AIRemoteModel, u.AIRemoteContextTokens = keep.AIEndpoint, keep.AIRemoteModel, keep.AIRemoteContextTokens
+	}
+	u.WebApplications = slices.Clone(keep.WebApplications)
+	u.NextcloudEnable, u.NextcloudHost = keep.NextcloudEnable, keep.NextcloudHost
+	if err := config.NormalizeProjectTools(u); err != nil {
 		return err
 	}
-	for _, c := range collections {
-		choice := apps.FirefoxCollectionChoice{Addons: maps.Clone(previous[c.ID].Addons)}
-		u.FirefoxAddons[c.ID] = choice
-		if !slices.Contains(chosen, c.ID) {
-			// Off, but the add-on choices stay for when it is turned on again.
-			continue
-		}
-		items = []prompt.Item{}
-		for _, a := range c.Addons {
-			items = append(items, prompt.Item{Value: a.ID, Name: a.Name, Description: a.Description, On: choice.Addons[a.ID] != apps.AddonOff})
-		}
-		picked, err := ui.Checklist(ctx, c.Name+": tick the add-ons you want.", items)
-		if err != nil {
-			return err
-		}
-		for _, a := range c.Addons {
-			switch {
-			case !slices.Contains(picked, a.ID):
-				choice.Addons[a.ID] = apps.AddonOff
-			case choice.Addons[a.ID] != apps.AddonLocked:
-				choice.Addons[a.ID] = apps.AddonOn
-			}
-		}
-		// A collection with nothing ticked stays off.
-		choice.Enable = len(picked) > 0
-		u.FirefoxAddons[c.ID] = choice
+	// uBlock Origin is locked on by default; the other add-ons are offered
+	// in the first-boot guide and by gjallarctl addons.
+	u.FirefoxAddons = apps.CompleteFirefoxAddons(keep.FirefoxAddons)
+	u.FirefoxStoreAddons = slices.Clone(keep.FirefoxStoreAddons)
+	if u.FirefoxStoreAddons == nil {
+		u.FirefoxStoreAddons = []apps.FirefoxStoreAddon{}
 	}
-	return collectStoreAddons(ctx, ui, u, previousStore)
-}
-
-// pinStoreAddon is swapped in tests; the installer asks addons.mozilla.org.
-var pinStoreAddon = firefoxstore.Pin
-
-// collectStoreAddons asks for more add-ons by ID. A listed add-on that was
-// pinned before keeps its pin; a new one is pinned to its current version
-// after the user has seen what it may do.
-func collectStoreAddons(ctx context.Context, ui prompt.UI, u *config.User, previous []apps.FirefoxStoreAddon) error {
-	const storeLabel = "More add-ons from addons.mozilla.org by add-on ID, comma-separated (optional). about:support lists the ID of each installed add-on."
-	ids := []string{}
-	for _, a := range previous {
-		ids = append(ids, a.ID)
-	}
-	label, answer := storeLabel, strings.Join(ids, ", ")
-	for {
-		var err error
-		answer, err = ui.Value(ctx, label, answer)
-		if err != nil {
-			return err
-		}
-		store, err := storeAddonsFor(ctx, ui, u, previous, answer)
-		if err == nil {
-			u.FirefoxStoreAddons = store
-			return nil
-		}
-		if errors.Is(err, prompt.ErrCancelled) || ctx.Err() != nil {
-			return err
-		}
-		label = err.Error() + "\n\n" + storeLabel
-	}
-}
-
-func storeAddonsFor(ctx context.Context, ui prompt.UI, u *config.User, previous []apps.FirefoxStoreAddon, answer string) ([]apps.FirefoxStoreAddon, error) {
-	store := []apps.FirefoxStoreAddon{}
-	for _, id := range strings.Split(answer, ",") {
-		if id = strings.TrimSpace(id); id == "" {
-			continue
-		}
-		if i := slices.IndexFunc(previous, func(a apps.FirefoxStoreAddon) bool { return a.ID == id }); i >= 0 {
-			a := previous[i]
-			if a.Mode == apps.AddonOff {
-				a.Mode = apps.AddonOn
-			}
-			store = append(store, a)
-			continue
-		}
-		// Check the ID before asking the network about it.
-		if err := apps.CheckStoreAddonID(id); err != nil {
-			return nil, fmt.Errorf("firefoxStoreAddons: %w", err)
-		}
-		if slices.ContainsFunc(store, func(a apps.FirefoxStoreAddon) bool { return a.ID == id }) {
-			return nil, fmt.Errorf("firefoxStoreAddons: %q listed twice", id)
-		}
-		a, err := pinStoreAddon(ctx, id, apps.AddonOn)
-		if err != nil {
-			return nil, err
-		}
-		ok, err := ui.Confirm(ctx, fmt.Sprintf("Install %s %s (%s)? It may use: %s", a.Name, a.Version, a.ID, permissionList(a.Permissions)), true)
-		if err != nil {
-			return nil, err
-		}
-		if !ok {
-			return nil, fmt.Errorf("%s left out; remove it from the list or confirm it", id)
-		}
-		store = append(store, a)
-	}
-	if err := apps.ValidateFirefoxAddons(u.FirefoxAddons, store); err != nil {
-		return nil, err
-	}
-	return store, nil
-}
-
-func permissionList(permissions []string) string {
-	if len(permissions) == 0 {
-		return "nothing special"
-	}
-	return strings.Join(permissions, ", ")
-}
-
-// aiMemoryGB is swapped in tests; the installer runs on the target machine.
-var aiMemoryGB = profile.MemoryGB
-
-func collectAI(ctx context.Context, ui prompt.UI, running, u *config.User) error {
-	backend, choices := "local", []string{"local", "central-server"}
-	ramGB, err := aiMemoryGB()
-	if err != nil {
-		return err
-	}
-	lowMemory := !profile.LocalFits(ramGB)
-	if lowMemory {
-		fmt.Fprintf(ui.Out, "No local AI model fits %d GiB RAM; local AI needs 8 GiB. Use a central server, turn AI off, or name a small model yourself.\n", ramGB)
-		backend, choices = "off", []string{"off", "central-server", "local"}
-	}
-	if running != nil && running.HasApp("ai") {
-		backend = "local"
-		if running.AIEndpoint != "" {
-			backend = "central-server"
-		}
-	}
-	backend, err = ui.Choice(ctx, "AI backend", backend, choices)
-	if err != nil {
-		return err
-	}
-	if backend == "off" {
-		u.Apps = slices.DeleteFunc(u.Apps, func(id string) bool { return id == "ai" })
-		return nil
-	}
-	if backend == "central-server" {
-		if err := collectAIServer(ctx, ui, running, u); err != nil {
-			return err
-		}
-	} else {
-		u.OverrideAISelection = lowMemory
-		if !lowMemory {
-			u.OverrideAISelection, err = ui.Confirm(ctx, "Override automatic hardware-aware AI model selection?", running != nil && running.OverrideAISelection)
-			if err != nil {
-				return err
-			}
-		}
-		if u.OverrideAISelection {
-			model := "qwen2.5-coder:14b"
-			if lowMemory {
-				model = "qwen2.5-coder:1.5b"
-			}
-			if running != nil && running.OverrideModelWith != "" {
-				model = running.OverrideModelWith
-			}
-			for {
-				value, err := ui.Value(ctx, "Exact Ollama model identifier", model)
-				if err != nil {
-					return err
-				}
-				override, err := profile.NewOverride(true, value)
-				if err == nil {
-					u.OverrideModelWith = override.Model
-					break
-				}
-				fmt.Fprintf(ui.Out, "%v\n", err)
-			}
-		}
-	}
-	modes := []string{"workspace", "owner-conservative", "owner-full-local"}
-	mode := "workspace"
-	if running != nil {
-		mode = offeredOr(running.AIAgentMode, modes, mode)
-	}
-	u.AIAgentMode, err = ui.Choice(ctx, "AI permission profile", mode, modes)
-	return err
-}
-
-// collectThunderbird offers smart card support for mail keys. It stays off
-// unless the user has a card: it starts pcscd and gpg-agent for them.
-func collectThunderbird(ctx context.Context, ui prompt.UI, running, u *config.User) error {
-	was := running != nil && running.ThunderbirdSmartCard
-	var err error
-	u.ThunderbirdSmartCard, err = ui.Confirm(ctx, "Use a smart card for mail encryption keys?", was)
-	return err
-}
-
-func collectTailscale(ctx context.Context, ui prompt.UI, running, u *config.User) error {
-	t := &config.TailscaleIntent{HomeSubnets: []string{}, TrustedWifis: []string{}, SiteRouterTargets: []string{}}
-	u.Tailscale = t
-	// was holds the running answers on a rerun, else what a new install offers.
-	was := config.TailscaleIntent{HomeSubnets: []string{}, RouterHome: true, SiteRouterTrust: true}
-	if running != nil && running.Tailscale != nil {
-		was = *running.Tailscale
-	}
-
-	ask := func(label, def string, set func(string) error) error {
-		for {
-			value, err := ui.Value(ctx, label, def)
-			if err != nil {
-				return err
-			}
-			err = set(value)
-			if err == nil {
-				err = config.ValidateTailscale(t)
-			}
-			if err != nil {
-				fmt.Fprintf(ui.Out, "%v\n", err)
-				continue
-			}
-			return nil
-		}
-	}
-
-	if err := ask("Home LAN subnets kept out of the tunnel at home, comma-separated (e.g. 192.168.1.0/24)", config.JoinList(was.HomeSubnets), func(v string) (err error) {
-		t.HomeSubnets, err = config.SplitList(v)
-		return err
-	}); err != nil {
-		return err
-	}
-
-	vpn, err := ui.Confirm(ctx, "Use a Tailscale exit node as VPN on networks that are not yours?", was.ExitNode != "")
-	if err != nil || !vpn {
-		return err
-	}
-	for t.ExitNode == "" {
-		// The tailnet is not reachable before the first login, so "auto"
-		// picks the home router's exit node at runtime.
-		exitNode := "auto"
-		if was.ExitNode != "" {
-			exitNode = was.ExitNode
-		}
-		if err := ask("Exit node (auto = your home router's, or a tailnet host name or 100.x address)", exitNode, func(v string) error {
-			t.ExitNode = strings.TrimSpace(v)
-			return nil
-		}); err != nil {
-			return err
-		}
-	}
-	if err := ask("Your Wi-Fi names where no VPN is needed, comma-separated, quote names with commas (e.g. home-5Ghz, home-2.4Ghz, \"cafe, upstairs\")", config.JoinList(was.TrustedWifis), func(v string) (err error) {
-		t.TrustedWifis, err = config.SplitList(v)
-		return err
-	}); err != nil {
-		return err
-	}
-	if len(t.TrustedWifis) > 0 {
-		// e.g. a relative's Wi-Fi: its printer stays usable while the
-		// internet still goes through home. gjallarctl vpn trust-wifi
-		// --exit-node picks another node per Wi-Fi later.
-		routed := slices.Sorted(maps.Keys(was.WifiExitNodes))
-		if err := ask("Of these, Wi-Fis that still send the internet through the exit node (comma-separated, empty = none)", config.JoinList(routed), func(v string) error {
-			names, err := config.SplitList(v)
-			t.WifiExitNodes = nil
-			for _, ssid := range names {
-				if t.WifiExitNodes == nil {
-					t.WifiExitNodes = map[string]string{}
-				}
-				t.WifiExitNodes[ssid] = t.ExitNode
-				if node := was.WifiExitNodes[ssid]; node != "" {
-					// gjallarctl vpn trust-wifi --exit-node may have picked another one.
-					t.WifiExitNodes[ssid] = node
-				}
-			}
-			return err
-		}); err != nil {
-			return err
-		}
-	}
-	// Any subnet router of the tailnet counts, a friend's too: the tailnet
-	// admin approved its routes, and the signed ping shows it is here.
-	t.RouterHome, err = ui.Confirm(ctx, "Switch the VPN off on any LAN where a subnet router of your tailnet is (yours or a friend's in the same tailnet)?", was.RouterHome)
-	if err != nil || t.RouterHome {
-		return err
-	}
-	t.SiteRouterTrust, err = ui.Confirm(ctx, "Then switch it off near such a router only when it reaches your home LAN?", was.SiteRouterTrust)
-	if err != nil || !t.SiteRouterTrust {
-		return err
-	}
-	targets := config.DefaultSiteRouterTarget(t.HomeSubnets)
-	if len(was.SiteRouterTargets) > 0 {
-		targets = config.JoinList(was.SiteRouterTargets)
-	}
-	return ask("Home hosts that router must reach (host:port, comma-separated, e.g. 192.168.1.1:53)", targets, func(v string) (err error) {
-		t.SiteRouterTargets, err = config.SplitList(v)
-		return err
-	})
-}
-
-func collectProjectTools(ctx context.Context, ui prompt.UI, running, u *config.User) error {
-	u.WebApplications = nil
-	was := map[string]config.WebApplicationIntent{}
-	if running != nil {
-		for _, application := range running.WebApplications {
-			was[application.ID] = application
-		}
-	}
-
-	for _, id := range config.SupportedWebApplicationIDs() {
-		label := id
-
-		switch id {
-		case config.WebApplicationPlane:
-			label = "Plane"
-		case config.WebApplicationTeams:
-			label = "Microsoft Teams"
-		}
-
-		previous, enabledBefore := was[id]
-		enabled, err := ui.Confirm(
-			ctx,
-			"Enable "+label+" web application integration?",
-			enabledBefore,
-		)
-		if err != nil {
-			return err
-		}
-		if !enabled {
-			continue
-		}
-
-		application := config.WebApplicationIntent{ID: id}
-
-		switch id {
-		case config.WebApplicationPlane:
-			application.Endpoint, err = askEndpoint(
-				ctx,
-				ui,
-				"Plane endpoint (blank skips Plane)",
-				previous.Endpoint,
-				checkEndpoint,
-			)
-			if err != nil {
-				return err
-			}
-			if application.Endpoint == "" {
-				continue
-			}
-
-		case config.WebApplicationTeams:
-			// Teams owns its default service endpoint.
-
-		default:
-			return fmt.Errorf(
-				"unsupported web application integration: %q",
-				id,
-			)
-		}
-
-		u.WebApplications = append(
-			u.WebApplications,
-			application,
-		)
-	}
-
-	var err error
-
-	u.NextcloudEnable, err = ui.Confirm(
-		ctx,
-		"Enable Nextcloud integration?",
-		running != nil && running.NextcloudEnable,
-	)
-	if err != nil {
-		return err
-	}
-
-	if u.NextcloudEnable {
-		nextcloudHost := ""
-		if running != nil {
-			nextcloudHost = running.NextcloudHost
-		}
-		u.NextcloudHost, err = askEndpoint(
-			ctx,
-			ui,
-			"Nextcloud server (blank skips Nextcloud)",
-			nextcloudHost,
-			func(host string) error {
-				probe := config.User{NextcloudEnable: true, NextcloudHost: host}
-				return config.NormalizeProjectTools(&probe)
-			},
-		)
-		if err != nil {
-			return err
-		}
-		u.NextcloudEnable = u.NextcloudHost != ""
-	}
-
-	return config.NormalizeProjectTools(u)
-}
-
-// askEndpoint asks for label until check accepts the answer, so an invalid
-// endpoint is asked again instead of failing the whole install. A blank answer
-// returns "" so the caller can skip the service; re-asking it trapped anyone
-// who said yes without having a server. def is the running endpoint on a
-// rerun.
-func askEndpoint(ctx context.Context, ui prompt.UI, label, def string, check func(string) error) (string, error) {
-	for {
-		value, err := ui.Value(ctx, label, def)
-		if err != nil {
-			return "", err
-		}
-		if strings.TrimSpace(value) == "" {
-			return "", nil
-		}
-		if err := check(value); err != nil {
-			fmt.Fprintf(ui.Out, "%v\n", err)
-			continue
-		}
-		return value, nil
-	}
-}
-
-// askSigningKey asks who signs the main user's settings files: gjallarOS,
-// or the user's own OpenSSH key (settingsSigningKey). running is the key of
-// the installed system on a rerun. The example is made up and never filled
-// in.
-func askSigningKey(ctx context.Context, ui prompt.UI, running string) (string, error) {
-	managed, err := ui.Confirm(ctx, "Let gjallarOS sign your settings files for you? (recommended; No: you sign them yourself with your own OpenSSH key, ssh-ed25519 or a FIDO sk-ssh-ed25519 key)", running == "")
-	if err != nil || managed {
-		return "", err
-	}
-	for {
-		line, err := askPersonal(ctx, ui, "Your OpenSSH public key line, from your .pub file", running, "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA... alex@example", true)
-		if err != nil {
-			return "", err
-		}
-		if _, err := sshsig.ParseKey(line); err != nil {
-			fmt.Fprintf(ui.Out, "%v\n", err)
-			running = ""
-			continue
-		}
-		return line, nil
-	}
-}
-
-func checkEndpoint(endpoint string) error {
-	_, err := config.NormalizeExternalServiceEndpoint(endpoint)
-	return err
+	return apps.ValidateFirefoxAddons(u.FirefoxAddons, u.FirefoxStoreAddons)
 }
 
 // defaultDotfilesDir is where the new user's checkout lives. The checkout the
@@ -2877,45 +2397,54 @@ func normalizeManagementSafety(u *config.User) {
 	u.PrebootLock.Enable = false
 }
 
-func configureWeatherLocation(ctx context.Context, ui prompt.UI, u *config.User, out io.Writer) error {
-	configuredCity := strings.TrimSpace(u.WeatherCity)
-	configuredCountry := strings.TrimSpace(u.WeatherCountry)
-	if configuredCity != "" && configuredCountry != "" {
-		u.WeatherCity = configuredCity
-		u.WeatherCountry = configuredCountry
-		fmt.Fprintf(out, "Weather location configured: %s, %s\n", configuredCity, configuredCountry)
-		return nil
-	}
+// Printing choices, in the order the question lists them.
+const (
+	printingOff     = "off"
+	printingUSB     = "usb: printers and scanners plugged into this computer"
+	printingNetwork = "network: also find printers on the local network"
+)
 
-	detected, detectErr := detectNetworkLocation(ctx)
-	if detectErr == nil {
-		fmt.Fprintf(out, "Approximate network location detected: %s, %s\n", detected.City, detected.Country)
-		correct, err := ui.Confirm(ctx, "Is this the correct weather location: "+detected.City+", "+detected.Country+"?", true)
-		if err != nil {
-			return err
-		}
-		if correct {
-			u.WeatherCity, u.WeatherCountry = detected.City, detected.Country
-			return nil
-		}
-	} else {
-		fmt.Fprintf(out, "Network location detection unavailable: %v\n", detectErr)
+// collectPrinting asks one question for printing. CUPS only ever listens on
+// this computer; the network choice adds mDNS discovery, which opens UDP
+// 5353 to the local network.
+func collectPrinting(ctx context.Context, ui prompt.UI, a config.User, u *config.User) error {
+	def := printingOff
+	switch {
+	case a.PrintingEnable && a.NetworkPrintingEnable:
+		def = printingNetwork
+	case a.PrintingEnable:
+		def = printingUSB
 	}
-
-	city, err := ui.Value(ctx, "Weather city", u.WeatherCity)
+	choice, err := ui.Choice(ctx, "Printers and scanners", def, []string{printingOff, printingUSB, printingNetwork})
 	if err != nil {
 		return err
 	}
-	country, err := ui.Value(ctx, "Weather country", u.WeatherCountry)
-	if err != nil {
-		return err
-	}
-	city, country = strings.TrimSpace(city), strings.TrimSpace(country)
-	if city == "" || country == "" {
-		return errors.New("weather city and country are required")
-	}
-	u.WeatherCity, u.WeatherCountry = city, country
+	u.PrintingEnable = choice != printingOff
+	u.NetworkPrintingEnable = choice == printingNetwork
 	return nil
+}
+
+// configureWeatherLocation fills the weather city and country without
+// asking and without the network. Values already set (a preset, or the
+// running system on a rerun) stay. Otherwise, when guess is set, the
+// timezone names them; the bar asks the user to confirm or change them.
+// Empty values hide the weather.
+func configureWeatherLocation(u *config.User, guess bool, out io.Writer) {
+	u.WeatherCity = strings.TrimSpace(u.WeatherCity)
+	u.WeatherCountry = strings.TrimSpace(u.WeatherCountry)
+	if u.WeatherCity != "" && u.WeatherCountry != "" {
+		fmt.Fprintf(out, "Weather location: %s, %s\n", u.WeatherCity, u.WeatherCountry)
+		return
+	}
+	u.WeatherCity, u.WeatherCountry = "", ""
+	if guess {
+		if place, ok := zonecity.Guess(u.Timezone); ok {
+			u.WeatherCity, u.WeatherCountry = place.City, place.Country
+			fmt.Fprintf(out, "Weather location from the timezone: %s, %s (the bar asks you to confirm it)\n", place.City, place.Country)
+			return
+		}
+	}
+	fmt.Fprintln(out, "Weather location: none yet; the bar asks for your city.")
 }
 
 func configureRecoveryProvisioning(ctx context.Context, ui prompt.UI, opt options, s *state) error {
@@ -3103,13 +2632,25 @@ func managementBlocker(secureBootSupported, tpm2 bool) string {
 	return ""
 }
 
-// collectUSBTrust offers USB trust review only with an ODDC model: the
-// system refuses USB trust without one, since the model names the internal
-// devices that must stay trusted. Blocking is offered only with TPM2 (the
-// approved-device list is signed by a TPM key the system creates on first
-// boot), an encrypted root (turning blocking off asks for the disk
-// passphrase) and a system disk that is not on USB (usbSystemDisk says why
-// not, see systemDiskOnUSB).
+// The USB trust choices (Q-K). Blocking is listed only where it can work.
+const (
+	usbTrustOff    = "Off"
+	usbTrustReview = "Review new devices"
+	usbTrustBlock  = "Review and block unknown devices from the first boot"
+)
+
+// DefaultUSBTrustLapseDays is how long an approved USB device stays
+// approved without use on a new install. Settings > Security changes it.
+const DefaultUSBTrustLapseDays = 30
+
+// collectUSBTrust asks for USB trust as one choice. It is offered only with
+// an ODDC model: the system refuses USB trust without one, since the model
+// names the internal devices that must stay trusted. Blocking is offered
+// only with TPM2 (the approved-device list is signed by a TPM key the
+// system creates on first boot), an encrypted root (turning blocking off
+// asks for the disk passphrase) and a system disk that is not on USB
+// (usbSystemDisk says why not, see systemDiskOnUSB). Approvals expire after
+// DefaultUSBTrustLapseDays without use; a rerun keeps the running value.
 func collectUSBTrust(ctx context.Context, ui prompt.UI, modelSelected, encryptedRoot, tpm2 bool, usbSystemDisk string, running, u *config.User) error {
 	was := config.User{}
 	if running != nil {
@@ -3123,61 +2664,57 @@ func collectUSBTrust(ctx context.Context, ui prompt.UI, modelSelected, encrypted
 		fmt.Fprintln(ui.Out, "No USB trust review: ODDC has no model for this machine, and USB trust needs one to know its internal devices.")
 		return nil
 	}
-	var err error
-	u.USBGuardEnable, err = ui.Confirm(ctx, "Enable USB trust review? New USB devices are logged and you can approve them.", was.USBGuardEnable)
-	if err != nil || !u.USBGuardEnable {
-		u.USBTrustTPMHandle = ""
+	noBlock := ""
+	switch {
+	case !tpm2:
+		noBlock = "it needs TPM2 to sign the list of approved devices."
+	case usbSystemDisk != "":
+		noBlock = usbSystemDisk
+	case !encryptedRoot:
+		noBlock = "turning it off again needs the disk passphrase, and this root is not encrypted."
+	}
+	fmt.Fprintln(ui.Out, "USB devices: review logs each new USB device so you can approve it.")
+	options := []string{usbTrustOff, usbTrustReview}
+	if noBlock == "" {
+		options = append(options, usbTrustBlock)
+		fmt.Fprintln(ui.Out, "With blocking, only built-in devices and devices you approve work. A USB keyboard or mouse that is not built in stays blocked until you approve it with the built-in keyboard.")
+	} else {
+		fmt.Fprintf(ui.Out, "Blocking is not offered: %s\n", noBlock)
+	}
+	// A new install defaults to review (Jade 2026-11-15); a rerun keeps
+	// what the machine runs.
+	def := usbTrustReview
+	if running != nil && !was.USBGuardEnable {
+		def = usbTrustOff
+	}
+	if was.USBTrustEnforce && noBlock == "" {
+		def = usbTrustBlock
+	}
+	choice, err := ui.Choice(ctx, "USB devices", def, options)
+	if err != nil {
 		return err
 	}
-	if !tpm2 {
+	u.USBGuardEnable = choice != usbTrustOff
+	u.USBTrustEnforce = choice == usbTrustBlock
+	if !u.USBGuardEnable || !tpm2 {
+		// Approvals are kept only under the TPM key.
 		u.USBTrustTPMHandle = ""
-		fmt.Fprintln(ui.Out, "USB blocking stays off: it needs TPM2 to sign the list of approved devices.")
 		return nil
 	}
 	if u.USBTrustTPMHandle == "" {
 		u.USBTrustTPMHandle = config.DefaultUSBTrustTPMHandle
 	}
-	if usbSystemDisk != "" {
-		fmt.Fprintf(ui.Out, "USB blocking stays off: %s\n", usbSystemDisk)
-	} else if !encryptedRoot {
-		fmt.Fprintln(ui.Out, "USB blocking stays off: turning it off again needs the disk passphrase, and this root is not encrypted.")
-	} else {
-		fmt.Fprintln(ui.Out, "With blocking on, only built-in devices and devices you approve work.")
-		fmt.Fprintln(ui.Out, "A USB keyboard or mouse that is not built in stays blocked until you approve it with the built-in keyboard.")
-		if u.USBTrustEnforce, err = ui.Confirm(ctx, "Block unknown USB devices from the first boot?", was.USBTrustEnforce); err != nil {
-			return err
-		}
+	// A rerun keeps the expiry the machine has, 0 included, once USB trust
+	// ran with a signed list; a value set while it was off counts too.
+	u.USBTrustLapseDays = DefaultUSBTrustLapseDays
+	if (was.USBGuardEnable && was.USBTrustTPMHandle != "") || was.USBTrustLapseDays > 0 {
+		u.USBTrustLapseDays = was.USBTrustLapseDays
 	}
-	return collectUSBTrustLapse(ctx, ui, was.USBTrustLapseDays, u)
-}
-
-// collectUSBTrustLapse asks whether approved USB devices expire after some
-// days without use. It needs the TPM key, since only then are approvals
-// stored at all. Off by default; running is the lapse a rerun offers, 0 for
-// none.
-func collectUSBTrustLapse(ctx context.Context, ui prompt.UI, running int, u *config.User) error {
-	fmt.Fprintln(ui.Out, "Approved USB devices can expire when they are not used for some days. An expired device asks for approval again.")
-	fmt.Fprintln(ui.Out, "Without a built-in USB keyboard, the keyboard and mouse you used last never expire, so you cannot lock yourself out.")
-	expire, err := ui.Confirm(ctx, "Let approved USB devices expire when unused?", running > 0)
-	if err != nil || !expire {
-		return err
+	if u.USBTrustLapseDays > 0 {
+		fmt.Fprintf(ui.Out, "Approved devices expire after %d days without use and then ask again; Settings > Security changes this.\n", u.USBTrustLapseDays)
+		fmt.Fprintln(ui.Out, "Without a built-in USB keyboard, the keyboard and mouse you used last never expire, so you cannot lock yourself out.")
 	}
-	days := "30"
-	if running > 0 {
-		days = strconv.Itoa(running)
-	}
-	for {
-		answer, err := ui.Value(ctx, fmt.Sprintf("Days without use before a device expires (1 to %d)", config.MaxUSBTrustLapseDays), days)
-		if err != nil {
-			return err
-		}
-		days, err := strconv.Atoi(answer)
-		if err == nil && days >= 1 && days <= config.MaxUSBTrustLapseDays {
-			u.USBTrustLapseDays = days
-			return nil
-		}
-		fmt.Fprintf(ui.Out, "Enter a whole number from 1 to %d.\n", config.MaxUSBTrustLapseDays)
-	}
+	return nil
 }
 
 func discoverInstalledRecoveryTopology(
@@ -3477,8 +3014,13 @@ func provisionRecoveryPartition(ctx context.Context, root string, s state) error
 	if err := attached(ctx, signScript, images[0], s.recoverySigningKey, s.recoverySigningPublicKey, releaseDir); err != nil {
 		return fmt.Errorf("sign recovery image release: %w", err)
 	}
-	manifest := filepath.Join(releaseDir, filepath.Base(images[0])+".manifest")
-	if err := attached(ctx, "sudo", installScript, s.recoveryPartition, images[0], manifest, manifest+".sig", filepath.Join(releaseDir, "recovery-signing-public.pem")); err != nil {
+	staged, release, err := stageRecoveryRelease(ctx, releaseDir, images[0])
+	if err != nil {
+		return fmt.Errorf("stage recovery image release: %w", err)
+	}
+	defer privilegedCommand(context.WithoutCancel(ctx), "rm", "-rf", "--", staged)
+	args := append([]string{installScript, s.recoveryPartition, images[0]}, release...)
+	if err := attached(ctx, "sudo", args...); err != nil {
 		return fmt.Errorf("install recovery partition: %w", err)
 	}
 	return nil
@@ -3545,6 +3087,7 @@ func detectAndRenderState(
 	s *state,
 	hardware discovery.Hardware,
 	resolvedDevice oddc.Resolved,
+	out io.Writer,
 ) error {
 	u := s.user
 	if u.AIAgentMode == "" {
@@ -3554,28 +3097,11 @@ func detectAndRenderState(
 	if err != nil {
 		return err
 	}
-	// Without local AI there is no model to pick. An empty aiModel makes a
-	// later switch to local AI stop at the Nix assertion instead of pulling a
-	// model sized for some other machine.
-	var ai profile.Result
-	// A central AI server holds the model; local hardware does not matter.
-	if u.HasApp("ai") && u.AIEndpoint == "" {
-		// u holds the override from either the preset file or the answers;
-		// the file does not exist yet in an interactive install.
-		override, err := profile.NewOverride(u.OverrideAISelection, u.OverrideModelWith)
-		if err != nil {
-			return fmt.Errorf("overrideModelWith: %w", err)
-		}
-		ai, err = profile.DetectWith(ctx, override)
-		if err != nil {
-			return err
-		}
-		if ai.Model == "" {
-			// Only a preset gets here; collectAI sets an override. Rebuilds sync
-			// apps from user.config.json, so the file itself has to change.
-			return fmt.Errorf("user.config.json enables local AI, but no local model fits %d GiB RAM (8 GiB needed): set aiEndpoint, set overrideAiSelection with overrideModelWith, or remove \"ai\" from apps", ai.RAMGB)
-		}
+	ai, err := pickLocalAI(ctx, &s.user, s.preset, out)
+	if err != nil {
+		return err
 	}
+	u.Apps = s.user.Apps
 	system, err := detectedNixSystem()
 	if err != nil {
 		return err
@@ -3600,6 +3126,44 @@ func detectAndRenderState(
 	s.render.WMs = []string{"hyprland"}
 
 	return nil
+}
+
+// detectLocalAI is profile.DetectWith; tests swap it.
+var detectLocalAI = profile.DetectWith
+
+// pickLocalAI picks the local AI model for the ai app. Without local AI, or
+// with a central AI server, there is no model to pick: an empty aiModel makes
+// a later switch to local AI stop at the Nix assertion instead of pulling a
+// model sized for some other machine.
+//
+// The interview no longer asks about AI (O4), so a rerun keeps the running
+// apps. When no model fits this machine (a disk moved to a smaller one), an
+// interactive run turns local AI off and says so; gjallarctl ai enable
+// explains the ways to turn it on anyway. A preset names its apps itself and
+// stops instead.
+func pickLocalAI(ctx context.Context, u *config.User, preset bool, out io.Writer) (profile.Result, error) {
+	if !u.HasApp("ai") || u.AIEndpoint != "" {
+		return profile.Result{}, nil
+	}
+	// u holds the override from either the preset file or the running
+	// config; the file does not exist yet in a new install.
+	override, err := profile.NewOverride(u.OverrideAISelection, u.OverrideModelWith)
+	if err != nil {
+		return profile.Result{}, fmt.Errorf("overrideModelWith: %w", err)
+	}
+	ai, err := detectLocalAI(ctx, override)
+	if err != nil {
+		return profile.Result{}, err
+	}
+	if ai.Model != "" {
+		return ai, nil
+	}
+	if preset {
+		return profile.Result{}, fmt.Errorf("the preset enables local AI, but no local model fits %d GiB RAM (8 GiB needed): set aiEndpoint, set overrideAiSelection with overrideModelWith, or remove \"ai\" from apps", ai.RAMGB)
+	}
+	u.Apps = slices.DeleteFunc(slices.Clone(u.Apps), func(id string) bool { return id == "ai" })
+	fmt.Fprintf(out, "Local AI is turned off: no local model fits %d GiB RAM (8 GiB needed). After the install, gjallarctl ai enable lists the ways to turn it on anyway.\n", ai.RAMGB)
+	return profile.Result{}, nil
 }
 
 func configureSecrets(context.Context, string, *state, io.Writer) error {
@@ -3765,6 +3329,7 @@ func fail(out io.Writer, err error) int {
 	}
 	recordFailure(out, err)
 	fmt.Fprintln(out, "ERROR:", err)
+	installlog.Mark(installlog.RunFailed)
 	return 1
 }
 

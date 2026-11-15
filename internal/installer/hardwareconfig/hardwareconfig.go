@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -83,7 +84,7 @@ func Generate(
 	repo,
 	target string,
 	now time.Time,
-) (string, error) {
+) (Result, error) {
 	return generate(
 		ctx,
 		repo,
@@ -105,7 +106,7 @@ func GenerateTarget(
 	repo,
 	target string,
 	now time.Time,
-) (string, error) {
+) (Result, error) {
 	return generate(
 		ctx,
 		repo,
@@ -123,10 +124,10 @@ func generate(
 	now time.Time,
 	root string,
 	runner commandRunner,
-) (string, error) {
+) (Result, error) {
 	target, err := ValidateTarget(repo, target)
 	if err != nil {
-		return "", err
+		return Result{}, err
 	}
 
 	if root != "" {
@@ -137,7 +138,7 @@ func generate(
 		)
 
 		if cleanRoot != freshTargetRoot && !isolatedRoot {
-			return "", fmt.Errorf(
+			return Result{}, fmt.Errorf(
 				"unsupported hardware discovery root %s",
 				root,
 			)
@@ -145,23 +146,23 @@ func generate(
 
 		if cleanRoot == freshTargetRoot {
 			if err := verifyFreshTargetMount(ctx, runner, root); err != nil {
-				return "", err
+				return Result{}, err
 			}
 		}
 	}
 
 	if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
-		return "", fmt.Errorf("create hardware state directory: %w", err)
+		return Result{}, fmt.Errorf("create hardware state directory: %w", err)
 	}
 
 	backup := ""
 	if _, err := os.Stat(target); err == nil {
 		backup, err = backupFile(target, now)
 		if err != nil {
-			return "", err
+			return Result{}, err
 		}
 	} else if !os.IsNotExist(err) {
-		return "", fmt.Errorf("inspect hardware configuration target: %w", err)
+		return Result{}, fmt.Errorf("inspect hardware configuration target: %w", err)
 	}
 
 	tmp, err := os.CreateTemp(
@@ -169,7 +170,7 @@ func generate(
 		".generated.nix-*",
 	)
 	if err != nil {
-		return backup, fmt.Errorf(
+		return Result{Backup: backup}, fmt.Errorf(
 			"create temporary hardware configuration: %w",
 			err,
 		)
@@ -197,18 +198,18 @@ func generate(
 		commandArgs...,
 	); err != nil {
 		_ = tmp.Close()
-		return backup, fmt.Errorf("nixos-generate-config: %w", err)
+		return Result{Backup: backup}, fmt.Errorf("nixos-generate-config: %w", err)
 	}
 
 	if err := tmp.Sync(); err != nil {
 		_ = tmp.Close()
-		return backup, fmt.Errorf(
+		return Result{Backup: backup}, fmt.Errorf(
 			"sync hardware configuration: %w",
 			err,
 		)
 	}
 	if err := tmp.Close(); err != nil {
-		return backup, fmt.Errorf(
+		return Result{Backup: backup}, fmt.Errorf(
 			"close hardware configuration: %w",
 			err,
 		)
@@ -216,38 +217,107 @@ func generate(
 
 	info, err := os.Stat(tmpName)
 	if err != nil {
-		return backup, fmt.Errorf(
+		return Result{Backup: backup}, fmt.Errorf(
 			"inspect generated hardware configuration: %w",
 			err,
 		)
 	}
 	if !info.Mode().IsRegular() || info.Size() == 0 {
-		return backup, fmt.Errorf(
+		return Result{Backup: backup}, fmt.Errorf(
 			"nixos-generate-config produced an empty or invalid hardware configuration",
 		)
 	}
 
 	data, err := os.ReadFile(tmpName)
 	if err != nil {
-		return backup, fmt.Errorf(
+		return Result{Backup: backup}, fmt.Errorf(
 			"read generated hardware configuration: %w",
 			err,
 		)
 	}
 	if !bytesContainNixModule(data) {
-		return backup, fmt.Errorf(
+		return Result{Backup: backup}, fmt.Errorf(
 			"generated hardware configuration does not look like a NixOS module",
 		)
 	}
+	data, dropped, err := dropDiskSwap(data)
+	if err != nil {
+		return Result{Backup: backup}, err
+	}
+	if len(dropped) > 0 {
+		if err := os.WriteFile(tmpName, data, 0o600); err != nil {
+			return Result{Backup: backup}, fmt.Errorf(
+				"write hardware configuration without disk swap: %w",
+				err,
+			)
+		}
+	}
 
 	if err := os.Rename(tmpName, target); err != nil {
-		return backup, fmt.Errorf(
+		return Result{Backup: backup}, fmt.Errorf(
 			"replace hardware configuration: %w",
 			err,
 		)
 	}
 
-	return backup, nil
+	return Result{Backup: backup, DroppedSwap: dropped}, nil
+}
+
+// Result is what a hardware generation did.
+type Result struct {
+	// Backup is the saved previous hardware configuration, if any.
+	Backup string
+	// DroppedSwap lists the disk swap devices that were active while
+	// nixos-generate-config ran and were left out of the configuration.
+	DroppedSwap []string
+}
+
+// DroppedSwapNotice tells the user which old swap partitions gjallarOS
+// does not use, or returns "" when there were none.
+func DroppedSwapNotice(dropped []string) string {
+	var b strings.Builder
+	for _, device := range dropped {
+		fmt.Fprintf(&b, "Old disk swap not used: %s\n", device)
+	}
+	if b.Len() > 0 {
+		b.WriteString("gjallarOS swaps to compressed memory (zram) only. The partition stays as it is; nothing on it was changed.\n")
+	}
+	return b.String()
+}
+
+var swapDevice = regexp.MustCompile(`device = "([^"]*)";`)
+
+// dropDiskSwap empties swapDevices. gjallarOS swaps to zram only
+// (system/hardware/memory.nix). nixos-generate-config lists every active
+// swap partition, but the unlock of an encrypted one lives in the old
+// configuration.nix, which gjallarOS does not use: boot then waits 90s
+// for a device that never appears, and the extra LUKS partition stopped
+// TPM2 setup (locked laptop, 2026-11-15). The partition itself is left
+// untouched.
+func dropDiskSwap(data []byte) ([]byte, []string, error) {
+	text := string(data)
+	const key = "swapDevices ="
+	switch strings.Count(text, key) {
+	case 0:
+		return data, nil, nil
+	case 1:
+	default:
+		return nil, nil, fmt.Errorf("generated hardware configuration sets swapDevices more than once")
+	}
+	start := strings.Index(text, key)
+	length := strings.Index(text[start:], "];")
+	if length < 0 {
+		return nil, nil, fmt.Errorf("generated hardware configuration has an unterminated swapDevices list")
+	}
+	end := start + length + len("];")
+	var dropped []string
+	for _, match := range swapDevice.FindAllStringSubmatch(text[start:end], -1) {
+		dropped = append(dropped, match[1])
+	}
+	if len(dropped) == 0 {
+		return data, nil, nil
+	}
+	return []byte(text[:start] + "swapDevices = [ ];" + text[end:]), dropped, nil
 }
 
 func verifyFreshTargetMount(

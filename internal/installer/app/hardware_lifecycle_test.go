@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/hardwareconfig"
 	"os"
 	"path/filepath"
 	"strings"
@@ -71,7 +72,7 @@ func TestReconcileExistingMissingGenerates(t *testing.T) {
 		repo string,
 		gotTarget string,
 		_ time.Time,
-	) (string, error) {
+	) (hardwareconfig.Result, error) {
 		calls++
 
 		if repo != root {
@@ -86,10 +87,10 @@ func TestReconcileExistingMissingGenerates(t *testing.T) {
 			[]byte("{ config, lib, pkgs, ... }: {}\n"),
 			0600,
 		); err != nil {
-			return "", err
+			return hardwareconfig.Result{}, err
 		}
 
-		return "", nil
+		return hardwareconfig.Result{}, nil
 	}
 
 	result, err := reconcileHardwareConfiguration(
@@ -134,9 +135,9 @@ func TestReconcileExistingHardwareRetainsWithoutGeneration(t *testing.T) {
 		string,
 		string,
 		time.Time,
-	) (string, error) {
+	) (hardwareconfig.Result, error) {
 		calls++
-		return "", errors.New("generator must not run")
+		return hardwareconfig.Result{}, errors.New("generator must not run")
 	}
 
 	result, err := reconcileHardwareConfiguration(
@@ -185,9 +186,9 @@ func TestReconcileRefreshRegeneratesExisting(t *testing.T) {
 		string,
 		string,
 		time.Time,
-	) (string, error) {
+	) (hardwareconfig.Result, error) {
 		calls++
-		return target + ".bak.test", nil
+		return hardwareconfig.Result{Backup: target + ".bak.test", DroppedSwap: []string{"/dev/disk/by-uuid/swap-test"}}, nil
 	}
 
 	result, err := reconcileHardwareConfiguration(
@@ -213,6 +214,9 @@ func TestReconcileRefreshRegeneratesExisting(t *testing.T) {
 	if calls != 1 {
 		t.Fatalf("generator calls = %d, want 1", calls)
 	}
+	if len(result.droppedSwap) != 1 || result.droppedSwap[0] != "/dev/disk/by-uuid/swap-test" {
+		t.Fatalf("dropped swap = %v", result.droppedSwap)
+	}
 	if result.backup != target+".bak.test" {
 		t.Fatalf("backup = %q", result.backup)
 	}
@@ -231,9 +235,9 @@ func TestReconcileSkipExistingNeverGenerates(t *testing.T) {
 		string,
 		string,
 		time.Time,
-	) (string, error) {
+	) (hardwareconfig.Result, error) {
 		calls++
-		return "", errors.New("generator must not run")
+		return hardwareconfig.Result{}, errors.New("generator must not run")
 	}
 
 	result, err := reconcileHardwareConfiguration(
@@ -267,9 +271,9 @@ func TestReconcileSkipMissingFailsBeforeGeneration(t *testing.T) {
 		string,
 		string,
 		time.Time,
-	) (string, error) {
+	) (hardwareconfig.Result, error) {
 		calls++
-		return "", nil
+		return hardwareconfig.Result{}, nil
 	}
 
 	_, err := reconcileHardwareConfiguration(

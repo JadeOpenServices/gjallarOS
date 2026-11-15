@@ -143,18 +143,30 @@ func noSecureBootPolicyNotice(modelID string) string {
 }
 
 // secureBootDeclinedNotice says what an install without gjallarOS Secure
-// Boot does not have, in words a non-technical owner can follow. later says
-// how to get it afterwards.
-func secureBootDeclinedNotice(later string) string {
-	return strings.Join([]string{
-		"Without gjallarOS Secure Boot:",
-		"  - Nothing checks the startup files before they run. Someone who gets the machine",
-		"    alone for a while could change them to record the disk passphrase.",
-		"  - The disk does not unlock on its own; the passphrase is typed at every startup.",
+// Boot does not have, in words a non-technical owner can follow. encrypted
+// says whether the root ends up encrypted: an in-place install over an
+// unencrypted root has no passphrase to record or type (e2e-cp4,
+// 2026-11-15). later says how to get it afterwards.
+func secureBootDeclinedNotice(encrypted bool, later string) string {
+	lines := []string{"Without gjallarOS Secure Boot:"}
+	if encrypted {
+		lines = append(lines,
+			"  - Nothing checks the startup files before they run. Someone who gets the machine",
+			"    alone for a while could change them to record the disk passphrase.",
+			"  - The disk does not unlock on its own; the passphrase is typed at every startup.",
+		)
+	} else {
+		lines = append(lines,
+			"  - Nothing checks the startup files before they run. Someone who gets the machine",
+			"    alone for a while could change them.",
+		)
+	}
+	lines = append(lines,
 		"  - No recovery partition. Repairs start from a gjallarOS USB stick.",
 		"  - JODS cannot manage this machine.",
-		"  " + later,
-	}, "\n") + "\n"
+		"  "+later,
+	)
+	return strings.Join(lines, "\n") + "\n"
 }
 
 // firmwareSecureBootNotice reports the firmware's own Secure Boot state when

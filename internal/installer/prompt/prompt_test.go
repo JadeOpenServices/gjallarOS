@@ -335,26 +335,6 @@ func TestExampleStopsAtEndOfInput(t *testing.T) {
 	}
 }
 
-func TestTerminalChecklist(t *testing.T) {
-	items := []Item{{Value: "a", Name: "A", Description: "first", On: true}, {Value: "b", Name: "B", Description: "second"}, {Value: "c", Name: "C", Description: "third"}}
-	for input, want := range map[string]string{
-		"\n":           "a",
-		"none\n":       "",
-		"3, 2\n":       "b,c",
-		"1,1,3\n":      "a,c",
-		"4\n0\nx\n2\n": "b",
-		"1,,2\n3\n":    "c",
-		"none,1\n1\n":  "a",
-	} {
-		var out strings.Builder
-		u := UI{Reader: bufio.NewReader(strings.NewReader(input)), Out: &out}
-		got, err := u.Checklist(context.Background(), "Pick", items)
-		if err != nil || strings.Join(got, ",") != want {
-			t.Errorf("%q: got %v, %v; want %q", input, got, err, want)
-		}
-	}
-}
-
 func TestSudoRunAsksInTerminal(t *testing.T) {
 	bin := t.TempDir()
 	if err := os.WriteFile(filepath.Join(bin, "zenity"), []byte("#!/bin/sh\n"), 0o755); err != nil {
@@ -374,5 +354,49 @@ func TestSudoRunAsksInTerminal(t *testing.T) {
 	t.Setenv("SUDO_USER", "")
 	if !gtkAvailable() {
 		t.Fatal("root desktop session lost GTK dialogs")
+	}
+}
+
+func TestTerminalPick(t *testing.T) {
+	zones := []string{"America/New_York", "Asia/Tokyo", "Etc/UTC", "Europe/Berlin", "Europe/Bern", "Europe/Paris"}
+	for _, tc := range []struct{ input, want string }{
+		{"\n", "Etc/UTC"},
+		{"Asia/Tokyo\n", "Asia/Tokyo"},
+		{"tokyo\n", "Asia/Tokyo"},
+		{"europe/paris\n", "Europe/Paris"},
+		{"ber\n2\n", "Europe/Bern"},
+		{"mars\nparis\n", "Europe/Paris"},
+		{"7\nyork\n", "America/New_York"},
+	} {
+		var out strings.Builder
+		u := UI{Reader: bufio.NewReader(strings.NewReader(tc.input)), Out: &out}
+		got, err := u.Pick(context.Background(), "Timezone", "Etc/UTC", zones)
+		if err != nil || got != tc.want {
+			t.Errorf("Pick(%q) = %q, %v; want %q\n%s", tc.input, got, err, tc.want, out.String())
+		}
+	}
+}
+
+func TestTerminalPickCapsTheList(t *testing.T) {
+	options := []string{}
+	for i := 0; i < 30; i++ {
+		options = append(options, "Zone/"+strings.Repeat("a", i+1))
+	}
+	var out strings.Builder
+	u := UI{Reader: bufio.NewReader(strings.NewReader("zone\n20\n")), Out: &out}
+	got, err := u.Pick(context.Background(), "Timezone", options[0], options)
+	if err != nil || got != options[19] {
+		t.Fatalf("Pick() = %q, %v", got, err)
+	}
+	if !strings.Contains(out.String(), "10 more") || strings.Contains(out.String(), "21)") {
+		t.Fatalf("list not capped:\n%s", out.String())
+	}
+}
+
+func TestTerminalPickStopsAtEndOfInput(t *testing.T) {
+	var out strings.Builder
+	u := UI{Reader: bufio.NewReader(strings.NewReader("mars\n")), Out: &out}
+	if _, err := u.Pick(context.Background(), "Timezone", "Etc/UTC", []string{"Etc/UTC"}); err == nil {
+		t.Fatal("Pick() kept asking past the end of input")
 	}
 }

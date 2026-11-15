@@ -360,3 +360,36 @@ func TestLocalMessageCapsFiles(t *testing.T) {
 		t.Fatalf("message %q", message)
 	}
 }
+
+func TestPlanFirefoxAddonsNeedFirefox(t *testing.T) {
+	user := defaults(t)
+	addons, err := json.Marshal(user.FirefoxAddons)
+	if err != nil {
+		t.Fatal(err)
+	}
+	addons = []byte(strings.Replace(string(addons), `"passbolt":"off"`, `"passbolt":"on"`, 1))
+	if _, err := Plan(configText(t, user), raw(map[string]string{"firefoxAddons": string(addons)})); err != nil {
+		t.Fatalf("add-on change with Firefox refused: %v", err)
+	}
+	// SYNTHETIC store pin: made-up file number and hash.
+	store := `[{"id":"addon@example.org","name":"Example","version":"1","url":"https://addons.mozilla.org/firefox/downloads/file/4000001/example.xpi","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","permissions":["storage"],"mode":"on"}]`
+	if _, err := Plan(configText(t, user), raw(map[string]string{"firefoxStoreAddons": store})); err != nil {
+		t.Fatalf("store add-on change with Firefox refused: %v", err)
+	}
+	if _, err := Plan(configText(t, user), raw(map[string]string{"firefoxAddons": string(addons), "browsers": `["chromium"]`})); err == nil {
+		t.Fatal("accepted an add-on change that drops Firefox in the same request")
+	}
+	user.Browsers, user.PreferredBrowser = []string{"chromium"}, "chromium"
+	data := configText(t, user)
+	for name, values := range map[string]map[string]string{
+		"collections": {"firefoxAddons": string(addons)},
+		"store":       {"firefoxStoreAddons": store, "weatherCity": `"Example City"`},
+	} {
+		if _, err := Plan(data, raw(values)); err == nil {
+			t.Errorf("%s: accepted without Firefox", name)
+		}
+	}
+	if _, err := Plan(data, raw(map[string]string{"firefoxAddons": string(addons), "browsers": `["chromium","firefox"]`})); err != nil {
+		t.Fatalf("add-on change that adds Firefox refused: %v", err)
+	}
+}

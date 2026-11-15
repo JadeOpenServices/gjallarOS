@@ -1,0 +1,187 @@
+package installlog
+
+import (
+	"bytes"
+	"context"
+	"io"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+)
+
+// standIn puts a script named nixos-rebuild first on PATH. It says whether
+// its stderr is a terminal, draws a bar the way Nix does and echoes the
+// line it reads from stdin.
+func standIn(t *testing.T) {
+	t.Helper()
+	bin := t.TempDir()
+	script := `#!/bin/sh
+if [ -t 2 ]; then echo "stderr: terminal" >&2; else echo "stderr: pipe" >&2; fi
+printf '\033[1m[1/3 built]\r\033[K[3/3 built]\033[0m\n' >&2
+read -r line
+echo "read: $line"
+`
+	if err := os.WriteFile(filepath.Join(bin, "nixos-rebuild"), []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
+func openTestLog(t *testing.T) *Log {
+	t.Helper()
+	log, err := Open(filepath.Join(t.TempDir(), "log"), time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	SetCurrent(log)
+	t.Cleanup(func() {
+		SetCurrent(nil)
+		log.Close()
+	})
+	return log
+}
+
+func exported(t *testing.T, log *Log) string {
+	t.Helper()
+	data, err := log.Export()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(data)
+}
+
+func TestRunRefusesOtherCommands(t *testing.T) {
+	for _, argv := range [][]string{{"sudo", "chpasswd"}, {"age-keygen"}, {"sudo"}, {"sh", "-c", "nixos-rebuild"}} {
+		err := Run(context.Background(), nil, io.Discard, io.Discard, argv[0], argv[1:]...)
+		if err == nil || !strings.Contains(err.Error(), "not a logged build command") {
+			t.Errorf("%v: got %v, want a refusal", argv, err)
+		}
+	}
+}
+
+func TestRunWithoutLogIsPlain(t *testing.T) {
+	standIn(t)
+	SetCurrent(nil)
+	var out, errOut bytes.Buffer
+	if err := Run(context.Background(), strings.NewReader("typed\n"), &out, &errOut, "nixos-rebuild"); err != nil {
+		t.Fatal(err)
+	}
+	if out.String() != "read: typed\n" || !strings.HasPrefix(errOut.String(), "stderr: pipe\n") {
+		t.Errorf("stdout %q, stderr %q", out.String(), errOut.String())
+	}
+}
+
+func TestRunLogsPipeOutput(t *testing.T) {
+	standIn(t)
+	log := openTestLog(t)
+	var term bytes.Buffer
+	tee := log.Tee(&term)
+	if err := Run(context.Background(), strings.NewReader("typed\n"), tee, tee, "nixos-rebuild"); err != nil {
+		t.Fatal(err)
+	}
+	text := exported(t, log)
+	for _, want := range []string{"stderr: pipe", " [3/3 built]\n", "read: \n"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("log lacks %q:\n%s", want, text)
+		}
+	}
+	checkClean(t, text)
+	if !strings.Contains(term.String(), "\x1b[1m") {
+		t.Errorf("terminal did not get the output as it is: %q", term.String())
+	}
+}
+
+func TestRunGivesNixATerminal(t *testing.T) {
+	standIn(t)
+	log := openTestLog(t)
+	// A pseudo-terminal stands in for the user's terminal.
+	master, slave, err := openPTY()
+	if err != nil {
+		t.Skipf("no pseudo-terminal here: %v", err)
+	}
+	defer master.Close()
+	defer slave.Close()
+	shown := make(chan string)
+	go func() {
+		data, _ := io.ReadAll(master)
+		shown <- string(data)
+	}()
+	tee := log.Tee(slave)
+	if err := Run(context.Background(), strings.NewReader("typed\n"), tee, tee, "nixos-rebuild"); err != nil {
+		t.Fatal(err)
+	}
+	slave.Close()
+	screen := <-shown
+	text := exported(t, log)
+	for _, want := range []string{"stderr: terminal", " [3/3 built]\n", "read: \n"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("log lacks %q:\n%s", want, text)
+		}
+	}
+	checkClean(t, text)
+	if !strings.Contains(screen, "\x1b[1m[1/3 built]\r") {
+		t.Errorf("terminal did not get the bar as it is: %q", screen)
+	}
+}
+
+// checkClean fails when typed input, escape codes or bar redraws reached
+// the log.
+func checkClean(t *testing.T, text string) {
+	t.Helper()
+	for _, bad := range []string{"typed", "\x1b", "\r", "[1/3 built]"} {
+		if strings.Contains(text, bad) {
+			t.Errorf("log holds %q:\n%q", bad, text)
+		}
+	}
+}
+
+// TestRunDoesNotWaitForLeftovers: a process the command leaves behind keeps
+// the pseudo-terminal open; Run returns after the drain time anyway.
+func TestRunDoesNotWaitForLeftovers(t *testing.T) {
+	bin := t.TempDir()
+	script := "#!/bin/sh\nsleep 3 &\necho started\n"
+	if err := os.WriteFile(filepath.Join(bin, "nix-channel"), []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	previous := drainTime
+	drainTime = 200 * time.Millisecond
+	t.Cleanup(func() { drainTime = previous })
+	log := openTestLog(t)
+	master, slave, err := openPTY()
+	if err != nil {
+		t.Skipf("no pseudo-terminal here: %v", err)
+	}
+	defer master.Close()
+	defer slave.Close()
+	go io.Copy(io.Discard, master)
+	tee := log.Tee(slave)
+	start := time.Now()
+	if err := Run(context.Background(), nil, tee, tee, "nix-channel"); err != nil {
+		t.Fatal(err)
+	}
+	if took := time.Since(start); took > 2*time.Second {
+		t.Errorf("Run waited %v for a leftover process", took)
+	}
+	if text := exported(t, log); !strings.Contains(text, "started") {
+		t.Errorf("log lacks the output:\n%s", text)
+	}
+}
+
+func TestPTYIsOwnerOnly(t *testing.T) {
+	master, slave, err := openPTY()
+	if err != nil {
+		t.Skipf("no pseudo-terminal here: %v", err)
+	}
+	defer master.Close()
+	defer slave.Close()
+	info, err := slave.Stat()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mode := info.Mode().Perm(); mode != 0o600 {
+		t.Errorf("pseudo-terminal mode %o, want 600", mode)
+	}
+}

@@ -11,10 +11,11 @@ lib.mkIf config.gjallar.apps.git.enable {
     enable = true;
     settings = {
       core.editor = lib.getExe pkgs.${settings.preferredEditor};
-      user = {
-        name = settings.name;
-        email = settings.email;
-      };
+      # Empty until Settings fills them; an empty name or email written
+      # here would make git refuse every commit.
+      user =
+        lib.optionalAttrs (settings.name != "") { name = settings.name; }
+        // lib.optionalAttrs (settings.email != "") { email = settings.email; };
       stash = {
         showPatch = true;
       };

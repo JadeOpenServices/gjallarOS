@@ -95,11 +95,28 @@ func gtkConfirmationWidth(message string) int {
 	}
 }
 
+// terminalWriter is a writer that copies output somewhere else, such as the
+// install log. Terminal is the writer behind it.
+type terminalWriter interface {
+	Terminal() io.Writer
+}
+
+// terminal returns the writer behind any logging writers around out.
+func terminal(out io.Writer) io.Writer {
+	for {
+		t, ok := out.(terminalWriter)
+		if !ok {
+			return out
+		}
+		out = t.Terminal()
+	}
+}
+
 func New(in io.Reader, out io.Writer) UI {
 	gtk := false
 
 	input, inputOK := in.(*os.File)
-	output, outputOK := out.(*os.File)
+	output, outputOK := terminal(out).(*os.File)
 	if inputOK && outputOK &&
 		input == os.Stdin &&
 		(output == os.Stdout || output == os.Stderr) {
@@ -288,14 +305,16 @@ Do not continue until you have saved both.
 // output file is not a terminal it is a log: installer-resume.service sends
 // stdout to the journal, which kept the Secure Boot recovery passphrase
 // (e2e-full, 2026-10-05). The secret then goes to the controlling terminal
-// only, or nowhere.
+// only, or nowhere. A writer that logs (the install log) is skipped: the
+// secret goes to the terminal behind it and never into the log.
 func (u UI) secretOut() (io.Writer, func(), error) {
-	file, ok := u.Out.(*os.File)
+	out := terminal(u.Out)
+	file, ok := out.(*os.File)
 	if !ok {
-		return u.Out, func() {}, nil
+		return out, func() {}, nil
 	}
 	if tty.Is(file) {
-		return u.Out, func() {}, nil
+		return out, func() {}, nil
 	}
 	tty, err := os.OpenFile("/dev/tty", os.O_WRONLY, 0)
 	if err != nil {
@@ -626,135 +645,61 @@ func (u UI) Choice(ctx context.Context, label, def string, options []string) (st
 	}
 }
 
-func (u UI) Multi(ctx context.Context, label string, defaults, options []string) ([]string, error) {
-	selected := map[string]bool{}
-	for _, v := range defaults {
-		selected[v] = true
+// pickShown caps how many matches Pick lists at once.
+const pickShown = 20
+
+// Pick chooses one value from a long list, such as all timezones. In the
+// terminal, Enter takes def, an exact name is taken as typed, and any
+// other text lists the names that contain it; a number then picks from that
+// list, and a single match is taken at once.
+func (u UI) Pick(ctx context.Context, label, def string, options []string) (string, error) {
+	if len(options) == 0 {
+		return "", fmt.Errorf("no options for %s", label)
 	}
 	if u.GTK {
-		args := []string{"--list", "--checklist", "--title=gjallarOS installer", "--text=" + label, "--separator=\n", "--column=Selected", "--column=Value"}
-		for _, v := range options {
-			args = append(args, strconv.FormatBool(selected[v]), v)
-		}
-		out, err := zenityCommand(ctx, args...).Output()
-		if err != nil {
-			return nil, ErrCancelled
-		}
-		values := strings.Fields(string(out))
-		if len(values) == 0 {
-			return nil, fmt.Errorf("select at least one value")
-		}
-		return values, nil
+		return u.Choice(ctx, label, def, options)
 	}
-	fmt.Fprintf(u.Out, "%s (comma-separated) [%s]: ", label, strings.Join(defaults, ","))
-	line, err := u.readLine(ctx)
-	if err != nil {
-		return nil, err
-	}
-	line = strings.TrimSpace(line)
-	if line == "" {
-		return defaults, nil
-	}
-	allowed := map[string]bool{}
-	for _, v := range options {
-		allowed[v] = true
-	}
-	values := []string{}
-	for _, v := range strings.Split(line, ",") {
-		v = strings.TrimSpace(v)
-		if !allowed[v] {
-			return nil, fmt.Errorf("unsupported selection %q", v)
-		}
-		values = append(values, v)
-	}
-	if len(values) == 0 {
-		return nil, fmt.Errorf("select at least one value")
-	}
-	return values, nil
-}
-
-// Item is one row of a Checklist.
-type Item struct {
-	Value, Name, Description string
-	On                       bool
-}
-
-// Checklist lets the user tick any number of items, none included, and
-// returns the ticked values in list order. Rows show name and description;
-// the value stays hidden.
-func (u UI) Checklist(ctx context.Context, label string, items []Item) ([]string, error) {
-	known := map[string]bool{}
-	for _, item := range items {
-		known[item.Value] = true
-	}
-	inOrder := func(chosen map[string]bool) []string {
-		values := []string{}
-		for _, item := range items {
-			if chosen[item.Value] {
-				values = append(values, item.Value)
-			}
-		}
-		return values
-	}
-	if u.GTK {
-		args := []string{"--list", "--checklist", "--title=gjallarOS installer", "--text=" + label, "--width=720", "--height=420", "--separator=\n",
-			"--column=Use", "--column=Value", "--column=Name", "--column=Description", "--hide-column=2", "--print-column=2"}
-		for _, item := range items {
-			args = append(args, strconv.FormatBool(item.On), item.Value, item.Name, item.Description)
-		}
-		out, err := zenityCommand(ctx, args...).Output()
-		if err != nil {
-			return nil, ErrCancelled
-		}
-		chosen := map[string]bool{}
-		for _, value := range strings.Fields(string(out)) {
-			if !known[value] {
-				return nil, fmt.Errorf("unsupported selection %q", value)
-			}
-			chosen[value] = true
-		}
-		return inOrder(chosen), nil
-	}
-	fmt.Fprintln(u.Out, label)
-	defaults := []string{}
-	for i, item := range items {
-		mark := " "
-		if item.On {
-			mark = "x"
-			defaults = append(defaults, strconv.Itoa(i+1))
-		}
-		fmt.Fprintf(u.Out, "  %d) [%s] %s: %s\n", i+1, mark, item.Name, item.Description)
-	}
+	var shown []string
 	for {
-		fmt.Fprintf(u.Out, "Numbers to tick, comma-separated, or none [%s]: ", strings.Join(defaults, ","))
-		line, err := u.readLine(ctx)
+		value, err := u.Value(ctx, label, def)
 		if err != nil {
-			return nil, err
+			return "", err
 		}
-		line = strings.TrimSpace(line)
-		chosen := map[string]bool{}
-		if line == "" {
-			for _, item := range items {
-				chosen[item.Value] = item.On
+		if n, e := strconv.Atoi(value); e == nil && n > 0 && n <= len(shown) {
+			return shown[n-1], nil
+		}
+		matches := []string{}
+		for _, candidate := range options {
+			if candidate == value {
+				return candidate, nil
 			}
-			return inOrder(chosen), nil
-		}
-		if strings.EqualFold(line, "none") {
-			return []string{}, nil
-		}
-		valid := true
-		for _, field := range strings.Split(line, ",") {
-			n, err := strconv.Atoi(strings.TrimSpace(field))
-			if err != nil || n < 1 || n > len(items) {
-				valid = false
+			if strings.EqualFold(candidate, value) {
+				matches = []string{candidate}
 				break
 			}
-			chosen[items[n-1].Value] = true
+			if strings.Contains(strings.ToLower(candidate), strings.ToLower(value)) {
+				matches = append(matches, candidate)
+			}
 		}
-		if valid {
-			return inOrder(chosen), nil
+		switch {
+		case len(matches) == 1:
+			fmt.Fprintf(u.Out, "Using %s.\n", matches[0])
+			return matches[0], nil
+		case len(matches) == 0:
+			shown = nil
+			fmt.Fprintf(u.Out, "Nothing matches %q. Type part of a name, such as a city or country code.\n", value)
+		default:
+			shown = matches
+			if len(shown) > pickShown {
+				shown = shown[:pickShown]
+			}
+			for i, v := range shown {
+				fmt.Fprintf(u.Out, "  %d) %s\n", i+1, v)
+			}
+			if len(matches) > len(shown) {
+				fmt.Fprintf(u.Out, "  ... %d more; type more letters to narrow it down.\n", len(matches)-len(shown))
+			}
 		}
-		fmt.Fprintf(u.Out, "Use numbers from 1 to %d, or none.\n", len(items))
 	}
 }
 

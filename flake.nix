@@ -248,6 +248,11 @@
           dbxUpdateModule = ./system/security/secure-boot/dbx-update.nix;
         };
 
+        printing-firewall = import ./tests/nix/printing-firewall.nix {
+          inherit nixpkgs system;
+          printingModule = ./system/services/printing.nix;
+        };
+
         installer-resume = import ./tests/nix/installer-resume.nix {
           inherit nixpkgs system;
           resumeModule = ./system/maintenance/installer-resume.nix;

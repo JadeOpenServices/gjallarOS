@@ -321,32 +321,6 @@ func EnsureFirmwarePolicySnapshot(
 	}
 	data = append(data, '\n')
 
-	temp, err := os.CreateTemp("", "gjallar-secure-boot-policy-*")
-	if err != nil {
-		return fmt.Errorf("create temporary Secure Boot firmware policy snapshot: %w", err)
-	}
-	tempPath := temp.Name()
-	defer os.Remove(tempPath)
-
-	if err := temp.Chmod(0600); err != nil {
-		_ = temp.Close()
-		return fmt.Errorf("set temporary Secure Boot policy permissions: %w", err)
-	}
-
-	if _, err := temp.Write(data); err != nil {
-		_ = temp.Close()
-		return fmt.Errorf("write temporary Secure Boot firmware policy snapshot: %w", err)
-	}
-
-	if err := temp.Sync(); err != nil {
-		_ = temp.Close()
-		return fmt.Errorf("sync temporary Secure Boot firmware policy snapshot: %w", err)
-	}
-
-	if err := temp.Close(); err != nil {
-		return fmt.Errorf("close temporary Secure Boot firmware policy snapshot: %w", err)
-	}
-
 	if err := run(
 		ctx,
 		"sudo", "install", "-d", "-m", "0700",
@@ -355,12 +329,7 @@ func EnsureFirmwarePolicySnapshot(
 		return fmt.Errorf("create Secure Boot policy transaction directory: %w", err)
 	}
 
-	if err := run(
-		ctx,
-		"sudo", "install", "-m", "0600",
-		tempPath,
-		FirmwarePolicyPath,
-	); err != nil {
+	if err := writeRootFile(ctx, data, "0600", FirmwarePolicyPath); err != nil {
 		return fmt.Errorf("install Secure Boot firmware policy snapshot: %w", err)
 	}
 

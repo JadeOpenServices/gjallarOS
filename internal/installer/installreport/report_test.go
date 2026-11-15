@@ -9,6 +9,7 @@ import (
 	"time"
 
 	portable "github.com/JadeOpenServices/oddc/pkg/oddc"
+	"golang.org/x/sys/unix"
 
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/secureboot"
 )
@@ -104,7 +105,7 @@ func TestSaveWritesOwnerOnlyFile(t *testing.T) {
 	dir := t.TempDir()
 	now := time.Date(2026, 11, 10, 3, 4, 5, 0, time.UTC)
 	data := syntheticReport().Render()
-	path, err := Save(Destination{Dir: dir, UID: -1, GID: -1}, data, now)
+	path, err := WriteNew(Destination{Dir: dir, UID: -1, GID: -1}, FileName(now), data)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -122,7 +123,7 @@ func TestSaveWritesOwnerOnlyFile(t *testing.T) {
 	if !bytes.Equal(saved, data) {
 		t.Fatal("saved bytes differ from the shown report")
 	}
-	if _, err := Save(Destination{Dir: dir, UID: -1, GID: -1}, data, now); err == nil || !strings.Contains(err.Error(), "already exists") {
+	if _, err := WriteNew(Destination{Dir: dir, UID: -1, GID: -1}, FileName(now), data); err == nil || !strings.Contains(err.Error(), "already exists") {
 		t.Fatalf("second save = %v, want refusal", err)
 	}
 }
@@ -134,7 +135,7 @@ func TestSaveRefusesPlantedLink(t *testing.T) {
 	if err := os.Symlink(target, filepath.Join(dir, FileName(now))); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Save(Destination{Dir: dir, UID: -1, GID: -1}, []byte("report"), now); err == nil {
+	if _, err := WriteNew(Destination{Dir: dir, UID: -1, GID: -1}, FileName(now), []byte("report")); err == nil {
 		t.Fatal("save followed a planted link")
 	}
 	if _, err := os.Lstat(target); !os.IsNotExist(err) {
@@ -142,13 +143,45 @@ func TestSaveRefusesPlantedLink(t *testing.T) {
 	}
 }
 
-func TestSaveRefusesOversize(t *testing.T) {
-	if _, err := Save(Destination{Dir: t.TempDir(), UID: -1, GID: -1}, make([]byte, MaxSize+1), time.Now()); err == nil {
-		t.Fatal("oversize report saved")
+func TestWriteNewRefusesPathNames(t *testing.T) {
+	parent := t.TempDir()
+	dir := filepath.Join(parent, "drive")
+	if err := os.Mkdir(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"../escaped.log", "sub/file.log", "..", ".", "", "/etc/passwd"} {
+		if _, err := WriteNew(Destination{Dir: dir, UID: -1, GID: -1}, name, []byte("log")); err == nil {
+			t.Errorf("WriteNew took %q", name)
+		}
+	}
+	if _, err := os.Lstat(filepath.Join(parent, "escaped.log")); !os.IsNotExist(err) {
+		t.Fatalf("a file was written outside the folder: %v", err)
 	}
 }
 
-// EMULATED sysfs tree.
+// A FIFO planted at the name would block the writer, or hand the data to
+// whoever reads it.
+func TestWriteNewRefusesPlantedFIFO(t *testing.T) {
+	dir := t.TempDir()
+	name := "gjallaros-install-20261115-120000.log"
+	if err := unix.Mkfifo(filepath.Join(dir, name), 0o666); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, err := WriteNew(Destination{Dir: dir, UID: -1, GID: -1}, name, []byte("log"))
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err == nil || !strings.Contains(err.Error(), "already exists") {
+			t.Fatalf("WriteNew on a FIFO = %v, want refusal", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("WriteNew blocked on a planted FIFO")
+	}
+}
+
 func TestCollectReadsWithoutSerials(t *testing.T) {
 	root := t.TempDir()
 	write := func(rel, value string) {
@@ -214,7 +247,7 @@ func TestFirmwareWithoutSecureBoot(t *testing.T) {
 func TestSaveRefusesFolderOfAnotherUser(t *testing.T) {
 	dir := t.TempDir()
 	other := os.Getuid() + 1
-	if _, err := Save(Destination{Dir: dir, UID: other, GID: other}, []byte("report"), time.Now()); err == nil ||
+	if _, err := WriteNew(Destination{Dir: dir, UID: other, GID: other}, FileName(time.Now()), []byte("report")); err == nil ||
 		!strings.Contains(err.Error(), "does not belong") {
 		t.Fatalf("save into a folder of another user = %v, want refusal", err)
 	}
@@ -226,7 +259,7 @@ func TestSaveRefusesLinkedFolder(t *testing.T) {
 	if err := os.Symlink(dir, link); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Save(Destination{Dir: link, UID: -1, GID: -1}, []byte("report"), time.Now()); err == nil {
+	if _, err := WriteNew(Destination{Dir: link, UID: -1, GID: -1}, FileName(time.Now()), []byte("report")); err == nil {
 		t.Fatal("save followed a linked folder")
 	}
 }
@@ -235,7 +268,7 @@ func TestSaveChownsForOwnUser(t *testing.T) {
 	// Chown to the running user works without root and goes through the
 	// same path root takes for the sudo user.
 	dir := t.TempDir()
-	path, err := Save(Destination{Dir: dir, UID: os.Getuid(), GID: os.Getgid()}, []byte("report"), time.Now())
+	path, err := WriteNew(Destination{Dir: dir, UID: os.Getuid(), GID: os.Getgid()}, FileName(time.Now()), []byte("report"))
 	if err != nil {
 		t.Fatal(err)
 	}

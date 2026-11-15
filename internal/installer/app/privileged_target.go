@@ -24,6 +24,15 @@ var privilegedCommand = func(ctx context.Context, args ...string) ([]byte, error
 	return output, nil
 }
 
+// stagedTreeCheck runs as root on root's own copy of a tree the user
+// staged, which the user can no longer change. cp -r keeps links, pipes
+// and a source that was swapped for a link, and a later root reader would
+// follow them (L55), so the copy must be a real folder holding only plain
+// files and folders.
+const stagedTreeCheck = `[ -d "$1" ] && [ ! -L "$1" ] || { echo "$1 is not a plain folder" >&2; exit 1; }
+odd=$(find "$1" -mindepth 1 ! -type f ! -type d -print -quit) || exit 1
+[ -z "$odd" ] || { echo "refusing $odd: only plain files and folders" >&2; exit 1; }`
+
 // installTreePrivileged copies the user-staged directory source to the
 // root-owned destination. The previous destination is replaced only after
 // the complete copy exists beside it.
@@ -44,6 +53,7 @@ func installTreePrivileged(ctx context.Context, source, destination string) erro
 		{"mkdir", "-p", "-m", "0700", "--", parent},
 		{"rm", "-rf", "--", incoming, previous},
 		{"cp", "-r", "--", source, incoming},
+		{"sh", "-c", stagedTreeCheck, "sh", incoming},
 		{"chown", "-R", "root:root", "--", incoming},
 		{"sh", "-c", `if [ -e "$1" ]; then mv -T -- "$1" "$2"; fi`, "sh", destination, previous},
 		{"mv", "-T", "--", incoming, destination},

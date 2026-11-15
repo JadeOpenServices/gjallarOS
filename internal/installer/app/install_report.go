@@ -5,9 +5,12 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/config"
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/installlog"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/installreport"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/prompt"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/secureboot"
@@ -51,16 +54,24 @@ type reportInput struct {
 	oddcModel   string
 	oddcChecked bool
 	failure     error
+	// log is the run log; after a failure it is saved with the report.
+	log *logKeeper
+	// toDrive is set on live and recovery runs, which save to a USB drive
+	// instead of a home folder that is gone at the next start.
+	toDrive bool
+	// targetDisk is the disk the run installs to, never offered as a drive.
+	targetDisk string
 }
 
-// offerInstallReport shows the report and saves it only after two yes
-// answers, both default No. The saved file holds exactly the bytes shown.
-// Nothing is sent: the user mails the file themselves.
+// offerInstallReport shows the report, then asks once whether to save it,
+// default No. After a failure the redacted run log is saved with it. The
+// saved report holds exactly the bytes shown. Nothing is sent: the user
+// mails the files themselves.
 func offerInstallReport(ctx context.Context, ui prompt.UI, out io.Writer, input reportInput) {
 	switch input.reason {
 	case installreport.ReasonFailed:
 		fmt.Fprintf(out, "\nGjallarOS can show a report about this machine and the error above. "+
-			"You decide whether to save it and send it to %s. Nothing is sent from here.\n", installreport.Contact)
+			"You decide whether to save it with the install log and send them to %s. Nothing is sent from here.\n", installreport.Contact)
 	default:
 		fmt.Fprintf(out, "\nNo ODDC model matches this machine. A report of its parts helps add it; "+
 			"you decide whether to save it and send it to %s. Nothing is sent from here.\n", installreport.Contact)
@@ -76,24 +87,49 @@ func offerInstallReport(ctx context.Context, ui prompt.UI, out io.Writer, input 
 	out.Write(data)
 	fmt.Fprintln(out, "----- install report: end -----")
 
+	files := []savedFile{{name: installreport.FileName(now), data: data}}
+	if input.reason == installreport.ReasonFailed {
+		if logData, err := input.log.export(); err != nil {
+			fmt.Fprintf(out, "WARNING: install log not added: %v\n", err)
+		} else if logData != nil {
+			files = append(files, savedFile{name: "gjallaros-" + installlog.FileName(now), data: logData})
+		}
+	}
+	if input.toDrive {
+		saveFilesToDrive(ctx, ui, out, input.targetDisk, files)
+		return
+	}
+	saveFilesToHome(ctx, ui, out, files)
+}
+
+// saveFilesToHome saves the files in the home folder of the user who ran
+// the installer, after one yes (default No).
+func saveFilesToHome(ctx context.Context, ui prompt.UI, out io.Writer, files []savedFile) {
 	dest, err := installreport.SaveDestination()
 	if err != nil {
 		fmt.Fprintf(out, "WARNING: install report not saved: %v\n", err)
 		return
 	}
-	save, err := ui.Confirm(ctx, fmt.Sprintf("Save this report as %s in %s?", installreport.FileName(now), dest.Dir), false)
+	names := make([]string, 0, len(files))
+	for _, file := range files {
+		names = append(names, file.name)
+	}
+	save, err := ui.Confirm(ctx, fmt.Sprintf("Save %s in %s?", strings.Join(names, " and "), dest.Dir), false)
 	if err != nil || !save {
 		fmt.Fprintln(out, "Install report not saved.")
 		return
 	}
-	path, err := installreport.Save(dest, data, now)
-	if err != nil {
-		fmt.Fprintf(out, "WARNING: install report not saved: %v\n", err)
-		return
+	saved, err := writeFiles(dest, files)
+	for _, name := range saved {
+		fmt.Fprintf(out, "Saved %s (readable by its owner only).\n", filepath.Join(dest.Dir, name))
 	}
-	fmt.Fprintf(out, "Install report saved to %s (readable by its owner only).\n"+
-		"Copy it to a USB stick or another computer, read it once more, and send it to %s.\n",
-		path, installreport.Contact)
+	if err != nil {
+		fmt.Fprintf(out, "WARNING: %v\n", err)
+		if len(saved) == 0 {
+			return
+		}
+	}
+	fmt.Fprintf(out, "Copy the files to a USB stick or another computer, read them once more, and send them to %s.\n", installreport.Contact)
 }
 
 func buildReport(input reportInput, now time.Time) installreport.Report {
@@ -105,19 +141,7 @@ func buildReport(input reportInput, now time.Time) installreport.Report {
 	report.ODDCModel = input.oddcModel
 	report.ODDCChecked = input.oddcChecked
 	if input.failure != nil {
-		host, _ := os.Hostname()
-		known := installreport.Known{
-			User:     input.user.Username,
-			Name:     input.user.Name,
-			Host:     input.user.Hostname,
-			Email:    input.user.Email,
-			GitHub:   input.user.GitHubUsername,
-			LiveHost: host,
-			LiveUser: os.Getenv("USER"),
-			Serials:  installreport.DiskSerials("/"),
-		}
-		raw := input.failure.Error()
-		report.Error = installreport.ErrorText(raw, known)
+		report.Error = installreport.ErrorText(input.failure.Error(), knownValues(input.user))
 	}
 	return report
 }

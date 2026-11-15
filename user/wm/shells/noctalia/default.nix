@@ -25,6 +25,15 @@ let
   hasDeveloperMode = settings.developerMode or false;
   # The shield while the VPN blocks or pauses this network (apps/tailscale).
   hasVPN = config.gjallar.apps.tailscale.enable or false;
+  # The weather city, empty when the weather is off. The installer guesses
+  # it from the timezone and the bar asks whether it is right.
+  weatherAddress = lib.concatStringsSep ", " (
+    lib.filter (part: part != "") [
+      settings.weatherCity
+      settings.weatherCountry
+    ]
+  );
+  hasWeather = settings.weatherCity != "";
   gjallarctlPackage = pkgs.callPackage ../../../../pkgs/gjallarctl { };
 
   palette = {
@@ -145,7 +154,10 @@ in
           ++ lib.optional hasEncryptedDisk "gjallar/disk-protection"
           ++ lib.optional hasDeveloperMode "gjallar/developer-mode"
           ++ lib.optional hasVPN "gjallar/vpn"
-          ++ [ "gjallar/time" ];
+          ++ [
+            "gjallar/time"
+            "gjallar/weather"
+          ];
         shell = {
           clipboard_enabled = false;
           # OpenJade shape rule: 6 px panels and cards, 4 px buttons and
@@ -317,6 +329,11 @@ in
             scale = 0.98;
           };
 
+          weather_city = {
+            type = "gjallar/weather:confirm";
+            scale = 0.98;
+          };
+
           center_clock = {
             type = "clock";
             format = "{:%a %d %b  %H:%M}";
@@ -359,9 +376,10 @@ in
           };
         };
 
+        # An empty address resolves nothing, so no request leaves.
         location = {
           auto_locate = false;
-          address = "${settings.weatherCity}, ${settings.weatherCountry}";
+          address = weatherAddress;
         };
         osd = {
           orientation = "horizontal";
@@ -370,7 +388,7 @@ in
             keyboard_layout = false;
           };
         };
-        weather.enabled = true;
+        weather.enabled = hasWeather;
 
         system.monitor = {
           enabled = true;
@@ -429,7 +447,10 @@ in
           ++ lib.optional hasDeveloperMode "developer_mode"
           ++ lib.optional hasEncryptedDisk "disk_protection"
           ++ lib.optional hasVPN "vpn"
-          ++ [ "time_status" ]
+          ++ [
+            "time_status"
+            "weather_city"
+          ]
           ++ lib.optional hasQuickKeys "quick_keys"
           ++ lib.optional hasTouchKeyboard "touch_keyboard"
           ++ [
@@ -440,8 +461,12 @@ in
             "divider_battery"
             "power_profile"
             "battery"
+          ]
+          ++ lib.optionals hasWeather [
             "divider_apps"
             "weather"
+          ]
+          ++ [
             "divider_media"
             "media"
             "session"
@@ -493,6 +518,8 @@ in
     source = ./plugins/vpn;
   };
   xdg.dataFile."noctalia/plugins/gjallar-time".source = ./plugins/time;
+  xdg.dataFile."noctalia/plugins/gjallar-weather".source = ./plugins/weather;
+  xdg.configFile."gjallar/weather-address".text = weatherAddress;
   # Noctalia loads plugin scripts once at start; a changed plugin restarts
   # the bar like a changed config.toml does.
   systemd.user.services.noctalia.Unit.X-Restart-Triggers =
@@ -501,7 +528,10 @@ in
     ++ lib.optional hasEncryptedDisk "${./plugins/disk-protection}"
     ++ lib.optional hasDeveloperMode "${./plugins/developer-mode}"
     ++ lib.optional hasVPN "${./plugins/vpn}"
-    ++ [ "${./plugins/time}" ];
+    ++ [
+      "${./plugins/time}"
+      "${./plugins/weather}"
+    ];
 
   # The developer-mode notice's click: the status in a terminal, readable
   # until Enter.
@@ -555,6 +585,71 @@ in
           ${gjallarctlPackage}/bin/gjallarctl system time
           printf '\nPress Enter to close. '
           read -r _
+        '')
+      ];
+    };
+  };
+
+  # The weather pin's click: keep the city, change it, or turn the weather
+  # off. The answer goes through gjallar-settingsd like any everyday
+  # change; the pin goes away once the rebuilt address matches.
+  systemd.user.services.gjallar-weather-city = {
+    Unit.Description = "Weather city";
+    Service = {
+      Type = "exec";
+      ExecStart = lib.escapeShellArgs [
+        "${pkgs.ghostty}/bin/ghostty"
+        "--title=gjallarOS weather city"
+        "--window-width=84"
+        "--window-height=20"
+        "-e"
+        (pkgs.writeShellScript "gjallar-weather-city" ''
+          set -u
+          address=${lib.escapeShellArg weatherAddress}
+          state=''${XDG_STATE_HOME:-$HOME/.local/state}/gjallar
+          confirm() {
+            mkdir -p "$state" && printf '%s' "$1" > "$state/weather-confirmed"
+          }
+          finish() {
+            printf '\nPress Enter to close. '
+            read -r _
+            exit "$1"
+          }
+
+          if [ -n "$address" ]; then
+            printf 'The weather shows %s.\nIs that your city? [Y/n] ' "$address"
+            read -r answer
+            case "$answer" in
+            "" | [Yy]*)
+              confirm "$address" || finish 1
+              echo "Kept."
+              finish 0
+              ;;
+            esac
+          fi
+
+          printf 'City (leave empty to turn the weather off): '
+          read -r city
+          country=
+          if [ -n "$city" ]; then
+            printf 'Country: '
+            read -r country
+          fi
+          wanted=$city
+          if [ -n "$country" ]; then
+            wanted="$city, $country"
+          fi
+          # Nothing to change, only the answer to keep.
+          if [ "$wanted" = "$address" ]; then
+            confirm "$wanted" || finish 1
+            echo "Kept."
+            finish 0
+          fi
+          if ${gjallarctlPackage}/bin/gjallarctl settings set "weatherCity=$city" "weatherCountry=$country"; then
+            confirm "$wanted"
+            finish 0
+          fi
+          finish 1
         '')
       ];
     };

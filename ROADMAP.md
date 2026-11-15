@@ -128,8 +128,9 @@ narrower than both: one mounted storage device, for this connection only.
 
 Permanently trusted external devices can lapse. A device that has not been
 connected for N days asks again on its next connection. It is off by
-default for standalone machines; the installer asks, and N is 30 when it is
-on. JODS will set it for managed machines later.
+default for standalone machines that leave USB device trust off. When the
+installer turns USB device trust on, N is 30 (Q-K); Settings changes it.
+JODS will set it for managed machines later.
 
 How others do it:
 
@@ -1374,9 +1375,10 @@ profiles show "not signed" but still install, which is what phishing uses.
   show the same code made from both public keys, and the user confirms on
   both with their password. Each then trusts the other's public key for
   that user. Unpairing removes it. See "Pairing and own keys" below.
-- **Opting out in the installer.** "Let gjallarOS manage signing keys
-  (recommended)". Saying no lets the person add their own OpenSSH public
-  key (ed25519 file or FIDO hardware key) as the only signer instead.
+- **Opting out later, not in the installer.** A new install signs with
+  the key gjallarOS makes (the installer stopped asking, Q-L). Setting
+  `settingsSigningKey` lets the person add their own OpenSSH public key
+  (ed25519 file or FIDO hardware key) as the only signer instead.
 - **Nothing is locked behind the key.** Login, disk unlock, applying
   settings in the editor and recovery never need it. Losing it only stops
   export until a new one is made; old exports still import, because the

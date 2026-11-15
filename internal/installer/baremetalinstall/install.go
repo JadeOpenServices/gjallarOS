@@ -22,6 +22,7 @@ import (
 	"github.com/JadeOpenServices/gjallarOS/internal/binarycache"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/buildlimits"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/flakesource"
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/installlog"
 )
 
 const targetRoot = "/mnt"
@@ -71,6 +72,10 @@ func (execRunner) Run(
 	name string,
 	args ...string,
 ) error {
+	// Build output goes into the install log; Nix keeps its progress bar.
+	if installlog.Logs(name, args) {
+		return installlog.Run(ctx, stdin, stdout, stderr, name, args...)
+	}
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Stdin = stdin
 	cmd.Stdout = stdout

@@ -9,6 +9,9 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/installlog"
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/rootfile"
 )
 
 type Plan struct {
@@ -20,7 +23,6 @@ func Build(config []byte, _ bool) Plan {
 	requirements := map[string]string{
 		"age-keygen":          "age",
 		"cryptsetup":          "cryptsetup",
-		"mkfs.ext4":           "e2fsprogs",
 		"mkfs.vfat":           "dosfstools",
 		"mkfs.btrfs":          "btrfs-progs",
 		"btrfs":               "btrfs-progs",
@@ -147,32 +149,18 @@ func Transform(config []byte, packages []string) []byte {
 	return []byte(text)
 }
 
+// Apply writes updated to configPath as root and rebuilds; a failed
+// rebuild puts the previous file back. The returned path is a backup left
+// behind when a later step failed.
 func Apply(ctx context.Context, configPath string, updated []byte, now time.Time) (string, error) {
-	tmp, err := os.CreateTemp("", "gjallar-bootstrap-*.nix")
-	if err != nil {
-		return "", err
-	}
-	name := tmp.Name()
-	defer os.Remove(name)
-	if _, err := tmp.Write(updated); err != nil {
-		tmp.Close()
-		return "", err
-	}
-	if err := tmp.Sync(); err != nil {
-		tmp.Close()
-		return "", err
-	}
-	if err := tmp.Close(); err != nil {
-		return "", err
-	}
 	backup := configPath + ".gjallar-backup." + now.Format("20060102150405")
 	if err := run(ctx, "sudo", "cp", "-a", "--", configPath, backup); err != nil {
 		return "", err
 	}
-	if err := run(ctx, "sudo", "install", "-m", "0644", name, configPath); err != nil {
+	if err := writeRootFile(ctx, updated, configPath); err != nil {
 		return backup, err
 	}
-	if err := run(ctx, "sudo", "nixos-rebuild", "switch", "-I", "nixos-config="+configPath); err != nil {
+	if err := rebuild(ctx, configPath); err != nil {
 		// A stop of the calling service cancels ctx; the restore must still
 		// run or the edited config stays (e2e-full, 2026-10-05).
 		restoreCtx := context.WithoutCancel(ctx)
@@ -186,6 +174,17 @@ func Apply(ctx context.Context, configPath string, updated []byte, now time.Time
 		return backup, fmt.Errorf("rebuild succeeded but backup cleanup failed: %w", err)
 	}
 	return "", nil
+}
+
+// writeRootFile writes the configuration as root. Tests replace it.
+var writeRootFile = func(ctx context.Context, data []byte, dst string) error {
+	return rootfile.Write(ctx, data, "0644", dst)
+}
+
+// rebuild switches to configPath. Its output goes into the install log
+// like every other Nix build of the run. Tests replace it.
+var rebuild = func(ctx context.Context, configPath string) error {
+	return installlog.Run(ctx, os.Stdin, os.Stdout, os.Stderr, "sudo", "nixos-rebuild", "switch", "-I", "nixos-config="+configPath)
 }
 
 func lastBrace(lines []string) int {
@@ -213,7 +212,9 @@ func insertAfterOpening(text, value string) string {
 	}
 	return text
 }
-func run(ctx context.Context, name string, args ...string) error {
+
+// run runs one root step with the terminal attached. Tests replace it.
+var run = func(ctx context.Context, name string, args ...string) error {
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout

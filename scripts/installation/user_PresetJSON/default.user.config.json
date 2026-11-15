@@ -41,7 +41,7 @@
     "privacy": {
       "enable": true,
       "addons": {
-        "ublock-origin": "on",
+        "ublock-origin": "locked",
         "multi-account-containers": "off",
         "facebook-container": "off",
         "privacy-badger": "off",

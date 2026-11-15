@@ -5,12 +5,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 
 	"github.com/JadeOpenServices/oddc/pkg/oddc"
+
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/rootfile"
 )
 
 // PrivilegedReader retrieves protected machine-local state. exists=false is
@@ -113,36 +114,6 @@ func savePrivileged(
 	}
 	data = append(data, '\n')
 
-	tmp, err := os.CreateTemp(
-		"",
-		"gjallar-oddc-host-overlay-*",
-	)
-	if err != nil {
-		return err
-	}
-
-	tmpPath := tmp.Name()
-	defer os.Remove(tmpPath)
-
-	if err := tmp.Chmod(0600); err != nil {
-		tmp.Close()
-		return err
-	}
-
-	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		return err
-	}
-
-	if err := tmp.Sync(); err != nil {
-		tmp.Close()
-		return err
-	}
-
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-
 	dir := filepath.Dir(path)
 	protectedTmp := filepath.Join(
 		dir,
@@ -164,15 +135,8 @@ func savePrivileged(
 		)
 	}
 
-	if _, err := run(
-		ctx,
-		"sudo",
-		"install",
-		"-m",
-		"0600",
-		tmpPath,
-		protectedTmp,
-	); err != nil {
+	// The overlay goes to root through a pipe, never through a file (L54).
+	if err := writeRootFile(ctx, data, "0600", protectedTmp); err != nil {
 		return fmt.Errorf(
 			"install temporary ODDC host overlay: %w",
 			err,
@@ -205,6 +169,9 @@ func savePrivileged(
 
 	return nil
 }
+
+// writeRootFile writes a root-only file from memory. Tests replace it.
+var writeRootFile = rootfile.Write
 
 // protectedExistsArgs builds the existence probe for a protected path.
 //

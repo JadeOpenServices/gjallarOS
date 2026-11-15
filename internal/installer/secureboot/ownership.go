@@ -383,31 +383,11 @@ func RecordOwnership(ctx context.Context, stage string) error {
 	}
 	data = append(data, '\n')
 
-	tmp, err := os.CreateTemp("", "gjallar-secure-boot-ownership-*")
-	if err != nil {
-		return err
-	}
-	tmpPath := tmp.Name()
-	defer os.Remove(tmpPath)
-
-	if err := tmp.Chmod(0600); err != nil {
-		tmp.Close()
-		return err
-	}
-	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-
 	if err := command(ctx, "sudo", "install", "-d", "-m", "0700",
 		filepath.Dir(OwnershipPath)); err != nil {
 		return fmt.Errorf("create Secure Boot ownership directory: %w", err)
 	}
-	if err := command(ctx, "sudo", "install", "-m", "0600",
-		tmpPath, OwnershipPath); err != nil {
+	if err := writeRootFile(ctx, data, "0600", OwnershipPath); err != nil {
 		return fmt.Errorf("install Secure Boot ownership record: %w", err)
 	}
 

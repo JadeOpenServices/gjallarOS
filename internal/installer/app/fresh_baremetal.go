@@ -17,6 +17,7 @@ import (
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/freshgpt"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/hardwareconfig"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/installconfirm"
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/installlog"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/mounttree"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/oddc"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/prompt"
@@ -29,6 +30,8 @@ type freshBareMetalResult struct {
 	RootPARTUUID      string
 	LUKSUUID          string
 	RecoveryPartition string
+	// MountPoint is where the new root is mounted; it stays mounted.
+	MountPoint string
 	// ReleaseTargetState unmounts the target state bound over the live host
 	// paths; call it when the installer is done with the target.
 	ReleaseTargetState func()
@@ -72,6 +75,8 @@ func runFreshBareMetal(
 			err,
 		)
 	}
+
+	installlog.Mark(installlog.TargetValidated)
 
 	plan, err := freshdiskplan.Build(
 		freshdiskplan.Input{
@@ -144,6 +149,8 @@ func runFreshBareMetal(
 			err,
 		)
 	}
+
+	installlog.Mark(installlog.TargetRootReady, installlog.Bool("encrypted", rootResult.LUKSUUID != ""))
 
 	// Fresh canonical storage has exactly one owner. mounttree prepares the
 	// ESP, encrypted Btrfs root mount, and the exact 12 GiB recovery
@@ -221,19 +228,22 @@ func runFreshBareMetal(
 
 	fmt.Fprintln(out, "STAGE: generating target hardware configuration")
 
-	if _, err := hardwareconfig.GenerateTarget(
+	generated, err := hardwareconfig.GenerateTarget(
 		ctx,
 		repo,
 		hardwarePath,
 		time.Now(),
-	); err != nil {
+	)
+	if err != nil {
 		return freshBareMetalResult{}, fmt.Errorf(
 			"generate fresh target hardware configuration: %w",
 			err,
 		)
 	}
+	reportDroppedSwap(out, generated.DroppedSwap)
 
 	fmt.Fprintln(out, "STAGE: installing gjallarOS into prepared target")
+	installlog.Mark(installlog.NixOSInstallStarted)
 
 	if _, err := baremetalinstall.Install(
 		ctx,
@@ -248,6 +258,8 @@ func runFreshBareMetal(
 			err,
 		)
 	}
+
+	installlog.Mark(installlog.NixOSInstallFinished)
 
 	if err := saveODDCHostOverlay(
 		ctx,
@@ -279,11 +291,13 @@ func runFreshBareMetal(
 	); err != nil {
 		return freshBareMetalResult{}, err
 	}
+	installlog.Mark(installlog.CheckoutCloned)
 
 	result := freshBareMetalResult{
 		TargetDisk:         plan.TargetDisk.Path,
 		RootPARTUUID:       plan.Root.Partition.PARTUUID,
 		LUKSUUID:           rootResult.LUKSUUID,
+		MountPoint:         rootResult.MountPoint,
 		ReleaseTargetState: releaseTargetState,
 	}
 	keepTargetState = true
@@ -299,6 +313,7 @@ func runFreshBareMetal(
 		out,
 		"PASS: canonical fresh bare-metal installation completed",
 	)
+	installlog.Mark(installlog.FreshInstallFinished)
 
 	return result, nil
 }
