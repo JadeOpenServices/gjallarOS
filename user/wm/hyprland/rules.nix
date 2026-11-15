@@ -120,6 +120,17 @@ in
           "monitor_h*0.8"
         ];
       }
+      # The weather city question (bar pin click, gjallar-weather-city),
+      # sized in cells like the time details.
+      {
+        match.title = "^(gjallarOS weather city)$";
+        float = true;
+        center = true;
+        max_size = [
+          "monitor_w*0.9"
+          "monitor_h*0.8"
+        ];
+      }
       # Monique's monitor name overlay. Monique adds this rule at runtime as
       # well, but only once per run; a reload drops that copy.
       {

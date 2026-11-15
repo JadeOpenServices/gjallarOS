@@ -3,12 +3,16 @@
 # recovery specialisation, the recovery-maintenance initrd and the recovery
 # ISO include this package.
 #
+# tzdata gives the zone and country tables the installer uses to guess the
+# weather city from the timezone, without asking the network.
+#
 # oddc is the full ODDC source (the flake's oddc input). With it the
 # installer drafts a model for machines ODDC does not match; without it
 # (recovery tools) it skips the draft.
 {
   callPackage,
   lib,
+  tzdata,
   oddc ? null,
 }:
 let
@@ -23,12 +27,15 @@ gjallarctl.overrideAttrs (old: {
   ];
 
   # The installer runs gjallarctl, which no longer sits next to it.
-  ldflags = old.ldflags ++ [
-    "-X github.com/JadeOpenServices/gjallarOS/internal/installer/control.Path=${gjallarctl}/bin/gjallarctl"
-  ]
-  ++ lib.optional (
-    oddc != null
-  ) "-X github.com/JadeOpenServices/gjallarOS/internal/installer/oddcdraft.Catalog=${oddc}";
+  ldflags =
+    old.ldflags
+    ++ [
+      "-X github.com/JadeOpenServices/gjallarOS/internal/installer/control.Path=${gjallarctl}/bin/gjallarctl"
+      "-X github.com/JadeOpenServices/gjallarOS/internal/installer/zonecity.Dir=${tzdata}/share/zoneinfo"
+    ]
+    ++ lib.optional (
+      oddc != null
+    ) "-X github.com/JadeOpenServices/gjallarOS/internal/installer/oddcdraft.Catalog=${oddc}";
 
   meta = old.meta // {
     description = "gjallarOS installer and recovery-storage maintenance";

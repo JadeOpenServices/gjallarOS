@@ -77,9 +77,12 @@ func interviewDefaults(running *config.User, o discovery.Options) config.User {
 		KeyboardLayout:         "de",
 		TouchpadWorkspaceSwipe: true,
 		ClamshellEnable:        true,
-		Shell:                  first(o.Shells),
-		Editors:                []string{"vscodium"},
-		Browsers:               []string{"firefox"},
+		// Printing on this computer only: CUPS listens on localhost and
+		// the firewall stays closed.
+		PrintingEnable: true,
+		Shell:          first(o.Shells),
+		Editors:        []string{"vscodium"},
+		Browsers:       []string{"firefox"},
 	}
 	if running == nil {
 		return fresh

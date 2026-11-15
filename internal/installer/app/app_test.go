@@ -11,7 +11,6 @@ import (
 
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/config"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/discovery"
-	"github.com/JadeOpenServices/gjallarOS/internal/installer/geolocation"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/prompt"
 )
 
@@ -66,24 +65,6 @@ func TestUnmanagedPresetForcesJODSPrebootLockOff(t *testing.T) {
 	normalizeManagementSafety(&u)
 	if u.PrebootLock.Enable {
 		t.Fatal("unmanaged preset retained JODS preboot lock")
-	}
-}
-
-func TestConfigureWeatherLocationRejectsDetectionAndPrompts(t *testing.T) {
-	original := detectNetworkLocation
-	detectNetworkLocation = func(context.Context) (geolocation.Location, error) {
-		return geolocation.Location{City: "Wrong", Country: "Place"}, nil
-	}
-	t.Cleanup(func() { detectNetworkLocation = original })
-
-	var output bytes.Buffer
-	ui := prompt.New(strings.NewReader("n\nBerlin\nGermany\n"), &output)
-	var user config.User
-	if err := configureWeatherLocation(context.Background(), ui, &user, &output); err != nil {
-		t.Fatal(err)
-	}
-	if user.WeatherCity != "Berlin" || user.WeatherCountry != "Germany" {
-		t.Fatalf("unexpected weather location: %+v", user)
 	}
 }
 

@@ -35,9 +35,12 @@ The preset answers the non-secret configuration automatically. Hardware
 profiling remains dynamic and GPU passthrough IDs are detected automatically.
 Remove or rename the file to return to fully interactive mode.
 
-The installer estimates the weather location from the current public network
-address and asks the user to confirm it. If rejected or unavailable, it asks
-for city and country explicitly. The detected value is never accepted silently.
+The installer does not ask for the weather city and sends nothing to the
+network for it. A new install guesses the city from the timezone, using the
+zone tables that ship with tzdata, and leaves it empty for zones such as UTC.
+A pin in the bar then asks once whether the city is right; the user keeps it,
+types another one, or leaves it empty to turn the weather off. A rerun keeps
+`weatherCity` and `weatherCountry` as they are.
 
 In the preset, `username` is the Linux account and the single identity input.
 `dotfilesDir` is derived automatically as `/home/<username>/Documents/gjallarOS`.

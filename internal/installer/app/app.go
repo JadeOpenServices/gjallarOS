@@ -38,7 +38,6 @@ import (
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/firefoxstore"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/firmware"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/flakesource"
-	"github.com/JadeOpenServices/gjallarOS/internal/installer/geolocation"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/hardwareconfig"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/installlog"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/installreport"
@@ -56,6 +55,7 @@ import (
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/sourcerevision"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/systemcheckout"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/targetdisk"
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/zonecity"
 	"github.com/JadeOpenServices/gjallarOS/internal/installercheck"
 	"github.com/JadeOpenServices/gjallarOS/internal/sshsig"
 )
@@ -105,7 +105,6 @@ const (
 	installerReleaseRebootScheduled = 75
 )
 
-var detectNetworkLocation = geolocation.Detect
 var runJODSCommand = attached
 
 func Run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer) int {
@@ -733,9 +732,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 		// repository into the root-owned system checkout.
 		s.user.DotfilesDir = systemcheckout.Path
 	}
-	if err := configureWeatherLocation(ctx, ui, &s.user, out); err != nil {
-		return fail(errOut, err)
-	}
+	configureWeatherLocation(&s.user, running == nil, out)
 	// Resolve managed security requirements before checking the physical TPM
 	// boundary so policy normalization cannot re-enable TPM-dependent features
 	// after a no-TPM decision.
@@ -2084,6 +2081,9 @@ func collectInteractive(ctx context.Context, ui prompt.UI, root string, partitio
 		u.Theme = running.Theme
 		u.USBTrustTPMHandle = running.USBTrustTPMHandle
 		u.FirefoxAddons, u.FirefoxStoreAddons = running.FirefoxAddons, running.FirefoxStoreAddons
+		// The weather city is answered in the bar, and an empty one means
+		// the user turned the weather off.
+		u.WeatherCity, u.WeatherCountry = running.WeatherCity, running.WeatherCountry
 	}
 	if u.Hostname, err = ui.Value(ctx, "Hostname", a.Hostname); err != nil {
 		return err
@@ -2204,16 +2204,8 @@ func collectInteractive(ctx context.Context, ui prompt.UI, root string, partitio
 	if u.Theme == "" {
 		u.Theme = first(o.Themes)
 	}
-	u.PrintingEnable, err = ui.Confirm(ctx, "Enable printing and scanning support?", a.PrintingEnable)
-	if err != nil {
+	if err := collectPrinting(ctx, ui, a, u); err != nil {
 		return err
-	}
-	u.NetworkPrintingEnable = false
-	if u.PrintingEnable {
-		u.NetworkPrintingEnable, err = ui.Confirm(ctx, "Enable network printer discovery?", a.NetworkPrintingEnable)
-		if err != nil {
-			return err
-		}
 	}
 	if err := collectApps(ctx, ui, running, u); err != nil {
 		return err
@@ -2888,45 +2880,54 @@ func normalizeManagementSafety(u *config.User) {
 	u.PrebootLock.Enable = false
 }
 
-func configureWeatherLocation(ctx context.Context, ui prompt.UI, u *config.User, out io.Writer) error {
-	configuredCity := strings.TrimSpace(u.WeatherCity)
-	configuredCountry := strings.TrimSpace(u.WeatherCountry)
-	if configuredCity != "" && configuredCountry != "" {
-		u.WeatherCity = configuredCity
-		u.WeatherCountry = configuredCountry
-		fmt.Fprintf(out, "Weather location configured: %s, %s\n", configuredCity, configuredCountry)
-		return nil
-	}
+// Printing choices, in the order the question lists them.
+const (
+	printingOff     = "off"
+	printingUSB     = "usb: printers and scanners plugged into this computer"
+	printingNetwork = "network: also find printers on the local network"
+)
 
-	detected, detectErr := detectNetworkLocation(ctx)
-	if detectErr == nil {
-		fmt.Fprintf(out, "Approximate network location detected: %s, %s\n", detected.City, detected.Country)
-		correct, err := ui.Confirm(ctx, "Is this the correct weather location: "+detected.City+", "+detected.Country+"?", true)
-		if err != nil {
-			return err
-		}
-		if correct {
-			u.WeatherCity, u.WeatherCountry = detected.City, detected.Country
-			return nil
-		}
-	} else {
-		fmt.Fprintf(out, "Network location detection unavailable: %v\n", detectErr)
+// collectPrinting asks one question for printing. CUPS only ever listens on
+// this computer; the network choice adds mDNS discovery, which opens UDP
+// 5353 to the local network.
+func collectPrinting(ctx context.Context, ui prompt.UI, a config.User, u *config.User) error {
+	def := printingOff
+	switch {
+	case a.PrintingEnable && a.NetworkPrintingEnable:
+		def = printingNetwork
+	case a.PrintingEnable:
+		def = printingUSB
 	}
-
-	city, err := ui.Value(ctx, "Weather city", u.WeatherCity)
+	choice, err := ui.Choice(ctx, "Printers and scanners", def, []string{printingOff, printingUSB, printingNetwork})
 	if err != nil {
 		return err
 	}
-	country, err := ui.Value(ctx, "Weather country", u.WeatherCountry)
-	if err != nil {
-		return err
-	}
-	city, country = strings.TrimSpace(city), strings.TrimSpace(country)
-	if city == "" || country == "" {
-		return errors.New("weather city and country are required")
-	}
-	u.WeatherCity, u.WeatherCountry = city, country
+	u.PrintingEnable = choice != printingOff
+	u.NetworkPrintingEnable = choice == printingNetwork
 	return nil
+}
+
+// configureWeatherLocation fills the weather city and country without
+// asking and without the network. Values already set (a preset, or the
+// running system on a rerun) stay. Otherwise, when guess is set, the
+// timezone names them; the bar asks the user to confirm or change them.
+// Empty values hide the weather.
+func configureWeatherLocation(u *config.User, guess bool, out io.Writer) {
+	u.WeatherCity = strings.TrimSpace(u.WeatherCity)
+	u.WeatherCountry = strings.TrimSpace(u.WeatherCountry)
+	if u.WeatherCity != "" && u.WeatherCountry != "" {
+		fmt.Fprintf(out, "Weather location: %s, %s\n", u.WeatherCity, u.WeatherCountry)
+		return
+	}
+	u.WeatherCity, u.WeatherCountry = "", ""
+	if guess {
+		if place, ok := zonecity.Guess(u.Timezone); ok {
+			u.WeatherCity, u.WeatherCountry = place.City, place.Country
+			fmt.Fprintf(out, "Weather location from the timezone: %s, %s (the bar asks you to confirm it)\n", place.City, place.Country)
+			return
+		}
+	}
+	fmt.Fprintln(out, "Weather location: none yet; the bar asks for your city.")
 }
 
 func configureRecoveryProvisioning(ctx context.Context, ui prompt.UI, opt options, s *state) error {

@@ -112,18 +112,19 @@ terminal.
 
 | Topic | Questions |
 | --- | --- |
-| You and your region | Username, password, hostname, timezone, language, keyboard layout and weather location |
+| You and your region | Username, password, hostname, timezone, language and keyboard layout |
 | Disk (USB stick) | Which disk to erase |
 | Startup (USB stick) | Whether the security chip (TPM2) unlocks the disk alone or asks a PIN; both add a recovery key |
-| Apps | Apps from the catalogue, Firefox add-ons, printing and scanning, a smart card for mail keys |
+| Apps | Apps from the catalogue, Firefox add-ons, printers and scanners (off, plugged into this computer, or also on the local network), a smart card for mail keys |
 | Network | Tailscale as a VPN on networks you do not trust, and Nextcloud |
 | Security | USB device trust, Secure Boot, firmware updates, a recovery partition, who signs settings files |
 | AI (optional) | A local model, an AI server on your network, or none |
 
 A new install ships zsh, VSCodium and Firefox, turns on touchpad
 workspace swipes, and keeps a laptop running with the lid closed on a
-dock. Git commits need your name and email, which the installer does not
-ask; set them with `gjallarctl settings set name="Alex Example"
+dock. The weather city comes from the timezone, and the bar asks once
+whether it is right. Git commits need your name and email, which the
+installer does not ask; set them with `gjallarctl settings set name="Alex Example"
 email=alex@example.com`. Settings changes the rest.
 
 [Install details](docs/install.md) covers release channels, preset answers
