@@ -177,13 +177,17 @@
       installerLabImage = recoverySystem [ ./system/recovery/installer-lab.nix ];
 
       # The installer stick is the same for everyone: no recoveryKeyboard,
-      # nothing from generated/.
+      # nothing from generated/. Its installer needs the Monique submodule,
+      # which a flake source only holds when built with ?submodules=1.
       stickImage = nixpkgs.lib.nixosSystem {
         inherit system;
         modules = [ ./system/installer-media/stick.nix ];
         specialArgs = {
           releaseVersion = releasePolicy.release;
-          repoSource = recoverySource;
+          repoSource =
+            assert lib.assertMsg (builtins.pathExists "${recoverySource}/pkgs/monique/nix/nixos-module.nix")
+              "the installer stick needs the Monique submodule: build '.?submodules=1#gjallar-stick-iso'";
+            recoverySource;
           inherit sourceRevision;
         };
       };
