@@ -635,7 +635,9 @@ func (t FirmwareTrust) Findings() []TrustFinding {
 		add(false, "The revocation list (dbx) is empty: files known to be unsafe are not blocked.")
 	}
 	for _, c := range t.MokList.Certs {
-		add(false, "Shim also trusts "+c.Name+" (added in MokManager).")
+		// MokListRT also mirrors shim's built-in vendor key (Debian's CA on
+		// the stick, e2e-sticksb 2026-11-16); Linux cannot tell the two apart.
+		add(false, "Shim also trusts "+c.Name+" (built into shim or added in MokManager).")
 	}
 	return append(critical, other...)
 }
