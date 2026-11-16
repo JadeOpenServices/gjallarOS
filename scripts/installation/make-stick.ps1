@@ -146,7 +146,10 @@ function Get-GjDisks([string]$where) {
             Remove-Item -LiteralPath $state.Work -Recurse -Force -ErrorAction SilentlyContinue
         }
     }
-    function Get-Bytes([long]$n) { '{0:0.0} GB' -f ([Math]::Floor($n / 100000000) / 10) }
+    function Get-Bytes([long]$n) {
+        if ($n -lt 1000000000) { return '{0} MB' -f [Math]::Floor($n / 1000000) }
+        '{0:0.0} GB' -f ([Math]::Floor($n / 100000000) / 10)
+    }
     function Get-Clean([string]$s) {
         $s = ($s -replace '[^A-Za-z0-9 ._()+-]', '').Trim()
         if ($s.Length -gt 40) { $s = $s.Substring(0, 40) }
@@ -341,17 +344,46 @@ function Get-GjDisks([string]$where) {
             $r = Read-Host 'Plug in a stick and press Enter to look again, or type Q to stop'
             if ($r -match '^[qQ]$') { Stop-Maker 'Nothing was written.' 130 }
         }
+        # USB hard disks and SSDs in an enclosure: Windows calls them
+        # external hard disk media (not removable), or they are bigger than
+        # sticks usually are. MSFT_PhysicalDisk.MediaType is no help: USB
+        # bridges often do not report it.
+        $extSize = 130000000000
+        function Get-External($disk) {
+            $why = @()
+            $n = [int]$disk.Number
+            $dd = @((New-Object Management.ManagementObjectSearcher('root\cimv2', "SELECT MediaType FROM Win32_DiskDrive WHERE Index = $n")).Get())
+            if ($dd.Count -ne 1 -or [string]$dd[0].MediaType -ne 'Removable Media') { $why += 'not marked removable' }
+            if ([long]$disk.Size -gt $extSize) { $why += "bigger than $(Get-Bytes $extSize)" }
+            $why -join ', '
+        }
+        function Show-Parts($disk) {
+            $parts = @(Get-Partition -DiskNumber ([int]$disk.Number) -ErrorAction SilentlyContinue | Sort-Object PartitionNumber)
+            if ($parts.Count -eq 0) { Write-Host '       no partitions'; return }
+            foreach ($p in $parts) {
+                $v = @($p | Get-Volume -ErrorAction SilentlyContinue)
+                $fs = ''; $vl = ''
+                if ($v.Count -eq 1) { $fs = Get-Clean ([string]$v[0].FileSystem); $vl = Get-Clean ([string]$v[0].FileSystemLabel) }
+                if (-not $fs) { $fs = 'unknown' }
+                if ($vl) { $vl = 'label "' + $vl + '"' }
+                Write-Host ('       {0,-8} {1,10}  {2,-8} {3}' -f ('part ' + [int]$p.PartitionNumber), (Get-Bytes $p.Size), $fs, $vl)
+            }
+        }
         Write-Host ''
         Write-Host 'USB sticks:'
+        $ext = @()
         for ($i = 0; $i -lt $sticks.Count; $i++) {
             $label = Get-Clean ([string]$sticks[$i].FriendlyName)
             if (-not $label) { $label = 'USB stick' }
             Write-Host ('  {0}  {1,-40} {2,10}   serial {3}' -f ($i + 1), $label, (Get-Bytes $sticks[$i].Size), (Get-Clean ([string]$sticks[$i].SerialNumber)))
+            $ext += , (Get-External $sticks[$i])
+            if ($ext[$i]) { Write-Host "       ! Looks like an external drive: $($ext[$i])" }
+            Show-Parts $sticks[$i]
         }
         while ($true) {
             $r = Read-Host 'Type the number of the stick to erase and write (Enter to stop)'
             if (-not $r) { Stop-Maker 'Nothing was written.' 130 }
-            if ($r -match '^[1-9][0-9]?$' -and [int]$r -le $sticks.Count) { $pick = $sticks[[int]$r - 1]; break }
+            if ($r -match '^[1-9][0-9]?$' -and [int]$r -le $sticks.Count) { $pick = $sticks[[int]$r - 1]; $pickExt = $ext[[int]$r - 1]; break }
             Write-Host "Type one of the numbers 1 to $($sticks.Count)."
         }
         Write-Log "GJA-3020 maker.disk.chosen disks=$($sticks.Count)"
@@ -364,6 +396,14 @@ function Get-GjDisks([string]$where) {
         Write-Host 'and add a small GJLOGS partition where the installer can save its log.'
         $r = Read-Host 'Type ERASE to go on, or press Enter to stop'
         if ($r -cne 'ERASE') { Stop-Maker 'Nothing was written.' 130 }
+        if ($pickExt) {
+            Write-Host ''
+            Write-Host 'This looks like an external hard disk or SSD, not a USB stick'
+            Write-Host "($pickExt). Backups and other files on it are erased too."
+            $r = Read-Host 'Type EXTERNAL to erase it anyway, or press Enter to stop'
+            if ($r -cne 'EXTERNAL') { Stop-Maker 'Nothing was written.' 130 }
+            Write-Log 'GJA-3023 maker.disk.external'
+        }
 
         Write-Host ''
         Write-Host 'The write needs admin rights, and Windows asks for them next.'

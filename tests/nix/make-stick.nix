@@ -125,13 +125,13 @@ pkgs.testers.runNixOSTest {
     machine.wait_for_open_port(8443)
     machine.wait_for_unit("multi-user.target")
 
-    def plug(name, size, serial):
+    def plug(name, size, serial, removable="on"):
         path = machine.state_dir / f"{name}.img"
         with open(path, "wb") as f:
             f.truncate(size)
         machine.send_monitor_command(f"drive_add 0 if=none,id={name},file={path},format=raw")
         machine.send_monitor_command(
-            f"device_add usb-storage,bus=xhci.0,drive={name},id=u{name},serial={serial}"
+            f"device_add usb-storage,bus=xhci.0,drive={name},id=u{name},serial={serial},removable={removable}"
         )
         link = f"/dev/disk/by-id/usb-QEMU_QEMU_HARDDISK_{serial}-0:0"
         machine.wait_until_succeeds(f"test -b {link}")
@@ -272,6 +272,14 @@ pkgs.testers.runNixOSTest {
         machine.fail("test -e /tmp/bash-env-ran-0")
         assert head_sha(dev, off + img_size) == good
 
+    with subtest("the list shows partitions and labels"):
+        machine.wait_until_succeeds(f"lsblk -no LABEL {dev} | grep -qx GJLOGS")
+        rc, out = maker("--release v2026.01.1", "1\n\n")
+        assert rc == 130, (rc, out)
+        assert 'label "GJLOGS"' in out, out
+        assert "external" not in out, "a removable stick is not an external drive"
+        assert head_sha(dev, off + img_size) == good
+
     with subtest("a GPT image gets no GJLOGS slot"):
         rc, out = maker("--release v2026.01.2", "1\nERASE\n")
         assert rc == 0, (rc, out)
@@ -280,6 +288,31 @@ pkgs.testers.runNixOSTest {
         assert "GJLOGS" not in machine.succeed(f"blkid -p {dev} || true")
 
     unplug("big", "GJTESTA1")
+
+    with subtest("Q228: an external drive needs EXTERNAL typed"):
+        dev, _ = plug("ext", 64 * 1024 * 1024, "GJTESTD4", removable="off")
+        machine.succeed(f"printf 'backup data' | dd of={dev} bs=1 seek=1048576 conv=notrunc,fsync status=none")
+        before = head_sha(dev)
+        for answers in ["1\nERASE\n", "1\nERASE\n\n", "1\nERASE\nexternal\n"]:
+            rc, out = maker("--release v2026.01.1", answers)
+            assert rc == 130, (answers, rc, out)
+            assert "Looks like an external drive: not marked removable" in out, out
+            assert "Nothing was written." in out, out
+            assert head_sha(dev) == before, answers
+        rc, out = maker("--release v2026.01.1", "1\nERASE\nEXTERNAL\n")
+        assert rc == 0, (rc, out)
+        assert "GJA-3023 maker.disk.external" in anchors()
+        machine.succeed(f"cmp -n 478 {dev} {fx}/mbr.iso")
+        unplug("ext", "GJTESTD4")
+        # Marked removable but bigger than sticks usually are (sparse file).
+        dev, _ = plug("big", 140 * 1000**3, "GJTESTD5")
+        before = head_sha(dev)
+        rc, out = maker("--release v2026.01.1", "1\nERASE\n\n")
+        assert rc == 130, (rc, out)
+        assert "Looks like an external drive: bigger than 130.0 GB" in out, out
+        assert "not marked removable" not in out, out
+        assert head_sha(dev) == before
+        unplug("big", "GJTESTD5")
 
     with subtest("a stick with no room after the image"):
         dev, _ = plug("mid", 9 * 1024 * 1024, "GJTESTB2")

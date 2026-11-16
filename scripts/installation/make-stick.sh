@@ -205,7 +205,7 @@ gjallar_make_stick() {
     say "Signature and checksums are correct."
 
     # USB sticks: whole USB disks with a /dev/disk/by-id/usb-* name.
-    local -a d_name d_id d_size d_serial d_label
+    local -a d_name d_id d_size d_serial d_label d_ext
     field() { # line key
         if [[ $1 =~ (^|\ )$2=\"([^\"]*)\" ]]; then
             printf '%s' "${BASH_REMATCH[2]}"
@@ -217,13 +217,14 @@ gjallar_make_stick() {
         printf '%s' "${s:0:40}"
     }
     find_sticks() {
-        d_name=() d_id=() d_size=() d_serial=() d_label=()
+        d_name=() d_id=() d_size=() d_serial=() d_label=() d_ext=()
         small=0
-        local l name tran type size serial model vendor link id
+        local l name tran type size serial model vendor link id rm ext
         while IFS= read -r l; do
             name=$(field "$l" NAME) tran=$(field "$l" TRAN) type=$(field "$l" TYPE)
             size=$(field "$l" SIZE) serial=$(field "$l" SERIAL)
             model=$(field "$l" MODEL) vendor=$(field "$l" VENDOR)
+            rm=$(field "$l" RM)
             [[ $tran == usb && $type == disk && $name =~ ^sd[a-z]{1,3}$ && $size =~ ^[1-9][0-9]{0,15}$ ]] || continue
             if ((size < iso_size)); then
                 small=$((small + 1))
@@ -240,11 +241,37 @@ gjallar_make_stick() {
             d_name+=("$name") d_id+=("$id") d_size+=("$size")
             d_serial+=("$serial")
             d_label+=("$(clean "$vendor $model")")
-        done < <(lsblk -dn -b -P -o NAME,TRAN,TYPE,SIZE,SERIAL,MODEL,VENDOR)
+            # USB hard disks and SSDs in an enclosure: not marked removable
+            # or bigger than sticks usually are. ROTA is no help here: many
+            # USB bridges skip the page that reports it, so sticks show 1.
+            ext=""
+            [[ $rm == 1 ]] || ext+=", not marked removable"
+            ((size <= ext_size)) || ext+=", bigger than $(gb "$ext_size")"
+            d_ext+=("${ext#, }")
+        done < <(lsblk -dn -b -P -o NAME,TRAN,TYPE,SIZE,SERIAL,MODEL,VENDOR,RM)
     }
-    gb() { printf '%d.%d GB' $(($1 / 1000000000)) $(($1 / 100000000 % 10)); }
+    # One line per partition: name, size, file system, label.
+    show_parts() { # name
+        local l pname ptype psize fs label shown=0
+        while IFS= read -r l; do
+            pname=$(field "$l" NAME) ptype=$(field "$l" TYPE) psize=$(field "$l" SIZE)
+            fs=$(clean "$(field "$l" FSTYPE)") label=$(clean "$(field "$l" LABEL)")
+            [[ $ptype == part && $pname =~ ^$1[0-9]{1,3}$ && $psize =~ ^[0-9]{1,16}$ ]] || continue
+            printf '       %-8s %10s  %-8s %s\n' "$pname" "$(gb "$psize")" "${fs:-unknown}" \
+                "${label:+label \"$label\"}"
+            shown=$((shown + 1))
+        done < <(lsblk -n -b -P -o NAME,TYPE,SIZE,FSTYPE,LABEL -- "/dev/$1" 2>/dev/null)
+        ((shown > 0)) || say "       no partitions"
+    }
+    gb() {
+        if (($1 < 1000000000)); then
+            printf '%d MB' $(($1 / 1000000))
+        else
+            printf '%d.%d GB' $(($1 / 1000000000)) $(($1 / 100000000 % 10))
+        fi
+    }
 
-    local small=0 n i
+    local small=0 n i ext_size=130000000000
     while :; do
         find_sticks
         n=${#d_name[@]}
@@ -261,6 +288,8 @@ gjallar_make_stick() {
     for ((i = 0; i < n; i++)); do
         printf '  %d  %-40s %10s   serial %s\n' $((i + 1)) "${d_label[i]:-USB stick}" \
             "$(gb "${d_size[i]}")" "$(clean "${d_serial[i]}")"
+        [[ -z ${d_ext[i]} ]] || say "       ! Looks like an external drive: ${d_ext[i]}"
+        show_parts "${d_name[i]}"
     done
     local pick=""
     while :; do
@@ -284,6 +313,16 @@ gjallar_make_stick() {
         say "Nothing was written."
         exit 130
     }
+    if [[ -n ${d_ext[pick]} ]]; then
+        say "" "This looks like an external hard disk or SSD, not a USB stick" \
+            "(${d_ext[pick]}). Backups and other files on it are erased too."
+        ask "Type EXTERNAL to erase it anyway, or press Enter to stop: "
+        [[ $REPLY == EXTERNAL ]] || {
+            say "Nothing was written."
+            exit 130
+        }
+        log "GJA-3023 maker.disk.external"
+    fi
 
     # Unmount what the desktop mounted, as the user. Root refuses the stick
     # if anything is still mounted, held or used as swap.

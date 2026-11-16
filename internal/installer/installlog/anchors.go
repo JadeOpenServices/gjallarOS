@@ -52,6 +52,7 @@ const (
 	MakerDiskChosen        ID = 3020
 	MakerElevationDeclined ID = 3021
 	MakerDiskBusy          ID = 3022
+	MakerDiskExternal      ID = 3023
 	MakerWriteFinished     ID = 3030
 	MakerReadbackVerified  ID = 3031
 	MakerReadbackMismatch  ID = 3032
@@ -202,6 +203,8 @@ var Registry = []Anchor{
 		Meaning: "Admin rights for the write were refused or not available; nothing was written."},
 	{ID: MakerDiskBusy, Name: "maker.disk.busy",
 		Meaning: "Windows could not lock a volume on the stick because a program has it open; nothing was written and the maker offers to try again."},
+	{ID: MakerDiskExternal, Name: "maker.disk.external",
+		Meaning: "The chosen USB disk looks like an external hard disk or SSD (not marked removable, or bigger than sticks usually are), and the user typed EXTERNAL to erase it anyway."},
 	{ID: MakerWriteFinished, Name: "maker.write.finished",
 		Meaning: "The image is written to the stick."},
 	{ID: MakerReadbackVerified, Name: "maker.readback.verified",

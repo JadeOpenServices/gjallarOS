@@ -47,6 +47,7 @@ yes/no or one of the words listed here, never text a user typed.
 | GJA-3020 | `maker.disk.chosen` | The user picked the USB stick to write. | `disks` (count): how many USB sticks the maker offered |
 | GJA-3021 | `maker.elevation.declined` | Admin rights for the write were refused or not available; nothing was written. | none |
 | GJA-3022 | `maker.disk.busy` | Windows could not lock a volume on the stick because a program has it open; nothing was written and the maker offers to try again. | none |
+| GJA-3023 | `maker.disk.external` | The chosen USB disk looks like an external hard disk or SSD (not marked removable, or bigger than sticks usually are), and the user typed EXTERNAL to erase it anyway. | none |
 | GJA-3030 | `maker.write.finished` | The image is written to the stick. | none |
 | GJA-3031 | `maker.readback.verified` | The stick reads back the same bytes that were signed. | none |
 | GJA-3032 | `maker.readback.mismatch` | The stick read back different bytes; its first MiB was wiped so it does not boot. | none |
