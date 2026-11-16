@@ -159,6 +159,23 @@ func TestWriteNewRefusesPathNames(t *testing.T) {
 	}
 }
 
+// A folder planted at the name on a save drive (L77) is refused and left
+// as it was.
+func TestWriteNewRefusesPlantedDirectory(t *testing.T) {
+	dir := t.TempDir()
+	name := "gjallaros-install-20261115-120000.log"
+	planted := filepath.Join(dir, name)
+	if err := os.Mkdir(planted, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := WriteNew(Destination{Dir: dir, UID: -1, GID: -1}, name, []byte("log")); err == nil || !strings.Contains(err.Error(), "already exists") {
+		t.Fatalf("WriteNew on a folder = %v, want refusal", err)
+	}
+	if entries, err := os.ReadDir(planted); err != nil || len(entries) != 0 {
+		t.Fatalf("planted folder changed: %v, %v", entries, err)
+	}
+}
+
 // A FIFO planted at the name would block the writer, or hand the data to
 // whoever reads it.
 func TestWriteNewRefusesPlantedFIFO(t *testing.T) {

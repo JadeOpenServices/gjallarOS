@@ -24,11 +24,34 @@ func saveTree(t *testing.T, targetPath string) []byte {
 		return map[string]any{"path": path, "type": "disk", "tran": tran, "fstype": nil, "uuid": nil,
 			"label": nil, "model": model, "size": 16000000000, "ro": ro, "mountpoints": []any{nil}, "children": children}
 	}
-	bootStick := disk("/dev/sdc", "usb", "Boot Stick", false,
-		part("/dev/sdc1", "iso9660", "2026-11-15-00-00-00-00", "GJALLAR_STICK", "/iso"),
-		part("/dev/sdc2", "vfat", "AAAA-0001", "EFIBOOT"),
-		part("/dev/sdc3", "vfat", "AAAA-0002", LogsLabel),
-	)
+	// A stick as the USB maker writes it (L76): the image's two partitions,
+	// GJLOGS in slot 3, and stage 1's /iso map over the whole disk.
+	stick := func(path, model string, iso bool, logs map[string]any) map[string]any {
+		d := disk(path, "usb", model, false,
+			numbered(part(path+"1", "iso9660", "2026-11-15-00-00-00-00", "GJALLAR_STICK"), 1),
+			numbered(part(path+"2", "vfat", "AAAA-0001", "EFIBOOT"), 2),
+			logs)
+		d["fstype"], d["label"] = "iso9660", "GJALLAR_STICK"
+		if iso {
+			d["children"] = append(d["children"].([]map[string]any),
+				map[string]any{"path": "/dev/mapper/gjallar-iso", "type": "dm", "fstype": "iso9660", "label": "GJALLAR_STICK",
+					"size": 1900000000, "ro": true, "mountpoints": []any{"/iso"}})
+		}
+		return d
+	}
+	logs := func(path, uuid string) map[string]any {
+		p := numbered(part(path, "vfat", uuid, LogsLabel), 3)
+		p["size"] = 32 << 20
+		return p
+	}
+	bootStick := stick("/dev/sdc", "Boot Stick", true, logs("/dev/sdc3", "474A-4C47"))
+	// Another gjallarOS stick: its GJLOGS is listed, but not as this run's.
+	otherStick := stick("/dev/sdl", "Other Stick", false, logs("/dev/sdl3", "474A-4C47"))
+	// gjallarOS sticks whose third partition no longer looks like GJLOGS.
+	bigLogs := logs("/dev/sdm3", "MMMM-0003")
+	bigLogs["size"] = 65 << 20
+	exfatLogs := logs("/dev/sdn3", "NNNN-0003")
+	exfatLogs["fstype"] = "exfat"
 	tree := map[string]any{"blockdevices": []any{
 		disk("/dev/nvme0n1", "nvme", "Internal", false, part("/dev/nvme0n1p1", "vfat", "BBBB-0001", "")),
 		disk(targetPath, "usb", "Target Disk", false, part("/dev/sdb1", "vfat", "CCCC-0001", "")),
@@ -47,12 +70,21 @@ func saveTree(t *testing.T, targetPath string) []byte {
 		disk("/dev/sdj", "usb", "Swap Stick", false, part("/dev/sdj1", "swap", "jjjjjjjj-0001", "")),
 		disk("/dev/sdk", "usb", "Path Stick", false, part("/dev/../etc/sdk1", "vfat", "KKKK-0001", "")),
 		bootStick,
+		otherStick,
+		stick("/dev/sdm", "Big Logs", false, bigLogs),
+		stick("/dev/sdn", "exFAT Logs", false, exfatLogs),
+		stick("/dev/sdo", "Slot Two", false, numbered(logs("/dev/sdo4", "OOOO-0004"), 4)),
 	}}
 	raw, err := json.Marshal(tree)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return raw
+}
+
+func numbered(part map[string]any, n int) map[string]any {
+	part["partn"] = n
+	return part
 }
 
 // targetLink makes a disk file and a link to it, the way /dev/disk/by-id
@@ -82,12 +114,15 @@ func TestSaveDrivesOffersOnlyFreeUSBPartitions(t *testing.T) {
 	for _, drive := range drives {
 		paths = append(paths, drive.Path)
 	}
-	want := []string{"/dev/sdc3", "/dev/sdd1", "/dev/sdf2"}
+	want := []string{"/dev/sdc3", "/dev/sdd1", "/dev/sdf2", "/dev/sdl3"}
 	if strings.Join(paths, " ") != strings.Join(want, " ") {
 		t.Fatalf("drives = %v, want %v", paths, want)
 	}
 	if !drives[0].BootStick || !strings.Contains(drives[0].Label, "the stick this run started from") {
 		t.Errorf("boot stick GJLOGS not marked: %+v", drives[0])
+	}
+	if last := drives[len(drives)-1]; last.BootStick || strings.Contains(last.Label, "started from") {
+		t.Errorf("another stick's GJLOGS marked as this run's: %+v", last)
 	}
 	if drives[1].MountPoint != "/run/media/nixos/STICK" {
 		t.Errorf("desktop mount lost: %+v", drives[1])
@@ -110,7 +145,7 @@ func TestSaveDrivesWithoutTarget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(drives) != 4 || drives[1].Path != "/dev/sdb1" {
+	if len(drives) != 5 || drives[1].Path != "/dev/sdb1" {
 		t.Fatalf("drives = %+v, want the target disk's partition second", drives)
 	}
 }

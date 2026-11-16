@@ -14,6 +14,15 @@ import (
 // boot stick (Plane 344). The installer only uses it; it never creates it.
 const LogsLabel = "GJLOGS"
 
+// The makers write GJLOGS as a 32 MiB FAT image into MBR slot 3 (L76). On a
+// gjallarOS stick only a partition that still looks like that is used
+// (L77): the stick's other FAT partition is its boot partition.
+const (
+	logsPartN    = 3
+	logsFSType   = "vfat"
+	logsMaxBytes = 64 << 20
+)
+
 // saveFSTypes are the filesystems a report or log is saved to. Both are
 // read on any computer, and both are simple for the kernel to mount: the
 // mount runs as root on a drive anyone could have handed over.
@@ -28,7 +37,9 @@ type SaveDrive struct {
 	// Label is the drive's own text: model, label and size, cleaned so it
 	// prints safely.
 	Label string
-	// BootStick is the GJLOGS partition of the stick this run started from.
+	// BootStick is the GJLOGS partition of the stick this run started from:
+	// the disk below the live system's /iso mount, not a disk that only
+	// carries the stick's label.
 	BootStick bool
 	// MountPoint is set when the partition is mounted already, by the
 	// desktop for its user; the files are written there as that user.
@@ -38,6 +49,7 @@ type SaveDrive struct {
 type saveDevice struct {
 	Path        string       `json:"path"`
 	Type        string       `json:"type"`
+	PartN       int          `json:"partn"`
 	Tran        string       `json:"tran"`
 	FSType      string       `json:"fstype"`
 	UUID        string       `json:"uuid"`
@@ -52,8 +64,10 @@ type saveDevice struct {
 // SaveDrives lists the partitions a failed run may save to. target is the
 // disk the run installs to, "" when none was chosen yet. A partition
 // qualifies when its disk is attached over USB and writable, is not target,
-// holds nothing the system uses, and the partition is FAT or exFAT. On the stick this run started from only the GJLOGS partition
-// qualifies: the stick's own boot partition is FAT as well.
+// holds nothing the system uses, and the partition is FAT or exFAT. On a
+// gjallarOS stick only its GJLOGS partition qualifies: the stick's own boot
+// partition is FAT as well. Only the stick this run started from is marked
+// and listed first; another gjallarOS stick is listed like any drive.
 func SaveDrives(ctx context.Context, target string) ([]SaveDrive, error) {
 	return saveDrives(ctx, target, execRunner{})
 }
@@ -78,9 +92,10 @@ func saveDrives(ctx context.Context, target string, runner commandRunner) ([]Sav
 		if resolveDisk(disk.Path) == target || saveSystemUse(disk) {
 			continue
 		}
-		bootStick := saveInstallMedia(disk)
+		bootStick := mountsInstallMedia(disk)
+		stick := bootStick || saveInstallMedia(disk)
 		for _, part := range disk.Children {
-			drive, ok := savePartition(disk, part, bootStick)
+			drive, ok := savePartition(disk, part, stick, bootStick)
 			if ok {
 				drives = append(drives, drive)
 			}
@@ -112,18 +127,17 @@ func checkSaveDrive(ctx context.Context, target string, want SaveDrive, runner c
 }
 
 func saveArgs() []string {
-	return []string{"-J", "-b", "-p", "--tree", "-o", "PATH,TYPE,TRAN,FSTYPE,UUID,LABEL,MODEL,SIZE,RO,MOUNTPOINTS"}
+	return []string{"-J", "-b", "-p", "--tree", "-o", "PATH,TYPE,PARTN,TRAN,FSTYPE,UUID,LABEL,MODEL,SIZE,RO,MOUNTPOINTS"}
 }
 
-func savePartition(disk, part saveDevice, bootStick bool) (SaveDrive, bool) {
+func savePartition(disk, part saveDevice, stick, bootStick bool) (SaveDrive, bool) {
 	if part.Type != "part" || part.RO || len(part.Children) > 0 || !saveFSTypes[part.FSType] {
 		return SaveDrive{}, false
 	}
 	if strings.TrimSpace(part.UUID) == "" || !strings.HasPrefix(part.Path, "/dev/") || strings.Contains(part.Path, "..") {
 		return SaveDrive{}, false
 	}
-	gjlogs := part.Label == LogsLabel
-	if bootStick && !gjlogs {
+	if stick && !logsPartition(part) {
 		return SaveDrive{}, false
 	}
 	var mountPoint string
@@ -162,7 +176,9 @@ func saveSystemUse(device saveDevice) bool {
 	switch device.Type {
 	case "disk", "part":
 	default:
-		return true
+		// The live system's /iso is a device-mapper copy of its boot
+		// stick. It marks that stick, not a use of it.
+		return !installMediaMap(device)
 	}
 	if device.FSType == "swap" || strings.HasPrefix(device.FSType, "crypto_") || strings.HasSuffix(device.FSType, "_member") {
 		return true
@@ -184,6 +200,48 @@ func saveSystemUse(device saveDevice) bool {
 		}
 	}
 	return false
+}
+
+// logsPartition is the GJLOGS partition as the makers write it.
+func logsPartition(part saveDevice) bool {
+	return part.Label == LogsLabel && part.PartN == logsPartN && part.FSType == logsFSType &&
+		part.Size > 0 && part.Size <= logsMaxBytes
+}
+
+// mountsInstallMedia is true for the disk the live system started from:
+// its /iso mount sits on it.
+func mountsInstallMedia(device saveDevice) bool {
+	for _, mount := range device.MountPoints {
+		if installationMediaMounts[filepath.Clean(strings.TrimSpace(mount))] {
+			return true
+		}
+	}
+	for _, child := range device.Children {
+		if mountsInstallMedia(child) {
+			return true
+		}
+	}
+	return false
+}
+
+// installMediaMap is the device-mapper or loop device stage 1 puts over
+// the boot stick, mounted only at the installation media mount.
+func installMediaMap(device saveDevice) bool {
+	if (device.Type != "dm" && device.Type != "loop") || len(device.Children) > 0 {
+		return false
+	}
+	found := false
+	for _, mount := range device.MountPoints {
+		mount = strings.TrimSpace(mount)
+		if mount == "" {
+			continue
+		}
+		if !installationMediaMounts[filepath.Clean(mount)] {
+			return false
+		}
+		found = true
+	}
+	return found
 }
 
 func saveInstallMedia(device saveDevice) bool {
