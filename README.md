@@ -646,6 +646,16 @@ partition (`EFI/nixos`, `EFI/BOOT`, `EFI/systemd`, `EFI/Linux`). Unsigned files
 in other folders, such as another system's boot loader, only give a warning:
 they stay where they are, and the firmware and shim decide whether they start.
 
+The gjallarOS installer stick also starts through shim; shim's list holds
+the hash of its boot file. A new install from the stick with Secure Boot on
+does steps 1 and 2 in one go: right before the restart it queues the
+gjallarOS key and the removal of the stick's entry, both with the same
+one-time password. MokManager then offers Enroll MOK and Delete MOK, and
+the installer lists what to pick. After that visit the stick no longer
+starts under Secure Boot on this machine. If the visit is missed, start the
+stick again and rerun the installer. With own keys or Secure Boot off, the
+installer queues only the removal and says so in its summary.
+
 `gjallarctl secure-boot setup --own-keys` replaces the firmware keys with
 gjallarOS keys instead. It needs an ODDC Secure Boot setup for the model. The
 command also takes this path on its own when the firmware is already in Setup

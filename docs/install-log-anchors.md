@@ -22,7 +22,7 @@ or one of the words listed here, never text a user typed.
 | GJA-1031 | `install.nixos-install.finished` | nixos-install finished without an error. | none |
 | GJA-1040 | `install.checkout.cloned` | The system checkout was cloned into the target. | none |
 | GJA-1041 | `install.fresh.finished` | The fresh install on the new disk is complete; Secure Boot steps may follow. | none |
-| GJA-1050 | `install.secureboot.continue` | The Secure Boot part of the run started. | `path` (one of shim, shim-sb-off, own-keys): signed through shim, shim while firmware Secure Boot is off, or own keys |
+| GJA-1050 | `install.secureboot.continue` | The Secure Boot part of the run started. | `path` (one of shim, shim-fresh, shim-sb-off, own-keys): shim on a running system, shim after a fresh install from the stick, shim while firmware Secure Boot is off, or own keys |
 | GJA-1060 | `install.inplace.started` | The in-place install on the running system started building. | `path` (one of first, system-checkout, repo): first install with a new system checkout, an update of the system checkout, or a build from the installer's own checkout |
 | GJA-1061 | `install.inplace.finished` | The in-place build and switch finished without an error. | none |
 | GJA-1090 | `install.run.restart` | The installer restarts the machine to go on. | `into` (one of system, firmware-setup): gjallarOS or the firmware setup screen |

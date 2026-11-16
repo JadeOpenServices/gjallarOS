@@ -1353,7 +1353,15 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 		if err != nil {
 			return fail(errOut, fmt.Errorf("read Secure Boot state: %w", err))
 		}
-		if sbOn {
+		if sbOn && !persistentInstalledHost {
+			// A fresh install from the installer stick: the live system
+			// keeps no answers across a restart, so the key is queued after
+			// the install (FinishFreshShim). Check now what would stop it
+			// then, before the disk changes.
+			if err := secureboot.CheckFreshShim(ctx, *s.shimFacts); err != nil {
+				return fail(errOut, err)
+			}
+		} else if sbOn {
 			listed, err := secureboot.QueueShimKey(ctx, out, *s.shimFacts, "the installer")
 			if err != nil {
 				return fail(errOut, err)
@@ -1409,6 +1417,8 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 		)
 	}
 
+	// freshRoot is where a fresh install mounted its new root.
+	freshRoot := ""
 	if runRebuild {
 		if persistentInstalledHost {
 			maintenanceRequired := false
@@ -1723,6 +1733,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 			// The Secure Boot continuation below still works on the target.
 			defer result.ReleaseTargetState()
 			runLog.target = result.MountPoint
+			freshRoot = result.MountPoint
 			s.recoveryPartition = result.RecoveryPartition
 		}
 	}
@@ -1739,6 +1750,16 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 		}
 		shimSBOff = !sbOn
 	}
+	freshShim := s.render.SecureBootEnable && s.render.SecureBootShim && !shimSBOff && !persistentInstalledHost
+	if freshRoot != "" && !freshShim {
+		// The fresh shim path queues this with the gjallarOS key for one
+		// MokManager visit; every other fresh install queues it alone.
+		notice, err := secureboot.QueueStickDelete(ctx, out)
+		if err != nil {
+			return fail(errOut, err)
+		}
+		fmt.Fprint(out, notice)
+	}
 	if shimSBOff {
 		installlog.Mark(installlog.SecureBootContinue, installlog.Choice("path", "shim-sb-off"))
 		// The rest of the switch runs from gjallarOS itself; until Secure
@@ -1747,6 +1768,26 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 			return fail(errOut, err)
 		}
 		fmt.Fprintln(out, "Restarting into gjallarOS through shim. Then run gjallarctl secure-boot setup in a terminal: it puts the gjallarOS key into shim's list.")
+		if err := runLog.restart(ctx, errOut, false); err != nil {
+			return fail(errOut, fmt.Errorf("restart: %w", err))
+		}
+		return 0
+	} else if freshShim {
+		installlog.Mark(installlog.SecureBootContinue, installlog.Choice("path", "shim-fresh"))
+		if freshRoot == "" {
+			return fail(errOut, errors.New("Secure Boot through shim: no new system was installed in this run"))
+		}
+		// The verifier exists only in the target's store.
+		if _, err := secureboot.FinishFreshShim(ctx, ui, out, *s.shimFacts, []string{
+			"nixos-enter", "--root", freshRoot, "--",
+			"/nix/var/nix/profiles/system/sw/bin/gjallar-verify-secure-boot-artifacts",
+		}); err != nil {
+			return fail(errOut, err)
+		}
+		if err := armSecureBootResume(ctx, out); err != nil {
+			return fail(errOut, err)
+		}
+		fmt.Fprintln(out, "Restarting into MokManager...")
 		if err := runLog.restart(ctx, errOut, false); err != nil {
 			return fail(errOut, fmt.Errorf("restart: %w", err))
 		}

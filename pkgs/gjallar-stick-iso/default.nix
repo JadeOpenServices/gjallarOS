@@ -13,6 +13,8 @@
   volumeID,
   isoName,
   efiArch,
+  # pkgs/gjallar-shim, x86_64 only; null boots the UKI directly.
+  shim ? null,
   # Release assets stay below 2 GiB, and a 2 GB stick keeps room for GJLOGS.
   maxSize ? 1900000000,
 }:
@@ -23,10 +25,29 @@
 #   once. UEFI only: no BIOS boot code, no GRUB.
 # - The UKI carries the store's dm-verity root hash on its command line, so
 #   stage 1 checks every block the store hands out.
+# - With shim (design 344/350 CP-C, Q1): BOOTX64.EFI is Debian's signed
+#   shim and the UKI sits next to it as grubx64.efi, the name shim loads.
+#   Under Secure Boot with only the Microsoft keys shim cannot verify the
+#   UKI and opens MokManager (mmx64.efi), where the user enrolls this
+#   UKI's hash. The installer removes that hash again after the install.
+#   No fbx64.efi: fallback would write a boot entry for the stick into
+#   the machine's NVRAM.
 # Fixed dates, FAT serial and file order keep the build reproducible, same
 # as upstream's efiImg and make-iso9660-image.sh.
 let
   bootFile = "BOOT${lib.toUpper efiArch}.EFI";
+  placeBoot =
+    if shim == null then
+      ''
+        cp ${uki} esp/EFI/BOOT/${bootFile}
+      ''
+    else
+      assert efiArch == "x64";
+      ''
+        cp ${shim}/share/shim/shimx64.efi esp/EFI/BOOT/${bootFile}
+        cp ${shim}/share/shim/mmx64.efi esp/EFI/BOOT/mmx64.efi
+        cp ${uki} esp/EFI/BOOT/grubx64.efi
+      '';
 in
 runCommand isoName
   {
@@ -41,7 +62,13 @@ runCommand isoName
   }
   ''
     mkdir -p esp/EFI/BOOT
-    cp ${uki} esp/EFI/BOOT/${bootFile}
+    ${placeBoot}
+    # Fallback (fb*.efi) writes NVRAM boot entries; the stick must not.
+    if find esp -iname 'fb*.efi' | grep -q .; then
+      echo "fallback loader on the stick ESP" >&2
+      exit 1
+    fi
+    ls -l esp/EFI/BOOT
     find esp -exec touch --date=2000-01-01 {} +
 
     # Files rounded up to whole MiB, plus 10% for FAT, in whole MiB.

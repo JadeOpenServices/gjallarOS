@@ -213,26 +213,9 @@ func ShimStarted() (bool, error) {
 // MokManager and prints the steps; the caller stops, the user restarts,
 // confirms the key and runs again ("again" names what to run).
 func QueueShimKey(ctx context.Context, out io.Writer, facts ShimFacts, again string) (bool, error) {
-	keys, ok, err := readLocalKeys(ctx)
+	keys, err := shimKeyFits(ctx, facts)
 	if err != nil {
 		return false, err
-	}
-	if !ok {
-		return false, errors.New("the gjallarOS Secure Boot keys are incomplete")
-	}
-	trust, err := ReadFirmwareTrust()
-	if err != nil {
-		return false, fmt.Errorf("read firmware trust: %w", err)
-	}
-	if trust.ShimValidationOff {
-		return false, errors.New("shim's own check is switched off in MokManager; turn it back on there first")
-	}
-	choice, err := ChoosePath(trust, facts, keys.dbDER)
-	if err != nil {
-		return false, err
-	}
-	if choice.Path != PathShim {
-		return false, fmt.Errorf("this firmware would not start shim with the gjallarOS key: %s", choice.Reason)
 	}
 	enrolled, err := mokHolds(liveFirmware, "MokListRT", keys.dbDER)
 	if err != nil {
@@ -255,6 +238,162 @@ func QueueShimKey(ctx context.Context, out io.Writer, facts ShimFacts, again str
 	}
 	fmt.Fprint(out, mokManagerSteps(keys.dbDER, queued, again))
 	return false, nil
+}
+
+// shimKeyFits reads the gjallarOS keys and checks that this firmware starts
+// shim and that shim would start gjallarOS once it lists the key.
+func shimKeyFits(ctx context.Context, facts ShimFacts) (localKeys, error) {
+	keys, ok, err := readLocalKeys(ctx)
+	if err != nil {
+		return localKeys{}, err
+	}
+	if !ok {
+		return localKeys{}, errors.New("the gjallarOS Secure Boot keys are incomplete")
+	}
+	trust, err := ReadFirmwareTrust()
+	if err != nil {
+		return localKeys{}, fmt.Errorf("read firmware trust: %w", err)
+	}
+	if trust.ShimValidationOff {
+		return localKeys{}, errors.New("shim's own check is switched off in MokManager; turn it back on there first")
+	}
+	choice, err := ChoosePath(trust, facts, keys.dbDER)
+	if err != nil {
+		return localKeys{}, err
+	}
+	if choice.Path != PathShim {
+		return localKeys{}, fmt.Errorf("this firmware would not start shim with the gjallarOS key: %s", choice.Reason)
+	}
+	return keys, nil
+}
+
+// CheckFreshShim runs before a fresh install from the installer stick with
+// Secure Boot on. Nothing waits for MokManager yet: the live system keeps
+// no answers across a restart, so the key is queued after the install
+// (FinishFreshShim). Here only what would stop it then is checked.
+func CheckFreshShim(ctx context.Context, facts ShimFacts) error {
+	if _, err := shimKeyFits(ctx, facts); err != nil {
+		return err
+	}
+	_, _, err := StickHash()
+	return err
+}
+
+// FinishFreshShim runs after a fresh install from the installer stick with
+// Secure Boot on, once nixos-install wrote the target. It checks the
+// target's boot files (verify runs the target's
+// gjallar-verify-secure-boot-artifacts), shows the recovery gate, queues the
+// gjallarOS key and the deletion of the stick's own MOK entry for one
+// MokManager visit, and arms the checks of the first start. The caller
+// restarts.
+func FinishFreshShim(ctx context.Context, ui UI, out io.Writer, facts ShimFacts, verify []string) (Continuation, error) {
+	record, recorded, err := readOwnership(ctx)
+	if err != nil {
+		return "", fmt.Errorf("read gjallarOS Secure Boot ownership metadata: %w", err)
+	}
+	if !recorded {
+		return "", errors.New("gjallarOS Secure Boot ownership metadata is missing")
+	}
+	keys, err := shimKeyFits(ctx, facts)
+	if err != nil {
+		return "", err
+	}
+	if err := verifyOwnershipRecord(record, keys, StagePendingMOK); err != nil {
+		return "", err
+	}
+	if len(verify) == 0 {
+		return "", errors.New("no boot file check given")
+	}
+	if err := run(ctx, "sudo", verify...); err != nil {
+		return "", fmt.Errorf("verify signed boot files: %w", err)
+	}
+	if err := recoveryGate(ctx, ui, out); err != nil {
+		return "", err
+	}
+
+	var visit mokVisit
+	listed, err := mokHolds(liveFirmware, "MokListRT", keys.dbDER)
+	if err != nil {
+		return "", err
+	}
+	if !listed {
+		visit.key = keys.dbDER
+		if visit.keyReused, err = mokHolds(liveFirmware, "MokNew", keys.dbDER); err != nil {
+			return "", err
+		}
+		if visit.keyReused {
+			fmt.Fprintln(out, "The gjallarOS key already waits for MokManager.")
+		} else if err := queueMOK(ctx, keys.dbDER, out); err != nil {
+			return "", err
+		}
+	}
+	password := "Choose a one-time password for MokManager. MokManager reads the keyboard as US layout; letters and digits are safe."
+	if visit.key != nil {
+		password = "Type the same password again: MokManager asks for it once more to delete the installer stick's entry."
+	}
+	if visit.stick, err = queueStickDelete(ctx, liveFirmware, liveStickCopy, out, password); err != nil {
+		return "", err
+	}
+	if err := run(ctx, "sudo", "install", "-m", "0600", "/dev/null", FinalMarkerPath); err != nil {
+		return "", fmt.Errorf("arm final Secure Boot verification: %w", err)
+	}
+	fmt.Fprint(out, visit.steps())
+	return ContinuationReboot, nil
+}
+
+// mokVisit is what one MokManager visit after a fresh install confirms.
+type mokVisit struct {
+	key       []byte
+	keyReused bool
+	stick     *stickDelete
+}
+
+// steps walks through MokManager. After each confirmed request MokManager
+// returns to its menu, which then starts on Reboot.
+func (v mokVisit) steps() string {
+	if v.key == nil && v.stick == nil {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("\nAt the next start a blue screen (MokManager) asks to confirm the changes.\n")
+	b.WriteString("It waits 10 seconds; press the down arrow before it runs out.\n")
+	n := 0
+	step := func(format string, args ...any) {
+		n++
+		fmt.Fprintf(&b, "  %d. "+format+"\n", append([]any{n}, args...)...)
+	}
+	password := func(reused bool) string {
+		if reused {
+			return "Type the password chosen when the request was made"
+		}
+		return "Type the password you just chose"
+	}
+	if v.key != nil {
+		step("Enroll MOK (press down to it, then Enter)")
+		step("View key 0; under [Fingerprint] it must read\n     %s\n     Press Enter to go back. If it differs, choose Continue boot instead.", sha1Fingerprint(v.key))
+		step("Continue")
+		step("Yes (the screen starts on No; press down, then Enter)")
+		step("%s", password(v.keyReused))
+	}
+	if v.stick != nil {
+		step("Delete MOK (press down to it, then Enter)")
+		step("View key 0; the SHA256 hash must start with\n     %s\n     Press Enter to go back.", spacedHex(v.stick.sum[:16]))
+		step("Continue")
+		step("Yes (the screen starts on No; press down, then Enter)")
+		step("%s", password(v.stick.reused))
+	}
+	step("Reboot")
+	b.WriteString("If the 10 seconds ran out, start the installer stick again and rerun the installer.\n")
+	return b.String()
+}
+
+// spacedHex groups hex digits in pairs.
+func spacedHex(s string) string {
+	parts := make([]string, 0, len(s)/2)
+	for i := 0; i+1 < len(s); i += 2 {
+		parts = append(parts, s[i:i+2])
+	}
+	return strings.Join(parts, " ")
 }
 
 // ContinueShimInstall runs after the install rebuilt a system that shim
@@ -367,20 +506,7 @@ func queueMOK(ctx context.Context, der []byte, out io.Writer) error {
 
 // mokHolds tells whether the shim variable name lists der.
 func mokHolds(f firmwareFiles, name string, der []byte) (bool, error) {
-	var raw []byte
-	var present bool
-	var err error
-	if name == "MokNew" {
-		// A request is an EFI variable only; shim never mirrors it.
-		// mokutil writes it root-only (mode 0600, mokutil 0.7.2,
-		// e2e-fw13 2026-11-03), so a user process reads it through root.
-		raw, present, err = f.efivar(name, shimLockGUID)
-		if errors.Is(err, fs.ErrPermission) {
-			raw, present, err = f.rootEfivar(name, shimLockGUID)
-		}
-	} else {
-		raw, present, err = f.shimVar(name)
-	}
+	raw, present, err := f.shimRequest(name)
 	if err != nil || !present {
 		return false, err
 	}
@@ -394,6 +520,21 @@ func mokHolds(f firmwareFiles, name string, der []byte) (bool, error) {
 		}
 	}
 	return false, nil
+}
+
+// shimRequest reads a shim list: a pending request (MokNew, MokDel) from
+// its EFI variable, anything else through shimVar. shim never mirrors a
+// request, and mokutil writes it root-only (mode 0600, mokutil 0.7.2,
+// e2e-fw13 2026-11-03), so a user process reads it through root.
+func (f firmwareFiles) shimRequest(name string) ([]byte, bool, error) {
+	if name != "MokNew" && name != "MokDel" {
+		return f.shimVar(name)
+	}
+	raw, present, err := f.efivar(name, shimLockGUID)
+	if errors.Is(err, fs.ErrPermission) {
+		raw, present, err = f.rootEfivar(name, shimLockGUID)
+	}
+	return raw, present, err
 }
 
 // efiSpaceFor refuses a write the firmware storage may not hold: a full
