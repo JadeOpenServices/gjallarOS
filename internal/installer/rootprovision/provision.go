@@ -191,13 +191,15 @@ func provision(
 	opened := false
 	mounted := false
 
+	// The cleanup must also run once an interrupt cancelled ctx.
+	cleanupCtx := context.WithoutCancel(ctx)
 	cleanup := func() {
 		if mounted {
-			_ = runner.Run(ctx, "sudo", "umount", "-R", mountPoint)
+			_ = runner.Run(cleanupCtx, "sudo", "umount", "-R", mountPoint)
 		}
 		if opened {
 			_ = runner.Run(
-				ctx,
+				cleanupCtx,
 				"sudo",
 				"cryptsetup",
 				"close",

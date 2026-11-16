@@ -153,6 +153,18 @@ func runFreshBareMetal(
 
 	installlog.Mark(installlog.TargetRootReady, installlog.Bool("encrypted", rootResult.LUKSUUID != ""))
 
+	// A later failure must not leave the target mounted and its LUKS mapping
+	// open: the disk check refuses a disk in use, so "Install" again would
+	// fail until a restart. Registered before the state binds, so their
+	// release runs first.
+	closeTarget := closeFreshTarget(ctx, rootResult.MountPoint, plan.Root.Encryption.MappingName, out)
+	keepTarget := false
+	defer func() {
+		if !keepTarget {
+			closeTarget()
+		}
+	}()
+
 	// Fresh canonical storage has exactly one owner. mounttree prepares the
 	// ESP, encrypted Btrfs root mount, and the exact 12 GiB recovery
 	// partition described by the canonical disk plan. Recovery artifact
@@ -302,6 +314,7 @@ func runFreshBareMetal(
 		ReleaseTargetState: releaseTargetState,
 	}
 	keepTargetState = true
+	keepTarget = true
 
 	if plan.Recovery != nil {
 		// Return stable identity, never /dev/nvmeXpN naming as authority.
@@ -432,3 +445,25 @@ func zero(secret []byte) {
 // Compile-time contract: fresh canonical storage is a diskplan.Plan and does
 // not gain another parallel storage-model representation.
 var _ diskplan.Plan
+
+// closeFreshTarget returns the teardown for a failed fresh install: unmount
+// everything below the target root, then close its LUKS mapping. Both names
+// come from the installer's own disk plan, never from the user session. It
+// also runs once an interrupt cancelled ctx.
+func closeFreshTarget(ctx context.Context, mountPoint, mappingName string, out io.Writer) func() {
+	cleanupCtx := context.WithoutCancel(ctx)
+	return func() {
+		if _, err := privilegedCommand(cleanupCtx, "umount", "-R", "--", mountPoint); err != nil {
+			fmt.Fprintf(out, "The new system disk is still in use (%v). Restart before you install again.\n", err)
+			return
+		}
+		if mappingName == "" || strings.HasPrefix(mappingName, "-") {
+			return
+		}
+		if _, err := privilegedCommand(cleanupCtx, "cryptsetup", "close", mappingName); err != nil {
+			fmt.Fprintf(out, "The new system disk is still open (%v). Restart before you install again.\n", err)
+			return
+		}
+		fmt.Fprintln(out, "The new system disk is closed again; you can start the install over.")
+	}
+}
