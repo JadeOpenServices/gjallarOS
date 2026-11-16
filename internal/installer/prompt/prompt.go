@@ -560,7 +560,12 @@ func (u UI) Value(ctx context.Context, label, def string) (string, error) {
 		}
 		return strings.TrimSpace(string(out)), nil
 	}
-	fmt.Fprintf(u.Out, "%s [%s]: ", label, def)
+	if def == "" {
+		// No default: "[]" read like an empty answer was expected.
+		fmt.Fprintf(u.Out, "%s: ", label)
+	} else {
+		fmt.Fprintf(u.Out, "%s [%s]: ", label, def)
+	}
 	line, err := u.readLine(ctx)
 	if err != nil {
 		return "", err

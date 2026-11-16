@@ -400,3 +400,19 @@ func TestTerminalPickStopsAtEndOfInput(t *testing.T) {
 		t.Fatal("Pick() kept asking past the end of input")
 	}
 }
+
+func TestValueShowsDefaultOnlyWhenSet(t *testing.T) {
+	for _, tc := range []struct{ def, want string }{
+		{"", "Choice: "},
+		{"us", "Choice [us]: "},
+	} {
+		var out bytes.Buffer
+		u := UI{Reader: bufio.NewReader(strings.NewReader("x\n")), Out: &out}
+		if _, err := u.Value(context.Background(), "Choice", tc.def); err != nil {
+			t.Fatal(err)
+		}
+		if out.String() != tc.want {
+			t.Errorf("default %q: prompt %q, want %q", tc.def, out.String(), tc.want)
+		}
+	}
+}
