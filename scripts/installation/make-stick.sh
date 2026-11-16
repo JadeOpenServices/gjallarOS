@@ -25,6 +25,10 @@ gjallar_make_stick() {
     local release_key='-----BEGIN PUBLIC KEY-----
 @GJALLAR_RELEASE_KEY@
 -----END PUBLIC KEY-----'
+    # The release this copy came from and the oldest release still safe
+    # then. Like the newest release this computer used, they are a floor
+    # the server cannot push the maker under (rollback guard, Q228/Q231).
+    local maker_release='@GJALLAR_RELEASE_VERSION@' maker_floor='@GJALLAR_RELEASE_FLOOR@'
     local img_size=33554432 iso_max=2000000000
 
     local log_file="" work="" tty_fd=""
@@ -110,11 +114,18 @@ gjallar_make_stick() {
     local key_body=${release_key#-----BEGIN PUBLIC KEY-----}
     key_body=${key_body%-----END PUBLIC KEY-----}
     key_body=${key_body//$'\n'/}
-    if [[ -z $key_body || $key_body == *[!A-Za-z0-9+/=]* ]]; then
-        fail "This copy of the maker has no release key. Download make-stick.sh from a gjallarOS release."
+    # Release names the guard compares: vYYYY.MM.N with N up to 6 digits.
+    ver_key() { # name -> sortable key, or fail
+        [[ $1 =~ ^v([0-9]{4})\.(0[1-9]|1[0-2])\.([0-9]{1,6})$ ]] || return 1
+        printf '%s%s%06d' "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}" "$((10#${BASH_REMATCH[3]}))"
+    }
+    ver_lt() { [[ $(ver_key "$1") < $(ver_key "$2") ]]; }
+    if [[ -z $key_body || $key_body == *[!A-Za-z0-9+/=]* ]] ||
+        ! ver_key "$maker_release" >/dev/null || ! ver_key "$maker_floor" >/dev/null; then
+        fail "This copy of the maker is not from a release. Download make-stick.sh from a gjallarOS release."
     fi
     local t missing=()
-    for t in curl openssl sha256sum lsblk flock dd od stat readlink mktemp; do
+    for t in curl openssl sha256sum lsblk flock dd od stat readlink mktemp date head mv; do
         command -v "$t" >/dev/null 2>&1 || missing+=("$t")
     done
     ((${#missing[@]} == 0)) || fail "These programs are missing: ${missing[*]}. Install them and run the maker again."
@@ -167,13 +178,17 @@ gjallar_make_stick() {
         -verify "$work/release.pem" -signature "$work/SHA256SUMS.sig" "$work/SHA256SUMS" \
         >/dev/null 2>&1 || bad_download SHA256SUMS
 
-    local line iso_name="" iso_sha="" img_sha="" iso_tag=""
+    local line iso_name="" iso_sha="" img_sha="" iso_tag="" rel_sha=""
     while IFS= read -r line; do
         [[ $line =~ ^([0-9a-f]{64})\ \ ([A-Za-z0-9._-]+)$ ]] || bad_download SHA256SUMS
         case ${BASH_REMATCH[2]} in
         gjlogs.img)
             [[ -z $img_sha ]] || bad_download SHA256SUMS
             img_sha=${BASH_REMATCH[1]}
+            ;;
+        RELEASE)
+            [[ -z $rel_sha ]] || bad_download SHA256SUMS
+            rel_sha=${BASH_REMATCH[1]}
             ;;
         make-stick.sh | make-stick.ps1) ;;
         *)
@@ -184,9 +199,66 @@ gjallar_make_stick() {
             ;;
         esac
     done <"$work/SHA256SUMS"
-    [[ -n $iso_name && -n $img_sha ]] || bad_download SHA256SUMS
+    [[ -n $iso_name && -n $img_sha && -n $rel_sha ]] || bad_download SHA256SUMS
     [[ -z $release || $iso_tag == "$release" ]] || bad_download SHA256SUMS
 
+    # RELEASE, signed through SHA256SUMS: exactly
+    #   version=vYYYY.MM.N  date=YYYY-MM-DD (UTC)  floor=vYYYY.MM.N
+    # floor is the oldest release that is still safe to write.
+    fetch "$base/RELEASE" RELEASE 512 -sS
+    local sum
+    sum=$(sha256sum -- "$work/RELEASE")
+    [[ ${sum%% *} == "$rel_sha" ]] || bad_download RELEASE
+    local -a rel=()
+    mapfile -t -n 4 rel <"$work/RELEASE"
+    ((${#rel[@]} == 3)) &&
+        [[ ${rel[0]} == "version=$iso_tag" && ${rel[1]} =~ ^date=([0-9]{4}-[0-9]{2}-[0-9]{2})$ ]] ||
+        bad_download RELEASE
+    local rel_date=${BASH_REMATCH[1]} rel_floor=${rel[2]#floor=} rel_day
+    [[ ${rel[2]} == "floor=$rel_floor" ]] && ver_key "$iso_tag" >/dev/null &&
+        ver_key "$rel_floor" >/dev/null && ! ver_lt "$iso_tag" "$rel_floor" ||
+        bad_download RELEASE
+    rel_day=$(date -u -d "$rel_date" +%s 2>/dev/null) || bad_download RELEASE
+
+    # The newest release and floor this computer used. Only the user
+    # reads and writes this file; root never opens it.
+    local seen_file="$state/gjallaros/make-stick.seen" seen_rel=$maker_release seen_floor=$maker_floor
+    local -a seen=()
+    if [[ -f $seen_file ]] && mapfile -t -n 3 seen < <(head -c 256 -- "$seen_file") &&
+        ((${#seen[@]} == 2)) && ver_key "${seen[0]#version=}" >/dev/null &&
+        ver_key "${seen[1]#floor=}" >/dev/null &&
+        [[ ${seen[0]} == version=* && ${seen[1]} == floor=* ]]; then
+        ver_lt "${seen[0]#version=}" "$seen_rel" || seen_rel=${seen[0]#version=}
+        ver_lt "${seen[1]#floor=}" "$seen_floor" || seen_floor=${seen[1]#floor=}
+    elif [[ -e $seen_file ]]; then
+        say "Ignoring $seen_file: it is not in the expected format."
+    fi
+    ver_lt "$rel_floor" "$seen_floor" || seen_floor=$rel_floor
+    if ver_lt "$iso_tag" "$seen_floor"; then
+        rm -rf -- "$work"
+        log "GJA-3013 maker.release.refused reason=floor"
+        fail "gjallarOS $iso_tag is older than $seen_floor, the oldest release that is still safe. Use a newer release. Nothing was written."
+    fi
+    if ver_lt "$iso_tag" "$seen_rel"; then
+        if [[ -z $release ]]; then
+            rm -rf -- "$work"
+            log "GJA-3013 maker.release.refused reason=rollback"
+            fail "The server offered gjallarOS $iso_tag as the newest release, but this computer already used $seen_rel. An old release offered as new can be an attack. Nothing was written."
+        fi
+        log "GJA-3014 maker.release.older reason=seen"
+        say "Note: $iso_tag is older than $seen_rel, which this computer used before."
+    fi
+    if (($(date -u +%s) - rel_day > 90 * 86400)); then
+        say "" "gjallarOS $iso_tag is from $rel_date, more than 90 days ago. A newer" \
+            "release may exist: compare with the newest version in the README at" \
+            "${releases%/releases}"
+        ask "Type OLD to use it anyway, or press Enter to stop: "
+        if [[ $REPLY != OLD ]]; then
+            say "Nothing was written."
+            exit 130
+        fi
+        log "GJA-3014 maker.release.older reason=date"
+    fi
     say "Downloading gjallarOS installer $iso_tag..."
     fetch "$base/$iso_name" installer.iso "$iso_max" -#
     fetch "$base/gjlogs.img" gjlogs.img "$img_size" -sS
@@ -196,11 +268,19 @@ gjallar_make_stick() {
     iso_size=$(stat -c %s -- "$work/installer.iso")
     [[ $(stat -c %s -- "$work/gjlogs.img") == "$img_size" ]] || bad_download gjlogs.img
     ((iso_size > 0 && iso_size % 512 == 0)) || bad_download "$iso_name"
-    local sum
     sum=$(sha256sum -- "$work/installer.iso")
     [[ ${sum%% *} == "$iso_sha" ]] || bad_download "$iso_name"
     sum=$(sha256sum -- "$work/gjlogs.img")
     [[ ${sum%% *} == "$img_sha" ]] || bad_download gjlogs.img
+    # Only a release that downloaded whole counts as used.
+    ver_lt "$iso_tag" "$seen_rel" || seen_rel=$iso_tag
+    local seen_tmp
+    if ! seen_tmp=$(mktemp -- "$seen_file.XXXXXXXX" 2>/dev/null) ||
+        ! { printf 'version=%s\nfloor=%s\n' "$seen_rel" "$seen_floor" >"$seen_tmp" &&
+            mv -f -- "$seen_tmp" "$seen_file"; }; then
+        [[ -z $seen_tmp ]] || rm -f -- "$seen_tmp"
+        say "Note: could not save $seen_file. The check against older releases cannot remember $iso_tag."
+    fi
     log "GJA-3011 maker.signature.verified"
     say "Signature and checksums are correct."
 

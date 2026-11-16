@@ -44,6 +44,8 @@ yes/no or one of the words listed here, never text a user typed.
 | GJA-3010 | `maker.download.finished` | The stick image and its checksum files are downloaded. | none |
 | GJA-3011 | `maker.signature.verified` | The signature and every checksum the maker needs are correct. | none |
 | GJA-3012 | `maker.signature.bad` | The signature or a checksum did not match; the download was deleted. | none |
+| GJA-3013 | `maker.release.refused` | The signed release is older than one this computer or the maker already knows; the download was deleted and nothing was written. | `reason` (one of floor, rollback): floor: below the oldest release still safe; rollback: offered as newest but older than one used before |
+| GJA-3014 | `maker.release.older` | The user went on with an older release after a warning. | `reason` (one of seen, date): seen: picked by name though a newer one was used before; date: signed more than 90 days ago and the user typed OLD |
 | GJA-3020 | `maker.disk.chosen` | The user picked the USB stick to write. | `disks` (count): how many USB sticks the maker offered |
 | GJA-3021 | `maker.elevation.declined` | Admin rights for the write were refused or not available; nothing was written. | none |
 | GJA-3022 | `maker.disk.busy` | Windows could not lock a volume on the stick because a program has it open; nothing was written and the maker offers to try again. | none |

@@ -33,6 +33,11 @@ function Invoke-GjallarMakeStick {
     # Its fingerprint is published apart from the release (Plane 350, Q5).
     $keyModulus = '@GJALLAR_RELEASE_KEY_MODULUS@'
     $keyExponent = '@GJALLAR_RELEASE_KEY_EXPONENT@'
+    # The release this copy came from and the oldest release still safe
+    # then. Like the newest release this computer used, they are a floor
+    # the server cannot push the maker under (rollback guard, Q228/Q231).
+    $makerRelease = '@GJALLAR_RELEASE_VERSION@'
+    $makerFloor = '@GJALLAR_RELEASE_FLOOR@'
     $imgSize = 33554432
     $isoMax = 2000000000
 
@@ -155,6 +160,14 @@ function Get-GjDisks([string]$where) {
         if ($s.Length -gt 40) { $s = $s.Substring(0, 40) }
         $s
     }
+    # Release names the guard compares: vYYYY.MM.N with N up to 6 digits.
+    function Get-VerKey([string]$v) {
+        if ($v -cmatch '^v([0-9]{4})\.(0[1-9]|1[0-2])\.([0-9]{1,6})$') {
+            return '{0}{1}{2:D6}' -f $Matches[1], $Matches[2], [int]$Matches[3]
+        }
+        ''
+    }
+    function Test-VerLt([string]$a, [string]$b) { [string]::CompareOrdinal((Get-VerKey $a), (Get-VerKey $b)) -lt 0 }
 
     $local = [Environment]::GetFolderPath('LocalApplicationData')
     if ($local) {
@@ -176,8 +189,11 @@ function Get-GjDisks([string]$where) {
         # placeholders, which are not base64.
         foreach ($k in @($keyModulus, $keyExponent)) {
             if ($k -notmatch '^[A-Za-z0-9+/]+={0,2}$') {
-                Stop-Maker 'This copy of the maker has no release key. Download make-stick.ps1 from a gjallarOS release.'
+                Stop-Maker 'This copy of the maker is not from a release. Download make-stick.ps1 from a gjallarOS release.'
             }
+        }
+        if (-not (Get-VerKey $makerRelease) -or -not (Get-VerKey $makerFloor)) {
+            Stop-Maker 'This copy of the maker is not from a release. Download make-stick.ps1 from a gjallarOS release.'
         }
         if ($PSVersionTable.PSVersion.Major -ne 5 -or [Environment]::OSVersion.Platform -ne 'Win32NT') {
             Stop-Maker 'Run the maker in Windows PowerShell 5.1 (powershell.exe), the one that comes with Windows.'
@@ -297,7 +313,7 @@ function Get-GjDisks([string]$where) {
         } catch { $good = $false }
         if (-not $good) { Stop-BadDownload 'SHA256SUMS' }
 
-        $isoName = ''; $isoSha = ''; $imgSha = ''; $isoTag = ''
+        $isoName = ''; $isoSha = ''; $imgSha = ''; $isoTag = ''; $relSha = ''
         $text = [Text.Encoding]::ASCII.GetString($sums)
         if ($text -notmatch "^([^\r\n]*\n)+\z") { Stop-BadDownload 'SHA256SUMS' }
         foreach ($line in $text.Substring(0, $text.Length - 1).Split("`n")) {
@@ -306,13 +322,80 @@ function Get-GjDisks([string]$where) {
             if ($name -ceq 'gjlogs.img') {
                 if ($imgSha) { Stop-BadDownload 'SHA256SUMS' }
                 $imgSha = $sum
+            } elseif ($name -ceq 'RELEASE') {
+                if ($relSha) { Stop-BadDownload 'SHA256SUMS' }
+                $relSha = $sum
             } elseif ($name -ceq 'make-stick.sh' -or $name -ceq 'make-stick.ps1') {
             } elseif (-not $isoName -and $name -cmatch '^gjallarOS-installer-(v[0-9]{4}\.[0-9]{2}\.[0-9]+)\.iso$') {
                 $isoName = $name; $isoSha = $sum; $isoTag = $Matches[1]
             } else { Stop-BadDownload 'SHA256SUMS' }
         }
-        if (-not $isoName -or -not $imgSha) { Stop-BadDownload 'SHA256SUMS' }
+        if (-not $isoName -or -not $imgSha -or -not $relSha) { Stop-BadDownload 'SHA256SUMS' }
         if ($Release -and $isoTag -cne $Release) { Stop-BadDownload 'SHA256SUMS' }
+
+        # RELEASE, signed through SHA256SUMS: exactly
+        #   version=vYYYY.MM.N  date=YYYY-MM-DD (UTC)  floor=vYYYY.MM.N
+        # floor is the oldest release that is still safe to write.
+        Get-Download "$base/RELEASE" 'RELEASE' 512 $false
+        $relPath = Join-Path $state.Work 'RELEASE'
+        if ((Get-Sha256 $relPath) -cne $relSha) { Stop-BadDownload 'RELEASE' }
+        $relText = [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($relPath))
+        if ($relText -cnotmatch '^version=([^\n]*)\ndate=([0-9]{4}-[0-9]{2}-[0-9]{2})\nfloor=([^\n]*)\n?\z' -or
+            $Matches[1] -cne $isoTag) { Stop-BadDownload 'RELEASE' }
+        $relDate = $Matches[2]; $relFloor = $Matches[3]
+        if (-not (Get-VerKey $isoTag) -or -not (Get-VerKey $relFloor) -or (Test-VerLt $isoTag $relFloor)) {
+            Stop-BadDownload 'RELEASE'
+        }
+        $relDay = [DateTime]::MinValue
+        if (-not [DateTime]::TryParseExact($relDate, 'yyyy-MM-dd', [Globalization.CultureInfo]::InvariantCulture,
+                [Globalization.DateTimeStyles]'AssumeUniversal, AdjustToUniversal', [ref]$relDay)) {
+            Stop-BadDownload 'RELEASE'
+        }
+
+        # The newest release and floor this computer used. Only the user
+        # reads and writes this file; the elevated side never opens it.
+        $seenFile = Join-Path $local 'gjallarOS\make-stick.seen'
+        $seenRel = $makerRelease; $seenFloor = $makerFloor
+        if (Test-Path -LiteralPath $seenFile) {
+            $t = ''
+            try {
+                $f = New-Object IO.FileStream($seenFile, 'Open', 'Read', 'ReadWrite')
+                try {
+                    $b = New-Object byte[] 256
+                    $t = [Text.Encoding]::ASCII.GetString($b, 0, $f.Read($b, 0, 256))
+                } finally { $f.Dispose() }
+            } catch { $t = '' }
+            $sv = ''; $sf = ''
+            if ($t -cmatch '^version=([^\n]*)\nfloor=([^\n]*)\n?\z') { $sv = $Matches[1]; $sf = $Matches[2] }
+            if ((Get-VerKey $sv) -and (Get-VerKey $sf)) {
+                if (-not (Test-VerLt $sv $seenRel)) { $seenRel = $sv }
+                if (-not (Test-VerLt $sf $seenFloor)) { $seenFloor = $sf }
+            } else { Write-Host "Ignoring ${seenFile}: it is not in the expected format." }
+        }
+        if (-not (Test-VerLt $relFloor $seenFloor)) { $seenFloor = $relFloor }
+        if (Test-VerLt $isoTag $seenFloor) {
+            Remove-Work
+            Write-Log 'GJA-3013 maker.release.refused reason=floor'
+            Stop-Maker "gjallarOS $isoTag is older than $seenFloor, the oldest release that is still safe. Use a newer release. Nothing was written."
+        }
+        if (Test-VerLt $isoTag $seenRel) {
+            if (-not $Release) {
+                Remove-Work
+                Write-Log 'GJA-3013 maker.release.refused reason=rollback'
+                Stop-Maker "The server offered gjallarOS $isoTag as the newest release, but this computer already used $seenRel. An old release offered as new can be an attack. Nothing was written."
+            }
+            Write-Log 'GJA-3014 maker.release.older reason=seen'
+            Write-Host "Note: $isoTag is older than $seenRel, which this computer used before."
+        }
+        if (([DateTime]::UtcNow - $relDay).TotalDays -gt 90) {
+            Write-Host ''
+            Write-Host "gjallarOS $isoTag is from $relDate, more than 90 days ago. A newer"
+            Write-Host 'release may exist: compare with the newest version in the README at'
+            Write-Host ($releases -replace '/releases$', '')
+            $r = Read-Host 'Type OLD to use it anyway, or press Enter to stop'
+            if ($r -cne 'OLD') { Stop-Maker 'Nothing was written.' 130 }
+            Write-Log 'GJA-3014 maker.release.older reason=date'
+        }
 
         Write-Host "Downloading gjallarOS installer $isoTag..."
         Get-Download "$base/$isoName" 'installer.iso' $isoMax $true
@@ -327,6 +410,17 @@ function Get-GjDisks([string]$where) {
         Write-Host 'Checking the download...'
         if ((Get-Sha256 $isoPath) -cne $isoSha) { Stop-BadDownload $isoName }
         if ((Get-Sha256 $imgPath) -cne $imgSha) { Stop-BadDownload 'gjlogs.img' }
+        # Only a release that downloaded whole counts as used.
+        if (-not (Test-VerLt $isoTag $seenRel)) { $seenRel = $isoTag }
+        $tmp = "$seenFile.$([Guid]::NewGuid().ToString('N').Substring(0, 8))"
+        try {
+            [IO.File]::WriteAllText($tmp, "version=$seenRel`nfloor=$seenFloor`n", (New-Object Text.ASCIIEncoding))
+            # [NullString]: a plain $null turns into '' here, which Replace refuses.
+            if ([IO.File]::Exists($seenFile)) { [IO.File]::Replace($tmp, $seenFile, [NullString]::Value) } else { [IO.File]::Move($tmp, $seenFile) }
+        } catch {
+            Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
+            Write-Host "Note: could not save $seenFile. The check against older releases cannot remember $isoTag."
+        }
         Write-Log 'GJA-3011 maker.signature.verified'
         Write-Host 'Signature and checksums are correct.'
 

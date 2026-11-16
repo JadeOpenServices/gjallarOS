@@ -4,7 +4,9 @@
 # layout as the stick ISO (MBR, slot 1 type 0xcd, slot 2 type 0xef) but
 # are 8 MiB. Checks for loopholes L70, L71, L72 and L76 run the root code
 # the maker passes to sudo, as root, with planted links, FIFOs, a mounted
-# stick and streams that differ from what was signed.
+# stick and streams that differ from what was signed. The rollback guard
+# (Q228/Q231/Q232) gets releases below the floor, one that raises it, one
+# signed 200 days ago and RELEASE files that do not match.
 {
   pkgs,
   script,
@@ -46,11 +48,17 @@ let
           openssl dgst -sha256 -sigopt rsa_padding_mode:pss -sigopt rsa_pss_saltlen:32 \
             -sign release.key -out "$1/SHA256SUMS.sig" "$1/SHA256SUMS"
         }
-        release() { # dir image tag
+        # Releases are signed today; the test sets the VM clock to
+        # tomorrow noon, so they never age into the 90-day question and
+        # the TLS certificate is already valid.
+        day=$(date -u +%F)
+        date -u -d "$day + 1 day" '+%F 12:00' >vm-now
+        release() { # dir image tag [date] [floor] [version in RELEASE]
           mkdir -p "$1"
           cp "$2" "$1/gjallarOS-installer-$3.iso"
           cp ${gjlogs}/gjlogs.img "$1/gjlogs.img"
-          (cd "$1" && sha256sum "gjallarOS-installer-$3.iso" gjlogs.img >SHA256SUMS)
+          printf 'version=%s\ndate=%s\nfloor=%s\n' "''${6:-$3}" "''${4:-$day}" "''${5:-v2026.01.1}" >"$1/RELEASE"
+          (cd "$1" && sha256sum "gjallarOS-installer-$3.iso" gjlogs.img RELEASE >SHA256SUMS)
           sign "$1"
         }
         r=www/releases
@@ -66,11 +74,26 @@ let
           -sign release.key -out $r/download/v2026.01.4/SHA256SUMS.sig $r/download/v2026.01.4/gjlogs.img
         # A correctly signed older release served under a newer name.
         release $r/download/v2026.01.5 mbr.iso v2026.01.1
+        # Rollback guard: below the maker's floor, a release that raises
+        # the floor, one signed 200 days ago.
+        release $r/download/v2026.01.0 mbr.iso v2026.01.0 "" v2026.01.0
+        release $r/download/v2026.01.6 mbr.iso v2026.01.6 "" v2026.01.6
+        release $r/download/v2026.01.7 mbr.iso v2026.01.7 "$(date -u -d "$day - 200 days" +%F)"
+        # RELEASE changed after signing; signed but naming another
+        # version; missing from SHA256SUMS.
+        release $r/download/v2026.01.8 mbr.iso v2026.01.8
+        printf 'version=v2026.01.9\ndate=%s\nfloor=v2026.01.1\n' "$day" >$r/download/v2026.01.8/RELEASE
+        release $r/download/v2026.01.9 mbr.iso v2026.01.9 "" "" v2026.01.1
+        release $r/download/v2026.01.10 mbr.iso v2026.01.10
+        sed -i '/ RELEASE$/d' $r/download/v2026.01.10/SHA256SUMS
+        sign $r/download/v2026.01.10
 
         cp ${script} make-stick.sh
         chmod u+w make-stick.sh
         substituteInPlace make-stick.sh \
           --replace-fail "@GJALLAR_RELEASE_KEY@" "$(sed '1d;$d' release.pub)" \
+          --replace-fail "@GJALLAR_RELEASE_VERSION@" v2026.01.1 \
+          --replace-fail "@GJALLAR_RELEASE_FLOOR@" v2026.01.1 \
           --replace-fail "https://github.com/JadeOpenServices/gjallarOS/releases" "https://127.0.0.1:8443/releases"
         awk "/local root_code='\$/ { f = 1; next } f && /^'\$/ { exit } f" make-stick.sh >root-code.sh
         grep -q '^echo "logs=\$logs"$' root-code.sh
@@ -119,11 +142,14 @@ pkgs.testers.runNixOSTest {
     off = 9 * 1024 * 1024  # iso_size rounded up to a MiB
     img_size = 33554432
     maker_log = "/home/alice/.local/state/gjallaros/make-stick.log"
+    seen_file = "/home/alice/.local/state/gjallaros/make-stick.seen"
 
     start_all()
     machine.wait_for_unit("release-server.service")
     machine.wait_for_open_port(8443)
     machine.wait_for_unit("multi-user.target")
+    vm_now = open(f"{fx}/vm-now").read().strip()
+    machine.succeed("timedatectl set-ntp false || true", f"date -u -s '{vm_now}'")
 
     def plug(name, size, serial, removable="on"):
         path = machine.state_dir / f"{name}.img"
@@ -200,7 +226,7 @@ pkgs.testers.runNixOSTest {
     good = head_sha(dev, off + img_size)
 
     with subtest("bad releases change nothing"):
-        for tag in ["v2026.01.3", "v2026.01.4", "v2026.01.5"]:
+        for tag in ["v2026.01.3", "v2026.01.4", "v2026.01.5", "v2026.01.8", "v2026.01.9", "v2026.01.10"]:
             rc, out = maker(f"--release {tag}", "")
             assert rc == 1, (tag, rc, out)
             assert "GJA-3012 maker.signature.bad" in anchors(), tag
@@ -321,5 +347,59 @@ pkgs.testers.runNixOSTest {
         machine.succeed(f"cmp -n {iso_size} {dev} {fx}/mbr.iso")
         assert "GJA-3041 maker.logs.skipped reason=too-small" in anchors()
         assert "start=" + str(off // 512) not in machine.succeed(f"sfdisk -d {dev}")
+
+    def seen():
+        return machine.succeed(f"cat {seen_file}")
+
+    with subtest("Q231: rollback and floor"):
+        before = head_sha(dev)
+        assert seen() == "version=v2026.01.2\nfloor=v2026.01.1\n", seen()
+        # The server offers v2026.01.1 as newest, this computer used .2.
+        rc, out = maker("", "\n1\nERASE\n")
+        assert rc == 1, (rc, out)
+        assert "already used v2026.01.2" in out, out
+        assert "GJA-3013 maker.release.refused reason=rollback" in anchors()
+        no_download_left()
+        # Picked by name: allowed with a note; the record never goes down.
+        rc, out = maker("--release v2026.01.1", "1\n\n")
+        assert rc == 130, (rc, out)
+        assert "older than v2026.01.2" in out, out
+        assert "GJA-3014 maker.release.older reason=seen" in anchors()
+        assert seen() == "version=v2026.01.2\nfloor=v2026.01.1\n", seen()
+        # Below the floor built into the maker.
+        rc, out = maker("--release v2026.01.0", "")
+        assert rc == 1, (rc, out)
+        assert "GJA-3013 maker.release.refused reason=floor" in anchors()
+        no_download_left()
+        # A newer release raises the floor; older ones are refused after.
+        rc, out = maker("--release v2026.01.6", "1\n\n")
+        assert rc == 130, (rc, out)
+        assert seen() == "version=v2026.01.6\nfloor=v2026.01.6\n", seen()
+        rc, out = maker("--release v2026.01.2", "")
+        assert rc == 1, (rc, out)
+        assert "GJA-3013 maker.release.refused reason=floor" in anchors()
+        # A broken record or a FIFO is skipped, not trusted or waited on,
+        # and replaced by a good one.
+        for plant in ["printf junk", "mkfifo"]:
+            arg = f"> {seen_file}" if plant == "printf junk" else seen_file
+            machine.succeed(f"rm -f {seen_file}", f"su alice -c {shlex.quote(plant + ' ' + arg)}")
+            rc, out = maker("--release v2026.01.2", "1\n\n")
+            assert rc == 130, (plant, rc, out)
+            assert "is not in the expected format" in out, out
+            assert seen() == "version=v2026.01.2\nfloor=v2026.01.1\n", seen()
+        assert head_sha(dev) == before
+
+    with subtest("Q232: a release signed more than 90 days ago needs OLD"):
+        before = head_sha(dev)
+        for answers in ["\n", "old\n1\nERASE\n"]:
+            rc, out = maker("--release v2026.01.7", answers)
+            assert rc == 130, (answers, rc, out)
+            assert "more than 90 days ago" in out, out
+            assert "Nothing was written." in out, out
+            assert head_sha(dev) == before, answers
+        rc, out = maker("--release v2026.01.7", "OLD\n1\nERASE\n")
+        assert rc == 0, (rc, out)
+        assert "GJA-3014 maker.release.older reason=date" in anchors()
+        machine.succeed(f"cmp -n {iso_size} {dev} {fx}/mbr.iso")
   '';
 }

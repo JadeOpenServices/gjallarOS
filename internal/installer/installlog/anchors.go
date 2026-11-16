@@ -49,6 +49,8 @@ const (
 	MakerDownloadFinished  ID = 3010
 	MakerSignatureVerified ID = 3011
 	MakerSignatureBad      ID = 3012
+	MakerReleaseRefused    ID = 3013
+	MakerReleaseOlder      ID = 3014
 	MakerDiskChosen        ID = 3020
 	MakerElevationDeclined ID = 3021
 	MakerDiskBusy          ID = 3022
@@ -196,6 +198,14 @@ var Registry = []Anchor{
 		Meaning: "The signature and every checksum the maker needs are correct."},
 	{ID: MakerSignatureBad, Name: "maker.signature.bad",
 		Meaning: "The signature or a checksum did not match; the download was deleted."},
+	{ID: MakerReleaseRefused, Name: "maker.release.refused",
+		Meaning: "The signed release is older than one this computer or the maker already knows; the download was deleted and nothing was written.",
+		Fields: []FieldSpec{{Name: "reason", Kind: KindChoice, Choices: []string{"floor", "rollback"},
+			Meaning: "floor: below the oldest release still safe; rollback: offered as newest but older than one used before"}}},
+	{ID: MakerReleaseOlder, Name: "maker.release.older",
+		Meaning: "The user went on with an older release after a warning.",
+		Fields: []FieldSpec{{Name: "reason", Kind: KindChoice, Choices: []string{"seen", "date"},
+			Meaning: "seen: picked by name though a newer one was used before; date: signed more than 90 days ago and the user typed OLD"}}},
 	{ID: MakerDiskChosen, Name: "maker.disk.chosen",
 		Meaning: "The user picked the USB stick to write.",
 		Fields:  []FieldSpec{{Name: "disks", Kind: KindCount, Meaning: "how many USB sticks the maker offered"}}},
