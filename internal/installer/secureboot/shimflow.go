@@ -367,7 +367,8 @@ func (v mokVisit) steps() string {
 	}
 	var b strings.Builder
 	b.WriteString("\nAt the next start a blue screen (MokManager) asks to confirm the changes.\n")
-	b.WriteString("It waits until you choose. The menu starts on Continue boot, which drops the changes.\n")
+	b.WriteString("Finish within 5 minutes: after that the computer restarts on its own and the changes are gone.\n")
+	b.WriteString("The menu starts on Continue boot, which also drops the changes.\n")
 	n := 0
 	step := func(format string, args ...any) {
 		n++
@@ -454,7 +455,8 @@ func mokManagerSteps(der []byte, reused bool, again string) string {
 	}
 	return fmt.Sprintf(`
 At the next start a blue screen (MokManager) asks to confirm the key.
-It waits until you choose. The menu starts on Continue boot, which drops the key:
+Finish within 5 minutes: after that the computer restarts on its own and the key
+is gone. The menu starts on Continue boot, which also drops the key:
   1. Enroll MOK (the menu starts on Continue boot; press down, then Enter)
   2. View key 0; under [Fingerprint] it must read
      %s
@@ -489,6 +491,9 @@ func sha1Fingerprint(der []byte) string {
 // after a fresh install that meant installing again. shim reads MokTimeout
 // once and deletes it; a negative value skips the countdown (MokManager.c
 // draw_countdown, shim 16.1). mokutil gets no input from the user session.
+// The menu still has only 5 minutes: shim 16.1 never resets the firmware
+// watchdog that the boot manager arms (fixed upstream 58843bc13a, not in a
+// release yet), so the guidance names the limit.
 func holdMokManager(ctx context.Context, f firmwareFiles) error {
 	if err := run(ctx, "sudo", privilegedTool("mokutil"), "--timeout", "-1"); err != nil {
 		return fmt.Errorf("make MokManager wait for a key press: %w", err)
