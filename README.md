@@ -142,6 +142,12 @@ powershell -ExecutionPolicy Bypass -File make-stick.ps1
 
 Run the last line only when the hash matches the table.
 
+The makers take the newest release. `--release vYYYY.MM.N` (Linux) or
+`-Release vYYYY.MM.N` (Windows) picks an older one. A maker never writes
+a release older than the oldest one still safe to use, which each release
+names and the computer remembers. An image more than 90 days old asks
+before it is written.
+
 ### On an existing NixOS
 
 Run the command on the machine itself. The installer shows the tools it
