@@ -77,7 +77,8 @@ let
   footConfig = pkgs.writeText "gjallar-stick-foot.ini" ''
     [main]
     font=Jade Code:style=Regular:size=${toString fontSize}
-    dpi-aware=yes
+    dpi-aware=no
+    pad=0x0 center
     resize-by-cells=no
     term=xterm-256color
     initial-color-theme=dark
@@ -93,6 +94,33 @@ let
     show-urls-copy=none
     show-urls-persistent=none
   '';
+
+  # The menu logo (THEMEBRAIN section 18): mark, gap and wordmark on the
+  # terminal ground, as sixel for 32 pixel cells (four rows) and for 64
+  # pixel cells (4K). Built from the brand SVGs, which are paths only, so
+  # no font is needed. The menu checks both files before it draws them.
+  stickLogo =
+    pkgs.runCommand "gjallar-stick-logo"
+      {
+        nativeBuildInputs = [
+          pkgs.librsvg
+          pkgs.imagemagick
+          pkgs.libsixel
+        ];
+      }
+      ''
+        mkdir -p $out
+        for s in 1 2; do
+          h=$((128 * s)) wh=$((92 * s)) gap=$((24 * s))
+          rsvg-convert -h "$h" ${../../themes/brand/openjade/mark.svg} -o mark.png
+          rsvg-convert -h "$wh" ${../../themes/brand/openjade/wordmark.svg} -o word.png
+          magick word.png -background none -gravity center -extent "x$h" word-h.png
+          magick -size "''${gap}x$h" xc:none gap.png
+          magick mark.png gap.png word-h.png -background none +append \
+            -background '#${hex term.background}' -alpha remove -alpha off -depth 8 +repage logo.png
+          img2sixel logo.png > $out/logo-''${s}x.six
+        done
+      '';
 
   # Runs the menu on tty1. Exit 75 means a new keyboard layout (the window
   # starts again with it), 0 a normal end. Any other code from the window
@@ -113,13 +141,19 @@ let
           pkgs.coreutils
         ]
       }:/run/wrappers/bin:/run/current-system/sw/bin
-      console_font() {
-        local size width height font=
-        local -a double=()
-        size=$(cat /sys/class/graphics/fb0/virtual_size 2> /dev/null) || return 0
-        [[ $size =~ ^([0-9]{1,5}),([0-9]{1,5})$ ]] || return 0
+      # screen sets width and height from the framebuffer; false when it
+      # reports nothing usable.
+      screen() {
+        local size
+        size=$(cat /sys/class/graphics/fb0/virtual_size 2> /dev/null) || return 1
+        [[ $size =~ ^([0-9]{1,5}),([0-9]{1,5})$ ]] || return 1
         width=''${BASH_REMATCH[1]}
         height=''${BASH_REMATCH[2]}
+      }
+      console_font() {
+        local width height font=
+        local -a double=()
+        screen || return 0
         if [ "$width" -ge 3840 ] && [ "$height" -ge 2160 ]; then
           font=ter-v32n
           double=(-d)
@@ -134,12 +168,19 @@ let
       while true; do
         if [ "$window" = true ]; then
           layout=$(gjallar-stick layout)
+          # The window font scales with the screen height in pixels: 19 at
+          # 1080 gives about 120 by 33 cells, like Terminus on the console.
+          # dpi-aware=no above, so a wrong EDID cannot change it.
+          font=()
+          if screen && [ "$height" -ge 600 ]; then
+            font=(-o "main.font=Jade Code:style=Regular:size=$((19 * height / 1080))")
+          fi
           rc=0
           # -d tells foot to draw no title bar (cage draws none either).
           # Without it foot kept 26 pixels for one and left a black strip at
           # the bottom of the screen.
           XKB_DEFAULT_LAYOUT=$layout WLR_RENDERER=pixman FONTCONFIG_FILE=${footFonts} \
-            cage -d -- foot -c ${footConfig} -- gjallar-stick menu --mode window || rc=$?
+            cage -d -- foot -c ${footConfig} "''${font[@]}" -- gjallar-stick menu --mode window --logo ${stickLogo} || rc=$?
           case $rc in
             0 | 75) continue ;;
           esac

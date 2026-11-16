@@ -13,6 +13,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/calmmenu"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/installlog"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/region"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/stickkeyboard"
@@ -28,6 +29,7 @@ const secureBootVar = "/sys/firmware/efi/efivars/SecureBoot-8be4df61-93ca-11d2-a
 
 const usage = `usage:
   gjallar-stick menu --mode window|console
+  gjallar-stick menu --mode window --logo DIR
   gjallar-stick layout
   gjallar-stick text-console
 `
@@ -52,6 +54,11 @@ func Main(args []string, stdout, stderr io.Writer) int {
 		}
 		return 0
 	}
+	logoDir := ""
+	if len(args) == 5 && args[2] == ModeWindow && args[3] == "--logo" {
+		logoDir = args[4]
+		args = args[:3]
+	}
 	if len(args) != 3 || args[0] != "menu" || args[1] != "--mode" {
 		fmt.Fprint(stderr, usage)
 		return 2
@@ -72,6 +79,14 @@ func Main(args []string, stdout, stderr io.Writer) int {
 	}()
 
 	s := New(mode)
+	if logoDir != "" {
+		logos, err := loadLogos(logoDir)
+		if err != nil {
+			// The menu works without the logo.
+			fmt.Fprintln(stderr, "No logo:", err)
+		}
+		s.Logos = logos
+	}
 	first := firstStart(LogDir)
 	if l, err := installlog.OpenStick(LogDir, time.Now()); err != nil {
 		fmt.Fprintln(stderr, "No log this run:", err)
@@ -95,6 +110,65 @@ func Main(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	return 0
+}
+
+// logoNames are the logo files for 32 and 64 pixel cells.
+var logoNames = []string{"logo-1x.six", "logo-2x.six"}
+
+// maxLogo caps one logo file; the 2x logo is about 100 KiB.
+const maxLogo = 1 << 20
+
+// loadLogos reads the logo files from dir, all or none. The menu runs as
+// root, so it does not follow links, does not open FIFOs or devices, reads
+// at most maxLogo bytes and lets only a checked sixel through.
+func loadLogos(dir string) ([]calmmenu.Sixel, error) {
+	d, err := unix.Open(dir, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", dir, err)
+	}
+	defer unix.Close(d)
+	var logos []calmmenu.Sixel
+	for _, name := range logoNames {
+		data, err := readSmallFile(d, name, maxLogo)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", name, err)
+		}
+		logo, err := calmmenu.ParseSixel(data)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", name, err)
+		}
+		logos = append(logos, logo)
+	}
+	return logos, nil
+}
+
+// readSmallFile reads the regular file name in the folder dirfd, which
+// must not be a link and must hold at most limit bytes.
+func readSmallFile(dirfd int, name string, limit int64) ([]byte, error) {
+	fd, err := unix.Openat(dirfd, name, unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_NONBLOCK|unix.O_CLOEXEC, 0)
+	if err != nil {
+		return nil, err
+	}
+	f := os.NewFile(uintptr(fd), name)
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() {
+		return nil, errors.New("not a regular file")
+	}
+	if info.Size() > limit {
+		return nil, errors.New("too big")
+	}
+	data, err := io.ReadAll(io.LimitReader(f, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > limit {
+		return nil, errors.New("too big")
+	}
+	return data, nil
 }
 
 // From linux/kd.h, the same on every architecture.

@@ -552,6 +552,16 @@ func (u UI) readLine(ctx context.Context) (string, error) {
 	}
 }
 
+// Line reads one answer for a question the caller drew itself, such as a
+// full-screen menu, without spaces around it.
+func (u UI) Line(ctx context.Context) (string, error) {
+	line, err := u.readLine(ctx)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(line), nil
+}
+
 func (u UI) Value(ctx context.Context, label, def string) (string, error) {
 	if u.GTK {
 		out, err := zenityCommand(ctx, "--entry", "--title=gjallarOS installer", "--text="+label, "--entry-text="+def).Output()

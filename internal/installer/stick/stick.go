@@ -23,6 +23,7 @@ import (
 	"golang.org/x/sys/unix"
 
 	"github.com/JadeOpenServices/gjallarOS/internal/input/xkb"
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/calmmenu"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/installlog"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/prompt"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/region"
@@ -84,11 +85,20 @@ type Stick struct {
 	WriteLayout func(string) error
 	// ErrorLog takes the fixed error lines for the log; nil for none.
 	ErrorLog io.Writer
+	// Size reports the terminal in cells and pixels; nil means 80 by 24
+	// with no pixel size (no logo).
+	Size func() (cols, rows, xpixel, ypixel int)
+	// Logos are the logo in sixel for 32 and 64 pixel cells, shown in
+	// the window only; empty for none.
+	Logos []calmmenu.Sixel
 
 	channel   string
 	offline   bool
 	lookAgain int
 	markedVia string
+	// note is one line for the next menu screen, such as an error: the
+	// menu clears the screen, so text printed before it is gone.
+	note string
 }
 
 // New returns a Stick for the real stick.
@@ -101,7 +111,16 @@ func New(mode string) *Stick {
 		Sleep:       func() { time.Sleep(time.Second) },
 		ReadLayout:  stickkeyboard.Read,
 		WriteLayout: stickkeyboard.Write,
+		Size:        termSize,
 	}
+}
+
+func termSize() (cols, rows, xpixel, ypixel int) {
+	ws, err := unix.IoctlGetWinsize(int(os.Stdout.Fd()), unix.TIOCGWINSZ)
+	if err != nil || ws.Col == 0 || ws.Row == 0 {
+		return 80, 24, 0, 0
+	}
+	return int(ws.Col), int(ws.Row), int(ws.Xpixel), int(ws.Ypixel)
 }
 
 // Run shows the menu until the user restarts or powers off, or a new
@@ -135,34 +154,32 @@ func (s *Stick) markDisplay() {
 	}
 }
 
-// Menu entries.
-const (
-	menuInstall  = "Install gjallarOS"
-	menuRecovery = "Recovery (unlock an installed gjallarOS with its recovery key)"
-	menuShell    = "Shell"
-	menuKeyboard = "Keyboard layout"
-	menuNetwork  = "Network"
-	menuAdvanced = "Advanced"
-	menuRestart  = "Restart"
-	menuPowerOff = "Power off"
-)
+// menuGroups are the menu entries, grouped as THEMEBRAIN section 18 shows
+// them: the task, ways out of trouble, settings, the machine.
+var menuGroups = [][]calmmenu.Item{
+	{{Key: "1", Label: "Install gjallarOS", Desc: "Set up gjallarOS on this computer"}},
+	{
+		{Key: "2", Label: "Recovery", Desc: "Unlock an installed gjallarOS with its recovery key"},
+		{Key: "3", Label: "Shell", Desc: "A command line. Type exit to come back here"},
+	},
+	{{Key: "4", Label: "Network"}, {Key: "5", Label: "Keyboard layout"}, {Key: "6", Label: "Advanced"}},
+	{{Key: "7", Label: "Restart"}, {Key: "8", Label: "Power off"}},
+}
 
 func (s *Stick) menu(ctx context.Context) error {
 	for {
-		fmt.Fprintln(s.UI.Out)
-		fmt.Fprintln(s.UI.Out, "gjallarOS installer")
-		if s.channel != channels[0] {
-			fmt.Fprintf(s.UI.Out, "Release channel: %s\n", s.channel)
+		s.flush()
+		if err := s.draw(s.screen()); err != nil {
+			return err
 		}
-		choice, err := s.choose(ctx, "Choice", []string{
-			menuInstall, menuAdvanced, menuRecovery, menuShell,
-			menuKeyboard, menuNetwork, menuRestart, menuPowerOff,
-		})
+		choice, err := s.UI.Line(ctx)
 		if err != nil {
 			return err
 		}
+		s.note = ""
+		fmt.Fprint(s.UI.Out, calmmenu.Clear)
 		switch choice {
-		case menuInstall:
+		case "1":
 			if s.offline {
 				fmt.Fprintln(s.UI.Out, "Installing needs a network connection.")
 				if err := s.networkStep(ctx); err != nil {
@@ -178,31 +195,100 @@ func (s *Stick) menu(ctx context.Context) error {
 				args = append(args, "--channel", s.channel)
 			}
 			s.runStep(ctx, "the installer", "gjallar-recover", args...)
-		case menuAdvanced:
-			if err := s.advanced(ctx); err != nil {
+			if err := s.pause(ctx); err != nil {
 				return err
 			}
-		case menuRecovery:
+		case "2":
 			installlog.Mark(installlog.StickMenuChosen, installlog.Choice("choice", "recovery"))
 			s.runStep(ctx, "the recovery console", "gjallar-recovery-console", "--from-stick")
-		case menuShell:
+			if err := s.pause(ctx); err != nil {
+				return err
+			}
+		case "3":
 			installlog.Mark(installlog.StickMenuChosen, installlog.Choice("choice", "shell"))
 			fmt.Fprintln(s.UI.Out, "Type exit to come back to this menu.")
 			s.runStep(ctx, "the shell", "runuser", "-l", "nixos")
-		case menuKeyboard:
-			if err := s.keyboardStep(ctx); err != nil {
-				return err
-			}
-		case menuNetwork:
+		case "4":
 			if err := s.networkStep(ctx); err != nil {
 				return err
 			}
-		case menuRestart:
+		case "5":
+			if err := s.keyboardStep(ctx); err != nil {
+				return err
+			}
+		case "6":
+			if err := s.advanced(ctx); err != nil {
+				return err
+			}
+		case "7":
 			s.runStep(ctx, "the restart", "systemctl", "reboot")
-		case menuPowerOff:
+		case "8":
 			s.runStep(ctx, "the power off", "systemctl", "poweroff")
+		default:
+			s.note = "Type one of the numbers 1 to 8."
 		}
 	}
+}
+
+// screen is the menu with the state as of now.
+func (s *Stick) screen() calmmenu.Menu {
+	network := "Not connected"
+	if !s.offline && s.markedVia != "" {
+		network = upperFirst(viaName(s.markedVia)) + ", connected"
+	}
+	keyboard, err := s.ReadLayout()
+	if err != nil {
+		keyboard = "not set"
+	}
+	return calmmenu.Menu{
+		Title: "gjallarOS installer",
+		Status: []calmmenu.Field{
+			{Name: "Network", Value: network},
+			{Name: "Keyboard", Value: keyboard},
+			{Name: "Channel", Value: s.channel},
+		},
+		Groups: menuGroups,
+		Note:   s.note,
+		Hint:   "Type a number and press Enter.",
+		Prompt: "Choice: ",
+	}
+}
+
+// draw shows m centred on the screen, with the logo on top in the window
+// when the terminal reports its pixel size and the logo fits.
+func (s *Stick) draw(m calmmenu.Menu) error {
+	cols, rows, xpixel, ypixel := 80, 24, 0, 0
+	if s.Size != nil {
+		cols, rows, xpixel, ypixel = s.Size()
+	}
+	var logo calmmenu.Logo
+	var picture calmmenu.Sixel
+	if s.Mode == ModeWindow && len(s.Logos) > 0 && xpixel > 0 && ypixel > 0 {
+		cw, ch := xpixel/cols, ypixel/rows
+		picture = s.Logos[0]
+		if ch >= 48 && len(s.Logos) > 1 {
+			// 4K cells are about 62 pixels high: the 64 pixel logo.
+			picture = s.Logos[1]
+		}
+		logo = picture.Cells(cw, ch)
+		if logo.Cols > cols || logo.Rows+1+m.Height() > rows {
+			logo = calmmenu.Logo{}
+		}
+	}
+	p, err := calmmenu.Render(s.UI.Out, m, logo, cols, rows, true)
+	if err != nil || logo.Rows == 0 {
+		return err
+	}
+	return picture.Draw(s.UI.Out, p)
+}
+
+// pause keeps what a program printed on the screen until the user has
+// read it: the menu clears the screen when it comes back.
+func (s *Stick) pause(ctx context.Context) error {
+	s.flush()
+	fmt.Fprint(s.UI.Out, "\nPress Enter to go back to the menu. ")
+	_, err := s.UI.Line(ctx)
+	return err
 }
 
 // runStep runs a program on the terminal and reports a failure without
@@ -219,7 +305,9 @@ func (s *Stick) runStep(ctx context.Context, what, name string, args ...string) 
 	}
 	installlog.Mark(installlog.StickFlowFailed)
 	s.logError(fmt.Sprintf("%s ended with exit code %d", what, code))
-	fmt.Fprintf(s.UI.Out, "%s ended with an error (exit code %d). You are back in the stick menu.\n", upperFirst(what), code)
+	// The menu block is 66 columns: the note leaves out the last part.
+	s.note = fmt.Sprintf("%s ended with an error (exit code %d).", upperFirst(what), code)
+	fmt.Fprintln(s.UI.Out, s.note, "You are back in the stick menu.")
 }
 
 func upperFirst(s string) string {

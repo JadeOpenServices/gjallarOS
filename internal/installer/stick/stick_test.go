@@ -207,7 +207,7 @@ func TestShowName(t *testing.T) {
 
 func TestOnlineGoesToMenuAndMarksOnce(t *testing.T) {
 	net := &fakeNet{devices: always(cable), connectivity: "full"}
-	h := newHarness(t, ModeWindow, "6\n", net) // Network, then end of input
+	h := newHarness(t, ModeWindow, "4\n", net) // Network, then end of input
 	if err := h.run(t); !errors.Is(err, io.EOF) {
 		t.Fatalf("Run = %v, want end of input", err)
 	}
@@ -282,9 +282,9 @@ func TestInstallChannels(t *testing.T) {
 		input, want, anchor string
 	}{
 		{"1\n", "gjallar-recover guided fresh", ""},
-		{"2\nstaging\n1\n", "gjallar-recover guided fresh --channel staging", "channel=staging"},
-		{"2\n3\n1\n", "gjallar-recover guided fresh --channel dev", "channel=dev"},
-		{"2\ndev\n2\nstable\n1\n", "gjallar-recover guided fresh", "channel=stable"},
+		{"6\nstaging\n1\n", "gjallar-recover guided fresh --channel staging", "channel=staging"},
+		{"6\n3\n1\n", "gjallar-recover guided fresh --channel dev", "channel=dev"},
+		{"6\ndev\n6\nstable\n1\n", "gjallar-recover guided fresh", "channel=stable"},
 	} {
 		net := &fakeNet{devices: always(cable), connectivity: "full"}
 		h := newHarness(t, ModeWindow, c.input, net)
@@ -320,7 +320,7 @@ func TestFailedStepIsLoggedWithoutItsOutput(t *testing.T) {
 
 func TestOtherEntries(t *testing.T) {
 	net := &fakeNet{devices: always(cable), connectivity: "full"}
-	h := newHarness(t, ModeWindow, "3\n4\n7\n8\n", net)
+	h := newHarness(t, ModeWindow, "2\n\n3\n7\n8\n", net)
 	h.run(t)
 	want := []string{
 		"gjallar-recovery-console --from-stick",
@@ -479,7 +479,7 @@ func TestKeyboardUnknownNameKeepsCurrent(t *testing.T) {
 }
 
 func TestMainArgs(t *testing.T) {
-	for _, args := range [][]string{nil, {"menu"}, {"menu", "--mode", "x11"}, {"layout", "extra"}, {"text-console", "x"}, {"menu", "--mode", "window", "x"}} {
+	for _, args := range [][]string{nil, {"menu"}, {"menu", "--mode", "x11"}, {"layout", "extra"}, {"text-console", "x"}, {"menu", "--mode", "window", "x"}, {"menu", "--mode", "console", "--logo", "/x"}, {"menu", "--mode", "window", "--logo"}, {"menu", "--mode", "window", "--icon", "/x"}} {
 		var out, errOut bytes.Buffer
 		if code := Main(args, &out, &errOut); code != 2 || !strings.Contains(errOut.String(), "usage") {
 			t.Errorf("Main(%q) = %d, %q", args, code, errOut.String())
