@@ -1,4 +1,5 @@
 {
+  config,
   lib,
   pkgs,
   settings,
@@ -19,6 +20,7 @@ let
     "BOOT/BOOTX64.EFI:shimx64.efi"
     "BOOT/mmx64.efi:mmx64.efi"
   ];
+  esp = config.boot.loader.efi.efiSysMountPoint;
   secureBootArtifactVerifier = pkgs.writeShellApplication {
     name = "gjallar-verify-secure-boot-artifacts";
     runtimeInputs = [
@@ -29,6 +31,13 @@ let
     ];
     text = ''
       export LC_ALL=C
+
+      # sbctl looks for the ESP through the udev database, which the
+      # installer's nixos-enter chroot does not have: esp-check reads it from
+      # the disk, and sbctl gets the checked path.
+      ${pkgs.runtimeShell} ${./esp-check.sh} ${lib.escapeShellArg esp}
+      export ESP_PATH=${lib.escapeShellArg esp}
+      unset SYSTEMD_ESP_PATH
 
       if output="$(sbctl verify 2>&1)"; then
         rc=0
@@ -41,7 +50,7 @@ let
       shim_copies=" "
       ${lib.optionalString shim ''
         for pair in ${lib.concatStringsSep " " shimCopies}; do
-          file=/boot/EFI/''${pair%%:*}
+          file=${esp}/EFI/''${pair%%:*}
           [ -e "$file" ] || continue
           if ! cmp -s -- "$file" "${shimFiles}/''${pair#*:}"; then
             printf 'ERROR: %s differs from the pinned shim %s\n' "$file" "${shimFiles}/''${pair#*:}" >&2
@@ -56,7 +65,7 @@ let
         # nixos (kernels, lanzaboote, shim), BOOT (fallback path), systemd
         # (systemd-boot) and Linux (UKIs systemd-boot lists). FAT ignores case.
         foreign_folder() {
-          local rest=''${1#/boot/EFI/}
+          local rest=''${1#${esp}/EFI/}
           [ "$rest" != "$1" ] || return 1
           case "$rest" in
             */*) ;;
@@ -81,7 +90,7 @@ let
         # From the first slash on, so a path with spaces stays whole.
         path="/''${path#*/}"
         case "$path" in
-          /boot/EFI/nixos/kernel-*.efi)
+          ${esp}/EFI/nixos/kernel-*.efi)
             allowed=$((allowed + 1))
             continue
             ;;

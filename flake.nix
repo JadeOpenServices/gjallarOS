@@ -292,6 +292,11 @@
           script = ./scripts/recovery/boot-first.sh;
         };
 
+        esp-check = import ./tests/nix/esp-check.nix {
+          inherit pkgs;
+          script = ./system/security/secure-boot/esp-check.sh;
+        };
+
         local-changes = import ./tests/nix/local-changes.nix { inherit pkgs; };
 
         legacy-names = import ./tests/nix/legacy-names.nix { inherit pkgs; };
