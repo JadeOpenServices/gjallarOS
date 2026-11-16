@@ -93,7 +93,9 @@ replaced, and nothing from the stick stays on the machine.
    installer can switch it back on later
    (see [Secure Boot](#secure-boot))
 4. Start the machine from the stick. The boot menu key is often F12,
-   F10 or Esc. Ethernet connects by itself, and `nmtui` sets up Wi-Fi
+   F10 or Esc. Keep only this one gjallarOS stick plugged in; with two,
+   the stick stops and asks you to take one out. Ethernet connects by
+   itself, and `nmtui` sets up Wi-Fi
 5. Pick Install gjallarOS in the stick's menu and answer the questions. The installer asks
    twice before it erases the disk you pick
 6. Save the recovery key it shows somewhere off this machine. It opens

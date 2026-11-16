@@ -173,6 +173,23 @@ in
         else
           label=/dev/disk/by-label/${config.isoImage.volumeID}
           udevadm wait --timeout=90 "$label" || fail "No medium labelled ${config.isoImage.volumeID} appeared."
+          # The link names one of the media that carry the label. A second
+          # one (two sticks of one image are byte copies, partition ids
+          # included) could answer it instead, so with more than one disk
+          # labelled like this, stop before using either (Q237, L92).
+          udevadm settle --timeout=15 || true
+          disks=
+          while IFS= read -r node; do
+            [ -n "$node" ] || continue
+            sys=$(readlink -f "/sys/class/block/''${node##*/}")
+            if [ -f "$sys/partition" ]; then
+              sys=''${sys%/*}
+            fi
+            disks+="''${sys##*/}"$'\n'
+          done <<< "$(blkid -c /dev/null -o device -t LABEL=${config.isoImage.volumeID} || true)"
+          if [ "$(printf '%s' "$disks" | sort -u | wc -l)" -gt 1 ]; then
+            fail "More than one gjallarOS medium labelled ${config.isoImage.volumeID} is plugged in. Take out all but the one to start from, then press Enter."
+          fi
           src=$(readlink -f "$label")
         fi
         dmsetup create gjallar-iso --readonly --table "0 $(blockdev --getsz "$src") linear $src 0"
