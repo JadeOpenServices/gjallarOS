@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 // rootRig records root steps instead of running them. Nothing runs as root.
@@ -60,8 +61,14 @@ func TestProvisionPassesPassphraseFromMemory(t *testing.T) {
 		t.Fatal(err)
 	}
 	rig.noUserFile(t)
-	if len(rig.inputs) != 1 || string(rig.inputs[0]) != recovery.Passphrase+"\n" {
-		t.Fatalf("openssl stdin = %q", rig.inputs)
+	// R47: sbctl reads its key names from the pipe, then openssl the
+	// passphrase.
+	if len(rig.inputs) != 2 || string(rig.inputs[1]) != recovery.Passphrase+"\n" {
+		t.Fatalf("stdin = %q", rig.inputs)
+	}
+	if !strings.Contains(string(rig.inputs[0]), ourKeyName+" "+time.Now().Format("2006-01-02")) ||
+		!slices.Contains(rig.steps, "stdin sudo "+privilegedTool("sbctl")+" --config /dev/stdin create-keys") {
+		t.Errorf("sbctl config not from stdin: %q %v", rig.inputs[0], rig.steps)
 	}
 	if !slices.ContainsFunc(rig.steps, func(s string) bool {
 		return strings.HasPrefix(s, "stdin sudo ") && strings.HasSuffix(s, "-pass stdin")

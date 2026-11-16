@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/rootfile"
 )
@@ -62,7 +63,14 @@ func Provision(ctx context.Context) (Recovery, error) {
 	}
 
 	if !keyExists {
-		if err := run(ctx, "sudo", privilegedTool("sbctl"), "create-keys"); err != nil {
+		// The key names carry the install date, so MokManager and a later
+		// install tell this key from older ones (R47). sbctl reads its
+		// configuration from the pipe before it locks itself down.
+		conf, err := sbctlConfig(time.Now().Format("2006-01-02"))
+		if err != nil {
+			return Recovery{}, err
+		}
+		if err := runWithInput(ctx, conf, "sudo", privilegedTool("sbctl"), "--config", "/dev/stdin", "create-keys"); err != nil {
 			return Recovery{}, fmt.Errorf(
 				"create Secure Boot keys: %w",
 				err,

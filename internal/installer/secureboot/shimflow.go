@@ -333,14 +333,33 @@ func FinishFreshShim(ctx context.Context, ui UI, out io.Writer, facts ShimFacts,
 			return "", err
 		}
 	}
-	password := "Choose a one-time password for MokManager. MokManager reads the keyboard as US layout; letters and digits are safe."
-	if visit.key != nil {
-		password = "Type the same password again: MokManager asks for it once more to delete the installer stick's entry."
+	choose := "Choose a one-time password for MokManager. MokManager reads the keyboard as US layout; letters and digits are safe."
+	again := "Type the same password again: MokManager asks for it once more to confirm the deletions."
+	prompted := visit.key != nil && !visit.keyReused
+	password := func() string {
+		if prompted {
+			return again
+		}
+		return choose
 	}
-	if visit.stick, err = queueStickDelete(ctx, liveFirmware, liveStickCopy, out, password); err != nil {
+	if err := clearForeignMokDel(ctx, ui, out, liveFirmware, liveStickCopy, keys.dbDER); err != nil {
 		return "", err
 	}
-	if visit.key != nil || visit.stick != nil {
+	oldQueued, err := queueOldKeys(ctx, ui, out, liveFirmware, keys.dbDER, password())
+	if err != nil {
+		return "", err
+	}
+	prompted = prompted || oldQueued
+	stick, err := queueStickDelete(ctx, liveFirmware, liveStickCopy, out, password())
+	if err != nil {
+		return "", err
+	}
+	if visit.del, err = readMokDel(liveFirmware); err != nil {
+		return "", err
+	}
+	// MokManager checks the password of the last mokutil delete call.
+	visit.delReused = !oldQueued && (stick == nil || stick.reused)
+	if visit.key != nil || len(visit.del) > 0 {
 		if err := holdMokManager(ctx, liveFirmware); err != nil {
 			return "", err
 		}
@@ -356,13 +375,15 @@ func FinishFreshShim(ctx context.Context, ui UI, out io.Writer, facts ShimFacts,
 type mokVisit struct {
 	key       []byte
 	keyReused bool
-	stick     *stickDelete
+	// del is MokDel in MokManager's order: one "View key N" per list.
+	del       []SignatureList
+	delReused bool
 }
 
 // steps walks through MokManager. After each confirmed request MokManager
 // returns to its menu, which then starts on Reboot.
 func (v mokVisit) steps() string {
-	if v.key == nil && v.stick == nil {
+	if v.key == nil && len(v.del) == 0 {
 		return ""
 	}
 	var b strings.Builder
@@ -387,12 +408,25 @@ func (v mokVisit) steps() string {
 		step("Yes (the screen starts on No; press down, then Enter)")
 		step("%s", password(v.keyReused))
 	}
-	if v.stick != nil {
+	if len(v.del) > 0 {
 		step("Delete MOK (press down to it, then Enter)")
-		step("View key 0; the SHA256 hash must start with\n     %s\n     Press Enter to go back.", spacedHex(v.stick.sum[:16]))
+		for i, l := range v.del {
+			view := "View key 0"
+			if i > 0 {
+				view = fmt.Sprintf("Press down to View key %d", i)
+			}
+			switch {
+			case len(l.Certs) == 1 && l.Hashes == 0 && l.Other == 0:
+				step("%s; under [Fingerprint] it must read\n     %s\n     (%s). Press Enter to go back.", view, sha1Fingerprint(l.Certs[0].der), strings.Trim(entryName(l.Certs[0].der), `"`))
+			case len(l.FileSums) == 1 && len(l.Certs) == 0 && l.Hashes == 1 && l.Other == 0:
+				step("%s; the SHA256 hash must start with\n     %s\n     (the installer stick). Press Enter to go back.", view, spacedHex(l.FileSums[0][:16]))
+			default:
+				step("%s; it holds more than one entry. Press Enter to go back.", view)
+			}
+		}
 		step("Continue")
 		step("Yes (the screen starts on No; press down, then Enter)")
-		step("%s", password(v.stick.reused))
+		step("%s", password(v.delReused))
 	}
 	step("Reboot")
 	b.WriteString("If it went on without the changes, start the installer stick again and rerun the installer.\n")

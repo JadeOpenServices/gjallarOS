@@ -10,6 +10,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 	"testing"
@@ -450,19 +451,34 @@ func TestMokVisitSteps(t *testing.T) {
 	if got := (mokVisit{}).steps(); got != "" {
 		t.Fatalf("nothing queued: %q", got)
 	}
-	both := mokVisit{key: ours.Raw, stick: &stickDelete{sum: sum}}.steps()
-	for _, want := range []string{"1. Enroll MOK", sha1Fingerprint(ours.Raw), "6. Delete MOK", "0f 0f 0f 0f 0f 0f 0f 0f", "11. Reboot"} {
+	old, _ := synthCert(t, "SYNTHETIC Database Key", nil, nil)
+	del := func(t *testing.T, raw ...[]byte) []SignatureList {
+		t.Helper()
+		lists, err := signatureLists(slices.Concat(raw...))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return lists
+	}
+	both := mokVisit{key: ours.Raw, del: del(t, x509SignatureList(old.Raw), digestList(t, sha256SignatureType, sum))}.steps()
+	for _, want := range []string{"1. Enroll MOK", sha1Fingerprint(ours.Raw), "6. Delete MOK", "7. View key 0", sha1Fingerprint(old.Raw),
+		"SYNTHETIC Database Key", "8. Press down to View key 1", "0f 0f 0f 0f 0f 0f 0f 0f", "installer stick", "11. Type the password you just chose", "12. Reboot"} {
 		if !strings.Contains(both, want) {
 			t.Errorf("both: missing %q in\n%s", want, both)
 		}
 	}
-	if strings.Index(both, "Enroll MOK") > strings.Index(both, "Delete MOK") {
-		t.Error("delete before enroll")
+	if strings.Index(both, "Enroll MOK") > strings.Index(both, "Delete MOK") ||
+		strings.Index(both, sha1Fingerprint(old.Raw)) > strings.Index(both, "0f 0f 0f") {
+		t.Error("steps out of MokManager's order")
 	}
-	onlyStick := mokVisit{stick: &stickDelete{sum: sum, reused: true}}.steps()
+	onlyStick := mokVisit{del: del(t, digestList(t, sha256SignatureType, sum)), delReused: true}.steps()
 	if strings.Contains(onlyStick, "Enroll") || !strings.Contains(onlyStick, "1. Delete MOK") || !strings.Contains(onlyStick, "6. Reboot") ||
 		!strings.Contains(onlyStick, "chosen when the request was made") {
 		t.Errorf("stick only:\n%s", onlyStick)
+	}
+	many := mokVisit{del: del(t, digestList(t, sha256SignatureType, sum, strings.Repeat("ab", 32)))}.steps()
+	if !strings.Contains(many, "more than one entry") {
+		t.Errorf("many:\n%s", many)
 	}
 	onlyKey := mokVisit{key: ours.Raw}.steps()
 	if strings.Contains(onlyKey, "Delete") || !strings.Contains(onlyKey, "6. Reboot") {
