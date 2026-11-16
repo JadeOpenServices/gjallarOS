@@ -207,12 +207,12 @@ func TestShowName(t *testing.T) {
 
 func TestOnlineGoesToMenuAndMarksOnce(t *testing.T) {
 	net := &fakeNet{devices: always(cable), connectivity: "full"}
-	h := newHarness(t, ModeGPU, "6\n", net) // Network, then end of input
+	h := newHarness(t, ModeWindow, "6\n", net) // Network, then end of input
 	if err := h.run(t); !errors.Is(err, io.EOF) {
 		t.Fatalf("Run = %v, want end of input", err)
 	}
 	log := h.logText(t)
-	if !strings.Contains(log, "GJA-2010 ") || !strings.Contains(log, "mode=gpu") {
+	if !strings.Contains(log, "GJA-2010 ") || !strings.Contains(log, "mode=window") {
 		t.Errorf("no display anchor:\n%s", log)
 	}
 	if n := strings.Count(log, "GJA-2020 "); n != 1 || !strings.Contains(log, "via=ethernet") {
@@ -287,7 +287,7 @@ func TestInstallChannels(t *testing.T) {
 		{"2\ndev\n2\nstable\n1\n", "gjallar-recover guided fresh", "channel=stable"},
 	} {
 		net := &fakeNet{devices: always(cable), connectivity: "full"}
-		h := newHarness(t, ModeGPU, c.input, net)
+		h := newHarness(t, ModeWindow, c.input, net)
 		h.run(t)
 		got := net.ran("gjallar-recover")
 		if len(got) != 1 || got[0] != c.want {
@@ -307,7 +307,7 @@ func TestFailedStepIsLoggedWithoutItsOutput(t *testing.T) {
 	exitThree := exec.Command("sh", "-c", "exit 3").Run()
 	net := &fakeNet{devices: always(cable), connectivity: "full",
 		interactive: func(string, []string) error { return exitThree }}
-	h := newHarness(t, ModeGPU, "1\n", net)
+	h := newHarness(t, ModeWindow, "1\n", net)
 	h.run(t)
 	log := h.logText(t)
 	if !strings.Contains(log, "GJA-2098 ") || !strings.Contains(log, "ERROR: the installer ended with exit code 3") {
@@ -320,7 +320,7 @@ func TestFailedStepIsLoggedWithoutItsOutput(t *testing.T) {
 
 func TestOtherEntries(t *testing.T) {
 	net := &fakeNet{devices: always(cable), connectivity: "full"}
-	h := newHarness(t, ModeGPU, "3\n4\n7\n8\n", net)
+	h := newHarness(t, ModeWindow, "3\n4\n7\n8\n", net)
 	h.run(t)
 	want := []string{
 		"gjallar-recovery-console --from-stick",
@@ -362,7 +362,7 @@ func TestWifiNamesStayOutOfTheLog(t *testing.T) {
 		},
 		interactive: func(string, []string) error { connected = true; return nil },
 	}
-	h := newHarness(t, ModeGPU, "1\n1\n", net) // Wi-Fi, first network
+	h := newHarness(t, ModeWindow, "1\n1\n", net) // Wi-Fi, first network
 	h.run(t)
 	got := net.ran("nmcli")
 	if len(got) != 1 || got[0] != "nmcli --ask device wifi connect AA:BB:CC:DD:EE:FF" {
@@ -383,7 +383,7 @@ func TestWifiNamesStayOutOfTheLog(t *testing.T) {
 func TestOpenNetworkWarnsAndBackReturns(t *testing.T) {
 	net := &fakeNet{devices: always(wifiOff), connectivity: "full",
 		wifiList: ` :Open:50:--:AA\:BB\:CC\:DD\:EE\:01` + "\n"}
-	h := newHarness(t, ModeGPU, "1\n2\n1\n1\n", net) // Wi-Fi, Back; Wi-Fi, Open
+	h := newHarness(t, ModeWindow, "1\n2\n1\n1\n", net) // Wi-Fi, Back; Wi-Fi, Open
 	h.run(t)
 	if got := net.ran("nmcli"); len(got) != 1 {
 		t.Fatalf("ran %q, want one connect", got)
@@ -396,14 +396,14 @@ func TestOpenNetworkWarnsAndBackReturns(t *testing.T) {
 func TestHiddenWifiRefusesOddNames(t *testing.T) {
 	for _, bad := range []string{"esc\x1bname", strings.Repeat("x", 33)} {
 		net := &fakeNet{devices: always(wifiOff)}
-		h := newHarness(t, ModeGPU, "2\n"+bad+"\n", net)
+		h := newHarness(t, ModeWindow, "2\n"+bad+"\n", net)
 		h.run(t)
 		if got := net.ran("nmcli"); len(got) != 0 {
 			t.Errorf("name %q went to nmcli: %q", bad, got)
 		}
 	}
 	net := &fakeNet{devices: always(wifiOff)}
-	h := newHarness(t, ModeGPU, "2\nMy Net\n", net)
+	h := newHarness(t, ModeWindow, "2\nMy Net\n", net)
 	h.run(t)
 	if got := net.ran("nmcli"); len(got) != 1 || got[0] != "nmcli --ask device wifi connect My Net hidden yes" {
 		t.Errorf("ran %q", got)
@@ -429,7 +429,7 @@ func withLayouts(t *testing.T, names ...string) {
 func TestFirstKeyboardInWindowRestartsIt(t *testing.T) {
 	withLayouts(t, "us", "de", "fr", "gb")
 	net := &fakeNet{devices: always(cable), connectivity: "full"}
-	h := newHarness(t, ModeGPU, "fr\n", net)
+	h := newHarness(t, ModeWindow, "fr\n", net)
 	h.layout = ""
 	if err := h.run(t); !errors.Is(err, ErrRestartDisplay) {
 		t.Fatalf("Run = %v, want ErrRestartDisplay", err)
@@ -442,7 +442,7 @@ func TestFirstKeyboardInWindowRestartsIt(t *testing.T) {
 func TestFirstKeyboardEnterKeepsDefault(t *testing.T) {
 	withLayouts(t, "us", "de")
 	net := &fakeNet{devices: always(cable), connectivity: "full"}
-	h := newHarness(t, ModeGPU, "\n", net)
+	h := newHarness(t, ModeWindow, "\n", net)
 	h.layout = ""
 	if err := h.run(t); !errors.Is(err, io.EOF) {
 		t.Fatalf("Run = %v, want the menu to go on", err)
@@ -471,7 +471,7 @@ func TestKeyboardUnknownNameKeepsCurrent(t *testing.T) {
 	withLayouts(t, "us", "de")
 	net := &fakeNet{devices: always(cable), connectivity: "full"}
 	// "zz" matches nothing; Pick asks again and "de" is taken.
-	h := newHarness(t, ModeGPU, "5\nzz\nde\n", net)
+	h := newHarness(t, ModeWindow, "5\nzz\nde\n", net)
 	h.run(t)
 	if h.layout != "de" {
 		t.Fatalf("stored %q", h.layout)
@@ -479,7 +479,7 @@ func TestKeyboardUnknownNameKeepsCurrent(t *testing.T) {
 }
 
 func TestMainArgs(t *testing.T) {
-	for _, args := range [][]string{nil, {"menu"}, {"menu", "--mode", "x11"}, {"layout", "extra"}, {"menu", "--mode", "gpu", "x"}} {
+	for _, args := range [][]string{nil, {"menu"}, {"menu", "--mode", "x11"}, {"layout", "extra"}, {"menu", "--mode", "window", "x"}} {
 		var out, errOut bytes.Buffer
 		if code := Main(args, &out, &errOut); code != 2 || !strings.Contains(errOut.String(), "usage") {
 			t.Errorf("Main(%q) = %d, %q", args, code, errOut.String())

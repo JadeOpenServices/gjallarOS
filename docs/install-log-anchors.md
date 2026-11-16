@@ -32,7 +32,7 @@ typed.
 | GJA-1098 | `install.run.failed` | The run stopped with an error; the ERROR line above says why. | none |
 | GJA-1099 | `install.run.finished` | The run ended. | `code` (count): exit code: 0 done, 1 failed, 2 wrong options, 130 stopped by the user |
 | GJA-2001 | `stick.boot.started` | The installer stick's menu started for the first time this boot. | `secureboot` (yes/no): the firmware booted with Secure Boot on |
-| GJA-2010 | `stick.display.started` | The stick's menu is on the screen. | `mode` (one of gpu, pixman, console): a window drawn by the graphics card, a window drawn by the processor, or the text console |
+| GJA-2010 | `stick.display.started` | The stick's menu is on the screen. | `mode` (one of window, console): a window on the screen, or the text console |
 | GJA-2020 | `stick.network.online` | The stick has a network connection. | `via` (one of ethernet, wifi): a cable or Wi-Fi |
 | GJA-2021 | `stick.network.look-again` | The user asked the stick to look for a network again. | `tries` (count): how many times so far |
 | GJA-2022 | `stick.network.none` | The user went on without a network connection. | none |

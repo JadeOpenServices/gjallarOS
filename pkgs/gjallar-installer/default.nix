@@ -36,6 +36,7 @@ gjallarctl.overrideAttrs (old: {
   subPackages = [
     "cmd/gjallar-installer"
     "cmd/gjallar-recovery-maintenance"
+    "cmd/gjallar-stick"
   ];
 
   # The installer runs gjallarctl, which no longer sits next to it.

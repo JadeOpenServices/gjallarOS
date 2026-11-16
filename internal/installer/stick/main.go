@@ -25,7 +25,7 @@ const LogDir = "/run/gjallar/stick/logs"
 const secureBootVar = "/sys/firmware/efi/efivars/SecureBoot-8be4df61-93ca-11d2-aa0d-00e098032b8c"
 
 const usage = `usage:
-  gjallar-stick menu --mode gpu|pixman|console
+  gjallar-stick menu --mode window|console
   gjallar-stick layout
 `
 
@@ -45,7 +45,7 @@ func Main(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	mode := args[2]
-	if mode != ModeGPU && mode != ModePixman && mode != ModeConsole {
+	if mode != ModeWindow && mode != ModeConsole {
 		fmt.Fprint(stderr, usage)
 		return 2
 	}

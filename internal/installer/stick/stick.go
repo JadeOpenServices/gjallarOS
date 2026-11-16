@@ -50,10 +50,10 @@ func (Exec) Interactive(ctx context.Context, name string, args ...string) error 
 	return cmd.Run()
 }
 
-// Display modes, from the host that started the menu.
+// Display modes, from the host that started the menu: a cage window, or
+// the text console when no window could start.
 const (
-	ModeGPU     = "gpu"
-	ModePixman  = "pixman"
+	ModeWindow  = "window"
 	ModeConsole = "console"
 )
 
@@ -71,7 +71,7 @@ var channels = []string{"stable", "staging", "dev"}
 type Stick struct {
 	UI  prompt.UI
 	Cmd Runner
-	// Mode is ModeGPU, ModePixman or ModeConsole.
+	// Mode is ModeWindow or ModeConsole.
 	Mode string
 	// TTY is the terminal the menu reads; nil in tests. Keys typed while
 	// no question is up are dropped from it before each question.
@@ -128,10 +128,8 @@ func (s *Stick) Run(ctx context.Context) error {
 
 func (s *Stick) markDisplay() {
 	switch s.Mode {
-	case ModeGPU:
-		installlog.Mark(installlog.StickDisplayStarted, installlog.Choice("mode", "gpu"))
-	case ModePixman:
-		installlog.Mark(installlog.StickDisplayStarted, installlog.Choice("mode", "pixman"))
+	case ModeWindow:
+		installlog.Mark(installlog.StickDisplayStarted, installlog.Choice("mode", "window"))
 	case ModeConsole:
 		installlog.Mark(installlog.StickDisplayStarted, installlog.Choice("mode", "console"))
 	}

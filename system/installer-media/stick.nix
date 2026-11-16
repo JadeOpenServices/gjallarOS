@@ -7,8 +7,8 @@
 }:
 # The installer stick (Plane 344/350). The same image for everyone: built
 # from the source without generated/ or user.config.json, US keyboard until
-# the stick menu asks (CP-D). For now tty1 is the live login, like the
-# recovery ISO.
+# the stick menu asks. tty1 runs the stick menu: in a window when the
+# screen can show one, on the text console otherwise.
 let
   media = config.system.build.gjallarMedia;
   isoName = "gjallar-stick-${config.system.nixos.label}-${pkgs.stdenv.hostPlatform.system}.iso";
@@ -19,6 +19,77 @@ let
     name = "gjallar-stick.efi";
     prettyName = "gjallarOS installer";
     cmdline = "";
+  };
+
+  installer = pkgs.callPackage ../../pkgs/gjallar-installer { };
+
+  # The window draws with the CPU (WLR_RENDERER=pixman): mesa's GPU drivers
+  # would add about 840 MB to an image that has about 150 MB left. Nothing
+  # in the window is an X program, so cage comes without Xwayland.
+  cage = pkgs.cage.override {
+    wlroots_0_20 = pkgs.wlroots_0_20.override { enableXWayland = false; };
+  };
+
+  # The live system turns fontconfig off; foot gets its own, with one font.
+  footFonts = pkgs.makeFontsConf { fontDirectories = [ pkgs.fira-code ]; };
+  # The terminal runs as root, like the menu in it. Its own shortcuts that
+  # start programs (a new terminal, opening a link) are off: the menu's
+  # Shell entry is the one way to a shell.
+  footConfig = pkgs.writeText "gjallar-stick-foot.ini" ''
+    [main]
+    font=Fira Code:size=12
+    dpi-aware=yes
+    term=xterm-256color
+
+    [key-bindings]
+    spawn-terminal=none
+    show-urls-launch=none
+    show-urls-copy=none
+    show-urls-persistent=none
+  '';
+
+  # Runs the menu on tty1. Exit 75 means a new keyboard layout (the window
+  # starts again with it), 0 a normal end. Any other code from the window
+  # (cage or foot could not start, or crashed) moves the menu to the text
+  # console for the rest of this boot.
+  host = pkgs.writeShellApplication {
+    name = "gjallar-stick-host";
+    text = ''
+      # Only programs from the image: nothing a user on the stick can change
+      # is searched (loophole 80).
+      export PATH=${
+        lib.makeBinPath [
+          installer
+          cage
+          pkgs.foot
+          pkgs.ckbcomp
+          pkgs.kbd
+          pkgs.coreutils
+        ]
+      }:/run/wrappers/bin:/run/current-system/sw/bin
+      window=true
+      while true; do
+        if [ "$window" = true ]; then
+          layout=$(gjallar-stick layout)
+          rc=0
+          XKB_DEFAULT_LAYOUT=$layout WLR_RENDERER=pixman FONTCONFIG_FILE=${footFonts} \
+            cage -- foot -c ${footConfig} -- gjallar-stick menu --mode window || rc=$?
+          case $rc in
+            0 | 75) continue ;;
+          esac
+          window=false
+          printf '%s\n' "The window stopped (code $rc). The menu goes on in the text console."
+        fi
+        # The console has no window to catch the installer's errors: they
+        # go to the screen too.
+        rc=0
+        gjallar-stick menu --mode console 2>&1 || rc=$?
+        case $rc in
+          0 | 75) ;;
+          *) sleep 1 ;;
+        esac
+      done
+    '';
   };
 in
 {
@@ -34,6 +105,81 @@ in
   # The installer queues the removal of the stick's hash from shim's list
   # (QueueStickHashDelete); mokutil does that.
   environment.systemPackages = lib.optional pkgs.stdenv.hostPlatform.isx86_64 pkgs.mokutil;
+
+  # tty1 is the stick menu, not a login. The other consoles keep the live
+  # login of every NixOS installer; the menu's Shell entry gives the same.
+  systemd.services."getty@tty1".enable = false;
+  systemd.services."autovt@tty1".enable = false;
+  systemd.tmpfiles.rules = [
+    "d /run/gjallar 0755 root root - -"
+    "d /run/gjallar/stick 0755 root root - -"
+    "d /run/gjallar/stick/logs 0700 root root - -"
+  ];
+  systemd.services.gjallar-stick = {
+    description = "gjallarOS installer stick menu";
+    wantedBy = [ "multi-user.target" ];
+    after = [
+      "installer-repository.service"
+      "systemd-user-sessions.service"
+      "systemd-logind.service"
+    ];
+    wants = [ "systemd-logind.service" ];
+    unitConfig.ConditionPathExists = "/dev/tty1";
+    restartIfChanged = false;
+    environment = {
+      TERM = "linux";
+      LANG = "C.UTF-8";
+    };
+    serviceConfig = {
+      ExecStart = lib.getExe host;
+      # A root session on seat0 through logind lets cage open the screen
+      # and the keyboard.
+      User = "root";
+      PAMName = "gjallar-stick";
+      TTYPath = "/dev/tty1";
+      TTYReset = true;
+      TTYVHangup = true;
+      TTYVTDisallocate = true;
+      StandardInput = "tty-fail";
+      StandardOutput = "tty";
+      # cage and foot log here; the menu's own log is in its log folder.
+      StandardError = "journal";
+      Restart = "always";
+      RestartSec = 1;
+    };
+  };
+  # Only the session part runs for a service. Nobody signs in through it.
+  security.pam.services.gjallar-stick = {
+    useDefaultRules = false;
+    rules = {
+      auth = utils.pam.autoOrderRules [
+        {
+          name = "deny";
+          control = "required";
+          modulePath = "${config.security.pam.package}/lib/security/pam_deny.so";
+        }
+      ];
+      account = utils.pam.autoOrderRules [
+        {
+          name = "unix";
+          control = "required";
+          modulePath = "${config.security.pam.package}/lib/security/pam_unix.so";
+        }
+      ];
+      session = utils.pam.autoOrderRules [
+        {
+          name = "unix";
+          control = "required";
+          modulePath = "${config.security.pam.package}/lib/security/pam_unix.so";
+        }
+        {
+          name = "systemd";
+          control = "required";
+          modulePath = "${config.systemd.package}/lib/security/pam_systemd.so";
+        }
+      ];
+    };
+  };
 
   # Started through shim, the stick's UKI is trusted by its hash, which the
   # user enrolled in MokManager. The installer removes that hash again after
