@@ -101,9 +101,23 @@ in
         fi
       done
       [ -n "$esp" ] || fail "The stick has no EFI system partition."
+      # gjallar-iso maps the whole disk and so holds it exclusively; the
+      # kernel then refuses the exclusive open a mount of one of its
+      # partitions needs. A read-only loop device opens the partition
+      # without that claim.
+      loop=
+      mounted=
+      cleanup() {
+        [ -z "$mounted" ] || umount /run/gjallar/stick-esp || true
+        [ -z "$loop" ] || losetup -d "$loop" || true
+        rmdir /run/gjallar/stick-esp 2> /dev/null || true
+        rm -f /run/gjallar/stick-uki.efi.new
+      }
+      trap cleanup EXIT
       mkdir -p -m 0755 /run/gjallar /run/gjallar/stick-esp
-      mount -t vfat -o ro,nodev,nosuid,noexec "$esp" /run/gjallar/stick-esp
-      trap 'umount /run/gjallar/stick-esp; rmdir /run/gjallar/stick-esp; rm -f /run/gjallar/stick-uki.efi.new' EXIT
+      loop=$(losetup -f --show -r "$esp")
+      mount -t vfat -o ro,nodev,nosuid,noexec "$loop" /run/gjallar/stick-esp
+      mounted=1
       file=/run/gjallar/stick-esp/EFI/BOOT/grubx64.efi
       [ -f "$file" ] || fail "The stick's boot file is missing."
       # The installer reads at most this much (stickUKIMax).
