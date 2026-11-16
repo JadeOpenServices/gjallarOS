@@ -177,6 +177,23 @@ in
           # one (two sticks of one image are byte copies, partition ids
           # included) could answer it instead, so with more than one disk
           # labelled like this, stop before using either (Q237, L92).
+          # The link shows up once the first stick is scanned. usb-storage
+          # scans each stick after its own delay (delay_use, 1 s) and uas
+          # scans in the background, and udev settle waits for neither: on a
+          # two-stick VM boot the second disk came 110 ms after the first
+          # one's link. So first wait until every USB storage interface the
+          # kernel has bound has a disk (at most 10 s; one that never gets
+          # one, like a dead stick, is not waited for longer).
+          udevadm settle --timeout=15 || true
+          for _ in $(seq 100); do
+            pending=
+            for host in /sys/bus/usb/drivers/usb-storage/*/host* /sys/bus/usb/drivers/uas/*/host*; do
+              [ -d "$host" ] || continue
+              compgen -G "$host/target*/*/block/*" > /dev/null || pending=1
+            done
+            [ -n "$pending" ] || break
+            sleep 0.1
+          done
           udevadm settle --timeout=15 || true
           disks=
           while IFS= read -r node; do
