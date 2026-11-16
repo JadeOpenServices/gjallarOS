@@ -152,6 +152,8 @@ ssh-keygen -Y verify -f "$work/allowed_signers" -I "$identity" -n "$namespace" \
 export GIT_DIR=$bare GIT_INDEX_FILE=$work/index
 export GIT_AUTHOR_NAME=$identity GIT_AUTHOR_EMAIL=$identity@invalid
 export GIT_COMMITTER_NAME=$identity GIT_COMMITTER_EMAIL=$identity@invalid
+# A fixed date: the commit tells nothing about the builder's clock or zone.
+export GIT_AUTHOR_DATE='1970-01-01T00:00:00+0000' GIT_COMMITTER_DATE='1970-01-01T00:00:00+0000'
 git read-tree "$base"
 sums_blob=$(git hash-object -w -- "$work/SHA256SUMS")
 sig_blob=$(git hash-object -w -- "$work/SHA256SUMS.sshsig")

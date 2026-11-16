@@ -257,6 +257,14 @@ qm guest exec <vmid> -- rm /var/lib/gjallar-builder/failed/vYYYY.MM.N
 | `... does not hold a fine-grained token` | Set the token again (step 3) |
 | `pushing the statement for ... failed` | Token expired or without rights, or GitHub was down. The next run tries again |
 
+Updating the builder after a change in `deployment/builder`: switch it in
+place through the guest agent, with the full commit hash, so the disk and
+its key stay:
+
+```sh
+qm guest exec <vmid> --timeout 3600 -- nixos-rebuild switch --flake 'github:JadeOpenServices/gjallarOS/<full commit>?dir=deployment/builder#gjallaros-build'
+```
+
 Changing the builder key: a new builder disk makes a new key. Then
 `BUILDER_SSH_KEY` has to change too, and `sign` refuses statements until
 it does. Change it only when you know why the key changed, the same way
