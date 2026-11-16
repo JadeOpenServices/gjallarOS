@@ -93,10 +93,12 @@ replaced, and nothing from the stick stays on the machine.
    F10 or Esc. Keep only this one gjallarOS stick plugged in; with two,
    the stick stops and asks you to take one out
 4. With Secure Boot on, the first start from a new stick shows a blue
-   screen (MokManager) once. Pick Enroll hash from disk, then EFIBOOT,
-   `EFI`, `BOOT`, `grubx64.efi`, confirm with Yes and pick Reboot. The
-   stick starts after that. The installer removes this entry again at
-   the end (see [Secure Boot](#secure-boot))
+   "Verification failed" box once. Press Enter on OK, then press any key
+   within 10 seconds to open the key screen (MokManager). If you miss
+   it, start from the stick again. Pick Enroll hash from disk, then
+   EFIBOOT, `EFI/`, `BOOT/`, `grubx64.efi`, Continue, Yes and Reboot.
+   The stick starts after that. The installer removes this entry again
+   at the end (see [Secure Boot](#secure-boot))
 5. The stick asks for the keyboard layout and checks the network: a
    cable connects by itself, Wi-Fi is picked from a list
 6. Pick Install gjallarOS and answer the questions. The installer asks
