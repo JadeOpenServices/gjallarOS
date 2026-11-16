@@ -89,18 +89,24 @@ replaced, and nothing from the stick stays on the machine.
    It then downloads the stick image, checks its signature, asks which
    stick to erase, writes the image and reads it back
 2. Keep the stick plugged in until the maker says it is done
-3. Switch Secure Boot off in the firmware settings for now. The
-   installer can switch it back on later
-   (see [Secure Boot](#secure-boot))
-4. Start the machine from the stick. The boot menu key is often F12,
+3. Start the machine from the stick. The boot menu key is often F12,
    F10 or Esc. Keep only this one gjallarOS stick plugged in; with two,
-   the stick stops and asks you to take one out. Ethernet connects by
-   itself, and `nmtui` sets up Wi-Fi
-5. Pick Install gjallarOS in the stick's menu and answer the questions. The installer asks
+   the stick stops and asks you to take one out
+4. With Secure Boot on, the first start from a new stick shows a blue
+   screen (MokManager) once. Pick Enroll hash from disk, then EFIBOOT,
+   `EFI`, `BOOT`, `grubx64.efi`, confirm with Yes and pick Reboot. The
+   stick starts after that. The installer removes this entry again at
+   the end (see [Secure Boot](#secure-boot))
+5. The stick asks for the keyboard layout and checks the network: a
+   cable connects by itself, Wi-Fi is picked from a list
+6. Pick Install gjallarOS and answer the questions. The installer asks
    twice before it erases the disk you pick
-6. Save the recovery key it shows somewhere off this machine. It opens
+7. Save the recovery key it shows somewhere off this machine. It opens
    the disk if the PIN or the security chip ever fails
-7. Shut down, take the stick out and start from the disk
+8. Restart when the installer asks. The machine starts the new system
+   even with the stick still in; take the stick out now. With Secure
+   Boot on, the blue screen comes once more: follow the steps the
+   installer showed, with the one-time password you chose there
 
 #### Release key fingerprint
 
