@@ -28,6 +28,7 @@ import (
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/prompt"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/region"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/stickkeyboard"
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/stickrelease"
 )
 
 // Runner runs the programs the menu needs. Tests use a fake.
@@ -91,6 +92,10 @@ type Stick struct {
 	// Logos are the logo in sixel for 32 and 64 pixel cells, shown in
 	// the window only; empty for none.
 	Logos []calmmenu.Sixel
+	// CheckRelease compares the stick with the newest signed release
+	// before an install (Q233). nil refuses to install, as a stick built
+	// without the release key.
+	CheckRelease func(context.Context) stickrelease.Outcome
 
 	channel   string
 	offline   bool
@@ -190,6 +195,12 @@ func (s *Stick) menu(ctx context.Context) error {
 				}
 			}
 			installlog.Mark(installlog.StickMenuChosen, installlog.Choice("choice", "install"))
+			if !s.releaseAllows(ctx) {
+				if err := s.pause(ctx); err != nil {
+					return err
+				}
+				continue
+			}
 			args := []string{"guided", "fresh"}
 			if s.channel != channels[0] {
 				args = append(args, "--channel", s.channel)
@@ -289,6 +300,51 @@ func (s *Stick) pause(ctx context.Context) error {
 	fmt.Fprint(s.UI.Out, "\nPress Enter to go back to the menu. ")
 	_, err := s.UI.Line(ctx)
 	return err
+}
+
+// releaseAllows checks the stick against the newest signed release and
+// says why when it may not install. Only release names that passed the
+// strict pattern reach the screen; the network's error text does not.
+func (s *Stick) releaseAllows(ctx context.Context) bool {
+	fmt.Fprintln(s.UI.Out, "Checking that this stick is still safe to install from...")
+	o := stickrelease.Outcome{Kind: stickrelease.NoKey}
+	if s.CheckRelease != nil {
+		o = s.CheckRelease(ctx)
+	}
+	refuse := func(log, text, note string) bool {
+		s.logError(log)
+		fmt.Fprintln(s.UI.Out, text, "Nothing on this computer was changed.")
+		s.note = note
+		return false
+	}
+	switch o.Kind {
+	case stickrelease.Current:
+		return true
+	case stickrelease.Older:
+		installlog.Mark(installlog.StickReleaseOlder)
+		fmt.Fprintf(s.UI.Out, "A newer release, %s, is out. This stick installs %s; update after the install.\n", o.Newest.Version, o.Stick)
+		return true
+	case stickrelease.BelowFloor:
+		installlog.Mark(installlog.StickReleaseRefused, installlog.Choice("reason", "floor"))
+		return refuse("the stick is below the release floor",
+			fmt.Sprintf("This stick installs gjallarOS %s, which is older than %s, the oldest release that is still safe to install. Make a new stick with the USB maker from the gjallarOS releases page.", o.Stick, o.Newest.Floor),
+			"This stick is too old to install from. Make a new stick.")
+	case stickrelease.Unreachable:
+		installlog.Mark(installlog.StickReleaseRefused, installlog.Choice("reason", "unreachable"))
+		return refuse("the release check could not fetch the release files",
+			"Could not reach the gjallarOS releases to check that this stick is still safe to install from. Check the network and try again.",
+			"Could not reach the gjallarOS releases. Check the network.")
+	case stickrelease.Bad:
+		installlog.Mark(installlog.StickReleaseRefused, installlog.Choice("reason", "bad"))
+		return refuse("the release files did not match the release key",
+			"The release files from the internet did not match the gjallarOS signature: something on the way may have changed them. Try another network, and report this with the time if it happens again.",
+			"The release check failed: the files did not match.")
+	default:
+		installlog.Mark(installlog.StickReleaseRefused, installlog.Choice("reason", "no-key"))
+		return refuse("the stick was built without the release key",
+			"This stick was built without the gjallarOS release key, so it cannot check that it is still safe to install from. Use a stick made with the USB maker from a gjallarOS release.",
+			"This stick cannot check its release. Use a released stick.")
+	}
 }
 
 // runStep runs a program on the terminal and reports a failure without

@@ -39,6 +39,8 @@ yes/no or one of the words listed here, never text a user typed.
 | GJA-2022 | `stick.network.none` | The user went on without a network connection. | none |
 | GJA-2030 | `stick.menu.chosen` | The user picked an entry of the stick's menu. | `choice` (one of install, move-disk, bring-over, recovery, shell): install, move to a new disk, bring an old system over, recovery, or the shell |
 | GJA-2031 | `stick.channel.advanced` | The user changed the release channel under Advanced. | `channel` (one of stable, staging, dev): the channel the install will follow |
+| GJA-2040 | `stick.release.refused` | The stick did not start the installer: it could not show that it is still safe to install from. Nothing on the computer was changed. | `reason` (one of floor, no-key, bad, unreachable): floor: the stick is older than the oldest release still safe; no-key: built without the release key; bad: the release files did not match the signature; unreachable: the release files could not be fetched |
+| GJA-2041 | `stick.release.older` | A newer release is out; the stick is still safe to install from and went on. | none |
 | GJA-2098 | `stick.flow.failed` | A step of the stick's menu failed; the ERROR line above says why. | none |
 | GJA-3001 | `maker.run.started` | The USB stick maker started. | `os` (one of linux, windows): the system the maker runs on |
 | GJA-3010 | `maker.download.finished` | The stick image and its checksum files are downloaded. | none |

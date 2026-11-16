@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -17,6 +18,7 @@ import (
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/installlog"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/region"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/stickkeyboard"
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/stickrelease"
 )
 
 // LogDir is the RAM folder for the menu's logs. systemd-tmpfiles creates
@@ -28,8 +30,8 @@ const LogDir = "/run/gjallar/stick/logs"
 const secureBootVar = "/sys/firmware/efi/efivars/SecureBoot-8be4df61-93ca-11d2-aa0d-00e098032b8c"
 
 const usage = `usage:
-  gjallar-stick menu --mode window|console
-  gjallar-stick menu --mode window --logo DIR
+  gjallar-stick menu --mode window|console --release FILE
+  gjallar-stick menu --mode window --release FILE --logo DIR
   gjallar-stick layout
   gjallar-stick text-console
 `
@@ -54,17 +56,8 @@ func Main(args []string, stdout, stderr io.Writer) int {
 		}
 		return 0
 	}
-	logoDir := ""
-	if len(args) == 5 && args[2] == ModeWindow && args[3] == "--logo" {
-		logoDir = args[4]
-		args = args[:3]
-	}
-	if len(args) != 3 || args[0] != "menu" || args[1] != "--mode" {
-		fmt.Fprint(stderr, usage)
-		return 2
-	}
-	mode := args[2]
-	if mode != ModeWindow && mode != ModeConsole {
+	mode, releaseFile, logoDir, ok := menuArgs(args)
+	if !ok {
 		fmt.Fprint(stderr, usage)
 		return 2
 	}
@@ -86,6 +79,14 @@ func Main(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintln(stderr, "No logo:", err)
 		}
 		s.Logos = logos
+	}
+	if cfg, err := loadRelease(releaseFile); err != nil {
+		// CheckRelease stays nil: the menu refuses to install.
+		fmt.Fprintln(stderr, "No release check:", err)
+	} else {
+		s.CheckRelease = func(ctx context.Context) stickrelease.Outcome {
+			return stickrelease.Check(ctx, cfg, nil)
+		}
 	}
 	first := firstStart(LogDir)
 	if l, err := installlog.OpenStick(LogDir, time.Now()); err != nil {
@@ -110,6 +111,62 @@ func Main(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	return 0
+}
+
+// menuArgs parses "menu --mode MODE --release FILE [--logo DIR]"; the logo
+// is for the window only.
+func menuArgs(args []string) (mode, release, logo string, ok bool) {
+	if len(args) < 3 || args[0] != "menu" || args[1] != "--mode" {
+		return "", "", "", false
+	}
+	mode = args[2]
+	if mode != ModeWindow && mode != ModeConsole {
+		return "", "", "", false
+	}
+	rest := args[3:]
+	if len(rest)%2 != 0 {
+		return "", "", "", false
+	}
+	for i := 0; i < len(rest); i += 2 {
+		value := rest[i+1]
+		if value == "" {
+			return "", "", "", false
+		}
+		switch rest[i] {
+		case "--release":
+			if release != "" {
+				return "", "", "", false
+			}
+			release = value
+		case "--logo":
+			if logo != "" || mode != ModeWindow {
+				return "", "", "", false
+			}
+			logo = value
+		default:
+			return "", "", "", false
+		}
+	}
+	return mode, release, logo, release != ""
+}
+
+// loadRelease reads the stick's release config, a store file. The menu runs
+// as root: the file must not be a link, FIFO or device and is size capped.
+func loadRelease(path string) (stickrelease.Config, error) {
+	if !filepath.IsAbs(path) {
+		return stickrelease.Config{}, fmt.Errorf("%s: not an absolute path", path)
+	}
+	dir, name := filepath.Split(filepath.Clean(path))
+	d, err := unix.Open(dir, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC, 0)
+	if err != nil {
+		return stickrelease.Config{}, fmt.Errorf("%s: %w", dir, err)
+	}
+	defer unix.Close(d)
+	data, err := readSmallFile(d, name, stickrelease.MaxConfig)
+	if err != nil {
+		return stickrelease.Config{}, fmt.Errorf("%s: %w", path, err)
+	}
+	return stickrelease.ParseConfig(data)
 }
 
 // logoNames are the logo files for 32 and 64 pixel cells.

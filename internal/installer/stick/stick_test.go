@@ -14,9 +14,12 @@ import (
 	"testing"
 	"time"
 
+	"golang.org/x/sys/unix"
+
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/installlog"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/region"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/stickkeyboard"
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/stickrelease"
 )
 
 // fakeNet is a made-up NetworkManager. devices returns the device list for
@@ -81,6 +84,8 @@ type harness struct {
 	screen *bytes.Buffer
 	log    *installlog.Log
 	layout string
+	// release is what the release check finds; Current by default.
+	release stickrelease.Outcome
 }
 
 func newHarness(t *testing.T, mode, input string, net *fakeNet) *harness {
@@ -105,6 +110,7 @@ func newHarness(t *testing.T, mode, input string, net *fakeNet) *harness {
 		WriteLayout: func(v string) error { h.layout = v; return nil },
 		ErrorLog:    l.Tee(io.Discard),
 	}
+	h.s.CheckRelease = func(context.Context) stickrelease.Outcome { return h.release }
 	h.s.UI.Reader = bufio.NewReader(strings.NewReader(input))
 	h.s.UI.Out = h.screen
 	return h
@@ -303,6 +309,62 @@ func TestInstallChannels(t *testing.T) {
 	}
 }
 
+// The release check (Q233) runs before the installer: below the floor,
+// without the key, with bad files or no answer the installer does not start
+// and the menu says why; a newer release is one line and the install goes
+// on.
+func TestInstallReleaseCheck(t *testing.T) {
+	newest := stickrelease.Release{Version: "v2026.11.3", Date: "2026-11-20", Floor: "v2026.11.1"}
+	for _, c := range []struct {
+		name    string
+		release stickrelease.Outcome
+		nilFunc bool
+		runs    bool
+		anchor  string
+		screen  string
+	}{
+		{name: "current", release: stickrelease.Outcome{Kind: stickrelease.Current, Stick: "v2026.10.66"}, runs: true},
+		{name: "older", release: stickrelease.Outcome{Kind: stickrelease.Older, Stick: "v2026.11.2", Newest: newest}, runs: true,
+			anchor: "GJA-2041 stick.release.older", screen: "A newer release, v2026.11.3, is out. This stick installs v2026.11.2"},
+		{name: "floor", release: stickrelease.Outcome{Kind: stickrelease.BelowFloor, Stick: "v2026.10.66", Newest: newest},
+			anchor: "reason=floor", screen: "older than v2026.11.1, the oldest release that is still safe to install"},
+		{name: "no key", release: stickrelease.Outcome{Kind: stickrelease.NoKey, Stick: "v2026.10.66"},
+			anchor: "reason=no-key", screen: "built without the gjallarOS release key"},
+		{name: "nil", nilFunc: true, anchor: "reason=no-key", screen: "built without the gjallarOS release key"},
+		{name: "bad", release: stickrelease.Outcome{Kind: stickrelease.Bad, Stick: "v2026.10.66", Err: errors.New("\x1b[2Jfrom the network")},
+			anchor: "reason=bad", screen: "did not match the gjallarOS signature"},
+		{name: "unreachable", release: stickrelease.Outcome{Kind: stickrelease.Unreachable, Stick: "v2026.10.66", Err: errors.New("\x1b[2Jfrom the network")},
+			anchor: "reason=unreachable", screen: "Check the network and try again."},
+	} {
+		net := &fakeNet{devices: always(cable), connectivity: "full"}
+		h := newHarness(t, ModeWindow, "1\n\n", net)
+		h.release = c.release
+		if c.nilFunc {
+			h.s.CheckRelease = nil
+		}
+		h.run(t)
+		if got := len(net.ran("gjallar-recover")); got != map[bool]int{true: 1}[c.runs] {
+			t.Errorf("%s: installer ran %d times", c.name, got)
+		}
+		log, screen := h.logText(t), h.screen.String()
+		if c.anchor != "" && !strings.Contains(log, c.anchor) {
+			t.Errorf("%s: log lacks %q:\n%s", c.name, c.anchor, log)
+		}
+		if !strings.Contains(screen, c.screen) {
+			t.Errorf("%s: screen lacks %q", c.name, c.screen)
+		}
+		if strings.Contains(screen+log, "from the network") {
+			t.Errorf("%s: network error text shown or logged", c.name)
+		}
+		if !c.runs && !strings.Contains(screen, "Nothing on this computer was changed.") {
+			t.Errorf("%s: screen does not say nothing changed", c.name)
+		}
+		if !c.runs && (h.s.note == "" || len([]rune(h.s.note)) > 66) {
+			t.Errorf("%s: note longer than the menu block: %q", c.name, h.s.note)
+		}
+	}
+}
+
 func TestFailedStepIsLoggedWithoutItsOutput(t *testing.T) {
 	exitThree := exec.Command("sh", "-c", "exit 3").Run()
 	net := &fakeNet{devices: always(cable), connectivity: "full",
@@ -479,10 +541,62 @@ func TestKeyboardUnknownNameKeepsCurrent(t *testing.T) {
 }
 
 func TestMainArgs(t *testing.T) {
-	for _, args := range [][]string{nil, {"menu"}, {"menu", "--mode", "x11"}, {"layout", "extra"}, {"text-console", "x"}, {"menu", "--mode", "window", "x"}, {"menu", "--mode", "console", "--logo", "/x"}, {"menu", "--mode", "window", "--logo"}, {"menu", "--mode", "window", "--icon", "/x"}} {
+	for _, args := range [][]string{nil, {"menu"}, {"menu", "--mode", "x11"}, {"layout", "extra"}, {"text-console", "x"}, {"menu", "--mode", "window", "x"}, {"menu", "--mode", "console", "--logo", "/x"}, {"menu", "--mode", "window", "--logo"}, {"menu", "--mode", "window", "--icon", "/x"}, {"menu", "--mode", "window", "--logo", "/x"}, {"menu", "--mode", "console", "--release", "/r", "--logo", "/x"}, {"menu", "--mode", "window", "--release", "/r", "--release", "/r"}, {"menu", "--mode", "window", "--release", ""}, {"menu", "--mode", "window", "--release"}} {
 		var out, errOut bytes.Buffer
 		if code := Main(args, &out, &errOut); code != 2 || !strings.Contains(errOut.String(), "usage") {
 			t.Errorf("Main(%q) = %d, %q", args, code, errOut.String())
+		}
+	}
+}
+
+func TestMenuArgs(t *testing.T) {
+	for _, c := range []struct {
+		args                []string
+		mode, release, logo string
+	}{
+		{[]string{"menu", "--mode", "console", "--release", "/r"}, ModeConsole, "/r", ""},
+		{[]string{"menu", "--mode", "window", "--release", "/r"}, ModeWindow, "/r", ""},
+		{[]string{"menu", "--mode", "window", "--release", "/r", "--logo", "/l"}, ModeWindow, "/r", "/l"},
+		{[]string{"menu", "--mode", "window", "--logo", "/l", "--release", "/r"}, ModeWindow, "/r", "/l"},
+	} {
+		mode, release, logo, ok := menuArgs(c.args)
+		if !ok || mode != c.mode || release != c.release || logo != c.logo {
+			t.Errorf("menuArgs(%q) = %q %q %q %v", c.args, mode, release, logo, ok)
+		}
+	}
+}
+
+// The menu runs as root: the release config must be a small regular file,
+// not a link, FIFO or relative path.
+func TestLoadRelease(t *testing.T) {
+	dir := t.TempDir()
+	good := filepath.Join(dir, "release.json")
+	if err := os.WriteFile(good, []byte(`{"version":"v2026.10.66","url":"https://example.org/r","key":null}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := loadRelease(good)
+	if err != nil || cfg.Version != "v2026.10.66" || cfg.Key != nil {
+		t.Fatalf("loadRelease = %+v, %v", cfg, err)
+	}
+	link := filepath.Join(dir, "link.json")
+	if err := os.Symlink(good, link); err != nil {
+		t.Fatal(err)
+	}
+	fifo := filepath.Join(dir, "fifo.json")
+	if err := unix.Mkfifo(fifo, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	big := filepath.Join(dir, "big.json")
+	if err := os.WriteFile(big, bytes.Repeat([]byte(" "), stickrelease.MaxConfig+1), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	bad := filepath.Join(dir, "bad.json")
+	if err := os.WriteFile(bad, []byte(`{"version":"v2026.10.66","url":"http://example.org/r","key":null}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{link, fifo, big, bad, "release.json", filepath.Join(dir, "missing.json")} {
+		if _, err := loadRelease(path); err == nil {
+			t.Errorf("loadRelease(%s) took it", path)
 		}
 	}
 }

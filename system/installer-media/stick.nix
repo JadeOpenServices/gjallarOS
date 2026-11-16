@@ -23,6 +23,17 @@ let
 
   installer = pkgs.callPackage ../../pkgs/gjallar-installer { };
 
+  # Before it installs, the menu checks the stick against the newest signed
+  # release (Q233): below the release floor it refuses. The stick's release
+  # is system/release, the tree it installs. A file in the store, so the
+  # root menu reads it from the verity-checked image.
+  releaseConfig = pkgs.writeText "gjallar-stick-release.json" (
+    builtins.toJSON {
+      version = lib.fileContents ../release;
+      inherit (config.gjallar.stick.release) url key;
+    }
+  );
+
   # The window draws with the CPU (WLR_RENDERER=pixman): mesa's GPU drivers
   # would add about 840 MB to an image that has about 150 MB left. Nothing
   # in the window is an X program, so cage comes without Xwayland.
@@ -67,8 +78,12 @@ let
   );
   # The Linux console paints the screen with colour 0 and writes text in
   # colour 7, so those two are the window's background and text.
-  consoleColours =
-    [ (hex term.background) ] ++ lib.sublist 1 6 normal ++ [ (hex term.foreground) ] ++ bright;
+  consoleColours = [
+    (hex term.background)
+  ]
+  ++ lib.sublist 1 6 normal
+  ++ [ (hex term.foreground) ]
+  ++ bright;
 
   # The terminal runs as root, like the menu in it. Its own shortcuts that
   # start programs (a new terminal, opening a link) are off: the menu's
@@ -190,7 +205,7 @@ let
           # Without it foot kept 26 pixels for one and left a black strip at
           # the bottom of the screen.
           XKB_DEFAULT_LAYOUT=$layout WLR_RENDERER=pixman FONTCONFIG_FILE=${footFonts} \
-            cage -d -- foot -c ${footConfig} "''${font[@]}" -- gjallar-stick menu --mode window --logo ${stickLogo} || rc=$?
+            cage -d -- foot -c ${footConfig} "''${font[@]}" -- gjallar-stick menu --mode window --release ${releaseConfig} --logo ${stickLogo} || rc=$?
           case $rc in
             0 | 75) continue ;;
           esac
@@ -209,7 +224,7 @@ let
         # The console has no window to catch the installer's errors: they
         # go to the screen too.
         rc=0
-        gjallar-stick menu --mode console 2>&1 || rc=$?
+        gjallar-stick menu --mode console --release ${releaseConfig} 2>&1 || rc=$?
         case $rc in
           0 | 75) ;;
           *) sleep 1 ;;
@@ -219,7 +234,26 @@ let
   };
 in
 {
-  imports = [ ./live.nix ];
+  imports = [
+    ./live.nix
+    {
+      options.gjallar.stick.release = {
+        url = lib.mkOption {
+          type = lib.types.strMatching "https://[^?#]+[^/?#]";
+          default = "https://github.com/JadeOpenServices/gjallarOS/releases/latest/download";
+          description = "Folder with the newest release's SHA256SUMS, SHA256SUMS.sig and RELEASE.";
+        };
+        key = lib.mkOption {
+          type = lib.types.nullOr lib.types.str;
+          default = null;
+          description = ''
+            The release key (PEM). null builds a stick that refuses to
+            install: it cannot check its release. CP-H sets the real key.
+          '';
+        };
+      };
+    }
+  ];
 
   # No boot screen for now: a Restart from the text menu never showed its
   # restart screen (Plane 360 brings it back). The boot stays quiet; the

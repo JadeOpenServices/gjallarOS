@@ -43,6 +43,8 @@ const (
 	StickNetworkNone      ID = 2022
 	StickMenuChosen       ID = 2030
 	StickChannelAdvanced  ID = 2031
+	StickReleaseRefused   ID = 2040
+	StickReleaseOlder     ID = 2041
 	StickFlowFailed       ID = 2098
 
 	MakerRunStarted        ID = 3001
@@ -185,6 +187,12 @@ var Registry = []Anchor{
 		Meaning: "The user changed the release channel under Advanced.",
 		Fields: []FieldSpec{{Name: "channel", Kind: KindChoice, Choices: []string{"stable", "staging", "dev"},
 			Meaning: "the channel the install will follow"}}},
+	{ID: StickReleaseRefused, Name: "stick.release.refused",
+		Meaning: "The stick did not start the installer: it could not show that it is still safe to install from. Nothing on the computer was changed.",
+		Fields: []FieldSpec{{Name: "reason", Kind: KindChoice, Choices: []string{"floor", "no-key", "bad", "unreachable"},
+			Meaning: "floor: the stick is older than the oldest release still safe; no-key: built without the release key; bad: the release files did not match the signature; unreachable: the release files could not be fetched"}}},
+	{ID: StickReleaseOlder, Name: "stick.release.older",
+		Meaning: "A newer release is out; the stick is still safe to install from and went on."},
 	{ID: StickFlowFailed, Name: "stick.flow.failed",
 		Meaning: "A step of the stick's menu failed; the ERROR line above says why."},
 
