@@ -13,7 +13,7 @@ import (
 	"testing"
 )
 
-var anchorName = regexp.MustCompile(`^install(\.[a-z0-9]+(-[a-z0-9]+)*){2,}$`)
+var anchorName = regexp.MustCompile(`^(install|stick)(\.[a-z0-9]+(-[a-z0-9]+)*){2,}$`)
 
 func repoRoot(t *testing.T) string {
 	t.Helper()
@@ -87,11 +87,20 @@ func TestRegistryRows(t *testing.T) {
 			t.Errorf("name %s used twice", a.Name)
 		}
 		names[a.Name] = true
-		if a.ID < 1000 || a.ID > 1999 {
-			t.Errorf("%s is outside the installer range", a.ID.Code())
+		switch {
+		case a.ID >= 1000 && a.ID <= 1999:
+			if !strings.HasPrefix(a.Name, "install.") {
+				t.Errorf("%s is in the installer range but named %s", a.ID.Code(), a.Name)
+			}
+		case a.ID >= 2000 && a.ID <= 2999:
+			if !strings.HasPrefix(a.Name, "stick.") {
+				t.Errorf("%s is in the stick range but named %s", a.ID.Code(), a.Name)
+			}
+		default:
+			t.Errorf("%s is outside the installer and stick ranges", a.ID.Code())
 		}
 		if !anchorName.MatchString(a.Name) {
-			t.Errorf("%s name %q is not install.area.event", a.ID.Code(), a.Name)
+			t.Errorf("%s name %q is not install.area.event or stick.area.event", a.ID.Code(), a.Name)
 		}
 		if strings.TrimSpace(a.Meaning) == "" {
 			t.Errorf("%s has no meaning", a.ID.Code())

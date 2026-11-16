@@ -3,8 +3,29 @@
 # is locked, so a shell here first needs the disk's recovery key or
 # passphrase. Without it, the only way on is to erase the disk and reinstall.
 
+#
+# The installer stick's menu starts it with --from-stick. There it only
+# unlocks and opens the shell: erasing and reinstalling is the stick menu's
+# Install, and restart and power off are in that menu too.
+
 # The menu ignores Ctrl-C; the recovery shell gets it back.
 trap '' INT QUIT TSTP
+
+from_stick=false
+case $# in
+  0) ;;
+  1)
+    [ "$1" = --from-stick ] || {
+      printf '%s\n' 'usage: gjallar-recovery-console [--from-stick]' >&2
+      exit 2
+    }
+    from_stick=true
+    ;;
+  *)
+    printf '%s\n' 'usage: gjallar-recovery-console [--from-stick]' >&2
+    exit 2
+    ;;
+esac
 
 mapping=gjallar-recovery-root
 
@@ -64,8 +85,12 @@ open_system() {
   udevadm settle
   if [ -z "$(internal_luks)" ]; then
     # A disk that has not shown up yet must not open the shell unchecked.
-    printf '%s\n' 'No encrypted disk found, so there is nothing to sign in with.' \
-      'Boot installer media to repair an unencrypted install.'
+    printf '%s\n' 'No encrypted disk found, so there is nothing to sign in with.'
+    if [ "$from_stick" = true ]; then
+      printf '%s\n' 'To repair an unencrypted install, use Shell in the stick menu.'
+    else
+      printf '%s\n' 'Boot installer media to repair an unencrypted install.'
+    fi
     return
   fi
   pick_device || {
@@ -116,6 +141,21 @@ erase_and_reinstall() {
   done
   runuser -l nixos -c 'gjallar-recover install'
 }
+
+if [ "$from_stick" = true ]; then
+  while true; do
+    printf '%s\n' '' 'gjallarOS recovery' \
+      '  1) Unlock the installed system and open a recovery shell' \
+      '  2) Back to the stick menu'
+    drop_typeahead
+    printf 'Choice: '
+    read -r choice || exit 1
+    case $choice in
+      1) open_system ;;
+      2) exit 0 ;;
+    esac
+  done
+fi
 
 while true; do
   printf '%s\n' '' 'gjallarOS recovery' \

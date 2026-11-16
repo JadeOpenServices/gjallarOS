@@ -56,7 +56,7 @@ let
           '  gjallar-recover repair-boot ROOT' \
           '  gjallar-recover rebuild ROOT FLAKE#HOST' \
           '  gjallar-recover developer-off' \
-          '  gjallar-recover guided {repair|reinstall|fresh}' \
+          '  gjallar-recover guided {repair|reinstall|fresh [--channel CHANNEL]}' \
           '  gjallar-recover install'
       }
 
@@ -566,14 +566,26 @@ let
               run_installer --recovery --accept-existing
               ;;
             fresh)
+              # The installer stick's Advanced entry passes a channel; only
+              # the three channel names get through.
+              channel_args=()
+              if [ "$#" -eq 4 ] && [ "$3" = --channel ]; then
+                case "$4" in
+                  stable | staging | dev) channel_args=(--channel "$4") ;;
+                esac
+              fi
+              if [ "$#" -ne 2 ] && [ "''${#channel_args[@]}" -eq 0 ]; then
+                printf '%s\n' 'Usage: gjallar-recover guided fresh [--channel stable|staging|dev]' >&2
+                exit 2
+              fi
               printf '%s\n' \
                 'DANGER: GUIDED FRESH INSTALL MODE' \
                 'Select the target disk in the installer and confirm its destructive plan.'
               confirm_phrase ERASE-FOR-FRESH-INSTALL
-              run_installer --recovery
+              run_installer --recovery "''${channel_args[@]}"
               ;;
             *)
-              printf '%s\n' 'Usage: gjallar-recover guided {repair|reinstall|fresh}' >&2
+              printf '%s\n' 'Usage: gjallar-recover guided {repair|reinstall|fresh [--channel CHANNEL]}' >&2
               exit 2
               ;;
           esac

@@ -14,6 +14,8 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/stickkeyboard"
 )
 
 // The package recipe sets these to tzdata's zoneinfo folder, glibc's list
@@ -105,6 +107,9 @@ type Session struct {
 
 // Live reads the session's timezone, locale and keyboard layout through
 // timedatectl and localectl. It runs as the installing user and only reads.
+// On the installer stick the layout picked in the stick menu wins: the
+// stick's console and display keep their own keymap, localectl does not
+// know it.
 func Live(ctx context.Context) Session {
 	var s Session
 	if out, err := exec.CommandContext(ctx, "timedatectl", "show", "-p", "Timezone", "--value").Output(); err == nil {
@@ -113,8 +118,19 @@ func Live(ctx context.Context) Session {
 	if out, err := exec.CommandContext(ctx, "localectl", "status").Output(); err == nil {
 		s.Locale, s.KeyboardLayout = parseLocalectl(string(out))
 	}
+	return preferStick(s)
+}
+
+// preferStick puts the stick menu's layout into s when there is one.
+func preferStick(s Session) Session {
+	if layout, err := stickLayout(); err == nil {
+		s.KeyboardLayout = layout
+	}
 	return s
 }
+
+// stickLayout is stickkeyboard.Read; tests replace it.
+var stickLayout = stickkeyboard.Read
 
 // parseLocalectl takes LANG from "System Locale:" and the first X11
 // layout, or the console keymap when no X11 layout is set.

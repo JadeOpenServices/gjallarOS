@@ -12,8 +12,9 @@ import (
 // row with Retired set.
 type ID uint16
 
-// Installer anchors, GJA-1000 to GJA-1999. Rebuild, update and recovery
-// get their own ranges when they start logging.
+// Installer anchors, GJA-1000 to GJA-1999; the installer stick's menu,
+// GJA-2000 to GJA-2999. Rebuild, update and recovery get their own ranges
+// when they start logging.
 const (
 	RunStarted           ID = 1001
 	RunHost              ID = 1002
@@ -33,6 +34,15 @@ const (
 	RunRestart           ID = 1090
 	RunFailed            ID = 1098
 	RunFinished          ID = 1099
+
+	StickBootStarted      ID = 2001
+	StickDisplayStarted   ID = 2010
+	StickNetworkOnline    ID = 2020
+	StickNetworkLookAgain ID = 2021
+	StickNetworkNone      ID = 2022
+	StickMenuChosen       ID = 2030
+	StickChannelAdvanced  ID = 2031
+	StickFlowFailed       ID = 2098
 )
 
 // Kind is the type of an anchor field. There is no free-text kind: a
@@ -130,6 +140,33 @@ var Registry = []Anchor{
 	{ID: RunFinished, Name: "install.run.finished",
 		Meaning: "The run ended.",
 		Fields:  []FieldSpec{{Name: "code", Kind: KindCount, Meaning: "exit code: 0 done, 1 failed, 2 wrong options, 130 stopped by the user"}}},
+
+	{ID: StickBootStarted, Name: "stick.boot.started",
+		Meaning: "The installer stick's menu started for the first time this boot.",
+		Fields:  []FieldSpec{{Name: "secureboot", Kind: KindBool, Meaning: "the firmware booted with Secure Boot on"}}},
+	{ID: StickDisplayStarted, Name: "stick.display.started",
+		Meaning: "The stick's menu is on the screen.",
+		Fields: []FieldSpec{{Name: "mode", Kind: KindChoice, Choices: []string{"gpu", "pixman", "console"},
+			Meaning: "a window drawn by the graphics card, a window drawn by the processor, or the text console"}}},
+	{ID: StickNetworkOnline, Name: "stick.network.online",
+		Meaning: "The stick has a network connection.",
+		Fields: []FieldSpec{{Name: "via", Kind: KindChoice, Choices: []string{"ethernet", "wifi"},
+			Meaning: "a cable or Wi-Fi"}}},
+	{ID: StickNetworkLookAgain, Name: "stick.network.look-again",
+		Meaning: "The user asked the stick to look for a network again.",
+		Fields:  []FieldSpec{{Name: "tries", Kind: KindCount, Meaning: "how many times so far"}}},
+	{ID: StickNetworkNone, Name: "stick.network.none",
+		Meaning: "The user went on without a network connection."},
+	{ID: StickMenuChosen, Name: "stick.menu.chosen",
+		Meaning: "The user picked an entry of the stick's menu.",
+		Fields: []FieldSpec{{Name: "choice", Kind: KindChoice, Choices: []string{"install", "move-disk", "bring-over", "recovery", "shell"},
+			Meaning: "install, move to a new disk, bring an old system over, recovery, or the shell"}}},
+	{ID: StickChannelAdvanced, Name: "stick.channel.advanced",
+		Meaning: "The user changed the release channel under Advanced.",
+		Fields: []FieldSpec{{Name: "channel", Kind: KindChoice, Choices: []string{"stable", "staging", "dev"},
+			Meaning: "the channel the install will follow"}}},
+	{ID: StickFlowFailed, Name: "stick.flow.failed",
+		Meaning: "A step of the stick's menu failed; the ERROR line above says why."},
 }
 
 var byID = func() map[ID]Anchor {
@@ -240,11 +277,14 @@ func Markdown() string {
 	b.WriteString("# Install log anchors\n\n")
 	b.WriteString("<!-- Generated from internal/installer/installlog/anchors.go. ")
 	b.WriteString("Update with: GJALLAR_UPDATE_DOCS=1 go test ./internal/installer/installlog -->\n\n")
-	b.WriteString("The installer writes a log of each run. Fixed points of the run carry an\n")
-	b.WriteString("anchor: a code that never changes and a name that says what happened, for\n")
-	b.WriteString("example `GJA-1011 install.disk.only-one-confirmed`. Search a log for the\n")
-	b.WriteString("code to find where a run got to. Anchor fields only hold numbers, yes/no\n")
-	b.WriteString("or one of the words listed here, never text a user typed.\n\n")
+	b.WriteString("The installer and the installer stick's menu write a log of each run.\n")
+	b.WriteString("Fixed points of the run carry an anchor: a code that never changes and a\n")
+	b.WriteString("name that says what happened, for example\n")
+	b.WriteString("`GJA-1011 install.disk.only-one-confirmed`. Search a log for the code to\n")
+	b.WriteString("find where a run got to. Codes GJA-1000 to GJA-1999 come from the\n")
+	b.WriteString("installer, GJA-2000 to GJA-2999 from the stick's menu. Anchor fields only\n")
+	b.WriteString("hold numbers, yes/no or one of the words listed here, never text a user\n")
+	b.WriteString("typed.\n\n")
 	b.WriteString("| Code | Name | Meaning | Fields |\n")
 	b.WriteString("|---|---|---|---|\n")
 	for _, a := range anchors {

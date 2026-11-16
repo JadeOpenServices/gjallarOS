@@ -2,11 +2,14 @@
 
 <!-- Generated from internal/installer/installlog/anchors.go. Update with: GJALLAR_UPDATE_DOCS=1 go test ./internal/installer/installlog -->
 
-The installer writes a log of each run. Fixed points of the run carry an
-anchor: a code that never changes and a name that says what happened, for
-example `GJA-1011 install.disk.only-one-confirmed`. Search a log for the
-code to find where a run got to. Anchor fields only hold numbers, yes/no
-or one of the words listed here, never text a user typed.
+The installer and the installer stick's menu write a log of each run.
+Fixed points of the run carry an anchor: a code that never changes and a
+name that says what happened, for example
+`GJA-1011 install.disk.only-one-confirmed`. Search a log for the code to
+find where a run got to. Codes GJA-1000 to GJA-1999 come from the
+installer, GJA-2000 to GJA-2999 from the stick's menu. Anchor fields only
+hold numbers, yes/no or one of the words listed here, never text a user
+typed.
 
 | Code | Name | Meaning | Fields |
 |---|---|---|---|
@@ -28,3 +31,11 @@ or one of the words listed here, never text a user typed.
 | GJA-1090 | `install.run.restart` | The installer restarts the machine to go on. | `into` (one of system, firmware-setup): gjallarOS or the firmware setup screen |
 | GJA-1098 | `install.run.failed` | The run stopped with an error; the ERROR line above says why. | none |
 | GJA-1099 | `install.run.finished` | The run ended. | `code` (count): exit code: 0 done, 1 failed, 2 wrong options, 130 stopped by the user |
+| GJA-2001 | `stick.boot.started` | The installer stick's menu started for the first time this boot. | `secureboot` (yes/no): the firmware booted with Secure Boot on |
+| GJA-2010 | `stick.display.started` | The stick's menu is on the screen. | `mode` (one of gpu, pixman, console): a window drawn by the graphics card, a window drawn by the processor, or the text console |
+| GJA-2020 | `stick.network.online` | The stick has a network connection. | `via` (one of ethernet, wifi): a cable or Wi-Fi |
+| GJA-2021 | `stick.network.look-again` | The user asked the stick to look for a network again. | `tries` (count): how many times so far |
+| GJA-2022 | `stick.network.none` | The user went on without a network connection. | none |
+| GJA-2030 | `stick.menu.chosen` | The user picked an entry of the stick's menu. | `choice` (one of install, move-disk, bring-over, recovery, shell): install, move to a new disk, bring an old system over, recovery, or the shell |
+| GJA-2031 | `stick.channel.advanced` | The user changed the release channel under Advanced. | `channel` (one of stable, staging, dev): the channel the install will follow |
+| GJA-2098 | `stick.flow.failed` | A step of the stick's menu failed; the ERROR line above says why. | none |

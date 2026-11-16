@@ -36,9 +36,14 @@ const (
 	anchorReserve = 64 << 10
 )
 
-// FileName is the log file's name for a run started at now.
+// FileName is the log file's name for an installer run started at now.
 func FileName(now time.Time) string {
 	return "install-" + now.UTC().Format("20060102-150405") + ".log"
+}
+
+// StickFileName is the log file's name for a stick menu started at now.
+func StickFileName(now time.Time) string {
+	return "stick-" + now.UTC().Format("20060102-150405") + ".log"
 }
 
 // RuntimeDir is the RAM folder for the log of the running user. On live
@@ -67,10 +72,21 @@ type Log struct {
 	pending map[*Tee][]byte
 }
 
-// Open creates the log in dir. dir is created owner-only when missing and
-// must belong to the running user with no access for anyone else. The
-// file is new: an existing file or link at its name is never used.
+// Open creates the installer's log in dir. dir is created owner-only when
+// missing and must belong to the running user with no access for anyone
+// else. The file is new: an existing file or link at its name is never
+// used.
 func Open(dir string, now time.Time) (*Log, error) {
+	return open(dir, FileName(now), "gjallarOS install log", now)
+}
+
+// OpenStick creates the stick menu's log in dir, under the same rules as
+// Open.
+func OpenStick(dir string, now time.Time) (*Log, error) {
+	return open(dir, StickFileName(now), "gjallarOS installer stick log", now)
+}
+
+func open(dir, name, title string, now time.Time) (*Log, error) {
 	if !filepath.IsAbs(dir) {
 		return nil, fmt.Errorf("install log folder %q is not absolute", dir)
 	}
@@ -89,7 +105,6 @@ func Open(dir string, now time.Time) (*Log, error) {
 	if int(st.Uid) != os.Geteuid() || st.Mode&0o077 != 0 {
 		return nil, fmt.Errorf("%s belongs to someone else or is open to others; no install log this run", dir)
 	}
-	name := FileName(now)
 	fd, err := unix.Openat(dirFD, name, unix.O_RDWR|unix.O_CREAT|unix.O_EXCL|unix.O_NOFOLLOW|unix.O_APPEND|unix.O_CLOEXEC, 0o600)
 	if err != nil {
 		return nil, fmt.Errorf("create install log in %s: %w", dir, err)
@@ -101,7 +116,7 @@ func Open(dir string, now time.Time) (*Log, error) {
 		now:     time.Now,
 		pending: map[*Tee][]byte{},
 	}
-	l.writeLine("gjallarOS install log, started " + now.UTC().Format(time.RFC3339))
+	l.writeLine(title + ", started " + now.UTC().Format(time.RFC3339))
 	return l, nil
 }
 
