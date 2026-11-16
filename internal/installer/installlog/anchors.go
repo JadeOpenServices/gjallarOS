@@ -33,6 +33,7 @@ const (
 	InPlaceStarted       ID = 1060
 	InPlaceFinished      ID = 1061
 	RunRestart           ID = 1090
+	RunBootNext          ID = 1091
 	RunFailed            ID = 1098
 	RunFinished          ID = 1099
 
@@ -45,6 +46,7 @@ const (
 	StickChannelAdvanced  ID = 2031
 	StickReleaseRefused   ID = 2040
 	StickReleaseOlder     ID = 2041
+	StickInstalledStart   ID = 2050
 	StickFlowFailed       ID = 2098
 
 	MakerRunStarted        ID = 3001
@@ -157,6 +159,10 @@ var Registry = []Anchor{
 		Meaning: "The installer restarts the machine to go on.",
 		Fields: []FieldSpec{{Name: "into", Kind: KindChoice, Choices: []string{"system", "firmware-setup"},
 			Meaning: "gjallarOS or the firmware setup screen"}}},
+	{ID: RunBootNext, Name: "install.run.boot-next",
+		Meaning: "Before the restart, the installer pointed the next start at the new system, so a stick still plugged in does not start again.",
+		Fields: []FieldSpec{{Name: "result", Kind: KindChoice, Choices: []string{"set", "none", "failed"},
+			Meaning: "set: the next start goes to the new system; none: no firmware entry for it was found; failed: setting it did not work (the WARNING line says why)"}}},
 	{ID: RunFailed, Name: "install.run.failed",
 		Meaning: "The run stopped with an error; the ERROR line above says why."},
 	{ID: RunFinished, Name: "install.run.finished",
@@ -193,6 +199,10 @@ var Registry = []Anchor{
 			Meaning: "floor: the stick is older than the oldest release still safe; no-key: built without the release key; bad: the release files did not match the signature; unreachable: the release files could not be fetched"}}},
 	{ID: StickReleaseOlder, Name: "stick.release.older",
 		Meaning: "A newer release is out; the stick is still safe to install from and went on."},
+	{ID: StickInstalledStart, Name: "stick.installed.start",
+		Meaning: "The user chose Start installed gjallarOS on the stick's menu.",
+		Fields: []FieldSpec{{Name: "result", Kind: KindChoice, Choices: []string{"set", "none", "failed"},
+			Meaning: "set: the stick restarts into the installed system; none: no installed system was found anymore; failed: the next start could not be set"}}},
 	{ID: StickFlowFailed, Name: "stick.flow.failed",
 		Meaning: "A step of the stick's menu failed; the ERROR line above says why."},
 

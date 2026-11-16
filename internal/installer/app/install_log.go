@@ -15,6 +15,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/bootnext"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/config"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/installlog"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/installreport"
@@ -41,6 +42,17 @@ var reboot = func(ctx context.Context, firmwareSetup bool) error {
 		args = append(args, "--firmware-setup")
 	}
 	return attached(ctx, "sudo", args...)
+}
+
+// bootNextRunner reads and sets firmware boot entries as root. It keeps
+// stdout only, so a warning on stderr never mixes into lsblk's JSON. Tests
+// replace it.
+var bootNextRunner bootnext.Runner = sudoStdout{}
+
+type sudoStdout struct{}
+
+func (sudoStdout) Output(ctx context.Context, name string, args ...string) ([]byte, error) {
+	return exec.CommandContext(ctx, "sudo", append([]string{name}, args...)...).Output()
 }
 
 // knownValues are the user's and machine's values a report or log hides.
@@ -72,6 +84,11 @@ type logKeeper struct {
 	// before it is the last one: a later copy could be cut off by the
 	// shutdown and leave a broken file.
 	restarting bool
+	// bootDisk is the disk a fresh install wrote in this run; empty on any
+	// other run. Before the machine restarts, the next start is pointed at
+	// it once (Q228 item 4).
+	bootDisk     string
+	bootNextDone bool
 }
 
 // startInstallLog opens the log and returns writers that copy into it. On
@@ -185,13 +202,60 @@ func (k *logKeeper) restart(ctx context.Context, errOut io.Writer, firmwareSetup
 	} else {
 		installlog.Mark(installlog.RunRestart, installlog.Choice("into", "system"))
 	}
+	k.bootNext(ctx, errOut)
 	k.keep(ctx, errOut)
 	k.restarting = true
 	return reboot(ctx, firmwareSetup)
 }
 
+// bootNext points the next start at the new system's firmware entry, so an
+// installer stick that is still plugged in does not start again. It runs
+// once per run. A failure is a warning: the stick's menu then offers to
+// start the installed system.
+func (k *logKeeper) bootNext(ctx context.Context, errOut io.Writer) {
+	if k == nil || k.bootDisk == "" || k.bootNextDone {
+		return
+	}
+	k.bootNextDone = true
+	want := sameDiskKey(k.bootDisk)
+	found, err := bootnext.Find(ctx, bootNextRunner)
+	if err == nil {
+		for _, in := range found {
+			if sameDiskKey(in.Disk) != want {
+				continue
+			}
+			if err = bootnext.Set(ctx, bootNextRunner, in.Entry); err == nil {
+				installlog.Mark(installlog.RunBootNext, installlog.Choice("result", "set"))
+				return
+			}
+			break
+		}
+	}
+	if err == nil {
+		installlog.Mark(installlog.RunBootNext, installlog.Choice("result", "none"))
+		fmt.Fprintln(errOut, "WARNING: no firmware boot entry for the new system was found. If the installer stick starts again, choose Start installed gjallarOS.")
+		return
+	}
+	installlog.Mark(installlog.RunBootNext, installlog.Choice("result", "failed"))
+	fmt.Fprintf(errOut, "WARNING: could not point the next start at the new system: %v. If the installer stick starts again, choose Start installed gjallarOS.\n", err)
+}
+
+// sameDiskKey resolves links such as /dev/disk/by-id names, so two names of
+// one disk compare equal.
+func sameDiskKey(path string) string {
+	if real, err := filepath.EvalSymlinks(path); err == nil {
+		return real
+	}
+	return filepath.Clean(path)
+}
+
 // finish ends the log: the last anchor, the copy into the target, close.
 func (k *logKeeper) finish(ctx context.Context, errOut io.Writer, code int) {
+	if code == 0 && !k.restarting {
+		// The user restarts later on their own; that start goes to the
+		// new system too.
+		k.bootNext(ctx, errOut)
+	}
 	if k.log == nil {
 		return
 	}

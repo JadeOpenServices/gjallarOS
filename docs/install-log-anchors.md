@@ -30,6 +30,7 @@ yes/no or one of the words listed here, never text a user typed.
 | GJA-1060 | `install.inplace.started` | The in-place install on the running system started building. | `path` (one of first, system-checkout, repo): first install with a new system checkout, an update of the system checkout, or a build from the installer's own checkout |
 | GJA-1061 | `install.inplace.finished` | The in-place build and switch finished without an error. | none |
 | GJA-1090 | `install.run.restart` | The installer restarts the machine to go on. | `into` (one of system, firmware-setup): gjallarOS or the firmware setup screen |
+| GJA-1091 | `install.run.boot-next` | Before the restart, the installer pointed the next start at the new system, so a stick still plugged in does not start again. | `result` (one of set, none, failed): set: the next start goes to the new system; none: no firmware entry for it was found; failed: setting it did not work (the WARNING line says why) |
 | GJA-1098 | `install.run.failed` | The run stopped with an error; the ERROR line above says why. | none |
 | GJA-1099 | `install.run.finished` | The run ended. | `code` (count): exit code: 0 done, 1 failed, 2 wrong options, 130 stopped by the user |
 | GJA-2001 | `stick.boot.started` | The installer stick's menu started for the first time this boot. | `secureboot` (yes/no): the firmware booted with Secure Boot on |
@@ -41,6 +42,7 @@ yes/no or one of the words listed here, never text a user typed.
 | GJA-2031 | `stick.channel.advanced` | The user changed the release channel under Advanced. | `channel` (one of stable, staging, dev): the channel the install will follow |
 | GJA-2040 | `stick.release.refused` | The stick did not start the installer: it could not show that it is still safe to install from. Nothing on the computer was changed. | `reason` (one of floor, no-key, bad, unreachable): floor: the stick is older than the oldest release still safe; no-key: built without the release key; bad: the release files did not match the signature; unreachable: the release files could not be fetched |
 | GJA-2041 | `stick.release.older` | A newer release is out; the stick is still safe to install from and went on. | none |
+| GJA-2050 | `stick.installed.start` | The user chose Start installed gjallarOS on the stick's menu. | `result` (one of set, none, failed): set: the stick restarts into the installed system; none: no installed system was found anymore; failed: the next start could not be set |
 | GJA-2098 | `stick.flow.failed` | A step of the stick's menu failed; the ERROR line above says why. | none |
 | GJA-3001 | `maker.run.started` | The USB stick maker started. | `os` (one of linux, windows): the system the maker runs on |
 | GJA-3010 | `maker.download.finished` | The stick image and its checksum files are downloaded. | none |

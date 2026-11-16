@@ -1733,6 +1733,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 			// The Secure Boot continuation below still works on the target.
 			defer result.ReleaseTargetState()
 			runLog.target = result.MountPoint
+			runLog.bootDisk = targetDisk
 			freshRoot = result.MountPoint
 			s.recoveryPartition = result.RecoveryPartition
 		}

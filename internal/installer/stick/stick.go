@@ -23,6 +23,7 @@ import (
 	"golang.org/x/sys/unix"
 
 	"github.com/JadeOpenServices/gjallarOS/internal/input/xkb"
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/bootnext"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/calmmenu"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/installlog"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/prompt"
@@ -101,6 +102,8 @@ type Stick struct {
 	offline   bool
 	lookAgain int
 	markedVia string
+	// lookFailed is set once the look for an installed system failed.
+	lookFailed bool
 	// note is one line for the next menu screen, such as an error: the
 	// menu clears the screen, so text printed before it is gone.
 	note string
@@ -159,22 +162,105 @@ func (s *Stick) markDisplay() {
 	}
 }
 
-// menuGroups are the menu entries, grouped as THEMEBRAIN section 18 shows
-// them: the task, ways out of trouble, settings, the machine.
-var menuGroups = [][]calmmenu.Item{
-	{{Key: "1", Label: "Install gjallarOS", Desc: "Set up gjallarOS on this computer"}},
+// The menu's entries. The numbers follow from where an entry sits, so they
+// shift when Start installed gjallarOS is on top (Q235).
+type action int
+
+const (
+	actStart action = iota
+	actInstall
+	actRecovery
+	actShell
+	actNetwork
+	actKeyboard
+	actAdvanced
+	actRestart
+	actPowerOff
+)
+
+type entry struct {
+	act         action
+	label, desc string
+}
+
+// menuLayout groups the entries as THEMEBRAIN section 18 shows them: the
+// task, ways out of trouble, settings, the machine.
+var menuLayout = [][]entry{
 	{
-		{Key: "2", Label: "Recovery", Desc: "Unlock an installed gjallarOS with its recovery key"},
-		{Key: "3", Label: "Shell", Desc: "A command line. Type exit to come back here"},
+		{actStart, "Start installed gjallarOS", "Leave the installer and start it"},
+		{actInstall, "Install gjallarOS", "Set up gjallarOS on this computer"},
 	},
-	{{Key: "4", Label: "Network"}, {Key: "5", Label: "Keyboard layout"}, {Key: "6", Label: "Advanced"}},
-	{{Key: "7", Label: "Restart"}, {Key: "8", Label: "Power off"}},
+	{
+		{actRecovery, "Recovery", "Unlock an installed gjallarOS with its recovery key"},
+		{actShell, "Shell", "A command line. Type exit to come back here"},
+	},
+	{{act: actNetwork, label: "Network"}, {act: actKeyboard, label: "Keyboard layout"}, {act: actAdvanced, label: "Advanced"}},
+	{{act: actRestart, label: "Restart"}, {act: actPowerOff, label: "Power off"}},
+}
+
+// numbered is the menu as shown: Start installed gjallarOS only when an
+// installed system was found, the numbers counted from 1.
+func numbered(installed bool) ([][]calmmenu.Item, map[string]action) {
+	keys := map[string]action{}
+	var groups [][]calmmenu.Item
+	for _, g := range menuLayout {
+		var items []calmmenu.Item
+		for _, e := range g {
+			if e.act == actStart && !installed {
+				continue
+			}
+			key := strconv.Itoa(len(keys) + 1)
+			keys[key] = e.act
+			items = append(items, calmmenu.Item{Key: key, Label: e.label, Desc: e.desc})
+		}
+		groups = append(groups, items)
+	}
+	return groups, keys
+}
+
+// installed reports whether a firmware entry starts an installed gjallarOS.
+// A failed look shows the menu without Start installed gjallarOS and logs
+// once.
+func (s *Stick) installed(ctx context.Context) bool {
+	found, err := bootnext.Find(ctx, s.Cmd)
+	if err != nil {
+		if !s.lookFailed {
+			s.lookFailed = true
+			s.logError("could not look for an installed gjallarOS")
+		}
+		return false
+	}
+	return len(found) > 0
+}
+
+// startInstalled points the next start at the installed system, looked up
+// again now, and restarts.
+func (s *Stick) startInstalled(ctx context.Context) {
+	found, err := bootnext.Find(ctx, s.Cmd)
+	if err == nil && len(found) == 0 {
+		installlog.Mark(installlog.StickInstalledStart, installlog.Choice("result", "none"))
+		s.note = "No installed gjallarOS was found anymore."
+		return
+	}
+	if err == nil {
+		err = bootnext.Set(ctx, s.Cmd, found[0].Entry)
+	}
+	if err != nil {
+		installlog.Mark(installlog.StickInstalledStart, installlog.Choice("result", "failed"))
+		s.logError("could not set the next start to the installed gjallarOS")
+		s.note = "The next start could not be set. Use the firmware's boot menu."
+		return
+	}
+	installlog.Mark(installlog.StickInstalledStart, installlog.Choice("result", "set"))
+	fmt.Fprintln(s.UI.Out, "Restarting into the installed gjallarOS...")
+	s.runStep(ctx, "the restart", "systemctl", "reboot")
 }
 
 func (s *Stick) menu(ctx context.Context) error {
 	for {
 		s.flush()
-		if err := s.draw(s.screen()); err != nil {
+		groups, keys := numbered(s.installed(ctx))
+		if err := s.draw(s.screen(groups)); err != nil {
 			return err
 		}
 		choice, err := s.UI.Line(ctx)
@@ -183,8 +269,15 @@ func (s *Stick) menu(ctx context.Context) error {
 		}
 		s.note = ""
 		fmt.Fprint(s.UI.Out, calmmenu.Clear)
-		switch choice {
-		case "1":
+		act, ok := keys[choice]
+		if !ok {
+			s.note = fmt.Sprintf("Type one of the numbers 1 to %d.", len(keys))
+			continue
+		}
+		switch act {
+		case actStart:
+			s.startInstalled(ctx)
+		case actInstall:
 			if s.offline {
 				fmt.Fprintln(s.UI.Out, "Installing needs a network connection.")
 				if err := s.networkStep(ctx); err != nil {
@@ -209,40 +302,38 @@ func (s *Stick) menu(ctx context.Context) error {
 			if err := s.pause(ctx); err != nil {
 				return err
 			}
-		case "2":
+		case actRecovery:
 			installlog.Mark(installlog.StickMenuChosen, installlog.Choice("choice", "recovery"))
 			s.runStep(ctx, "the recovery console", "gjallar-recovery-console", "--from-stick")
 			if err := s.pause(ctx); err != nil {
 				return err
 			}
-		case "3":
+		case actShell:
 			installlog.Mark(installlog.StickMenuChosen, installlog.Choice("choice", "shell"))
 			fmt.Fprintln(s.UI.Out, "Type exit to come back to this menu.")
 			s.runStep(ctx, "the shell", "runuser", "-l", "nixos")
-		case "4":
+		case actNetwork:
 			if err := s.networkStep(ctx); err != nil {
 				return err
 			}
-		case "5":
+		case actKeyboard:
 			if err := s.keyboardStep(ctx); err != nil {
 				return err
 			}
-		case "6":
+		case actAdvanced:
 			if err := s.advanced(ctx); err != nil {
 				return err
 			}
-		case "7":
+		case actRestart:
 			s.runStep(ctx, "the restart", "systemctl", "reboot")
-		case "8":
+		case actPowerOff:
 			s.runStep(ctx, "the power off", "systemctl", "poweroff")
-		default:
-			s.note = "Type one of the numbers 1 to 8."
 		}
 	}
 }
 
 // screen is the menu with the state as of now.
-func (s *Stick) screen() calmmenu.Menu {
+func (s *Stick) screen(groups [][]calmmenu.Item) calmmenu.Menu {
 	network := "Not connected"
 	if !s.offline && s.markedVia != "" {
 		network = upperFirst(viaName(s.markedVia)) + ", connected"
@@ -258,7 +349,7 @@ func (s *Stick) screen() calmmenu.Menu {
 			{Name: "Keyboard", Value: keyboard},
 			{Name: "Channel", Value: s.channel},
 		},
-		Groups: menuGroups,
+		Groups: groups,
 		Note:   s.note,
 		Hint:   "Type a number and press Enter.",
 		Prompt: "Choice: ",

@@ -32,6 +32,14 @@ type fakeNet struct {
 	calls        []string
 	// interactive answers programs run on the terminal; nil means success.
 	interactive func(name string, args []string) error
+	// disks is what lsblk prints; empty means no disks. boot is what
+	// efibootmgr -v prints. bootNext is set by efibootmgr --bootnext unless
+	// setFails.
+	disks, boot, bootNext string
+	setFails              bool
+	// diskLooks counts lsblk calls; disksGone empties the disks from that
+	// look on.
+	diskLooks, disksGone int
 }
 
 func (f *fakeNet) Output(_ context.Context, name string, args ...string) ([]byte, error) {
@@ -46,6 +54,26 @@ func (f *fakeNet) Output(_ context.Context, name string, args ...string) ([]byte
 		return []byte(f.connectivity + "\n"), nil
 	case "nmcli -t -f IN-USE,SSID,SIGNAL,SECURITY,BSSID device wifi list --rescan yes":
 		return []byte(f.wifiList), nil
+	case "lsblk -J -l -p -o PATH,TYPE,PARTUUID,PARTLABEL,PARTTYPE,PKNAME":
+		f.diskLooks++
+		if f.disks == "" || (f.disksGone > 0 && f.diskLooks >= f.disksGone) {
+			return []byte(`{"blockdevices":[]}`), nil
+		}
+		return []byte(f.disks), nil
+	case "efibootmgr -v":
+		return []byte(f.boot), nil
+	case "efibootmgr ": // no arguments: the key ends in the space
+		if f.bootNext == "" {
+			return []byte("BootCurrent: 0001\n"), nil
+		}
+		return []byte("BootNext: " + f.bootNext + "\nBootCurrent: 0001\n"), nil
+	}
+	if e, ok := strings.CutPrefix(call, "efibootmgr --bootnext "); ok {
+		if f.setFails {
+			return nil, errors.New("efivars read-only")
+		}
+		f.bootNext = e
+		return nil, nil
 	}
 	return nil, fmt.Errorf("unexpected %s", call)
 }
