@@ -8,12 +8,13 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
 )
 
-var anchorName = regexp.MustCompile(`^(install|stick)(\.[a-z0-9]+(-[a-z0-9]+)*){2,}$`)
+var anchorName = regexp.MustCompile(`^(install|stick|maker)(\.[a-z0-9]+(-[a-z0-9]+)*){2,}$`)
 
 func repoRoot(t *testing.T) string {
 	t.Helper()
@@ -96,11 +97,15 @@ func TestRegistryRows(t *testing.T) {
 			if !strings.HasPrefix(a.Name, "stick.") {
 				t.Errorf("%s is in the stick range but named %s", a.ID.Code(), a.Name)
 			}
+		case a.ID >= 3000 && a.ID <= 3999:
+			if !strings.HasPrefix(a.Name, "maker.") {
+				t.Errorf("%s is in the maker range but named %s", a.ID.Code(), a.Name)
+			}
 		default:
-			t.Errorf("%s is outside the installer and stick ranges", a.ID.Code())
+			t.Errorf("%s is outside the installer, stick and maker ranges", a.ID.Code())
 		}
 		if !anchorName.MatchString(a.Name) {
-			t.Errorf("%s name %q is not install.area.event or stick.area.event", a.ID.Code(), a.Name)
+			t.Errorf("%s name %q is not install, stick or maker .area.event", a.ID.Code(), a.Name)
 		}
 		if strings.TrimSpace(a.Meaning) == "" {
 			t.Errorf("%s has no meaning", a.ID.Code())
@@ -262,5 +267,64 @@ func TestAnchorDocsAreCurrent(t *testing.T) {
 	}
 	if string(got) != want {
 		t.Error("docs/install-log-anchors.md is out of date; run GJALLAR_UPDATE_DOCS=1 go test ./internal/installer/installlog")
+	}
+}
+
+// The Linux stick maker writes its anchors from shell, so the Go checks
+// above do not see them. Each `log "GJA-..."` line must match the registry:
+// code and name together, known fields, choice values as written there,
+// counts from a shell variable or a number. Every maker anchor that is not
+// for Windows only must be written somewhere.
+func TestMakerScriptAnchors(t *testing.T) {
+	path := filepath.Join(repoRoot(t), "scripts", "installation", "make-stick.sh")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	line := regexp.MustCompile(`log "GJA-([0-9]{4}) ([a-z0-9.-]+)((?: [a-z-]+=[^ "]+)*)"`)
+	count := regexp.MustCompile(`^(\$[a-z_]+|[0-9]+)$`)
+	src := string(raw)
+	if n, m := strings.Count(src, "GJA-"), len(line.FindAllString(src, -1)); n != m {
+		t.Errorf("%d GJA- codes in the script, but only %d in log \"GJA-NNNN name field=value\" lines", n, m)
+	}
+	seen := map[ID]bool{}
+	for _, m := range line.FindAllStringSubmatch(src, -1) {
+		n, _ := strconv.Atoi(m[1])
+		anchor, ok := Lookup(ID(n))
+		if !ok || anchor.Name != m[2] {
+			t.Errorf("%q: GJA-%s %s is not a registered anchor", m[0], m[1], m[2])
+			continue
+		}
+		seen[anchor.ID] = true
+		fields := strings.Fields(m[3])
+		if len(fields) != len(anchor.Fields) {
+			t.Errorf("%q: want %d fields", m[0], len(anchor.Fields))
+		}
+		for i, f := range fields {
+			name, value, _ := strings.Cut(f, "=")
+			if i >= len(anchor.Fields) || anchor.Fields[i].Name != name {
+				t.Errorf("%q: field %s is not field %d of %s", m[0], name, i+1, anchor.ID.Code())
+				continue
+			}
+			spec := anchor.Fields[i]
+			switch spec.Kind {
+			case KindCount:
+				if !count.MatchString(value) {
+					t.Errorf("%q: count %s must be a number or a shell variable", m[0], name)
+				}
+			case KindChoice:
+				if !slices.Contains(spec.Choices, value) {
+					t.Errorf("%q: %q is not a choice of %s", m[0], value, name)
+				}
+			default:
+				t.Errorf("%q: the maker writes no %s fields", m[0], spec.Kind)
+			}
+		}
+	}
+	windowsOnly := map[ID]bool{}
+	for _, a := range Registry {
+		if a.ID >= 3000 && a.ID <= 3999 && !seen[a.ID] && !windowsOnly[a.ID] {
+			t.Errorf("%s %s is never written by make-stick.sh", a.ID.Code(), a.Name)
+		}
 	}
 }

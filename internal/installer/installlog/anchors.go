@@ -13,8 +13,9 @@ import (
 type ID uint16
 
 // Installer anchors, GJA-1000 to GJA-1999; the installer stick's menu,
-// GJA-2000 to GJA-2999. Rebuild, update and recovery get their own ranges
-// when they start logging.
+// GJA-2000 to GJA-2999; the USB stick makers (make-stick.sh and
+// make-stick.ps1), GJA-3000 to GJA-3999. Rebuild, update and recovery get
+// their own ranges when they start logging.
 const (
 	RunStarted           ID = 1001
 	RunHost              ID = 1002
@@ -43,6 +44,20 @@ const (
 	StickMenuChosen       ID = 2030
 	StickChannelAdvanced  ID = 2031
 	StickFlowFailed       ID = 2098
+
+	MakerRunStarted        ID = 3001
+	MakerDownloadFinished  ID = 3010
+	MakerSignatureVerified ID = 3011
+	MakerSignatureBad      ID = 3012
+	MakerDiskChosen        ID = 3020
+	MakerElevationDeclined ID = 3021
+	MakerWriteFinished     ID = 3030
+	MakerReadbackVerified  ID = 3031
+	MakerReadbackMismatch  ID = 3032
+	MakerLogsCreated       ID = 3040
+	MakerLogsSkipped       ID = 3041
+	MakerRunFailed         ID = 3098
+	MakerRunFinished       ID = 3099
 )
 
 // Kind is the type of an anchor field. There is no free-text kind: a
@@ -167,6 +182,39 @@ var Registry = []Anchor{
 			Meaning: "the channel the install will follow"}}},
 	{ID: StickFlowFailed, Name: "stick.flow.failed",
 		Meaning: "A step of the stick's menu failed; the ERROR line above says why."},
+
+	{ID: MakerRunStarted, Name: "maker.run.started",
+		Meaning: "The USB stick maker started.",
+		Fields: []FieldSpec{{Name: "os", Kind: KindChoice, Choices: []string{"linux", "windows"},
+			Meaning: "the system the maker runs on"}}},
+	{ID: MakerDownloadFinished, Name: "maker.download.finished",
+		Meaning: "The stick image and its checksum files are downloaded."},
+	{ID: MakerSignatureVerified, Name: "maker.signature.verified",
+		Meaning: "The signature and every checksum the maker needs are correct."},
+	{ID: MakerSignatureBad, Name: "maker.signature.bad",
+		Meaning: "The signature or a checksum did not match; the download was deleted."},
+	{ID: MakerDiskChosen, Name: "maker.disk.chosen",
+		Meaning: "The user picked the USB stick to write.",
+		Fields:  []FieldSpec{{Name: "disks", Kind: KindCount, Meaning: "how many USB sticks the maker offered"}}},
+	{ID: MakerElevationDeclined, Name: "maker.elevation.declined",
+		Meaning: "Admin rights for the write were refused or not available; nothing was written."},
+	{ID: MakerWriteFinished, Name: "maker.write.finished",
+		Meaning: "The image is written to the stick."},
+	{ID: MakerReadbackVerified, Name: "maker.readback.verified",
+		Meaning: "The stick reads back the same bytes that were signed."},
+	{ID: MakerReadbackMismatch, Name: "maker.readback.mismatch",
+		Meaning: "The stick read back different bytes; its first MiB was wiped so it does not boot."},
+	{ID: MakerLogsCreated, Name: "maker.logs.created",
+		Meaning: "The GJLOGS partition for install logs is on the stick."},
+	{ID: MakerLogsSkipped, Name: "maker.logs.skipped",
+		Meaning: "The stick got no GJLOGS partition; the installer offers to save logs to another drive instead.",
+		Fields: []FieldSpec{{Name: "reason", Kind: KindChoice, Choices: []string{"too-small", "layout"},
+			Meaning: "the stick has no room after the image, or the image's partition table leaves no free slot"}}},
+	{ID: MakerRunFailed, Name: "maker.run.failed",
+		Meaning: "A step of the maker failed; the ERROR line above says why."},
+	{ID: MakerRunFinished, Name: "maker.run.finished",
+		Meaning: "The maker ended.",
+		Fields:  []FieldSpec{{Name: "code", Kind: KindCount, Meaning: "exit code: 0 done, 1 failed, 2 wrong options, 130 stopped by the user"}}},
 }
 
 var byID = func() map[ID]Anchor {
@@ -277,14 +325,15 @@ func Markdown() string {
 	b.WriteString("# Install log anchors\n\n")
 	b.WriteString("<!-- Generated from internal/installer/installlog/anchors.go. ")
 	b.WriteString("Update with: GJALLAR_UPDATE_DOCS=1 go test ./internal/installer/installlog -->\n\n")
-	b.WriteString("The installer and the installer stick's menu write a log of each run.\n")
+	b.WriteString("The installer, the installer stick's menu and the USB stick makers write\n")
+	b.WriteString("a log of each run.\n")
 	b.WriteString("Fixed points of the run carry an anchor: a code that never changes and a\n")
 	b.WriteString("name that says what happened, for example\n")
 	b.WriteString("`GJA-1011 install.disk.only-one-confirmed`. Search a log for the code to\n")
 	b.WriteString("find where a run got to. Codes GJA-1000 to GJA-1999 come from the\n")
-	b.WriteString("installer, GJA-2000 to GJA-2999 from the stick's menu. Anchor fields only\n")
-	b.WriteString("hold numbers, yes/no or one of the words listed here, never text a user\n")
-	b.WriteString("typed.\n\n")
+	b.WriteString("installer, GJA-2000 to GJA-2999 from the stick's menu, GJA-3000 to\n")
+	b.WriteString("GJA-3999 from the USB stick makers. Anchor fields only hold numbers,\n")
+	b.WriteString("yes/no or one of the words listed here, never text a user typed.\n\n")
 	b.WriteString("| Code | Name | Meaning | Fields |\n")
 	b.WriteString("|---|---|---|---|\n")
 	for _, a := range anchors {

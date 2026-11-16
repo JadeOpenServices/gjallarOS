@@ -2,14 +2,15 @@
 
 <!-- Generated from internal/installer/installlog/anchors.go. Update with: GJALLAR_UPDATE_DOCS=1 go test ./internal/installer/installlog -->
 
-The installer and the installer stick's menu write a log of each run.
+The installer, the installer stick's menu and the USB stick makers write
+a log of each run.
 Fixed points of the run carry an anchor: a code that never changes and a
 name that says what happened, for example
 `GJA-1011 install.disk.only-one-confirmed`. Search a log for the code to
 find where a run got to. Codes GJA-1000 to GJA-1999 come from the
-installer, GJA-2000 to GJA-2999 from the stick's menu. Anchor fields only
-hold numbers, yes/no or one of the words listed here, never text a user
-typed.
+installer, GJA-2000 to GJA-2999 from the stick's menu, GJA-3000 to
+GJA-3999 from the USB stick makers. Anchor fields only hold numbers,
+yes/no or one of the words listed here, never text a user typed.
 
 | Code | Name | Meaning | Fields |
 |---|---|---|---|
@@ -39,3 +40,16 @@ typed.
 | GJA-2030 | `stick.menu.chosen` | The user picked an entry of the stick's menu. | `choice` (one of install, move-disk, bring-over, recovery, shell): install, move to a new disk, bring an old system over, recovery, or the shell |
 | GJA-2031 | `stick.channel.advanced` | The user changed the release channel under Advanced. | `channel` (one of stable, staging, dev): the channel the install will follow |
 | GJA-2098 | `stick.flow.failed` | A step of the stick's menu failed; the ERROR line above says why. | none |
+| GJA-3001 | `maker.run.started` | The USB stick maker started. | `os` (one of linux, windows): the system the maker runs on |
+| GJA-3010 | `maker.download.finished` | The stick image and its checksum files are downloaded. | none |
+| GJA-3011 | `maker.signature.verified` | The signature and every checksum the maker needs are correct. | none |
+| GJA-3012 | `maker.signature.bad` | The signature or a checksum did not match; the download was deleted. | none |
+| GJA-3020 | `maker.disk.chosen` | The user picked the USB stick to write. | `disks` (count): how many USB sticks the maker offered |
+| GJA-3021 | `maker.elevation.declined` | Admin rights for the write were refused or not available; nothing was written. | none |
+| GJA-3030 | `maker.write.finished` | The image is written to the stick. | none |
+| GJA-3031 | `maker.readback.verified` | The stick reads back the same bytes that were signed. | none |
+| GJA-3032 | `maker.readback.mismatch` | The stick read back different bytes; its first MiB was wiped so it does not boot. | none |
+| GJA-3040 | `maker.logs.created` | The GJLOGS partition for install logs is on the stick. | none |
+| GJA-3041 | `maker.logs.skipped` | The stick got no GJLOGS partition; the installer offers to save logs to another drive instead. | `reason` (one of too-small, layout): the stick has no room after the image, or the image's partition table leaves no free slot |
+| GJA-3098 | `maker.run.failed` | A step of the maker failed; the ERROR line above says why. | none |
+| GJA-3099 | `maker.run.finished` | The maker ended. | `code` (count): exit code: 0 done, 1 failed, 2 wrong options, 130 stopped by the user |

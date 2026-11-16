@@ -209,6 +209,7 @@
         "gjallar-recovery-iso" = recoveryImage.config.system.build.isoImage;
         "gjallar-installer-lab-iso" = installerLabImage.config.system.build.isoImage;
         "gjallar-stick-iso" = stickImage.config.system.build.gjallarStickIso;
+        "gjallar-gjlogs-image" = pkgs.callPackage ./pkgs/gjallar-gjlogs-image { };
 
         # Packages that cache.nixos.org does not have because gjallarOS patches
         # them. The modules use the same files with the same pkgs, so a build
@@ -373,6 +374,12 @@
         udiskie-new-media-only = import ./tests/nix/udiskie-new-media-only.nix {
           inherit pkgs;
           stockUdiskie = nixpkgs.legacyPackages.${system}.udiskie;
+        };
+
+        make-stick = import ./tests/nix/make-stick.nix {
+          inherit pkgs;
+          script = ./scripts/installation/make-stick.sh;
+          gjlogs = self.packages.${system}."gjallar-gjlogs-image";
         };
 
         foreign-media-readonly = import ./tests/nix/foreign-media-readonly.nix {
