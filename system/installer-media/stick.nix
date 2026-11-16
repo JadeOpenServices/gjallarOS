@@ -93,11 +93,14 @@ let
     show-urls-launch=none
     show-urls-copy=none
     show-urls-persistent=none
+
+    [mouse]
+    hide-when-typing=yes
   '';
 
   # The menu logo (THEMEBRAIN section 18): mark, gap and wordmark on the
-  # terminal ground, as sixel for 32 pixel cells (four rows) and for 64
-  # pixel cells (4K). Built from the brand SVGs, which are paths only, so
+  # terminal ground, as sixel at 1x and at 2x (for cells of 48 pixels
+  # and more, 4K). Built from the brand SVGs, which are paths only, so
   # no font is needed. The menu checks both files before it draws them.
   stickLogo =
     pkgs.runCommand "gjallar-stick-logo"
@@ -111,14 +114,21 @@ let
       ''
         mkdir -p $out
         for s in 1 2; do
-          h=$((128 * s)) wh=$((92 * s)) gap=$((24 * s))
-          rsvg-convert -h "$h" ${../../themes/brand/openjade/mark.svg} -o mark.png
-          rsvg-convert -h "$wh" ${../../themes/brand/openjade/wordmark.svg} -o word.png
+          # The SVGs carry padding: trim it, then pad both parts to one
+          # height that is a multiple of 6. Sixel draws bands of 6 rows, and
+          # a short last band shows as a dark bar under the logo.
+          rsvg-convert -h $((128 * s)) ${../../themes/brand/openjade/mark.svg} | magick - -trim +repage mark.png
+          rsvg-convert -h $((92 * s)) ${../../themes/brand/openjade/wordmark.svg} | magick - -trim +repage word.png
+          mh=$(magick identify -format %h mark.png)
+          h=$(((mh + 5) / 6 * 6))
+          magick mark.png -background none -gravity center -extent "x$h" mark-h.png
           magick word.png -background none -gravity center -extent "x$h" word-h.png
-          magick -size "''${gap}x$h" xc:none gap.png
-          magick mark.png gap.png word-h.png -background none +append \
+          magick -size "$((20 * s))x$h" xc:none gap.png
+          magick mark-h.png gap.png word-h.png -background none +append \
             -background '#${hex term.background}' -alpha remove -alpha off -depth 8 +repage logo.png
-          img2sixel logo.png > $out/logo-''${s}x.six
+          # No dithering and full colour, so the ground keeps the window's
+          # background (within sixel's percent steps) and shows no box.
+          img2sixel -d none -I logo.png > $out/logo-''${s}x.six
         done
       '';
 
