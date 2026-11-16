@@ -61,6 +61,21 @@
       system = "x86_64-linux";
       lib = nixpkgs.lib;
       releasePolicy = builtins.fromJSON (builtins.readFile ./deployment/release-policy.json);
+      # The release public key (CP-H, Plane 344/350). Without it the stick
+      # refuses to install and no release package is built. Only the
+      # public key belongs here: a private key would go into the image.
+      releaseKeyFile = ./deployment/release-key.pem;
+      releaseKey =
+        if builtins.pathExists releaseKeyFile then
+          let
+            key = builtins.readFile releaseKeyFile;
+          in
+          assert lib.assertMsg (
+            !(lib.hasInfix "PRIVATE" key)
+          ) "deployment/release-key.pem holds a private key: only the public key belongs in the repository";
+          key
+        else
+          null;
       sourceRevision =
         if self ? rev then
           "git:${self.rev}"
@@ -181,7 +196,10 @@
       # which a flake source only holds when built with ?submodules=1.
       stickImage = nixpkgs.lib.nixosSystem {
         inherit system;
-        modules = [ ./system/installer-media/stick.nix ];
+        modules = [
+          ./system/installer-media/stick.nix
+          { gjallar.stick.release.key = releaseKey; }
+        ];
         specialArgs = {
           releaseVersion = releasePolicy.release;
           repoSource =
@@ -193,6 +211,24 @@
       };
 
       pkgs = basePkgs;
+
+      # One release per v* tag: system/release names it, the floor is the
+      # oldest release still safe to write, the date is the commit day.
+      release = pkgs.callPackage ./pkgs/gjallar-release { } {
+        version = lib.fileContents ./system/release;
+        floor = lib.fileContents ./deployment/release-floor;
+        date =
+          let
+            d = self.lastModifiedDate;
+          in
+          "${builtins.substring 0 4 d}-${builtins.substring 4 2 d}-${builtins.substring 6 2 d}";
+        keyFile = releaseKeyFile;
+        makeStickSh = ./scripts/installation/make-stick.sh;
+        makeStickPs1 = ./scripts/installation/make-stick.ps1;
+        readme = ./README.md;
+        stickIso = stickImage.config.system.build.gjallarStickIso;
+        gjlogs = basePkgs.callPackage ./pkgs/gjallar-gjlogs-image { };
+      };
     in
     {
       packages.${system} = rec {
@@ -281,6 +317,10 @@
           # the patched KDE libraries it needs.
           ++ import ./apps/dolphin/kde-apps.nix pkgs
         );
+      }
+      // lib.optionalAttrs (releaseKey != null) {
+        "gjallar-release-makers" = release.makers;
+        "gjallar-release" = release.release;
       };
 
       checks.${system} = {
@@ -376,6 +416,8 @@
           stockUdiskie = nixpkgs.legacyPackages.${system}.udiskie;
         };
 
+        release = import ./tests/nix/release.nix { inherit pkgs; };
+
         make-stick = import ./tests/nix/make-stick.nix {
           inherit pkgs;
           script = ./scripts/installation/make-stick.sh;
@@ -455,6 +497,10 @@
             ./scripts
           ];
         };
+      }
+      # With a release key, README.md has to show it and the makers it signs.
+      // lib.optionalAttrs (releaseKey != null) {
+        release-readme = release.readmeCheck;
       };
 
       formatter = {
