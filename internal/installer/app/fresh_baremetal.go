@@ -66,7 +66,8 @@ func runFreshBareMetal(
 	observed, err := targetdisk.Validate(
 		ctx,
 		targetdisk.Input{
-			Path: targetPath,
+			Path:         targetPath,
+			MinSizeBytes: freshTargetMinimumBytes,
 		},
 	)
 	if err != nil {

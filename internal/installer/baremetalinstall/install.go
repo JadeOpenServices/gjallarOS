@@ -17,6 +17,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/JadeOpenServices/gjallarOS/internal/binarycache"
@@ -242,10 +243,14 @@ func verifySystemProfile(root string) error {
 // evaluating the gjallarOS configuration inside nixos-install was OOM-killed
 // on a 12 GiB machine. A temporary swapfile on the target avoids that. It
 // lives on the encrypted target Btrfs, so swapped pages never reach the disk
-// in clear, and is removed after the installation.
+// in clear, and is removed after the installation. A root file system
+// below installSwapSmallRoot (a disk near the 40 GiB minimum, Q227) gets the
+// smaller file so the system and the first update still fit.
 const (
-	installSwapPath = targetRoot + "/.gjallar-install.swap"
-	installSwapSize = "8g"
+	installSwapPath      = targetRoot + "/.gjallar-install.swap"
+	installSwapSize      = "8g"
+	installSwapSmallSize = "4g"
+	installSwapSmallRoot = uint64(48) << 30
 )
 
 func enableInstallSwap(ctx context.Context, r runner, out io.Writer) (func(), error) {
@@ -257,13 +262,22 @@ func enableInstallSwap(ctx context.Context, r runner, out io.Writer) (func(), er
 	if strings.TrimSpace(string(active)) != "" {
 		return noop, nil
 	}
-	fstype, err := r.Output(ctx, "findmnt", "-nro", "FSTYPE", "--mountpoint", targetRoot)
+	mounted, err := r.Output(ctx, "findmnt", "-nbro", "FSTYPE,SIZE", "--mountpoint", targetRoot)
 	if err != nil {
 		return nil, fmt.Errorf("inspect target filesystem: %w", err)
 	}
-	if strings.TrimSpace(string(fstype)) != "btrfs" {
+	fields := strings.Fields(string(mounted))
+	if len(fields) != 2 || fields[0] != "btrfs" {
 		fmt.Fprintln(out, "No swap active and the target is not Btrfs; installing without temporary swap.")
 		return noop, nil
+	}
+	rootBytes, err := strconv.ParseUint(fields[1], 10, 64)
+	if err != nil {
+		return nil, fmt.Errorf("read target filesystem size %q: %w", fields[1], err)
+	}
+	size := installSwapSize
+	if rootBytes < installSwapSmallRoot {
+		size = installSwapSmallSize
 	}
 	// Cleanup must also run once an interrupt cancelled ctx.
 	cleanupCtx := context.WithoutCancel(ctx)
@@ -271,7 +285,7 @@ func enableInstallSwap(ctx context.Context, r runner, out io.Writer) (func(), er
 		_ = r.Run(cleanupCtx, nil, out, out, "sudo", "rm", "-f", "--", installSwapPath)
 	}
 	remove() // leftover from an interrupted attempt
-	if err := r.Run(ctx, nil, out, out, "sudo", "btrfs", "filesystem", "mkswapfile", "--size", installSwapSize, installSwapPath); err != nil {
+	if err := r.Run(ctx, nil, out, out, "sudo", "btrfs", "filesystem", "mkswapfile", "--size", size, installSwapPath); err != nil {
 		remove()
 		return nil, fmt.Errorf("create temporary installation swap: %w", err)
 	}
@@ -279,7 +293,7 @@ func enableInstallSwap(ctx context.Context, r runner, out io.Writer) (func(), er
 		remove()
 		return nil, fmt.Errorf("enable temporary installation swap: %w", err)
 	}
-	fmt.Fprintf(out, "Temporary %s swap on the encrypted target: %s\n", installSwapSize, installSwapPath)
+	fmt.Fprintf(out, "Temporary %s swap on the encrypted target: %s\n", size, installSwapPath)
 	return func() {
 		_ = r.Run(cleanupCtx, nil, out, out, "sudo", "swapoff", installSwapPath)
 		remove()

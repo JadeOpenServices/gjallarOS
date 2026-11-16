@@ -436,3 +436,50 @@ func TestValidateRejectsDiskInUse(t *testing.T) {
 		t.Fatalf("idle partitioned disk rejected: %v", err)
 	}
 }
+
+// Q228: the disk list reads bus, rotation, removable and the partitions from
+// lsblk; util-linux before 2.37 writes ROTA/RM as "1"/"0".
+func TestValidateReadsBusAndPartitions(t *testing.T) {
+	for _, rota := range []string{`true`, `"1"`} {
+		data := `{"blockdevices": [{
+		  "path": "/dev/sda", "type": "disk", "model": "Example HDD",
+		  "serial": "EX-HDD-1", "size": 2000398934016, "mountpoints": [null],
+		  "tran": "usb", "rota": ` + rota + `, "rm": false,
+		  "children": [
+		    {"path": "/dev/sda1", "type": "part", "size": 2000397795328,
+		     "fstype": "ntfs", "label": "Backup", "partlabel": "Basic data partition",
+		     "parttype": "EBD0A0A2-B9E5-4433-87C0-68B6B72699C7", "mountpoints": [null]}
+		  ]}]}`
+		result, err, _ := runValidation(t, data, Input{Path: "/dev/sda"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result.Transport != "usb" || !result.Rotational || result.Removable {
+			t.Fatalf("rota %s: bus fields = %+v", rota, result)
+		}
+		if len(result.Partitions) != 1 || result.Partitions[0].Label != "Backup" ||
+			result.Partitions[0].PartType != "ebd0a0a2-b9e5-4433-87c0-68b6b72699c7" {
+			t.Fatalf("partitions = %+v", result.Partitions)
+		}
+		warnings := strings.Join(result.Warnings(), "\n")
+		if !strings.Contains(warnings, "Windows (NTFS) files") || !strings.Contains(warnings, "All 1 partition below") {
+			t.Fatalf("warnings = %q", warnings)
+		}
+	}
+}
+
+func TestSerialEndShowsOnlyFourCharacters(t *testing.T) {
+	for _, tc := range []struct {
+		r    Result
+		want string
+	}{
+		{Result{Serial: "ABCDEFGH1234"}, "serial …1234"},
+		{Result{WWN: "eui.0011223344556677"}, "WWN …6677"},
+		{Result{Serial: "\x1b[2J9876"}, "serial …9876"},
+		{Result{}, "no serial"},
+	} {
+		if got := tc.r.SerialEnd(); got != tc.want {
+			t.Fatalf("SerialEnd(%+v) = %q, want %q", tc.r, got, tc.want)
+		}
+	}
+}

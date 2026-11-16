@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"html"
 	"io"
 	"os"
 	"os/exec"
@@ -51,6 +52,22 @@ func zenityCommand(ctx context.Context, args ...string) *exec.Cmd {
 }
 
 var geteuid = os.Geteuid
+
+// gtkMarkup escapes text for zenity --question and --list. zenity 4.2.2
+// runs that --text through g_strcompress (backslash escapes) and then shows
+// it as Pango markup (msg.c, tree.c). Disk models and partition labels come
+// from the disk itself, so a label like "<span size='99999'>" must show as
+// typed, not change the dialog.
+func gtkMarkup(s string) string {
+	return strings.ReplaceAll(html.EscapeString(s), `\`, `\\`)
+}
+
+// gtkMnemonic escapes text for zenity --entry, which runs --text through
+// g_strcompress and shows it as a label with a mnemonic (entry.c): no
+// markup, but "_" marks a shortcut key.
+func gtkMnemonic(s string) string {
+	return strings.ReplaceAll(strings.ReplaceAll(s, `\`, `\\`), "_", "__")
+}
 
 func gtkAvailable() bool {
 	_, err := exec.LookPath("zenity")
@@ -207,7 +224,7 @@ func (u UI) Confirm(ctx context.Context, message string, defaultYes bool) (bool,
 		args := []string{
 			"--question",
 			"--title=gjallarOS installer",
-			"--text=" + message,
+			"--text=" + gtkMarkup(message),
 			"--width=" + strconv.Itoa(width),
 			"--ok-label=Yes",
 			"--cancel-label=No",
@@ -503,7 +520,7 @@ func (u UI) Exact(ctx context.Context, label, expected string) error {
 			ctx,
 			"--entry",
 			"--title=gjallarOS installer",
-			"--text="+label,
+			"--text="+gtkMnemonic(label),
 		).Output()
 		if err != nil {
 			return ErrCancelled
@@ -564,7 +581,7 @@ func (u UI) Line(ctx context.Context) (string, error) {
 
 func (u UI) Value(ctx context.Context, label, def string) (string, error) {
 	if u.GTK {
-		out, err := zenityCommand(ctx, "--entry", "--title=gjallarOS installer", "--text="+label, "--entry-text="+def).Output()
+		out, err := zenityCommand(ctx, "--entry", "--title=gjallarOS installer", "--text="+gtkMnemonic(label), "--entry-text="+def).Output()
 		if err != nil {
 			return "", ErrCancelled
 		}
@@ -598,7 +615,7 @@ func (u UI) Example(ctx context.Context, label, example string, required bool) (
 	for {
 		var line string
 		if u.GTK {
-			out, err := zenityCommand(ctx, "--entry", "--title=gjallarOS installer", "--text="+text).Output()
+			out, err := zenityCommand(ctx, "--entry", "--title=gjallarOS installer", "--text="+gtkMnemonic(text)).Output()
 			if err != nil {
 				return "", ErrCancelled
 			}
@@ -626,7 +643,7 @@ func (u UI) Choice(ctx context.Context, label, def string, options []string) (st
 		return "", fmt.Errorf("no options for %s", label)
 	}
 	if u.GTK {
-		args := []string{"--list", "--radiolist", "--title=gjallarOS installer", "--text=" + label, "--column=Selected", "--column=Value"}
+		args := []string{"--list", "--radiolist", "--title=gjallarOS installer", "--text=" + gtkMarkup(label), "--column=Selected", "--column=Value"}
 		for _, v := range options {
 			args = append(args, strconv.FormatBool(v == def), v)
 		}

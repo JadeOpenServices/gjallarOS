@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"sort"
 	"strings"
+	"unicode"
 )
 
 // Rejected describes a whole block device that was discovered but did not pass
@@ -101,4 +102,15 @@ func Discover(
 	)
 
 	return eligible, rejected, nil
+}
+
+// Text is the reason as the disk list shows it, with control characters
+// from disk-reported names removed.
+func (r Rejected) Text() string {
+	return strings.Map(func(c rune) rune {
+		if unicode.IsPrint(c) {
+			return c
+		}
+		return -1
+	}, r.Path+" — "+r.Reason)
 }

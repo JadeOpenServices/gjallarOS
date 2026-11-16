@@ -118,8 +118,8 @@ func mountedRunner() *fakeRunner {
 				"--mountpoint",
 				"/mnt/boot",
 			): []byte("/mnt/boot\n"),
-			commandKey("swapon", "--show=NAME", "--noheadings"):             nil,
-			commandKey("findmnt", "-nro", "FSTYPE", "--mountpoint", "/mnt"): []byte("btrfs\n"),
+			commandKey("swapon", "--show=NAME", "--noheadings"):                   nil,
+			commandKey("findmnt", "-nbro", "FSTYPE,SIZE", "--mountpoint", "/mnt"): []byte("btrfs 255013683200\n"),
 		},
 		errors: map[string]error{},
 	}
@@ -500,6 +500,21 @@ func TestInstallUsesTemporaryEncryptedTargetSwap(t *testing.T) {
 	last := strings.Join(r.calls[len(r.calls)-1], " ")
 	if last != "sudo rm -f -- /mnt/.gjallar-install.swap" {
 		t.Fatalf("swapfile left on target, last call %q", last)
+	}
+}
+
+// Q227: a disk near the 40 GiB minimum leaves a root below 48 GiB, which
+// gets the 4 GiB swap file so the system and the first update still fit.
+func TestInstallUsesSmallerSwapOnSmallRoot(t *testing.T) {
+	createInstalledProfile(t)
+	r := mountedRunner()
+	r.outputs[commandKey("findmnt", "-nbro", "FSTYPE,SIZE", "--mountpoint", "/mnt")] = []byte("btrfs 28991029248\n")
+	var out bytes.Buffer
+	if _, err := install(context.Background(), Input{Repo: testRepo(t), Hostname: "gjallarOS", Out: &out}, r); err != nil {
+		t.Fatal(err)
+	}
+	if callIndex(r.calls, "sudo btrfs filesystem mkswapfile --size 4g /mnt/.gjallar-install.swap") < 0 {
+		t.Fatalf("small root must get the 4 GiB swap file:\n%s", callsText(r.calls))
 	}
 }
 

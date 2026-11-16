@@ -416,3 +416,15 @@ func TestValueShowsDefaultOnlyWhenSet(t *testing.T) {
 		}
 	}
 }
+
+// zenity shows --question and --list text as Pango markup after
+// g_strcompress, and --entry text as a mnemonic label. Disk labels reach
+// these dialogs, so they must show as typed.
+func TestGTKTextEscaping(t *testing.T) {
+	if got := gtkMarkup(`<span size='99999'>a&b\n`); got != `&lt;span size=&#39;99999&#39;&gt;a&amp;b\\n` {
+		t.Fatalf("gtkMarkup = %q", got)
+	}
+	if got := gtkMnemonic(`my_disk\t`); got != `my__disk\\t` {
+		t.Fatalf("gtkMnemonic = %q", got)
+	}
+}

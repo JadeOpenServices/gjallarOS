@@ -51,6 +51,22 @@ type Result struct {
 	Serial    string
 	WWN       string
 	SizeBytes uint64
+	// Transport is lsblk's TRAN (usb, nvme, sata, ...), empty when unknown.
+	Transport  string
+	Rotational bool
+	Removable  bool
+	Partitions []Partition
+}
+
+// Partition is what the disk list shows of one partition before the erase.
+// Every text field comes from the disk itself and is untrusted.
+type Partition struct {
+	Path      string
+	FSType    string
+	Label     string
+	PartLabel string
+	PartType  string
+	SizeBytes uint64
 }
 
 type commandRunner interface {
@@ -150,19 +166,38 @@ func validate(ctx context.Context, input Input, runner commandRunner) (Result, e
 	}
 	if input.MinSizeBytes > 0 && disk.Size < input.MinSizeBytes {
 		return Result{}, fmt.Errorf(
-			"target disk %q is too small: %d bytes, require at least %d bytes",
+			"target disk %q is too small: %s; gjallarOS needs at least %s for the system, install swap and the first update",
 			disk.Path,
-			disk.Size,
-			input.MinSizeBytes,
+			SizeText(disk.Size),
+			SizeText(input.MinSizeBytes),
 		)
 	}
 
+	var parts []Partition
+	for _, child := range disk.Children {
+		if strings.TrimSpace(child.Type) != "part" {
+			continue
+		}
+		parts = append(parts, Partition{
+			Path:      filepath.Clean(child.Path),
+			FSType:    strings.TrimSpace(child.FSType),
+			Label:     strings.TrimSpace(child.Label),
+			PartLabel: strings.TrimSpace(child.PartLabel),
+			PartType:  strings.ToLower(strings.TrimSpace(child.PartType)),
+			SizeBytes: child.Size,
+		})
+	}
+
 	return Result{
-		Path:      filepath.Clean(disk.Path),
-		Model:     model,
-		Serial:    serial,
-		WWN:       wwn,
-		SizeBytes: disk.Size,
+		Path:       filepath.Clean(disk.Path),
+		Model:      model,
+		Serial:     serial,
+		WWN:        wwn,
+		SizeBytes:  disk.Size,
+		Transport:  strings.ToLower(strings.TrimSpace(disk.Tran)),
+		Rotational: bool(disk.Rota),
+		Removable:  bool(disk.RM),
+		Partitions: parts,
 	}, nil
 }
 
@@ -175,7 +210,7 @@ func lsblkArgs(path string) []string {
 		// crypt mappings) as flat siblings; --tree keeps them nested.
 		"--tree",
 		"-o",
-		"PATH,TYPE,MODEL,SERIAL,WWN,SIZE,LABEL,MOUNTPOINTS",
+		"PATH,TYPE,MODEL,SERIAL,WWN,SIZE,LABEL,MOUNTPOINTS,TRAN,ROTA,RM,FSTYPE,PARTLABEL,PARTTYPE",
 		"--",
 		path,
 	}
@@ -196,7 +231,26 @@ type blockDevice struct {
 	PartLabel   string        `json:"partlabel"`
 	PkName      string        `json:"pkname"`
 	MountPoints []string      `json:"mountpoints"`
+	Tran        string        `json:"tran"`
+	Rota        lsblkBool     `json:"rota"`
+	RM          lsblkBool     `json:"rm"`
+	FSType      string        `json:"fstype"`
+	PartType    string        `json:"parttype"`
 	Children    []blockDevice `json:"children"`
+}
+
+// lsblkBool reads ROTA and RM: util-linux 2.37+ writes JSON true/false,
+// older versions "1"/"0". Anything else reads as false.
+type lsblkBool bool
+
+func (b *lsblkBool) UnmarshalJSON(raw []byte) error {
+	switch strings.Trim(string(raw), `"`) {
+	case "true", "1":
+		*b = true
+	default:
+		*b = false
+	}
+	return nil
 }
 
 func containsRootMount(device blockDevice) bool {
