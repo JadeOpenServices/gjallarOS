@@ -377,10 +377,10 @@ func TestHoldMokManager(t *testing.T) {
 		written []byte
 		ok      bool
 	}{
-		{"waits", []byte{0xff, 0xff}, true},
+		{"waits", []byte{0xff, 0xff, 0xff, 0xff}, true},
 		{"not written", nil, false},
-		{"countdown kept", []byte{0x0a, 0x00}, false},
-		{"wrong size", []byte{0xff, 0xff, 0xff, 0xff}, false},
+		{"countdown kept", []byte{0x0a, 0x00, 0x00, 0x00}, false},
+		{"wrong size", []byte{0xff, 0xff}, false},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			f := newFakeFirmware(t)

@@ -500,8 +500,9 @@ func holdMokManager(ctx context.Context, f firmwareFiles) error {
 	if err != nil {
 		return fmt.Errorf("read MokTimeout back: %w", err)
 	}
-	// mokutil 0.7.2 writes an int16; shim reads the value as signed.
-	if !present || !bytes.Equal(raw, []byte{0xff, 0xff}) {
+	// mokutil 0.7.2 set_timeout writes a C int (-1 = ff ff ff ff); shim 16.1
+	// reads MokTimeoutvar.Timeout as INT32.
+	if !present || !bytes.Equal(raw, []byte{0xff, 0xff, 0xff, 0xff}) {
 		return errors.New("mokutil returned, but the firmware holds no MokManager wait")
 	}
 	return nil
