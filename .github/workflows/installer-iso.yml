@@ -1,0 +1,322 @@
+# Builds the installer stick release for each v* tag, has it signed after a
+# second, independent build agrees, publishes it, and keeps "Latest" on the
+# release that stable runs. Setup and upkeep: docs/maintainers.md
+# "Installer release".
+#
+#   build    (tag)    nix build gjallar-release -> draft release, no signature
+#   sign     (tag)    environment installer-sign, a reviewer approves:
+#                     builder statement checked, then SHA256SUMS signed
+#   publish  (tag)    files checked against the signature, draft goes public,
+#                     old releases pruned
+#   promote  (stable) "Latest" moves to the release whose tree stable has
+name: installer release
+
+on:
+  push:
+    tags: ["v*"]
+    branches: [stable]
+
+permissions:
+  contents: read
+
+# bash -eo pipefail: a failed `gh api ... | head` fails the step.
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: installer-release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  GH_REPO: ${{ github.repository }}
+  # Where the second builder pushes its signed statement (Q239).
+  STATEMENTS_REPO: JadeOpenServices/gjallarOS-statements
+
+jobs:
+  build:
+    if: github.repository == 'JadeOpenServices/gjallarOS' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    timeout-minutes: 360
+    outputs:
+      sums: ${{ steps.release.outputs.sums }}
+    env:
+      TAG: ${{ github.ref_name }}
+    steps:
+      - name: Check the tag name
+        run: |
+          [[ $TAG =~ ^v[0-9]{4}\.(0[1-9]|1[0-2])\.[0-9]{1,6}$ ]] ||
+            { echo "$TAG is not a release name like v2026.10.1" >&2; exit 1; }
+
+      # A release is made from a commit that is already on dev, staging or
+      # stable, never from a commit that only exists under the tag.
+      - name: Check the tag is on a release branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for b in dev staging stable; do
+            s=$(gh api "repos/$GH_REPO/compare/$GITHUB_SHA...$b" --jq .status 2>/dev/null) || continue
+            if [ "$s" = ahead ] || [ "$s" = identical ]; then
+              echo "$TAG is on $b"
+              exit 0
+            fi
+          done
+          echo "$TAG points at a commit that is on none of dev, staging, stable" >&2
+          exit 1
+
+      # Re-running would replace files people may already have checked.
+      - name: Check there is no release for the tag yet
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "A release or draft for $TAG exists. Delete the draft on GitHub to build it again; a published release stays as it is." >&2
+            exit 1
+          fi
+
+      # Room for the Nix store: the runner image ships about 14 GB free.
+      - name: Free disk space
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: true
+          persist-credentials: false
+
+      - name: Check system/release matches the tag
+        run: |
+          release=$(cat system/release)
+          if [ "$release" != "$TAG" ]; then
+            echo "system/release says $release, the tag is $TAG; bump system/release in the tagged commit" >&2
+            exit 1
+          fi
+
+      # Without the public key the flake has no release output at all.
+      - name: Check the release key is in the repository
+        run: |
+          if [ ! -f deployment/release-key.pem ]; then
+            echo "deployment/release-key.pem is missing; see docs/maintainers.md \"Installer release\"" >&2
+            exit 1
+          fi
+
+      # Same cache as cache.yml; Nix accepts only files signed with its key.
+      - name: Read the release cache
+        id: cache
+        run: |
+          python3 -I - <<'EOF' >> "$GITHUB_OUTPUT"
+          import json
+          c = json.load(open("deployment/binary-cache.json"))
+          url, key = c.get("url", ""), c.get("publicKey", "")
+          if url.startswith("https://") and key:
+              print("conf<<END")
+              print("extra-substituters = " + url)
+              print("extra-trusted-public-keys = " + key)
+              print("END")
+          EOF
+
+      - uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31.11.1
+        with:
+          extra_nix_config: ${{ steps.cache.outputs.conf }}
+
+      # gjallar-release checks the README fingerprint and maker rows, the
+      # image size cap and the GJLOGS size, and writes SHA256SUMS.
+      - name: Build
+        run: nix build --print-build-logs --out-link result '.?submodules=1#gjallar-release'
+
+      - name: Check the release files
+        id: release
+        working-directory: result
+        run: |
+          want="gjallarOS-installer-$TAG.iso gjlogs.img RELEASE make-stick.sh make-stick.ps1"
+          have=$(sed 's/^[0-9a-f]\{64\}  //' SHA256SUMS | tr '\n' ' ')
+          [ "$have" = "$want " ] || { echo "SHA256SUMS lists: $have" >&2; exit 1; }
+          sha256sum -c --strict SHA256SUMS
+          [ "$(head -n 1 RELEASE)" = "version=$TAG" ] || { echo "RELEASE does not name $TAG" >&2; exit 1; }
+          echo "sums=$(base64 -w 0 SHA256SUMS)" >> "$GITHUB_OUTPUT"
+
+      # Draft: nobody but maintainers sees it, and the makers' "latest" link
+      # never points at it. The files go up without a signature.
+      - name: Upload as a draft release
+        working-directory: result
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$TAG" --draft --verify-tag --latest=false \
+            --title "gjallarOS $TAG" \
+            --notes "Installer stick for gjallarOS $TAG. How to make the stick and check it: README \"USB stick\"." \
+            "gjallarOS-installer-$TAG.iso" gjlogs.img RELEASE make-stick.sh make-stick.ps1 SHA256SUMS
+
+  sign:
+    needs: build
+    runs-on: ubuntu-24.04
+    # Holds RELEASE_SIGNING_KEY and BUILDER_SSH_KEY. Its rules (v* tags
+    # only, required reviewer, no self-review, no admin bypass) decide
+    # whether this job ever runs.
+    environment: installer-sign
+    permissions:
+      contents: read
+    timeout-minutes: 15
+    outputs:
+      sig: ${{ steps.sign.outputs.sig }}
+    env:
+      TAG: ${{ github.ref_name }}
+      SUMS: ${{ needs.build.outputs.sums }}
+    # No checkout: nothing from the tagged tree runs next to the key.
+    steps:
+      - name: Check the tag name
+        run: |
+          [[ $TAG =~ ^v[0-9]{4}\.(0[1-9]|1[0-2])\.[0-9]{1,6}$ ]] ||
+            { echo "$TAG is not a release name like v2026.10.1" >&2; exit 1; }
+
+      - name: Fetch the builder statement and the release public key
+        working-directory: ${{ runner.temp }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          raw() { gh api -H 'Accept: application/vnd.github.raw' "$1" | head -c "$(($2 + 1))" > "$3"; }
+          printf '%s' "$SUMS" | base64 -d > SHA256SUMS
+          raw "repos/$STATEMENTS_REPO/contents/$TAG/gjallar-builder/SHA256SUMS" 65536 builder.sums ||
+            { echo "No builder statement for $TAG in $STATEMENTS_REPO yet. Re-run this job once the builder has pushed it." >&2; exit 1; }
+          raw "repos/$STATEMENTS_REPO/contents/$TAG/gjallar-builder/SHA256SUMS.sshsig" 4096 builder.sshsig ||
+            { echo "The builder statement for $TAG has no signature file." >&2; exit 1; }
+          raw "repos/$GH_REPO/contents/deployment/release-key.pem?ref=$GITHUB_SHA" 4096 release-key.pem
+          for f in builder.sums:65536 builder.sshsig:4096 release-key.pem:4096; do
+            [ "$(stat -c %s "${f%:*}")" -le "${f#*:}" ] || { echo "${f%:*} is larger than ${f#*:} bytes" >&2; exit 1; }
+          done
+
+      # BUILDER_SSH_KEY is one allowed_signers line:
+      #   gjallar-builder namespaces="gjallaros-release" ssh-ed25519 AAAA...
+      - name: Check the builder statement
+        working-directory: ${{ runner.temp }}
+        env:
+          BUILDER_SSH_KEY: ${{ vars.BUILDER_SSH_KEY }}
+        run: |
+          [ -n "$BUILDER_SSH_KEY" ] || { echo "The installer-sign environment has no BUILDER_SSH_KEY variable." >&2; exit 1; }
+          [ "$(printf '%s\n' "$BUILDER_SSH_KEY" | grep -c '')" = 1 ] &&
+            [[ $BUILDER_SSH_KEY == 'gjallar-builder namespaces="gjallaros-release" ssh-ed25519 '* ]] ||
+            { echo "BUILDER_SSH_KEY must be one line: gjallar-builder namespaces=\"gjallaros-release\" ssh-ed25519 AAAA..." >&2; exit 1; }
+          printf '%s\n' "$BUILDER_SSH_KEY" > allowed_signers
+          ssh-keygen -Y verify -f allowed_signers -I gjallar-builder -n gjallaros-release \
+            -s builder.sshsig < builder.sums ||
+            { echo "The builder statement for $TAG is not signed by the pinned builder key." >&2; exit 1; }
+          cmp -s SHA256SUMS builder.sums ||
+            { echo "The builder got other files than CI for $TAG:" >&2; diff SHA256SUMS builder.sums >&2; exit 1; }
+          want="gjallarOS-installer-$TAG.iso gjlogs.img RELEASE make-stick.sh make-stick.ps1"
+          [ "$(grep -c '' SHA256SUMS)" = 5 ] &&
+            ! grep -qvE '^[0-9a-f]{64}  [A-Za-z0-9._-]+$' SHA256SUMS &&
+            [ "$(cut -c 67- SHA256SUMS | tr '\n' ' ')" = "$want " ] ||
+            { echo "SHA256SUMS does not list exactly the five release files." >&2; exit 1; }
+
+      # RSA-PSS, SHA-256, salt 32: what make-stick.sh (openssl) and
+      # make-stick.ps1 (RSACng) check.
+      - name: Sign SHA256SUMS
+        id: sign
+        working-directory: ${{ runner.temp }}
+        env:
+          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+        run: |
+          umask 077
+          trap 'rm -f release.key' EXIT
+          printf '%s\n' "$RELEASE_SIGNING_KEY" > release.key
+          openssl pkey -in release.key -pubout -out signing-key.pem ||
+            { echo "RELEASE_SIGNING_KEY is not a private key openssl can read." >&2; exit 1; }
+          cmp -s signing-key.pem release-key.pem ||
+            { echo "RELEASE_SIGNING_KEY does not belong to deployment/release-key.pem of this tag." >&2; exit 1; }
+          openssl dgst -sha256 -sigopt rsa_padding_mode:pss -sigopt rsa_pss_saltlen:32 \
+            -sign release.key -out SHA256SUMS.sig SHA256SUMS
+          rm -f release.key
+          openssl dgst -sha256 -sigopt rsa_padding_mode:pss -sigopt rsa_pss_saltlen:32 \
+            -verify release-key.pem -signature SHA256SUMS.sig SHA256SUMS
+          [ "$(stat -c %s SHA256SUMS.sig)" -le 4096 ]
+          echo "sig=$(base64 -w 0 SHA256SUMS.sig)" >> "$GITHUB_OUTPUT"
+
+  publish:
+    needs: [build, sign]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    timeout-minutes: 60
+    env:
+      TAG: ${{ github.ref_name }}
+      SUMS: ${{ needs.build.outputs.sums }}
+      SIG: ${{ needs.sign.outputs.sig }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Check the tag name
+        run: |
+          [[ $TAG =~ ^v[0-9]{4}\.(0[1-9]|1[0-2])\.[0-9]{1,6}$ ]] ||
+            { echo "$TAG is not a release name like v2026.10.1" >&2; exit 1; }
+
+      # The draft must still hold exactly what was built and signed.
+      - name: Check the draft against the signature
+        run: |
+          mkdir "$RUNNER_TEMP/rel" && cd "$RUNNER_TEMP/rel"
+          names=$(gh release view "$TAG" --json assets --jq '.assets[].name' | sort | tr '\n' ' ')
+          want=$(printf '%s\n' "gjallarOS-installer-$TAG.iso" gjlogs.img RELEASE make-stick.sh make-stick.ps1 SHA256SUMS | sort | tr '\n' ' ')
+          [ "$names" = "$want" ] || { echo "The draft for $TAG holds: $names" >&2; exit 1; }
+          gh release download "$TAG"
+          printf '%s' "$SUMS" | base64 -d | cmp -s - SHA256SUMS ||
+            { echo "SHA256SUMS in the draft is not the one that was signed." >&2; exit 1; }
+          printf '%s' "$SIG" | base64 -d > SHA256SUMS.sig
+          gh api -H 'Accept: application/vnd.github.raw' \
+            "repos/$GH_REPO/contents/deployment/release-key.pem?ref=$GITHUB_SHA" | head -c 4097 > "$RUNNER_TEMP/release-key.pem"
+          openssl dgst -sha256 -sigopt rsa_padding_mode:pss -sigopt rsa_pss_saltlen:32 \
+            -verify "$RUNNER_TEMP/release-key.pem" -signature SHA256SUMS.sig SHA256SUMS
+          sha256sum -c --strict SHA256SUMS
+          [ "$(head -n 1 RELEASE)" = "version=$TAG" ]
+
+      # No --clobber: an existing SHA256SUMS.sig stops the job.
+      - name: Publish
+        working-directory: ${{ runner.temp }}/rel
+        run: |
+          gh release upload "$TAG" SHA256SUMS.sig
+          latest=false
+          stable=$(gh api "repos/$GH_REPO/commits/stable" --jq .commit.tree.sha)
+          tagged=$(gh api "repos/$GH_REPO/commits/$GITHUB_SHA" --jq .commit.tree.sha)
+          [ "$stable" != "$tagged" ] || latest=true
+          gh release edit "$TAG" --draft=false --latest="$latest"
+          echo "Published $TAG (latest: $latest)"
+
+      # Keeps the three newest signed releases and whatever "Latest" is.
+      # Only releases this workflow made (they carry SHA256SUMS.sig) are
+      # touched; the git tags always stay.
+      - name: Prune old releases
+        run: |
+          latest=$(gh api "repos/$GH_REPO/releases/latest" --jq .tag_name 2>/dev/null || true)
+          gh api --paginate "repos/$GH_REPO/releases" \
+            --jq '.[] | select(.draft == false and .prerelease == false)
+                  | select(.tag_name | test("^v[0-9]{4}\\.[0-9]{2}\\.[0-9]+$"))
+                  | select(any(.assets[]; .name == "SHA256SUMS.sig")) | .tag_name' |
+            sort -V -r | tail -n +4 | while read -r old; do
+              [ "$old" != "$latest" ] || continue
+              echo "Deleting release $old (its tag stays)"
+              gh release delete "$old" --yes
+            done
+
+  promote:
+    if: github.repository == 'JadeOpenServices/gjallarOS' && github.ref == 'refs/heads/stable'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      # stable carries a release tree as its own commit, so the match is by
+      # tree, not by commit.
+      - name: Mark the stable release as Latest
+        run: |
+          tree=$(gh api "repos/$GH_REPO/commits/$GITHUB_SHA" --jq .commit.tree.sha)
+          for t in $(gh api --paginate "repos/$GH_REPO/releases" \
+            --jq '.[] | select(.draft == false and .prerelease == false)
+                  | select(any(.assets[]; .name == "SHA256SUMS.sig")) | .tag_name'); do
+            [[ $t =~ ^v[0-9]{4}\.(0[1-9]|1[0-2])\.[0-9]{1,6}$ ]] || continue
+            if [ "$(gh api "repos/$GH_REPO/commits/$t" --jq .commit.tree.sha)" = "$tree" ]; then
+              gh release edit "$t" --latest
+              echo "Latest is now $t"
+              exit 0
+            fi
+          done
+          echo "No published installer release has the tree of stable; Latest stays as it is."
