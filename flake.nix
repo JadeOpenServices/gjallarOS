@@ -287,6 +287,11 @@
 
         bootstrap-pins = import ./tests/nix/bootstrap-pins.nix { inherit pkgs; };
 
+        boot-first = import ./tests/nix/boot-first.nix {
+          inherit pkgs;
+          script = ./scripts/recovery/boot-first.sh;
+        };
+
         local-changes = import ./tests/nix/local-changes.nix { inherit pkgs; };
 
         legacy-names = import ./tests/nix/legacy-names.nix { inherit pkgs; };

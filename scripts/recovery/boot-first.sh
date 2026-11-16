@@ -53,7 +53,16 @@ esp=$(findmnt -nro SOURCE --mountpoint "$mountpoint" || true)
   exit 1
 }
 lower() { tr '[:upper:]' '[:lower:]'; }
-esp_partuuid=$(lsblk -dnro PARTUUID "$esp" | lower)
+# blkid -p reads the partition table itself. lsblk takes PARTUUID from the
+# udev database, which the nixos-install chroot does not have: it printed
+# nothing there, so the entry made a moment before was never found and the
+# install stopped (stick CP-C, 2026-11-16).
+esp_partuuid=$(blkid -p -s PART_ENTRY_UUID -o value "$esp" | lower) || esp_partuuid=
+printf '%s\n' "$esp_partuuid" |
+  grep -qx '[0-9a-f]\{8\}-[0-9a-f]\{4\}-[0-9a-f]\{4\}-[0-9a-f]\{4\}-[0-9a-f]\{12\}' || {
+  echo "ERROR: cannot read the GPT partition UUID of $esp" >&2
+  exit 1
+}
 
 # Entry numbers on this ESP that start the loader file $1.
 boot_entries() {
