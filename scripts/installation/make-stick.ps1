@@ -6,11 +6,14 @@
 # Downloads the installer stick image, checks its signature against the key
 # below, writes it to a USB stick the user picks, reads it back and adds a
 # small GJLOGS partition for install logs. Only the write runs with admin
-# rights. The elevated code is text from this script, handed to a new
-# powershell.exe through -EncodedCommand: no .ps1 file, no Add-Type, nothing
-# in %TEMP% (loophole L73). The elevated side opens the downloads itself and
-# refuses links and pipes (L74), checks again that the disk is the stick the
-# user picked (L75) and writes a prebuilt GJLOGS image (L76).
+# rights. The elevated code is text from this script, saved next to the
+# downloads; the new powershell.exe reads it once into memory and runs it
+# only if its SHA-256 matches the hash on its command line. No Add-Type,
+# nothing in %TEMP% (loophole L73). The elevated side opens the downloads
+# itself and refuses links and pipes (L74), checks again that the disk is the
+# stick the user picked (L75) and writes a prebuilt GJLOGS image (L76). Only
+# its own success codes count as success: a process that Windows Security or
+# anything else ends early never reads as a written stick (L83).
 #
 # Everything sits in one function that the last line calls, so a cut-off
 # download runs nothing. The function never calls exit: under irm | iex
@@ -378,9 +381,9 @@ function Get-GjDisks([string]$where) {
 
         # Elevated part. Arguments only, all base64 or digits: disk number,
         # UniqueId, size, ISO path, ISO size, ISO hash, image path, image
-        # hash. Exit codes: 0 done with GJLOGS, 30 done without GJLOGS (the
-        # layout leaves no slot), 31 done without GJLOGS (no room),
-        # 10 bad arguments, 11 not the picked stick, 12 a volume on it is in
+        # hash. Exit codes: 40 done with GJLOGS, 41 done without GJLOGS (the
+        # layout leaves no slot), 42 done without GJLOGS (no room); any other
+        # code is a failure, 0 and 1 too (L83). 10 bad arguments, 11 not the picked stick, 12 a volume on it is in
         # use, 13 too small, 14 a download is not a plain file, 15 a
         # download does not match its hash, 16 not 512-byte sectors,
         # 21 read-back mismatch, 22 write failed (both wipe the first MiB).
@@ -404,12 +407,17 @@ function Test-Disk {
     $d.Count -eq 1 -and [string]$d[0].UniqueId -ceq $uid -and [long]$d[0].Size -eq $size -and
         [int]$d[0].BusType -eq 7 -and -not $d[0].IsBoot -and -not $d[0].IsSystem
 }
-function Invoke-Ioctl($h, [int]$code, [int]$outSize) {
-    $out = $null
-    if ($outSize -gt 0) { $out = New-Object byte[] $outSize }
+# A control code without output gives a bool. An empty byte array would
+# read as false and turn a lock that worked into "in use".
+function Invoke-Ioctl($h, [int]$code) {
+    $n = 0
+    [bool]$K::DeviceIoControl($h, $code, $null, 0, $null, 0, [ref]$n, [IntPtr]::Zero)
+}
+function Get-Ioctl($h, [int]$code, [int]$outSize) {
+    $out = New-Object byte[] $outSize
     $n = 0
     if (-not $K::DeviceIoControl($h, $code, $null, 0, $out, $outSize, [ref]$n, [IntPtr]::Zero)) { return $null }
-    if ($outSize -gt 0) { , $out } else { , (New-Object byte[] 0) }
+    , $out
 }
 function Get-Hash($h, [long]$at, [long]$count, [string]$what) {
     if (-not $K::SetFilePointerEx($h, $at, [IntPtr]::Zero, 0)) { throw 'seek failed' }
@@ -463,7 +471,7 @@ foreach ($v in @($vols.Get())) {
     if ($id -notmatch '^\\\\\?\\Volume\{[0-9a-fA-F-]{36}\}$') { continue }
     $vh = $K::CreateFileW($id, -1073741824, 3, [IntPtr]::Zero, 3, 0, [IntPtr]::Zero)
     if ($vh.IsInvalid) { continue }
-    $ext = Invoke-Ioctl $vh 0x00560000 776
+    $ext = Get-Ioctl $vh 0x00560000 776
     $mine = $false
     if ($ext) {
         $cnt = [BitConverter]::ToUInt32($ext, 0)
@@ -472,14 +480,14 @@ foreach ($v in @($vols.Get())) {
         }
     }
     if (-not $mine) { $vh.Dispose(); continue }
-    if (-not (Invoke-Ioctl $vh 0x00090018 0) -or -not (Invoke-Ioctl $vh 0x00090020 0)) { $vh.Dispose(); Stop-Gj 12 }
+    if (-not (Invoke-Ioctl $vh 0x00090018) -or -not (Invoke-Ioctl $vh 0x00090020)) { $vh.Dispose(); Stop-Gj 12 }
     [void]$locks.Add($vh)
 }
 
 $disk = $K::CreateFileW("\\.\PhysicalDrive$num", -1073741824, 3, [IntPtr]::Zero, 3, -2147483648, [IntPtr]::Zero)
 if ($disk.IsInvalid) { Stop-Gj 12 }
-$devnum = Invoke-Ioctl $disk 0x002D1080 12
-$geo = Invoke-Ioctl $disk 0x000700A0 256
+$devnum = Get-Ioctl $disk 0x002D1080 12
+$geo = Get-Ioctl $disk 0x000700A0 256
 if (-not $devnum -or -not $geo -or [BitConverter]::ToUInt32($devnum, 4) -ne $num -or
     [BitConverter]::ToInt64($geo, 24) -ne $size -or -not (Test-Disk)) { Stop-Gj 11 }
 if ([BitConverter]::ToUInt32($geo, 20) -ne 512) { Stop-Gj 16 }
@@ -540,39 +548,58 @@ if ($rc) {
     [void]$K::FlushFileBuffers($disk)
 }
 foreach ($l in $locks) { $l.Dispose() }
-[void](Invoke-Ioctl $disk 0x00070140 0)
+[void](Invoke-Ioctl $disk 0x00070140)
 $disk.Dispose()
 if ($rc) { Stop-Gj $rc }
-switch ($logs) { 'created' { Stop-Gj 0 } 'layout' { Stop-Gj 30 } default { Stop-Gj 31 } }
+switch ($logs) { 'created' { Stop-Gj 40 } 'layout' { Stop-Gj 41 } default { Stop-Gj 42 } }
 '@
 
         function ConvertTo-B64([string]$s) { [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($s)) }
-        # The elevated code goes in gzip-packed, so the command line stays
-        # well under the 32767-character limit; it is unpacked in memory.
-        $ms = New-Object IO.MemoryStream
-        $gz = New-Object IO.Compression.GZipStream($ms, [IO.Compression.CompressionMode]::Compress)
+        # The elevated code goes into the download folder as a plain file.
+        # The elevated side reads it into memory once and runs those bytes
+        # only if their SHA-256 matches, so a change to the file after this
+        # point stops the write (code 15); a link swapped in at the path can
+        # only stop it too. A packed, encoded copy on the command line looks
+        # like a malware stager to Windows Security, which then ends the
+        # process before its first line (L83).
         $raw = [Text.Encoding]::UTF8.GetBytes($elevated)
-        $gz.Write($raw, 0, $raw.Length)
-        $gz.Dispose()
-        $packed = [Convert]::ToBase64String($ms.ToArray())
+        $sha = [Security.Cryptography.SHA256]::Create()
+        $bodySha = -join ($sha.ComputeHash($raw) | ForEach-Object { $_.ToString('x2') })
+        $sha.Dispose()
+        $bodyPath = Join-Path $state.Work 'write-stick.txt'
+        [IO.File]::WriteAllBytes($bodyPath, $raw)
         $argList = @([string]$pick.Number, (ConvertTo-B64 ([string]$pick.UniqueId)), [string]$pick.Size,
             (ConvertTo-B64 $isoFinal), [string]$isoSize, $isoSha, (ConvertTo-B64 $imgFinal), $imgSha) |
             ForEach-Object { "'$_'" }
         # The elevated process loads no module from the user's folders:
         # autoload is off before the first command, and the one module the
         # write needs comes from the PowerShell install folder by full path.
+        # FileStream refuses pipes and devices, and others may only read the
+        # file while it is open.
         $boot = '$PSModuleAutoLoadingPreference = ''None''; $ErrorActionPreference = ''Stop''; ' +
             'Import-Module -Name ($PSHOME + ''\Modules\Microsoft.PowerShell.Utility\Microsoft.PowerShell.Utility.psd1''); ' +
-            '$z = [IO.Compression.GZipStream]::new([IO.MemoryStream]::new([Convert]::FromBase64String(''' + $packed +
-            ''')), [IO.Compression.CompressionMode]::Decompress); $t = [IO.StreamReader]::new($z, [Text.Encoding]::UTF8).ReadToEnd(); ' +
-            '& ([ScriptBlock]::Create($t)) ' + ($argList -join ' ') + '; [Environment]::Exit(1)'
+            '$f = New-Object IO.FileStream(''' + $bodyPath.Replace("'", "''") + ''', ''Open'', ''Read'', ''Read''); ' +
+            'if ($f.Length -ne ' + $raw.Length + ') { [Environment]::Exit(15) }; ' +
+            '$b = New-Object byte[] ' + $raw.Length + '; $o = 0; ' +
+            'while ($o -lt $b.Length) { $n = $f.Read($b, $o, $b.Length - $o); if ($n -le 0) { [Environment]::Exit(15) }; $o += $n }; ' +
+            '$f.Dispose(); $s = [Security.Cryptography.SHA256]::Create(); ' +
+            'if ((-join ($s.ComputeHash($b) | ForEach-Object { $_.ToString(''x2'') })) -cne ''' + $bodySha + ''') { [Environment]::Exit(15) }; ' +
+            '& ([ScriptBlock]::Create([Text.Encoding]::UTF8.GetString($b))) ' + ($argList -join ' ') + '; [Environment]::Exit(1)'
         $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($boot))
         $ps = Join-Path ([Environment]::GetFolderPath('System')) 'WindowsPowerShell\v1.0\powershell.exe'
 
         while ($true) {
+            # Process.Start, not Start-Process: Windows PowerShell's Start-Process
+            # turns the UAC "No" into an InvalidOperationException that drops the
+            # Win32Exception and its code 1223.
+            $psi = New-Object Diagnostics.ProcessStartInfo
+            $psi.FileName = $ps
+            $psi.Arguments = "-NoProfile -NoLogo -NonInteractive -EncodedCommand $encoded"
+            $psi.UseShellExecute = $true
+            $psi.Verb = 'runas'
             try {
-                $proc = Start-Process -FilePath $ps -Verb RunAs -Wait -PassThru -ArgumentList @(
-                    '-NoProfile', '-NoLogo', '-NonInteractive', '-EncodedCommand', $encoded)
+                $proc = [Diagnostics.Process]::Start($psi)
+                $proc.WaitForExit()
             } catch {
                 # 1223: the user said no at the UAC prompt.
                 $ex = $_.Exception
@@ -593,9 +620,9 @@ switch ($logs) { 'created' { Stop-Gj 0 } 'layout' { Stop-Gj 30 } default { Stop-
             $r = Read-Host 'Close the programs that show the stick, then press Enter to try again, or type Q to stop'
             if ($r -match '^[qQ]$') { Stop-Maker 'Nothing was written.' 130 }
         }
-        if ($rc -in 0, 21, 30, 31) { Write-Log 'GJA-3030 maker.write.finished' }
+        if ($rc -in 21, 40, 41, 42) { Write-Log 'GJA-3030 maker.write.finished' }
         switch ($rc) {
-            { $_ -in 0, 30, 31 } { break }
+            { $_ -in 40, 41, 42 } { break }
             11 { Stop-Maker 'The stick changed after you picked it. Nothing was written. Run the maker again.' }
             13 { Stop-Maker "The stick is too small. The installer needs $(Get-Bytes $isoSize). Nothing was written." }
             14 { Stop-Maker 'The downloaded files changed or are not plain files. Nothing was written. Run the maker again.' }
@@ -606,16 +633,20 @@ switch ($logs) { 'created' { Stop-Gj 0 } 'layout' { Stop-Gj 30 } default { Stop-
                 Stop-Maker 'The stick did not read back what was written. Its start was wiped so it does not boot. Try another stick.'
             }
             22 { Stop-Maker 'The write failed. Its start was wiped so the stick does not boot. Run the maker again or try another stick.' }
-            default { Stop-Maker "The write failed (code $rc). The stick may not start; run the maker again." }
+            default {
+                Write-Log "GJA-3033 maker.write.ended code=$rc"
+                Stop-Maker ("The write did not finish (code $rc), so the stick may not start. If Windows Security " +
+                    'stopped it, its Protection history names the reason. Run the maker again.')
+            }
         }
         Write-Log 'GJA-3031 maker.readback.verified'
         switch ($rc) {
-            0 { Write-Log 'GJA-3040 maker.logs.created' }
-            30 {
+            40 { Write-Log 'GJA-3040 maker.logs.created' }
+            41 {
                 Write-Log 'GJA-3041 maker.logs.skipped reason=layout'
                 Write-Host 'No GJLOGS partition: this image leaves no free slot for it. The installer offers other drives for its log.'
             }
-            31 {
+            42 {
                 Write-Log 'GJA-3041 maker.logs.skipped reason=too-small'
                 Write-Host 'No GJLOGS partition: the stick has no room after the image. The installer offers other drives for its log.'
             }

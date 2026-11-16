@@ -50,6 +50,7 @@ yes/no or one of the words listed here, never text a user typed.
 | GJA-3030 | `maker.write.finished` | The image is written to the stick. | none |
 | GJA-3031 | `maker.readback.verified` | The stick reads back the same bytes that were signed. | none |
 | GJA-3032 | `maker.readback.mismatch` | The stick read back different bytes; its first MiB was wiped so it does not boot. | none |
+| GJA-3033 | `maker.write.ended` | The admin process for the write ended without one of its own result codes, for example because Windows Security stopped it; the maker does not count the stick as written. | `code` (count): the exit code Windows reported |
 | GJA-3040 | `maker.logs.created` | The GJLOGS partition for install logs is on the stick. | none |
 | GJA-3041 | `maker.logs.skipped` | The stick got no GJLOGS partition; the installer offers to save logs to another drive instead. | `reason` (one of too-small, layout): the stick has no room after the image, or the image's partition table leaves no free slot |
 | GJA-3098 | `maker.run.failed` | A step of the maker failed; the ERROR line above says why. | none |

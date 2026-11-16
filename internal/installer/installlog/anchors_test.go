@@ -276,7 +276,7 @@ func TestAnchorDocsAreCurrent(t *testing.T) {
 // counts from a variable or a number. Every maker anchor must be written
 // by each maker it applies to.
 func TestMakerScriptAnchors(t *testing.T) {
-	windowsOnly := map[ID]bool{MakerDiskBusy: true}
+	windowsOnly := map[ID]bool{MakerDiskBusy: true, MakerWriteEnded: true}
 	for _, c := range []struct {
 		file, os    string
 		line, count *regexp.Regexp

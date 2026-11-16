@@ -55,6 +55,7 @@ const (
 	MakerWriteFinished     ID = 3030
 	MakerReadbackVerified  ID = 3031
 	MakerReadbackMismatch  ID = 3032
+	MakerWriteEnded        ID = 3033
 	MakerLogsCreated       ID = 3040
 	MakerLogsSkipped       ID = 3041
 	MakerRunFailed         ID = 3098
@@ -207,6 +208,9 @@ var Registry = []Anchor{
 		Meaning: "The stick reads back the same bytes that were signed."},
 	{ID: MakerReadbackMismatch, Name: "maker.readback.mismatch",
 		Meaning: "The stick read back different bytes; its first MiB was wiped so it does not boot."},
+	{ID: MakerWriteEnded, Name: "maker.write.ended",
+		Meaning: "The admin process for the write ended without one of its own result codes, for example because Windows Security stopped it; the maker does not count the stick as written.",
+		Fields:  []FieldSpec{{Name: "code", Kind: KindCount, Meaning: "the exit code Windows reported"}}},
 	{ID: MakerLogsCreated, Name: "maker.logs.created",
 		Meaning: "The GJLOGS partition for install logs is on the stick."},
 	{ID: MakerLogsSkipped, Name: "maker.logs.skipped",
