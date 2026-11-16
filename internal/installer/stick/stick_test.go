@@ -218,7 +218,7 @@ func TestOnlineGoesToMenuAndMarksOnce(t *testing.T) {
 	if n := strings.Count(log, "GJA-2020 "); n != 1 || !strings.Contains(log, "via=ethernet") {
 		t.Errorf("online anchor %d times, want 1:\n%s", n, log)
 	}
-	if strings.Contains(h.screen.String(), "Keyboard layout:") {
+	if strings.Contains(h.screen.String(), "Type a keyboard layout") {
 		t.Error("asked for the keyboard although a layout was stored")
 	}
 }
@@ -479,11 +479,32 @@ func TestKeyboardUnknownNameKeepsCurrent(t *testing.T) {
 }
 
 func TestMainArgs(t *testing.T) {
-	for _, args := range [][]string{nil, {"menu"}, {"menu", "--mode", "x11"}, {"layout", "extra"}, {"menu", "--mode", "window", "x"}} {
+	for _, args := range [][]string{nil, {"menu"}, {"menu", "--mode", "x11"}, {"layout", "extra"}, {"text-console", "x"}, {"menu", "--mode", "window", "x"}} {
 		var out, errOut bytes.Buffer
 		if code := Main(args, &out, &errOut); code != 2 || !strings.Contains(errOut.String(), "usage") {
 			t.Errorf("Main(%q) = %d, %q", args, code, errOut.String())
 		}
+	}
+}
+
+// textMode leaves anything that is not a virtual terminal alone.
+func TestTextModeRefusesNonTerminal(t *testing.T) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	defer w.Close()
+	if err := textMode(int(r.Fd())); err == nil {
+		t.Fatal("textMode on a pipe returned no error")
+	}
+	f, err := os.Create(filepath.Join(t.TempDir(), "file"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if err := textMode(int(f.Fd())); err == nil {
+		t.Fatal("textMode on a file returned no error")
 	}
 }
 

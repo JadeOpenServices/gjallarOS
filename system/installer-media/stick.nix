@@ -30,17 +30,63 @@ let
     wlroots_0_20 = pkgs.wlroots_0_20.override { enableXWayland = false; };
   };
 
+  # Jade Code (Fira Code with the Fira names changed, OFL 1.1), the
+  # brand's terminal font. Its licence goes with it.
+  jadeCode = pkgs.runCommand "jade-code" { } ''
+    install -Dm444 ${../../themes/brand/openjade/fonts/JadeCode-VF.ttf} $out/share/fonts/truetype/JadeCode-VF.ttf
+    install -Dm444 ${../../themes/brand/openjade/fonts/JadeCode-LICENSE.txt} $out/share/fonts/truetype/JadeCode-LICENSE.txt
+  '';
   # The live system turns fontconfig off; foot gets its own, with one font.
-  footFonts = pkgs.makeFontsConf { fontDirectories = [ pkgs.fira-code ]; };
+  footFonts = pkgs.makeFontsConf { fontDirectories = [ jadeCode ]; };
+  # The desktop's font size.
+  inherit (import ../../themes/noctalia.nix { inherit pkgs; }) fontSize;
+
+  # The text console's font for the menu when no window could start: larger
+  # on screens wide enough to keep at least 100 columns. Store files only.
+  consoleFonts = "${pkgs.terminus_font}/share/consolefonts";
+
+  # The brand's terminal colours (Obsidian, dark), as the installed
+  # desktop's terminal has them. foot and the console take them without '#'.
+  term = (import ../../themes/palettes/openjade.nix).Obsidian.dark.terminal;
+  hex = lib.removePrefix "#";
+  slots = [
+    "black"
+    "red"
+    "green"
+    "yellow"
+    "blue"
+    "magenta"
+    "cyan"
+    "white"
+  ];
+  normal = map (n: hex term.normal.${n}) slots;
+  bright = map (n: hex term.bright.${n}) slots;
+  footColours = lib.concatStrings (
+    lib.imap0 (i: c: "regular${toString i}=${c}\n") normal
+    ++ lib.imap0 (i: c: "bright${toString i}=${c}\n") bright
+  );
+  # The Linux console paints the screen with colour 0 and writes text in
+  # colour 7, so those two are the window's background and text.
+  consoleColours =
+    [ (hex term.background) ] ++ lib.sublist 1 6 normal ++ [ (hex term.foreground) ] ++ bright;
+
   # The terminal runs as root, like the menu in it. Its own shortcuts that
   # start programs (a new terminal, opening a link) are off: the menu's
-  # Shell entry is the one way to a shell.
+  # Shell entry is the one way to a shell. The window keeps the screen's
+  # full size, not whole character cells.
   footConfig = pkgs.writeText "gjallar-stick-foot.ini" ''
     [main]
-    font=Fira Code:size=12
+    font=Jade Code:style=Regular:size=${toString fontSize}
     dpi-aware=yes
+    resize-by-cells=no
     term=xterm-256color
+    initial-color-theme=dark
 
+    [colors-dark]
+    alpha=1.0
+    foreground=${hex term.foreground}
+    background=${hex term.background}
+    ${footColours}
     [key-bindings]
     spawn-terminal=none
     show-urls-launch=none
@@ -67,18 +113,47 @@ let
           pkgs.coreutils
         ]
       }:/run/wrappers/bin:/run/current-system/sw/bin
+      console_font() {
+        local size width height font=
+        local -a double=()
+        size=$(cat /sys/class/graphics/fb0/virtual_size 2> /dev/null) || return 0
+        [[ $size =~ ^([0-9]{1,5}),([0-9]{1,5})$ ]] || return 0
+        width=''${BASH_REMATCH[1]}
+        height=''${BASH_REMATCH[2]}
+        if [ "$width" -ge 3840 ] && [ "$height" -ge 2160 ]; then
+          font=ter-v32n
+          double=(-d)
+        elif [ "$width" -ge 1920 ] && [ "$height" -ge 1080 ]; then
+          font=ter-v32n
+        elif [ "$width" -ge 1280 ] && [ "$height" -ge 720 ]; then
+          font=ter-v24n
+        fi
+        [ -z "$font" ] || setfont "''${double[@]}" ${consoleFonts}/$font.psf.gz || true
+      }
       window=true
       while true; do
         if [ "$window" = true ]; then
           layout=$(gjallar-stick layout)
           rc=0
+          # -d tells foot to draw no title bar (cage draws none either).
+          # Without it foot kept 26 pixels for one and left a black strip at
+          # the bottom of the screen.
           XKB_DEFAULT_LAYOUT=$layout WLR_RENDERER=pixman FONTCONFIG_FILE=${footFonts} \
-            cage -- foot -c ${footConfig} -- gjallar-stick menu --mode window || rc=$?
+            cage -d -- foot -c ${footConfig} -- gjallar-stick menu --mode window || rc=$?
           case $rc in
             0 | 75) continue ;;
           esac
           window=false
-          printf '%s\n' "The window stopped (code $rc). The menu goes on in the text console."
+          # logind gives tty1 back from cage (text mode, keyboard on) a
+          # moment late, and the kernel takes no font in graphics mode: the
+          # host owns tty1 and does it itself.
+          gjallar-stick text-console || true
+          printf '%s\n' "The window stopped (exit code $rc). The menu goes on in the text console."
+          # A quiet boot defers fbcon: tty1 stays on the dummy console,
+          # which takes no font, until the first text reaches it (setfont
+          # failed there, D4 2026-11-16). The font comes after that line;
+          # fbcon redraws it.
+          console_font
         fi
         # The console has no window to catch the installer's errors: they
         # go to the screen too.
@@ -94,6 +169,23 @@ let
 in
 {
   imports = [ ./live.nix ];
+
+  # No boot screen for now: a Restart from the text menu never showed its
+  # restart screen (Plane 360 brings it back). The boot stays quiet; the
+  # menu is the first thing on screen.
+  boot.consoleLogLevel = 0;
+  boot.initrd.verbose = false;
+  boot.kernelParams = [
+    "quiet"
+    "rd.systemd.show_status=false"
+    "systemd.show_status=false"
+    "udev.log_level=0"
+    "rd.udev.log_level=0"
+  ];
+
+  # The text console in the same colours, for the menu when no window
+  # could start.
+  console.colors = consoleColours;
 
   # targetdisk.bootMediaLabel knows this label; the installer never offers
   # the stick as a target.

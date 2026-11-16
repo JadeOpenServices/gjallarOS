@@ -191,7 +191,7 @@ func (s *Stick) networkStep(ctx context.Context) error {
 		n := s.readNet(ctx)
 		if n.online() {
 			s.markOnline(n.via)
-			fmt.Fprintf(s.UI.Out, "Network: connected (%s).\n", viaName(n.via))
+			fmt.Fprintf(s.UI.Out, "Connected to the network (%s).\n", viaName(n.via))
 			return nil
 		}
 		switch {
@@ -279,7 +279,7 @@ func (s *Stick) pickWifi(ctx context.Context) error {
 	}
 	picked := networks[choice]
 	if picked.security == "" {
-		fmt.Fprintln(s.UI.Out, "This network is open: others nearby can read what goes over it. The installer checks everything it downloads.")
+		fmt.Fprintln(s.UI.Out, "This network is open, so others nearby can read what goes over it. The installer checks everything it downloads.")
 	}
 	// nmcli asks for the password on the terminal itself; it never passes
 	// through this program or its log.

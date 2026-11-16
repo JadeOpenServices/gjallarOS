@@ -138,11 +138,11 @@ func (s *Stick) markDisplay() {
 // Menu entries.
 const (
 	menuInstall  = "Install gjallarOS"
-	menuRecovery = "Recovery: unlock an installed gjallarOS with its recovery key"
+	menuRecovery = "Recovery (unlock an installed gjallarOS with its recovery key)"
 	menuShell    = "Shell"
 	menuKeyboard = "Keyboard layout"
 	menuNetwork  = "Network"
-	menuAdvanced = "Advanced >"
+	menuAdvanced = "Advanced"
 	menuRestart  = "Restart"
 	menuPowerOff = "Power off"
 )
@@ -237,7 +237,7 @@ func (s *Stick) logError(line string) {
 }
 
 func (s *Stick) advanced(ctx context.Context) error {
-	fmt.Fprintln(s.UI.Out, "Release channel. stable gets updates after they were tested; staging and dev get them earlier and break more often.")
+	fmt.Fprintln(s.UI.Out, "Pick a release channel. Stable gets tested updates. Staging and dev get them earlier and break more often.")
 	choice, err := s.choose(ctx, "Channel", channels)
 	if err != nil || choice == s.channel {
 		return err
@@ -269,20 +269,20 @@ func (s *Stick) keyboardStep(ctx context.Context) error {
 		}
 	}
 	s.flush()
-	fmt.Fprintln(s.UI.Out, "Keyboard layout: type a layout name such as us, gb or fr, or part of one to see a list.")
+	fmt.Fprintln(s.UI.Out, "Type a keyboard layout such as us, gb or fr. Part of a name shows a list.")
 	picked, err := s.UI.Pick(ctx, "Keyboard layout", current, options)
 	if err != nil {
 		return err
 	}
 	normal, err := xkb.Normalize(picked)
 	if err != nil || !stickkeyboard.Valid(normal.Name) {
-		fmt.Fprintln(s.UI.Out, "That layout cannot be used; keeping", current)
+		fmt.Fprintf(s.UI.Out, "That layout cannot be used. Still using %s.\n", current)
 		return nil
 	}
 	if err := s.WriteLayout(normal.Name); err != nil {
 		installlog.Mark(installlog.StickFlowFailed)
 		s.logError("could not store the keyboard layout")
-		fmt.Fprintln(s.UI.Out, "Could not store the keyboard layout; the installer will ask again.")
+		fmt.Fprintln(s.UI.Out, "Could not store the keyboard layout. The installer will ask again.")
 		return nil
 	}
 	if normal.Name == current {
@@ -304,7 +304,7 @@ func (s *Stick) applyConsoleLayout(ctx context.Context) {
 	// ckbcomp turns the X layout into a console keymap; loadkeys reads it
 	// from its standard input.
 	if err := s.Cmd.Interactive(ctx, "sh", "-c", `ckbcomp -layout "$1" | loadkeys -q`, "sh", layout); err != nil {
-		fmt.Fprintln(s.UI.Out, "The console keeps its old layout; the installed system gets", layout)
+		fmt.Fprintf(s.UI.Out, "The console keeps its old layout. The installed system gets %s.\n", layout)
 	}
 }
 

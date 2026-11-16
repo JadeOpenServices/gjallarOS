@@ -11,6 +11,8 @@ import (
 	"syscall"
 	"time"
 
+	"golang.org/x/sys/unix"
+
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/installlog"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/region"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/stickkeyboard"
@@ -27,6 +29,7 @@ const secureBootVar = "/sys/firmware/efi/efivars/SecureBoot-8be4df61-93ca-11d2-a
 const usage = `usage:
   gjallar-stick menu --mode window|console
   gjallar-stick layout
+  gjallar-stick text-console
 `
 
 // Main runs gjallar-stick and returns its exit code.
@@ -38,6 +41,15 @@ func Main(args []string, stdout, stderr io.Writer) int {
 			layout = region.DefaultKeyboard
 		}
 		fmt.Fprintln(stdout, layout)
+		return 0
+	}
+	if len(args) == 1 && args[0] == "text-console" {
+		// The display host calls this before the text console takes over
+		// from a window that stopped: see textMode.
+		if err := textMode(int(os.Stdin.Fd())); err != nil {
+			fmt.Fprintln(stderr, "Cannot switch the console to text:", err)
+			return 1
+		}
 		return 0
 	}
 	if len(args) != 3 || args[0] != "menu" || args[1] != "--mode" {
@@ -83,6 +95,43 @@ func Main(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	return 0
+}
+
+// From linux/kd.h, the same on every architecture.
+const (
+	kdSetMode   = 0x4B3A
+	kdGetMode   = 0x4B3B
+	kdGetKbMode = 0x4B44
+	kdSetKbMode = 0x4B45
+	kdText      = 0
+	kbOff       = 4
+	kbUnicode   = 3
+)
+
+// textMode puts the virtual terminal on fd back into text mode with the
+// keyboard on. cage runs through logind, which turns both off for it and
+// back on only a moment after cage stops; until then the kernel refuses a
+// console font (con_font_set wants text mode) and keys are lost. The host
+// owns the terminal, so it does this itself instead of waiting for logind.
+// An fd that is not a virtual terminal is an error and is left alone.
+func textMode(fd int) error {
+	mode, err := unix.IoctlGetInt(fd, kdGetMode)
+	if err != nil {
+		return fmt.Errorf("not a virtual terminal: %w", err)
+	}
+	if mode != kdText {
+		if err := unix.IoctlSetInt(fd, kdSetMode, kdText); err != nil {
+			return err
+		}
+	}
+	kb, err := unix.IoctlGetInt(fd, kdGetKbMode)
+	if err != nil {
+		return err
+	}
+	if kb == kbOff {
+		return unix.IoctlSetInt(fd, kdSetKbMode, kbUnicode)
+	}
+	return nil
 }
 
 // firstStart reports whether no menu log exists yet this boot.
