@@ -318,6 +318,7 @@
           lanzabooteModule = inputs.lanzaboote.nixosModules.lanzaboote;
           secureBootModule = ./system/security/secure-boot/lanzaboote.nix;
           flashReadModule = ./system/security/secure-boot/flash-read.nix;
+          tpm2ClearModule = ./system/security/secure-boot/tpm2-clear.nix;
         };
 
         snapshots = import ./tests/nix/snapshots.nix {

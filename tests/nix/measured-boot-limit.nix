@@ -4,6 +4,7 @@
   lanzabooteModule,
   secureBootModule,
   flashReadModule,
+  tpm2ClearModule,
 }:
 let
   evaluate =
@@ -19,6 +20,8 @@ let
         lanzabooteModule
         secureBootModule
         flashReadModule
+        # lanzaboote.nix calls the chip-slot cleanup this module provides.
+        tpm2ClearModule
         {
           system.stateVersion = "26.05";
           # As on every host (system/hardware/firmware.nix).
@@ -40,6 +43,7 @@ let
           specialisation.gjallar-recovery-maintenance.configuration = { };
         }
       ];
+      specialArgs.gjallarctlPackage = nixpkgs.legacyPackages.${system}.emptyDirectory;
       specialArgs.settings = {
         secureBootEnable = true;
       }
