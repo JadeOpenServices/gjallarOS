@@ -194,6 +194,75 @@ and write", nothing else. It cannot touch the gjallarOS repository. The
 `sign` job trusts a statement only through the signature and
 `BUILDER_SSH_KEY`, not because it is in that repository.
 
+Setting it up:
+
+1. Create `gjallarOS-statements` as a public repository with a README, so
+   `main` exists. Add a branch ruleset on `main`: block force pushes and
+   deletion. The builder only ever adds a commit on top.
+2. Start the builder. On first boot `gjallar-builder-statement-key.service`
+   makes the key. Read the public half through the guest agent and put it
+   into `BUILDER_SSH_KEY` ([step 2](#2-environment-installer-sign)):
+
+   ```sh
+   qm guest exec <vmid> -- cat /var/lib/gjallar-builder/statement-key.pub
+   ```
+
+3. Make the token (on the release bot account or yours) and hand it to the
+   builder through stdin, so it is on no command line. Paste it, press
+   Enter, then Ctrl-D:
+
+   ```sh
+   qm guest exec <vmid> --pass-stdin 1 -- /run/current-system/sw/bin/gjallar-builder-set-token
+   ```
+
+   Fine-grained tokens expire. Before the date GitHub shows, make a new
+   one and run the same command again.
+
+What it does: 15 minutes after boot, and then one hour after each run,
+`gjallar-builder-statement.service` lists the `v*` tags and takes the
+oldest one from `v2026.10.67` on that has no statement yet. One tag per
+run. Older tags have no installer release and are never built.
+
+The tagged code runs only as the user `gjallar-release-build`, which may
+use Nix but is not trusted by it and cannot read the key or the token.
+Root reads only `SHA256SUMS` and `RELEASE` from the build output, checks
+that they are plain files of the expected shape, signs, and pushes. The
+statements repository is never checked out on the builder: the job writes
+the new commit straight from git objects, so a file or link someone put
+into that repository never lands on the builder's disk.
+
+To see what it did:
+
+```sh
+qm guest exec <vmid> -- journalctl -u gjallar-builder-statement -n 60 --no-pager
+```
+
+Each failed try for a tag is counted in
+`/var/lib/gjallar-builder/failed/<tag>`. After three, the builder leaves
+that tag alone and goes on with newer ones. Fix the cause first, then let
+it try again:
+
+```sh
+qm guest exec <vmid> -- rm /var/lib/gjallar-builder/failed/vYYYY.MM.N
+```
+
+| Message in the journal | What to do |
+| --- | --- |
+| `no statement key yet` | The key service failed: `journalctl -u gjallar-builder-statement-key` |
+| `the build of ... failed` | The journal shows the end of the build log. CI most likely fails the same way |
+| `RELEASE of the build does not say version=...` | `system/release` in the tagged commit is wrong; CI stops on it too. New commit, new tag |
+| `SHA256SUMS has N lines` / `SHA256SUMS line N is not the hash of ...` | The `gjallar-release` output changed shape. `statement.sh` and the workflow list the same five files and must change together |
+| `... is not a regular file` / `... is larger than ... bytes` | The build put a link or an oversized file where `SHA256SUMS` or `RELEASE` belong. That is the tagged code trying something. Do not retry; find out which commit did it |
+| `... in the statements repository is a blob, not a folder` | Someone put a file or link at the tag's path in gjallarOS-statements. Find out who, remove it with a commit, then clear the failed file |
+| `... does not hold a fine-grained token` | Set the token again (step 3) |
+| `pushing the statement for ... failed` | Token expired or without rights, or GitHub was down. The next run tries again |
+
+Changing the builder key: a new builder disk makes a new key. Then
+`BUILDER_SSH_KEY` has to change too, and `sign` refuses statements until
+it does. Change it only when you know why the key changed, the same way
+as the [release key](#changing-the-release-key). Statements already in
+the repository stay as they are; `sign` only looks at the tag it signs.
+
 ### Per release
 
 1. On the release commit, set `system/release` to the new tag name.

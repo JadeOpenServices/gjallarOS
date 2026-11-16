@@ -13,6 +13,45 @@
 let
   keyName = "gjallaros-build-2";
   keyDir = "/var/lib/gjallar-builder";
+  # Runs everything that touches tagged code: listing tags, evaluating and
+  # building the flake. It cannot read keyDir.
+  buildUser = "gjallar-release-build";
+  sourceRepo = "JadeOpenServices/gjallarOS";
+  statementsRepo = "JadeOpenServices/gjallarOS-statements";
+  # The first tag with a gjallar-release output; older tags are skipped.
+  firstTag = "v2026.10.67";
+
+  statement = pkgs.writeShellApplication {
+    name = "gjallar-builder-statement";
+    runtimeInputs = with pkgs; [
+      coreutils
+      gnugrep
+      gnused
+      git
+      nix
+      openssh
+      util-linux
+    ];
+    text = builtins.readFile ./statement.sh;
+  };
+
+  # Puts the statements push token in place. Reads it from stdin so it never
+  # shows on a command line:
+  #   qm guest exec <vmid> --pass-stdin 1 -- /run/current-system/sw/bin/gjallar-builder-set-token
+  setToken = pkgs.writeShellApplication {
+    name = "gjallar-builder-set-token";
+    runtimeInputs = [ pkgs.coreutils ];
+    text = ''
+      umask 077
+      [ "$(id -u)" = 0 ] || { echo "run as root" >&2; exit 1; }
+      tok=$(head -c 1024 | tr -d '\n')
+      [[ $tok =~ ^github_pat_[A-Za-z0-9_]+$ ]] || { echo "not a fine-grained token (github_pat_...)" >&2; exit 1; }
+      install -d -m 0700 ${keyDir}
+      printf '%s\n' "$tok" >${keyDir}/statements-token.tmp
+      mv -f ${keyDir}/statements-token.tmp ${keyDir}/statements-token
+      echo "token saved"
+    '';
+  };
 in
 {
   imports = [ "${modulesPath}/profiles/qemu-guest.nix" ];
@@ -89,12 +128,20 @@ in
       "flakes"
     ];
     substituters = lib.mkForce [ "https://cache.nixos.org" ];
-    trusted-public-keys = lib.mkForce [ "cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY=" ];
+    trusted-public-keys = lib.mkForce [
+      "cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY="
+    ];
     sandbox = true;
-    allowed-users = [ "root" ];
+    # The build user is not trusted: it cannot pick other caches or keys.
+    allowed-users = [
+      "root"
+      buildUser
+    ];
     trusted-users = [ "root" ];
     # Builds only pinned revisions: no name lookups in any registry.
     flake-registry = "";
+    # A tagged flake.nix must not add caches or settings.
+    accept-flake-config = false;
   };
   nixpkgs.flake = {
     setFlakeRegistry = false;
@@ -126,5 +173,71 @@ in
     '';
   };
 
-  environment.systemPackages = [ pkgs.git ];
+  # The statement key signs the SHA256SUMS of each release this VM built;
+  # the installer-sign environment pins its public half (BUILDER_SSH_KEY).
+  systemd.services.gjallar-builder-statement-key = {
+    description = "Make the release statement SSH key";
+    wantedBy = [ "multi-user.target" ];
+    unitConfig.ConditionPathExists = "!${keyDir}/statement-key";
+    serviceConfig = {
+      Type = "oneshot";
+      UMask = "0077";
+      StateDirectory = "gjallar-builder";
+      StateDirectoryMode = "0700";
+    };
+    script = ''
+      rm -f ${keyDir}/statement-key.tmp ${keyDir}/statement-key.tmp.pub
+      ${pkgs.openssh}/bin/ssh-keygen -q -t ed25519 -N "" -C gjallar-builder \
+        -f ${keyDir}/statement-key.tmp
+      mv ${keyDir}/statement-key.tmp.pub ${keyDir}/statement-key.pub
+      chmod 0644 ${keyDir}/statement-key.pub
+      mv ${keyDir}/statement-key.tmp ${keyDir}/statement-key
+    '';
+  };
+
+  users.groups.${buildUser} = { };
+  users.users.${buildUser} = {
+    isSystemUser = true;
+    group = buildUser;
+    home = "/var/lib/${buildUser}";
+    createHome = true;
+  };
+
+  # Builds the oldest tag without a statement and pushes its statement.
+  systemd.services.gjallar-builder-statement = {
+    description = "Build a release tag and push the builder statement";
+    after = [
+      "network-online.target"
+      "gjallar-builder-statement-key.service"
+    ];
+    wants = [ "network-online.target" ];
+    environment = {
+      SOURCE_URL = "https://github.com/${sourceRepo}";
+      STATEMENTS_URL = "https://github.com/${statementsRepo}";
+      FIRST_TAG = firstTag;
+      BUILD_USER = buildUser;
+      KEY_DIR = keyDir;
+    };
+    serviceConfig = {
+      Type = "oneshot";
+      UMask = "0077";
+      StateDirectory = "gjallar-builder";
+      StateDirectoryMode = "0700";
+      PrivateTmp = true;
+      ExecStart = "${statement}/bin/gjallar-builder-statement";
+      TimeoutStartSec = "12h";
+    };
+  };
+  systemd.timers.gjallar-builder-statement = {
+    wantedBy = [ "timers.target" ];
+    timerConfig = {
+      OnBootSec = "15min";
+      OnUnitInactiveSec = "1h";
+    };
+  };
+
+  environment.systemPackages = [
+    pkgs.git
+    setToken
+  ];
 }
