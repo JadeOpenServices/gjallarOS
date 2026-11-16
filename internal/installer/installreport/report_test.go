@@ -92,6 +92,24 @@ func TestRenderRejectsOddFieldValues(t *testing.T) {
 	}
 }
 
+func TestRenderShowsBuildRevisions(t *testing.T) {
+	const c = "2aa66ac7dd24a0900983ccfc6841d50c5e04663d"
+	for revision, want := range map[string]string{
+		c:                     c,
+		"git:" + c:            c,
+		"git:" + c + "-dirty": c + "-dirty",
+		"nar:sha256-AAAA":     "unknown",
+		"":                    "unknown",
+		"git:" + c + "\nx":    "unknown",
+	} {
+		r := syntheticReport()
+		r.Commit = revision
+		if got := string(r.Render()); !strings.Contains(got, "gjallarOS commit:  "+want+"\n") {
+			t.Fatalf("revision %q: want commit line %q in:\n%s", revision, want, got)
+		}
+	}
+}
+
 func TestRenderIsCapped(t *testing.T) {
 	r := syntheticReport()
 	r.Error = strings.Repeat("e", 4*MaxSize)

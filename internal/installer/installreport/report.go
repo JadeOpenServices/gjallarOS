@@ -70,7 +70,9 @@ const (
 )
 
 var (
-	commitPattern = regexp.MustCompile(`^[0-9a-f]{7,64}$`)
+	// A bare commit, or a build revision as the installer gets it
+	// ("git:<commit>", with "-dirty" when the build had local changes).
+	commitPattern = regexp.MustCompile(`^(?:git:)?([0-9a-f]{7,64}(?:-dirty)?)$`)
 	idPattern     = regexp.MustCompile(`^[0-9A-Za-z][0-9A-Za-z:._-]{0,31}$`)
 	busPattern    = regexp.MustCompile(`^[a-z0-9]{1,16}$`)
 	modelPattern  = regexp.MustCompile(`^[0-9A-Za-z][0-9A-Za-z._/-]{0,95}$`)
@@ -86,7 +88,7 @@ func (r Report) Render() []byte {
 	fmt.Fprintf(&b, "gjallarOS install report (format %d)\n\n", Format)
 	line("Why", string(r.Reason))
 	line("Date (UTC)", r.Date.UTC().Format("2006-01-02"))
-	line("gjallarOS commit", only(r.Commit, commitPattern))
+	line("gjallarOS commit", orUnknown(commit(r.Commit)))
 	line("Release channel", field(r.Channel))
 	line("Live kernel", field(r.Kernel))
 	line("Firmware", r.Firmware.text())
@@ -209,6 +211,14 @@ func field(value string) string {
 		value = value[:maxField]
 	}
 	return value
+}
+
+func commit(value string) string {
+	m := commitPattern.FindStringSubmatch(value)
+	if m == nil {
+		return ""
+	}
+	return m[1]
 }
 
 func only(value string, pattern *regexp.Regexp) string {
