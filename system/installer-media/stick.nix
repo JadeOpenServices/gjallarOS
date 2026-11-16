@@ -371,6 +371,9 @@ in
   boot.initrd.systemd.services.gjallar-stick-uki = lib.mkIf pkgs.stdenv.hostPlatform.isx86_64 {
     description = "Keep the stick's boot file for the installer";
     wantedBy = [ "initrd.target" ];
+    # It reads the device behind gjallar-iso, so it has nothing to do when
+    # that failed; the retry at the emergency prompt starts both again.
+    requires = [ "gjallar-media-iso.service" ];
     after = [ "gjallar-media-iso.service" ];
     before = [ "gjallar-media-store.service" ];
     unitConfig.DefaultDependencies = false;

@@ -189,7 +189,13 @@ in
             pending=
             for host in /sys/bus/usb/drivers/usb-storage/*/host* /sys/bus/usb/drivers/uas/*/host*; do
               [ -d "$host" ] || continue
-              compgen -G "$host/target*/*/block/*" > /dev/null || pending=1
+              # A plain glob: stage 1's bash has no compgen. With no match
+              # the pattern stays as is and -e is false.
+              disk=
+              for b in "$host"/target*/*/block/*; do
+                if [ -e "$b" ]; then disk=1; break; fi
+              done
+              [ -n "$disk" ] || pending=1
             done
             [ -n "$pending" ] || break
             sleep 0.1
