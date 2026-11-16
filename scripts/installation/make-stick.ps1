@@ -605,11 +605,9 @@ switch ($logs) { 'created' { Stop-Gj 40 } 'layout' { Stop-Gj 41 } default { Stop
                 $ex = $_.Exception
                 while ($ex -and -not ($ex -is [ComponentModel.Win32Exception] -and $ex.NativeErrorCode -eq 1223)) { $ex = $ex.InnerException }
                 if (-not $ex) { throw }
-                Remove-Work
                 Write-Log 'GJA-3021 maker.elevation.declined'
                 Write-Host ''
-                Write-Host 'No admin rights for the write. Nothing was written and the download is deleted.'
-                return
+                Stop-Maker 'No admin rights for the write. Nothing was written and the download is deleted.'
             }
             $rc = $proc.ExitCode
             if ($rc -ne 12) { break }
