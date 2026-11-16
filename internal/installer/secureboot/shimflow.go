@@ -194,6 +194,9 @@ func ContinueShim(
 	} else {
 		fmt.Fprintln(out, "The gjallarOS key already waits for MokManager.")
 	}
+	if err := holdMokManager(ctx, liveFirmware); err != nil {
+		return "", err
+	}
 	fmt.Fprint(out, mokManagerSteps(keys.dbDER, queued, "gjallarctl secure-boot setup"))
 	return ContinuationReboot, nil
 }
@@ -235,6 +238,9 @@ func QueueShimKey(ctx context.Context, out io.Writer, facts ShimFacts, again str
 		}
 	} else {
 		fmt.Fprintln(out, "The gjallarOS key already waits for MokManager.")
+	}
+	if err := holdMokManager(ctx, liveFirmware); err != nil {
+		return false, err
 	}
 	fmt.Fprint(out, mokManagerSteps(keys.dbDER, queued, again))
 	return false, nil
@@ -334,6 +340,11 @@ func FinishFreshShim(ctx context.Context, ui UI, out io.Writer, facts ShimFacts,
 	if visit.stick, err = queueStickDelete(ctx, liveFirmware, liveStickCopy, out, password); err != nil {
 		return "", err
 	}
+	if visit.key != nil || visit.stick != nil {
+		if err := holdMokManager(ctx, liveFirmware); err != nil {
+			return "", err
+		}
+	}
 	if err := run(ctx, "sudo", "install", "-m", "0600", "/dev/null", FinalMarkerPath); err != nil {
 		return "", fmt.Errorf("arm final Secure Boot verification: %w", err)
 	}
@@ -356,7 +367,7 @@ func (v mokVisit) steps() string {
 	}
 	var b strings.Builder
 	b.WriteString("\nAt the next start a blue screen (MokManager) asks to confirm the changes.\n")
-	b.WriteString("It waits 10 seconds; press the down arrow before it runs out.\n")
+	b.WriteString("It waits until you choose. The menu starts on Continue boot, which drops the changes.\n")
 	n := 0
 	step := func(format string, args ...any) {
 		n++
@@ -383,7 +394,7 @@ func (v mokVisit) steps() string {
 		step("%s", password(v.stick.reused))
 	}
 	step("Reboot")
-	b.WriteString("If the 10 seconds ran out, start the installer stick again and rerun the installer.\n")
+	b.WriteString("If it went on without the changes, start the installer stick again and rerun the installer.\n")
 	return b.String()
 }
 
@@ -443,7 +454,7 @@ func mokManagerSteps(der []byte, reused bool, again string) string {
 	}
 	return fmt.Sprintf(`
 At the next start a blue screen (MokManager) asks to confirm the key.
-It waits 10 seconds; press the down arrow before it runs out:
+It waits until you choose. The menu starts on Continue boot, which drops the key:
   1. Enroll MOK (the menu starts on Continue boot; press down, then Enter)
   2. View key 0; under [Fingerprint] it must read
      %s
@@ -452,7 +463,7 @@ It waits 10 seconds; press the down arrow before it runs out:
   4. Yes (the screen starts on No; press down, then Enter)
   5. %s
   6. Reboot
-If the 10 seconds ran out, run %[3]s again.
+If it went on without the key, run %[3]s again.
 After the restart, run %[3]s again for the next step.
 `, sha1Fingerprint(der), password, again)
 }
@@ -470,6 +481,30 @@ func sha1Fingerprint(der []byte) string {
 		return strings.Join(parts, " ")
 	}
 	return line(sum[:10]) + "\n     " + line(sum[10:])
+}
+
+// holdMokManager makes the next MokManager wait for a key press instead of
+// counting down 10 seconds. shim deletes MokNew and MokDel before it shows
+// the menu, so a countdown that runs out drops every queued request, and
+// after a fresh install that meant installing again. shim reads MokTimeout
+// once and deletes it; a negative value skips the countdown (MokManager.c
+// draw_countdown, shim 16.1). mokutil gets no input from the user session.
+func holdMokManager(ctx context.Context, f firmwareFiles) error {
+	if err := run(ctx, "sudo", privilegedTool("mokutil"), "--timeout", "-1"); err != nil {
+		return fmt.Errorf("make MokManager wait for a key press: %w", err)
+	}
+	raw, present, err := f.efivar("MokTimeout", shimLockGUID)
+	if errors.Is(err, fs.ErrPermission) {
+		raw, present, err = f.rootEfivar("MokTimeout", shimLockGUID)
+	}
+	if err != nil {
+		return fmt.Errorf("read MokTimeout back: %w", err)
+	}
+	// mokutil 0.7.2 writes an int16; shim reads the value as signed.
+	if !present || !bytes.Equal(raw, []byte{0xff, 0xff}) {
+		return errors.New("mokutil returned, but the firmware holds no MokManager wait")
+	}
+	return nil
 }
 
 // mokImportPath is where root keeps the key mokutil imports. /run belongs

@@ -1,6 +1,7 @@
 package secureboot
 
 import (
+	"context"
 	"crypto/sha1"
 	"crypto/sha256"
 	"encoding/binary"
@@ -365,5 +366,42 @@ func TestShimPlanSteps(t *testing.T) {
 	}
 	if strings.Contains(plan, "Run this again") {
 		t.Errorf("plan still says \"Run this again\":\n%s", plan)
+	}
+}
+
+// A missed MokManager countdown drops every queued request, so each queue
+// flow makes the next MokManager wait and checks that the firmware took it.
+func TestHoldMokManager(t *testing.T) {
+	for _, c := range []struct {
+		name    string
+		written []byte
+		ok      bool
+	}{
+		{"waits", []byte{0xff, 0xff}, true},
+		{"not written", nil, false},
+		{"countdown kept", []byte{0x0a, 0x00}, false},
+		{"wrong size", []byte{0xff, 0xff, 0xff, 0xff}, false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			f := newFakeFirmware(t)
+			var calls []string
+			saved := run
+			t.Cleanup(func() { run = saved })
+			run = func(_ context.Context, name string, args ...string) error {
+				calls = append(calls, name+" "+strings.Join(args, " "))
+				if c.written != nil {
+					f.set("MokTimeout", shimLockGUID, c.written)
+				}
+				return nil
+			}
+			err := holdMokManager(context.Background(), f.root)
+			if (err == nil) != c.ok {
+				t.Fatalf("err = %v", err)
+			}
+			want := "sudo " + privilegedTool("mokutil") + " --timeout -1"
+			if len(calls) != 1 || calls[0] != want {
+				t.Fatalf("calls %q, want %q", calls, want)
+			}
+		})
 	}
 }

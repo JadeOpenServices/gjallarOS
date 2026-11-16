@@ -276,6 +276,9 @@ func QueueStickDelete(ctx context.Context, out io.Writer) (string, error) {
 	if err != nil || del == nil {
 		return "", err
 	}
+	if err := holdMokManager(ctx, liveFirmware); err != nil {
+		return "", err
+	}
 	return stickDeleteNotice(del), nil
 }
 
@@ -285,7 +288,8 @@ func stickDeleteNotice(del *stickDelete) string {
 		password = "the password chosen when the request was made"
 	}
 	return fmt.Sprintf(`The installer stick stays trusted by shim until MokManager deletes its
-entry. When shim next starts, MokManager shows a blue screen: choose
-Delete MOK, check that the hash starts with %s, confirm and type %s.
+entry. When shim next starts, MokManager shows a blue screen and waits
+until you choose. Choose Delete MOK, check that the hash starts with %s,
+confirm and type %s. Continue boot drops the request.
 `, del.sum[:16], password)
 }
