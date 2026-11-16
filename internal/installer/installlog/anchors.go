@@ -51,6 +51,7 @@ const (
 	MakerSignatureBad      ID = 3012
 	MakerDiskChosen        ID = 3020
 	MakerElevationDeclined ID = 3021
+	MakerDiskBusy          ID = 3022
 	MakerWriteFinished     ID = 3030
 	MakerReadbackVerified  ID = 3031
 	MakerReadbackMismatch  ID = 3032
@@ -198,6 +199,8 @@ var Registry = []Anchor{
 		Fields:  []FieldSpec{{Name: "disks", Kind: KindCount, Meaning: "how many USB sticks the maker offered"}}},
 	{ID: MakerElevationDeclined, Name: "maker.elevation.declined",
 		Meaning: "Admin rights for the write were refused or not available; nothing was written."},
+	{ID: MakerDiskBusy, Name: "maker.disk.busy",
+		Meaning: "Windows could not lock a volume on the stick because a program has it open; nothing was written and the maker offers to try again."},
 	{ID: MakerWriteFinished, Name: "maker.write.finished",
 		Meaning: "The image is written to the stick."},
 	{ID: MakerReadbackVerified, Name: "maker.readback.verified",
