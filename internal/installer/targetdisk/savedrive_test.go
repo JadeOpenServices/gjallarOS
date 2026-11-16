@@ -25,18 +25,18 @@ func saveTree(t *testing.T, targetPath string) []byte {
 			"label": nil, "model": model, "size": 16000000000, "ro": ro, "mountpoints": []any{nil}, "children": children}
 	}
 	// A stick as the USB maker writes it (L76): the image's two partitions,
-	// GJLOGS in slot 3, and stage 1's /iso map over the whole disk.
+	// GJLOGS in slot 3, and stage 1's /iso map over partition 1, where the
+	// label link points (seen on a stick21 VM boot, 2026-11-16).
 	stick := func(path, model string, iso bool, logs map[string]any) map[string]any {
-		d := disk(path, "usb", model, false,
-			numbered(part(path+"1", "iso9660", "2026-11-15-00-00-00-00", "GJALLAR_STICK"), 1),
+		p1 := numbered(part(path+"1", "iso9660", "2026-11-15-00-00-00-00", "GJALLAR_STICK"), 1)
+		if iso {
+			p1["children"] = []map[string]any{{"path": "/dev/mapper/gjallar-iso", "type": "dm", "fstype": "iso9660",
+				"label": "GJALLAR_STICK", "size": 1900000000, "ro": true, "mountpoints": []any{"/iso"}}}
+		}
+		d := disk(path, "usb", model, false, p1,
 			numbered(part(path+"2", "vfat", "AAAA-0001", "EFIBOOT"), 2),
 			logs)
 		d["fstype"], d["label"] = "iso9660", "GJALLAR_STICK"
-		if iso {
-			d["children"] = append(d["children"].([]map[string]any),
-				map[string]any{"path": "/dev/mapper/gjallar-iso", "type": "dm", "fstype": "iso9660", "label": "GJALLAR_STICK",
-					"size": 1900000000, "ro": true, "mountpoints": []any{"/iso"}})
-		}
 		return d
 	}
 	logs := func(path, uuid string) map[string]any {
