@@ -30,7 +30,8 @@ function Invoke-GjallarMakeStick {
     $releases = 'https://github.com/JadeOpenServices/gjallarOS/releases'
     # RSA public key for release signatures (RSA-PSS, SHA-256, salt 32), as
     # base64 modulus and exponent: Windows PowerShell 5.1 has no PEM import.
-    # Its fingerprint is published apart from the release (Plane 350, Q5).
+    # Its fingerprint (SHA-256 of the DER key) is in the README, apart from
+    # the release (Plane 350, Q5); the maker shows it before it downloads.
     $keyModulus = '@GJALLAR_RELEASE_KEY_MODULUS@'
     $keyExponent = '@GJALLAR_RELEASE_KEY_EXPONENT@'
     # The release this copy came from and the oldest release still safe
@@ -168,6 +169,41 @@ function Get-GjDisks([string]$where) {
         ''
     }
     function Test-VerLt([string]$a, [string]$b) { [string]::CompareOrdinal((Get-VerKey $a), (Get-VerKey $b)) -lt 0 }
+    # DER pieces for the key fingerprint: SHA-256 of the key as
+    # SubjectPublicKeyInfo, the same bytes make-stick.sh and
+    # `openssl pkey -pubin -outform DER` hash.
+    function Get-Der([byte]$tag, [byte[]]$body) {
+        $out = New-Object 'Collections.Generic.List[byte]'
+        $out.Add($tag)
+        $n = $body.Length
+        if ($n -lt 128) {
+            $out.Add([byte]$n)
+        } else {
+            $len = New-Object 'Collections.Generic.List[byte]'
+            while ($n -gt 0) { $len.Insert(0, [byte]($n -band 255)); $n = $n -shr 8 }
+            $out.Add([byte](128 + $len.Count))
+            $out.AddRange($len)
+        }
+        $out.AddRange($body)
+        , $out.ToArray()
+    }
+    function Get-DerInt([byte[]]$mag) {
+        $i = 0
+        while ($i -lt $mag.Length - 1 -and $mag[$i] -eq 0) { $i++ }
+        $v = New-Object 'Collections.Generic.List[byte]'
+        if ($mag[$i] -band 0x80) { $v.Add(0) }
+        for (; $i -lt $mag.Length; $i++) { $v.Add($mag[$i]) }
+        Get-Der 0x02 $v.ToArray()
+    }
+    function Get-KeyFingerprint {
+        $rsaOid = [byte[]](0x06, 0x09, 0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x01, 0x01, 0x05, 0x00)
+        $pub = Get-Der 0x30 ([byte[]]((Get-DerInt ([Convert]::FromBase64String($keyModulus))) +
+                (Get-DerInt ([Convert]::FromBase64String($keyExponent)))))
+        $spki = Get-Der 0x30 ([byte[]]((Get-Der 0x30 $rsaOid) + (Get-Der 0x03 ([byte[]](@([byte]0) + $pub)))))
+        $sha = [Security.Cryptography.SHA256]::Create()
+        try { $h = $sha.ComputeHash($spki) } finally { $sha.Dispose() }
+        ([BitConverter]::ToString($h)) -replace '-', ''
+    }
 
     $local = [Environment]::GetFolderPath('LocalApplicationData')
     if ($local) {
@@ -204,6 +240,28 @@ function Get-GjDisks([string]$where) {
         Write-Host ''
         Write-Host 'This downloads the gjallarOS installer, checks its signature and writes'
         Write-Host 'it to a USB stick. Everything on that stick is erased.'
+        Write-Host ''
+
+        # Q229/Q236: the user compares the key fingerprint with the README.
+        # This catches an old copy or one built with another key. It cannot
+        # catch a changed script: that can print the right fingerprint and
+        # skip every check after it. Only the download-first way in the
+        # README (compare the script's SHA-256 before running it) covers that.
+        $fp = ''
+        try { $fp = Get-KeyFingerprint } catch { $fp = '' }
+        if ($fp -cnotmatch '^[0-9A-F]{64}$') { Stop-Maker 'The maker could not compute its release key fingerprint.' }
+        $groups = for ($i = 0; $i -lt 64; $i += 4) { $fp.Substring($i, 4) }
+        Write-Host 'Release key fingerprint (SHA-256):'
+        Write-Host ('  ' + ($groups[0..7] -join ' '))
+        Write-Host ('  ' + ($groups[8..15] -join ' '))
+        Write-Host ''
+        Write-Host 'Compare it with "Release key fingerprint" in the gjallarOS README.'
+        $r = Read-Host 'Type yes if it matches'
+        if ($r -ne 'yes') {
+            Write-Log 'GJA-3003 maker.key.declined'
+            Stop-Maker 'The fingerprint was not confirmed; nothing was downloaded or written. Get the maker again through the gjallarOS README.'
+        }
+        Write-Log 'GJA-3002 maker.key.confirmed'
         Write-Host ''
         if (-not $Release) {
             $r = Read-Host 'Press Enter to use the newest stable release, or type A for advanced options'

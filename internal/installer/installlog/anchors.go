@@ -50,6 +50,8 @@ const (
 	StickFlowFailed       ID = 2098
 
 	MakerRunStarted        ID = 3001
+	MakerKeyConfirmed      ID = 3002
+	MakerKeyDeclined       ID = 3003
 	MakerDownloadFinished  ID = 3010
 	MakerSignatureVerified ID = 3011
 	MakerSignatureBad      ID = 3012
@@ -210,6 +212,10 @@ var Registry = []Anchor{
 		Meaning: "The USB stick maker started.",
 		Fields: []FieldSpec{{Name: "os", Kind: KindChoice, Choices: []string{"linux", "windows"},
 			Meaning: "the system the maker runs on"}}},
+	{ID: MakerKeyConfirmed, Name: "maker.key.confirmed",
+		Meaning: "The user typed yes: the release key fingerprint the maker showed matches the README."},
+	{ID: MakerKeyDeclined, Name: "maker.key.declined",
+		Meaning: "The user did not confirm the release key fingerprint; nothing was downloaded or written."},
 	{ID: MakerDownloadFinished, Name: "maker.download.finished",
 		Meaning: "The stick image and its checksum files are downloaded."},
 	{ID: MakerSignatureVerified, Name: "maker.signature.verified",

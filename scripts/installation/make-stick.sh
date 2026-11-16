@@ -21,7 +21,8 @@ gjallar_make_stick() {
 
     local releases='https://github.com/JadeOpenServices/gjallarOS/releases'
     # RSA public key for release signatures (RSA-PSS, SHA-256, salt 32).
-    # Its fingerprint is published apart from the release (Plane 350, Q5).
+    # Its fingerprint (SHA-256 of the DER key) is in the README, apart from
+    # the release (Plane 350, Q5); the maker shows it before it downloads.
     local release_key='-----BEGIN PUBLIC KEY-----
 @GJALLAR_RELEASE_KEY@
 -----END PUBLIC KEY-----'
@@ -134,6 +135,30 @@ gjallar_make_stick() {
     say "gjallarOS USB stick maker" "" \
         "This downloads the gjallarOS installer, checks its signature and writes" \
         "it to a USB stick. Everything on that stick is erased." ""
+
+    # Q229/Q236: the user compares the key fingerprint with the README.
+    # This catches an old copy or one built with another key. It cannot
+    # catch a changed script: that can print the right fingerprint and
+    # skip every check after it. Only the download-first way in the
+    # README (compare the script's SHA-256 before running it) covers that.
+    local key_fp i fp_lines=("" "")
+    key_fp=$(printf '%s' "$key_body" | openssl base64 -d -A | sha256sum) ||
+        fail "The maker could not compute its release key fingerprint."
+    key_fp=${key_fp%% *}
+    key_fp=${key_fp^^}
+    [[ $key_fp =~ ^[0-9A-F]{64}$ ]] || fail "The maker could not compute its release key fingerprint."
+    for ((i = 0; i < 64; i += 4)); do
+        fp_lines[i / 32]+=" ${key_fp:i:4}"
+    done
+    say "Release key fingerprint (SHA-256):" " ${fp_lines[0]}" " ${fp_lines[1]}" "" \
+        "Compare it with \"Release key fingerprint\" in the gjallarOS README."
+    ask "Type yes if it matches: "
+    if [[ $REPLY != [yY][eE][sS] ]]; then
+        log "GJA-3003 maker.key.declined"
+        fail "The fingerprint was not confirmed; nothing was downloaded or written. Get the maker again through the gjallarOS README."
+    fi
+    log "GJA-3002 maker.key.confirmed"
+    say ""
     if [[ -z $release ]]; then
         ask "Press Enter to use the newest stable release, or type A for advanced options: "
         if [[ $REPLY == [aA] ]]; then

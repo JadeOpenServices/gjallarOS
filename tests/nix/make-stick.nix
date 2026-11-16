@@ -28,6 +28,7 @@ let
         cd $out
         openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:3072 -out release.key 2>/dev/null
         openssl pkey -in release.key -pubout -out release.pub
+        openssl pkey -pubin -in release.pub -outform DER | sha256sum | cut -c1-64 | tr a-f A-F >release.fp
         openssl req -x509 -newkey rsa:2048 -nodes -keyout tls.key -out tls.crt -days 36500 \
           -subj /CN=127.0.0.1 -addext subjectAltName=IP:127.0.0.1 2>/dev/null
 
@@ -168,9 +169,10 @@ pkgs.testers.runNixOSTest {
         machine.send_monitor_command(f"device_del u{name}")
         machine.wait_until_fails(f"ls /dev/disk/by-id/ | grep -q {serial}")
 
-    def maker(args, answers, env=""):
+    # Every run first confirms the release key fingerprint (Q229).
+    def maker(args, answers, env="", key="yes\n"):
         cmd = f"{env} CURL_CA_BUNDLE={fx}/tls.crt bash {fx}/make-stick.sh {args}"
-        run = f"printf {shlex.quote(answers)} | script -qec {shlex.quote(cmd)} /dev/null"
+        run = f"printf {shlex.quote(key + answers)} | script -qec {shlex.quote(cmd)} /dev/null"
         machine.succeed(f"rm -f {maker_log}")
         return machine.execute(f"su - alice -c {shlex.quote(run)}")
 
@@ -184,12 +186,25 @@ pkgs.testers.runNixOSTest {
         machine.fail("ls -d /home/alice/.cache/gjallar-make-stick.*")
 
     iso_sha = hashlib.sha256(open(f"{fx}/mbr.iso", "rb").read()).hexdigest()
+    fp = open(f"{fx}/release.fp").read().strip()
+    fp_shown = "  " + " ".join(fp[i : i + 4] for i in range(0, 32, 4)) + "\r\n  " + " ".join(fp[i : i + 4] for i in range(32, 64, 4))
+
+    with subtest("Q229: the key fingerprint is shown; anything but yes stops before the download"):
+        for key in ["no\n", "\n", "y\n"]:
+            rc, out = maker("--release v2026.01.1", "", key=key)
+            assert rc == 1, (key, rc, out)
+            assert fp_shown in out, out
+            assert "The fingerprint was not confirmed" in out, out
+            a = anchors()
+            assert "GJA-3003 maker.key.declined" in a and "GJA-3010" not in a and "GJA-3002" not in a, a
+            no_download_left()
 
     with subtest("only sticks big enough are offered"):
         dev, _ = plug("small", 4 * 1024 * 1024, "GJTESTC3")
-        rc, out = maker("--release v2026.01.1", "q\n")
+        rc, out = maker("--release v2026.01.1", "q\n", key="YES\n")
         assert rc == 130, (rc, out)
         assert "too small" in out, out
+        assert "GJA-3002 maker.key.confirmed" in anchors()
         assert "GJA-3099 maker.run.finished code=130" in anchors()
         no_download_left()
         unplug("small", "GJTESTC3")

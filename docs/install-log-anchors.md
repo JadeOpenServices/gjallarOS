@@ -45,6 +45,8 @@ yes/no or one of the words listed here, never text a user typed.
 | GJA-2050 | `stick.installed.start` | The user chose Start installed gjallarOS on the stick's menu. | `result` (one of set, none, failed): set: the stick restarts into the installed system; none: no installed system was found anymore; failed: the next start could not be set |
 | GJA-2098 | `stick.flow.failed` | A step of the stick's menu failed; the ERROR line above says why. | none |
 | GJA-3001 | `maker.run.started` | The USB stick maker started. | `os` (one of linux, windows): the system the maker runs on |
+| GJA-3002 | `maker.key.confirmed` | The user typed yes: the release key fingerprint the maker showed matches the README. | none |
+| GJA-3003 | `maker.key.declined` | The user did not confirm the release key fingerprint; nothing was downloaded or written. | none |
 | GJA-3010 | `maker.download.finished` | The stick image and its checksum files are downloaded. | none |
 | GJA-3011 | `maker.signature.verified` | The signature and every checksum the maker needs are correct. | none |
 | GJA-3012 | `maker.signature.bad` | The signature or a checksum did not match; the download was deleted. | none |

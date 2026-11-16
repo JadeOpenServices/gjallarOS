@@ -72,23 +72,73 @@ It installs from a USB stick or on an existing NixOS. The main differences:
 This installs gjallarOS on a whole disk. Everything on that disk is
 replaced, and nothing from the stick stays on the machine.
 
-1. Download the NixOS minimal ISO for 64-bit Intel/AMD from
-   [nixos.org/download](https://nixos.org/download) and compare it with
-   the SHA-256 checksum listed there
-2. Write the ISO to the stick with an image writer. GNOME Disks
-   ("Restore Disk Image"), KDE ISO Image Writer, Fedora Media Writer,
-   balenaEtcher, Raspberry Pi Imager ("Use custom") and `dd` all do
-   this. Copying the file onto the stick does not make it bootable
+1. Make the stick with the gjallarOS maker. On Linux:
+
+   ```bash
+   curl -fsSL https://github.com/JadeOpenServices/gjallarOS/releases/latest/download/make-stick.sh | bash
+   ```
+
+   On Windows, in PowerShell:
+
+   ```powershell
+   irm https://github.com/JadeOpenServices/gjallarOS/releases/latest/download/make-stick.ps1 | iex
+   ```
+
+   The maker first shows its release key fingerprint. Type `yes` only if
+   it matches the one under [Release key fingerprint](#release-key-fingerprint).
+   It then downloads the stick image, checks its signature, asks which
+   stick to erase, writes the image and reads it back
+2. Keep the stick plugged in until the maker says it is done
 3. Switch Secure Boot off in the firmware settings for now. The
    installer can switch it back on later
    (see [Secure Boot](#secure-boot))
 4. Start the machine from the stick. The boot menu key is often F12,
    F10 or Esc. Ethernet connects by itself, and `nmtui` sets up Wi-Fi
-5. Run the command above and answer the questions. The installer asks
+5. Pick Install gjallarOS in the stick's menu and answer the questions. The installer asks
    twice before it erases the disk you pick
 6. Save the recovery key it shows somewhere off this machine. It opens
    the disk if the PIN or the security chip ever fails
 7. Shut down, take the stick out and start from the disk
+
+#### Release key fingerprint
+
+The maker checks the stick image against the gjallarOS release key. Before
+it downloads anything, it shows the fingerprint of that key:
+
+```text
+Release key fingerprint (SHA-256):
+  not set yet: filled in with the first signed release
+```
+
+If the maker shows other numbers, type nothing but Enter and get the maker
+again from this page. This check finds an old copy of the maker or one
+built with another key. It cannot find a maker that someone changed: a
+changed maker can show the right fingerprint and skip every check after
+it. To rule that out, download the maker first, compare its SHA-256 with
+the value below, and only then run it.
+
+| Maker | SHA-256 of the current release |
+| --- | --- |
+| `make-stick.sh` | not set yet: filled in with the first signed release |
+| `make-stick.ps1` | not set yet: filled in with the first signed release |
+
+On Linux:
+
+```bash
+curl -fsSLO https://github.com/JadeOpenServices/gjallarOS/releases/latest/download/make-stick.sh
+sha256sum make-stick.sh
+bash make-stick.sh
+```
+
+On Windows, in PowerShell:
+
+```powershell
+Invoke-WebRequest https://github.com/JadeOpenServices/gjallarOS/releases/latest/download/make-stick.ps1 -OutFile make-stick.ps1
+Get-FileHash make-stick.ps1
+powershell -ExecutionPolicy Bypass -File make-stick.ps1
+```
+
+Run the last line only when the hash matches the table.
 
 ### On an existing NixOS
 
