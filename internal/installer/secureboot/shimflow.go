@@ -346,7 +346,8 @@ func FinishFreshShim(ctx context.Context, ui UI, out io.Writer, facts ShimFacts,
 type mokVisit struct {
 	key       []byte
 	keyReused bool
-	// del is MokDel in MokManager's order: one "View key N" per list.
+	// del is MokDel in MokManager's order: one "View key N" per certificate
+	// and one per hash list.
 	del       []SignatureList
 	delReused bool
 	// retry says what to do when the visit was missed; it ends the steps.
@@ -383,8 +384,9 @@ func (v mokVisit) steps() string {
 	}
 	if len(v.del) > 0 {
 		step("Delete MOK (press down to it, then Enter)")
-		// MokManager shows one View key per certificate and per hash, also
-		// when one list holds several hashes.
+		// MokManager shows one View key per certificate and one per hash
+		// list. A list of several hashes opens [Hash List]: View hash 0..N,
+		// then Back. Menus keep the cursor where it was.
 		i := 0
 		view := func() string {
 			defer func() { i++ }()
@@ -393,16 +395,28 @@ func (v mokVisit) steps() string {
 			}
 			return fmt.Sprintf("Press down to View key %d", i)
 		}
+		const stickHash = "the SHA256 hash must start with\n     %s\n     (a gjallarOS installer stick). Press Enter to go back."
 		for _, l := range v.del {
+			hashesOnly := len(l.Certs) == 0 && l.Other == 0 && l.Hashes == len(l.FileSums)
 			switch {
-			case len(l.Certs) == 1 && l.Hashes == 0 && l.Other == 0:
-				step("%s; under [Fingerprint] it must read\n     %s\n     (%s). Press Enter to go back.", view(), sha1Fingerprint(l.Certs[0].der), strings.Trim(entryName(l.Certs[0].der), `"`))
-			case len(l.FileSums) > 0 && len(l.Certs) == 0 && l.Hashes == len(l.FileSums) && l.Other == 0:
-				for _, sum := range l.FileSums {
-					step("%s; the SHA256 hash must start with\n     %s\n     (a gjallarOS installer stick). Press Enter to go back.", view(), spacedHex(sum[:16]))
+			case len(l.Certs) > 0 && l.Hashes == 0 && l.Other == 0:
+				for _, c := range l.Certs {
+					step("%s; under [Fingerprint] it must read\n     %s\n     (%s). Press Enter to go back.", view(), sha1Fingerprint(c.der), strings.Trim(entryName(c.der), `"`))
 				}
+			case hashesOnly && len(l.FileSums) == 1:
+				step("%s; "+stickHash, view(), spacedHex(l.FileSums[0][:16]))
+			case hashesOnly && len(l.FileSums) > 1:
+				step("%s; it opens [Hash List] with %d hashes", view(), len(l.FileSums))
+				for k, sum := range l.FileSums {
+					hv := "View hash 0"
+					if k > 0 {
+						hv = fmt.Sprintf("Press down to View hash %d", k)
+					}
+					step("%s; "+stickHash, hv, spacedHex(sum[:16]))
+				}
+				step("Press down to Back, then Enter")
 			default:
-				step("%s; it holds more than one entry. Press Enter to go back.", view())
+				step("%s; it holds entries of a kind gjallarOS cannot show here. Press Enter to go back.", view())
 			}
 		}
 		step("Continue")

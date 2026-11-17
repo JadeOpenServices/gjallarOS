@@ -554,9 +554,24 @@ func TestMokVisitSteps(t *testing.T) {
 		t.Errorf("stick only:\n%s", onlyStick)
 	}
 	many := mokVisit{del: del(t, digestList(t, sha256SignatureType, sum, strings.Repeat("ab", 32)))}.steps()
-	for _, want := range []string{"2. View key 0", "0f 0f 0f 0f 0f 0f 0f 0f", "3. Press down to View key 1", "ab ab ab ab ab ab ab ab", "4. Continue"} {
+	// One list of several hashes is one View key that opens [Hash List]
+	// (seen in the L99 VM run: View hash 0..2, then Back).
+	for _, want := range []string{"2. View key 0; it opens [Hash List] with 2 hashes", "3. View hash 0;", "0f 0f 0f 0f 0f 0f 0f 0f",
+		"4. Press down to View hash 1;", "ab ab ab ab ab ab ab ab", "5. Press down to Back, then Enter", "6. Continue"} {
 		if !strings.Contains(many, want) {
 			t.Errorf("many: missing %q in\n%s", want, many)
+		}
+	}
+	if strings.Contains(many, "View key 1") {
+		t.Errorf("many: one hash list must be one View key:\n%s", many)
+	}
+	mixed := mokVisit{del: del(t, x509SignatureList(old.Raw), digestList(t, sha256SignatureType, sum, strings.Repeat("ab", 32), strings.Repeat("cd", 32)),
+		digestList(t, sha256SignatureType, strings.Repeat("ef", 32)))}.steps()
+	for _, want := range []string{"2. View key 0; under [Fingerprint]", "3. Press down to View key 1; it opens [Hash List] with 3 hashes",
+		"4. View hash 0;", "6. Press down to View hash 2;", "cd cd cd cd", "7. Press down to Back, then Enter",
+		"8. Press down to View key 2; the SHA256 hash must start with", "ef ef ef ef", "9. Continue"} {
+		if !strings.Contains(mixed, want) {
+			t.Errorf("mixed: missing %q in\n%s", want, mixed)
 		}
 	}
 	onlyKey := mokVisit{key: ours.Raw}.steps()
