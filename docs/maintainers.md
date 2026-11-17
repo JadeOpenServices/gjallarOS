@@ -259,10 +259,11 @@ qm guest exec <vmid> -- rm /var/lib/gjallar-builder/failed/vYYYY.MM.N
 
 Updating the builder after a change in `deployment/builder`: switch it in
 place through the guest agent, with the full commit hash, so the disk and
-its key stay:
+its key stay. The guest agent finds no `nixos-rebuild` on its own path,
+so the command runs through the system shell:
 
 ```sh
-qm guest exec <vmid> --timeout 3600 -- nixos-rebuild switch --flake 'github:JadeOpenServices/gjallarOS/<full commit>?dir=deployment/builder#gjallaros-build'
+qm guest exec <vmid> --timeout 3600 -- /run/current-system/sw/bin/sh -c 'PATH=/run/current-system/sw/bin; nixos-rebuild switch --flake "github:JadeOpenServices/gjallarOS/<full commit>?dir=deployment/builder#gjallaros-build"'
 ```
 
 Changing the builder key: a new builder disk makes a new key. Then
