@@ -216,11 +216,17 @@ made it is responsible for it.
    with the password).
 2. Invite it to the organization as a member and add it to the team
    `gjallaros-release`. Accept the invite on the bot login.
-3. On the bot login: Settings → Developer settings → Fine-grained tokens →
-   Generate. Resource owner `JadeOpenServices`, "Only select repositories"
-   → `gjallarOS`, permission Contents "Read and write", nothing else,
-   expiry at most one year. If the organization asks for token approval,
-   approve it as owner.
+3. On the bot login: Settings → Developer settings → Personal access
+   tokens → Fine-grained tokens → Generate new token.
+   - Token name `gjallarOS tags`, Resource owner `JadeOpenServices`,
+     expiration at most one year.
+   - Repository access: "Only select repositories" → `gjallarOS`.
+   - Permissions start empty. Click "Add permissions", tick "Contents",
+     then switch its access from "Read-only" to "Read and write".
+     "Metadata: Read-only" is added by itself and is required. Add
+     nothing else.
+   - Generate token. If the organization asks for token approval,
+     approve it as owner.
 4. Store the token in the keyring of the machine that pushes the tags.
    Paste it into the prompt, so it is on no command line and in no file:
 
@@ -267,9 +273,14 @@ Setting it up:
    ```
 
 3. Make the token on your own login, not the bot's, so the login that tags
-   is not the one that writes statements. Hand it to the
-   builder through stdin, so it is on no command line. Paste it, press
-   Enter, then Ctrl-D:
+   is not the one that writes statements: Settings → Developer settings →
+   Personal access tokens → Fine-grained tokens → Generate new token.
+   Token name `gjallarOS statements`, Resource owner `JadeOpenServices`,
+   expiration at most one year, "Only select repositories" →
+   `gjallarOS-statements`. Click "Add permissions", tick "Contents" and
+   switch it to "Read and write"; "Metadata: Read-only" comes with it.
+   Nothing else. Hand the token to the builder through stdin, so it is on
+   no command line. Paste it, press Enter, then Ctrl-D:
 
    ```sh
    qm guest exec <vmid> --pass-stdin 1 -- /run/current-system/sw/bin/gjallar-builder-set-token
