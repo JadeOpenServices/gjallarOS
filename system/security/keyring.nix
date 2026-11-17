@@ -1,6 +1,10 @@
-{ lib, ... }:
+{ lib, pkgs, ... }:
 {
   services.gnome.gnome-keyring.enable = true;
+
+  # secret-tool: store and look up keyring entries from a shell (tokens
+  # for CLI tools, the release bot token in docs/maintainers.md).
+  environment.systemPackages = [ pkgs.libsecret ];
 
   security.pam.services = {
     greetd.enableGnomeKeyring = true;
