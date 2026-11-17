@@ -63,10 +63,11 @@ func Provision(ctx context.Context) (Recovery, error) {
 	}
 
 	if !keyExists {
-		// The key names carry the install date, so MokManager and a later
-		// install tell this key from older ones (R47). sbctl reads its
+		// The key names carry the install date and minute, so MokManager
+		// and a later install tell this key from older ones, also from one
+		// made earlier the same day (R47). sbctl reads its
 		// configuration from the pipe before it locks itself down.
-		conf, err := sbctlConfig(time.Now().Format("2006-01-02"))
+		conf, err := sbctlConfig(time.Now().UTC().Format("2006-01-02 15:04 UTC"))
 		if err != nil {
 			return Recovery{}, err
 		}

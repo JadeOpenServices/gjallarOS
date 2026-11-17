@@ -28,7 +28,7 @@ func (u *scriptedUI) Confirm(_ context.Context, message string, _ bool) (bool, e
 }
 
 func TestSbctlConfig(t *testing.T) {
-	raw, err := sbctlConfig("2026-11-17")
+	raw, err := sbctlConfig("2026-11-17 14:32 UTC")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,7 +44,7 @@ func TestSbctlConfig(t *testing.T) {
 		t.Fatalf("%s", raw)
 	}
 	db := conf.Keys["db"]
-	if db.Description != "gjallarOS Secure Boot key 2026-11-17" || db.Privkey != "/var/lib/sbctl/keys/db/db.key" ||
+	if db.Description != "gjallarOS Secure Boot key 2026-11-17 14:32 UTC" || db.Privkey != "/var/lib/sbctl/keys/db/db.key" ||
 		db.Pubkey != "/var/lib/sbctl/keys/db/db.pem" || db.Type != "file" {
 		t.Fatalf("db %+v", db)
 	}

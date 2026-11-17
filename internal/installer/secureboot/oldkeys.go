@@ -17,7 +17,8 @@ import (
 // MokManager visit that enrolls the new key also deletes the old ones.
 
 // ourKeyName starts the name of every key gjallarOS makes since R47; the
-// install date follows it.
+// install date and minute in UTC follow it, so two installs on one day
+// still give keys MokManager names apart.
 const ourKeyName = "gjallarOS Secure Boot key"
 
 // sbctlDefaultDBName is the name sbctl gives a db key made without a
@@ -29,7 +30,7 @@ const sbctlDefaultDBName = "Database Key"
 // sbctl defaults, with names that say whose keys these are and when they
 // were made. Root reads it from the pipe, never from a file the user
 // session could change.
-func sbctlConfig(day string) ([]byte, error) {
+func sbctlConfig(made string) ([]byte, error) {
 	type key struct {
 		Privkey     string `json:"privkey"`
 		Pubkey      string `json:"pubkey"`
@@ -41,7 +42,7 @@ func sbctlConfig(day string) ([]byte, error) {
 			Privkey:     "/var/lib/sbctl/keys/" + dir + "/" + dir + ".key",
 			Pubkey:      "/var/lib/sbctl/keys/" + dir + "/" + dir + ".pem",
 			Type:        "file",
-			Description: desc + " " + day,
+			Description: desc + " " + made,
 		}
 	}
 	return json.Marshal(struct {
