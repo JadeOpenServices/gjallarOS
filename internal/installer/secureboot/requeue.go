@@ -184,7 +184,7 @@ func RequeueKey(ctx context.Context, ui UI, out io.Writer, der []byte) (bool, er
 	if trust.ShimValidationOff {
 		return false, errors.New("shim's own check is switched off in MokManager; turn it back on there first")
 	}
-	fmt.Fprintf(out, "The installed gjallarOS has the key %q, fingerprint\n  %s\n", certName(cert), sha1Fingerprint(der))
+	fmt.Fprintf(out, "The installed gjallarOS has the key %q, fingerprint\n%s\n", certName(cert), sha1Fingerprint(der, "  "))
 	visit, err := queueVisit(ctx, ui, out, der)
 	if err != nil {
 		return false, err

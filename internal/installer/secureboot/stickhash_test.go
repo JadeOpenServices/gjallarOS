@@ -538,14 +538,14 @@ func TestMokVisitSteps(t *testing.T) {
 		return lists
 	}
 	both := mokVisit{key: ours.Raw, del: del(t, x509SignatureList(old.Raw), digestList(t, sha256SignatureType, sum))}.steps()
-	for _, want := range []string{"1. Enroll MOK", sha1Fingerprint(ours.Raw), "6. Delete MOK", "7. View key 0", sha1Fingerprint(old.Raw),
+	for _, want := range []string{"1. Enroll MOK", sha1Fingerprint(ours.Raw, stepIndent), "6. Delete MOK", "7. View key 0", sha1Fingerprint(old.Raw, stepIndent),
 		"SYNTHETIC Database Key", "8. Press down to View key 1", "0f 0f 0f 0f 0f 0f 0f 0f", "installer stick", "11. Type the password you just chose", "12. Reboot"} {
 		if !strings.Contains(both, want) {
 			t.Errorf("both: missing %q in\n%s", want, both)
 		}
 	}
 	if strings.Index(both, "Enroll MOK") > strings.Index(both, "Delete MOK") ||
-		strings.Index(both, sha1Fingerprint(old.Raw)) > strings.Index(both, "0f 0f 0f") {
+		strings.Index(both, sha1Fingerprint(old.Raw, stepIndent)) > strings.Index(both, "0f 0f 0f") {
 		t.Error("steps out of MokManager's order")
 	}
 	onlyStick := mokVisit{del: del(t, digestList(t, sha256SignatureType, sum)), delReused: true}.steps()

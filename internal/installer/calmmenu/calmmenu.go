@@ -82,12 +82,22 @@ func (m Menu) lines() [][]span {
 		}
 		ls = append(ls, l)
 	}
+	// Numbers are right-aligned to the widest one, so labels start in one
+	// column when the menu reaches 10.
+	kw := 0
+	for _, g := range m.Groups {
+		for _, it := range g {
+			kw = max(kw, utf8.RuneCountInString(it.Key))
+		}
+	}
+	indent := strings.Repeat(" ", kw+3)
 	for _, g := range m.Groups {
 		ls = append(ls, nil)
 		for _, it := range g {
-			ls = append(ls, []span{{accent, fmt.Sprintf(" %s  ", it.Key)}, {"", it.Label}})
+			key := strings.Repeat(" ", kw-utf8.RuneCountInString(it.Key)) + it.Key
+			ls = append(ls, []span{{accent, " " + key + "  "}, {"", it.Label}})
 			if it.Desc != "" {
-				ls = append(ls, []span{{dim, "    " + it.Desc}})
+				ls = append(ls, []span{{dim, indent + it.Desc}})
 			}
 		}
 	}

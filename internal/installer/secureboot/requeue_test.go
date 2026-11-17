@@ -178,7 +178,7 @@ func TestRequeueKey(t *testing.T) {
 			t.Fatalf("%v %v", queued, err)
 		}
 		s := out.String()
-		for _, want := range []string{sha1Fingerprint(f.current), "Enroll MOK", "Delete MOK", "queue the key once more"} {
+		for _, want := range []string{"fingerprint\n" + sha1Fingerprint(f.current, "  ") + "\n", sha1Fingerprint(f.current, stepIndent), "Enroll MOK", "Delete MOK", "queue the key once more"} {
 			if !strings.Contains(s, want) {
 				t.Errorf("output lacks %q:\n%s", want, s)
 			}

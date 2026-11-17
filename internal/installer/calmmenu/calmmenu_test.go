@@ -184,3 +184,34 @@ func TestBuiltLogo(t *testing.T) {
 		}
 	}
 }
+
+// With 10 items the numbers are right-aligned, so every label and every
+// description starts in the same column.
+func TestTwoDigitKeysAlign(t *testing.T) {
+	m := example("")
+	m.Groups = append(m.Groups[:3:3], []Item{{"9", "Queue the key again", "When the blue screen was missed"}, {"10", "Power off", ""}})
+	var b strings.Builder
+	if _, err := Render(&b, m, Logo{}, 120, 33, false); err != nil {
+		t.Fatal(err)
+	}
+	labels := map[int]bool{}
+	descs := map[int]bool{}
+	for _, row := range screen(t, b.String(), 120, 33) {
+		for _, l := range []string{"Install gjallarOS", "Queue the key again", "Power off", "Restart"} {
+			if i := strings.Index(row, l); i >= 0 && !strings.Contains(row, "Type") {
+				labels[i] = true
+			}
+		}
+		for _, d := range []string{"Set up gjallarOS", "When the blue screen"} {
+			if i := strings.Index(row, d); i >= 0 {
+				descs[i] = true
+			}
+		}
+		if strings.Contains(row, " 9  Queue") && !strings.Contains(row, "  9  Queue") {
+			t.Errorf("9 is not right-aligned under 10: %q", row)
+		}
+	}
+	if len(labels) != 1 || len(descs) != 1 {
+		t.Errorf("labels start in columns %v, descriptions in %v; want one each", labels, descs)
+	}
+}

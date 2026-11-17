@@ -126,7 +126,7 @@ func TestQueueOldKeys(t *testing.T) {
 			t.Fatalf("%v %v", queued, err)
 		}
 		rig.noUserFile(t)
-		if len(ui.asked) != 1 || !strings.Contains(out.String(), sha1Fingerprint(f.sbctl)) || !strings.Contains(out.String(), "PASSWORD TEXT") {
+		if len(ui.asked) != 1 || !strings.Contains(out.String(), sha1Fingerprint(f.sbctl, "  ")) || !strings.Contains(out.String(), "PASSWORD TEXT") {
 			t.Fatalf("asked %q out %q", ui.asked, out.String())
 		}
 		want := []string{

@@ -134,7 +134,7 @@ func queueOldKeys(ctx context.Context, ui UI, out io.Writer, f firmwareFiles, cu
 			queue = append(queue, k.der)
 			continue
 		}
-		fmt.Fprintf(out, "Shim also trusts a key named %q, fingerprint\n  %s\n", k.name, sha1Fingerprint(k.der))
+		fmt.Fprintf(out, "Shim also trusts a key named %q, fingerprint\n%s\n", k.name, sha1Fingerprint(k.der, "  "))
 		fmt.Fprintln(out, "Earlier gjallarOS installs made keys with this name, and so does any other system on this computer that uses sbctl.")
 		yes, err := ui.Confirm(ctx, "Delete this key? Keep it if another system on this computer still starts with it.", false)
 		if err != nil {

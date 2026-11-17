@@ -377,7 +377,7 @@ func (v mokVisit) steps() string {
 	}
 	if v.key != nil {
 		step("Enroll MOK (press down to it, then Enter)")
-		step("View key 0; under [Fingerprint] it must read\n     %s\n     Press Enter to go back. If it differs, choose Continue boot instead.", sha1Fingerprint(v.key))
+		step("View key 0; under [Fingerprint] it must read\n%s\n     Press Enter to go back. If it differs, choose Continue boot instead.", sha1Fingerprint(v.key, stepIndent))
 		step("Continue")
 		step("Yes (the screen starts on No; press down, then Enter)")
 		step("%s", password(v.keyReused))
@@ -401,7 +401,7 @@ func (v mokVisit) steps() string {
 			switch {
 			case len(l.Certs) > 0 && l.Hashes == 0 && l.Other == 0:
 				for _, c := range l.Certs {
-					step("%s; under [Fingerprint] it must read\n     %s\n     (%s). Press Enter to go back.", view(), sha1Fingerprint(c.der), strings.Trim(entryName(c.der), `"`))
+					step("%s; under [Fingerprint] it must read\n%s\n     (%s). Press Enter to go back.", view(), sha1Fingerprint(c.der, stepIndent), strings.Trim(entryName(c.der), `"`))
 				}
 			case hashesOnly && len(l.FileSums) == 1:
 				step("%s; "+stickHash, view(), spacedHex(l.FileSums[0][:16]))
@@ -492,7 +492,7 @@ Finish within 5 minutes: after that the computer restarts on its own and the key
 is gone. The menu starts on Continue boot, which also drops the key:
   1. Enroll MOK (the menu starts on Continue boot; press down, then Enter)
   2. View key 0; under [Fingerprint] it must read
-     %s
+%s
      Press Enter to go back. If it differs, choose Continue boot instead.
   3. Continue
   4. Yes (the screen starts on No; press down, then Enter)
@@ -500,13 +500,16 @@ is gone. The menu starts on Continue boot, which also drops the key:
   6. Reboot
 If it went on without the key, run %[3]s again.
 After the restart, run %[3]s again for the next step.
-`, sha1Fingerprint(der), password, again)
+`, sha1Fingerprint(der, stepIndent), password, again)
 }
+
+// stepIndent lines a fingerprint up under the text of a numbered step.
+const stepIndent = "     "
 
 // sha1Fingerprint formats der the way MokManager's "View key" prints it
 // under [Fingerprint]: SHA-1 of the DER, ten bytes per line, space-separated
-// (MokManager.c show_x509_info, shim 16.1).
-func sha1Fingerprint(der []byte) string {
+// (MokManager.c show_x509_info, shim 16.1). Both lines start with indent.
+func sha1Fingerprint(der []byte, indent string) string {
 	sum := sha1.Sum(der)
 	line := func(b []byte) string {
 		parts := make([]string, len(b))
@@ -515,7 +518,7 @@ func sha1Fingerprint(der []byte) string {
 		}
 		return strings.Join(parts, " ")
 	}
-	return line(sum[:10]) + "\n     " + line(sum[10:])
+	return indent + line(sum[:10]) + "\n" + indent + line(sum[10:])
 }
 
 // holdMokManager makes the next MokManager wait for a key press instead of
