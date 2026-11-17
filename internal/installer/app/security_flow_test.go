@@ -10,7 +10,9 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/calmmenu"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/config"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/diskcrypto"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/prompt"
@@ -192,6 +194,22 @@ func TestStartupUnlockTextPerKind(t *testing.T) {
 		text := startupUnlockText(kind)
 		if !strings.Contains(text, "PIN at startup (recommended on this device)") || !strings.Contains(text, "separate part") || strings.Contains(text, "recommended for most") {
 			t.Fatalf("%q text:\n%s", kind, text)
+		}
+	}
+}
+
+// The startup unlock screen keeps to the calm menu width, so an
+// 80-column console never wraps it mid-word.
+func TestStartupUnlockTextWidth(t *testing.T) {
+	texts := []string{keyboardOnlyNotice}
+	for _, kind := range []diskcrypto.TPMKind{diskcrypto.TPMFirmware, diskcrypto.TPMSeparate, diskcrypto.TPMUnknown} {
+		texts = append(texts, startupUnlockText(kind))
+	}
+	for _, text := range texts {
+		for _, line := range strings.Split(text, "\n") {
+			if n := utf8.RuneCountInString(line); n > calmmenu.Width {
+				t.Errorf("%d columns: %q", n, line)
+			}
 		}
 	}
 }

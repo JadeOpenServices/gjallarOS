@@ -30,21 +30,23 @@ func StartupUnlockText(kind TPMKind) string {
 	if kind.PINRecommended() {
 		automatic, pin = "", " (recommended on this device)"
 		note = `
-  The security chip in this device is a separate part on the board, or
-  gjallarOS could not confirm that it sits inside the processor. Without a
-  PIN, someone who has the device and special tools can get the disk key
-  out of such a chip.
+  The security chip in this device is a separate part on the
+  board, or gjallarOS could not confirm that it sits inside the
+  processor. Without a PIN, someone who has the device and special
+  tools can get the disk key out of such a chip.
 `
 	}
 	return `How should the disk unlock at startup?
 
-  Automatic` + automatic + `: nothing to type at startup; the security
-  chip unlocks the disk only when the boot files are unchanged. This protects
-  a stolen, switched-off device against reading the disk directly.
+  Automatic` + automatic + `
+  Nothing to type at startup. The security chip unlocks the disk
+  only when the boot files are unchanged. This protects a stolen,
+  switched-off device against reading the disk directly.
 ` + note + `
-  PIN at startup` + pin + `: you type a PIN of 6 or more characters at
-  every startup; the security chip checks it and the boot files, and blocks
-  guessing after too many wrong tries. The disk stays locked even when someone
-  starts the device, until the PIN is typed.
+  PIN at startup` + pin + `
+  You type a PIN of 6 or more characters at every startup. The
+  security chip checks it and the boot files, and blocks guessing
+  after too many wrong tries. The disk stays locked even when
+  someone starts the device, until the PIN is typed.
 `
 }

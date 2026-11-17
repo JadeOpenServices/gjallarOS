@@ -192,10 +192,15 @@ func firmwareSecureBootNotice(firmwareOn bool, firmwareErr error) string {
 // the installer's PIN and recovery key come from.
 func startupUnlockText(kind diskcrypto.TPMKind) string {
 	return diskcrypto.StartupUnlockText(kind) + `
-You set the PIN at the first startup. Either way you get a recovery key
-there, for when the chip cannot unlock the disk.
+You set the PIN at the first startup. Either way you get a
+recovery key there, for when the chip cannot unlock the disk.
 `
 }
+
+// keyboardOnlyNotice is printed after the startup unlock choice on a
+// device that cannot show an on-screen keyboard at the disk prompt.
+const keyboardOnlyNotice = `This device has no touchscreen gjallarOS can use at startup:
+typing the PIN or the recovery key needs a keyboard attached.`
 
 // keyboardOnlyAtStartup reports a tablet or detachable (SMBIOS chassis 30 or
 // 32) where no on-screen keyboard can show at the disk prompt. Convertibles
@@ -222,7 +227,7 @@ func collectStartupUnlock(ctx context.Context, ui prompt.UI, kind diskcrypto.TPM
 	u.LUKSTPM2Enable = true
 	u.LUKSTPM2PIN = choice == diskcrypto.StartupUnlockPIN
 	if keyboardOnlyAtStartup(chassisType, touchscreen) {
-		fmt.Fprintln(ui.Out, "This device has no touchscreen gjallarOS can use at startup: typing the PIN or the recovery key needs a keyboard attached.")
+		fmt.Fprintln(ui.Out, keyboardOnlyNotice)
 	}
 	return nil
 }
