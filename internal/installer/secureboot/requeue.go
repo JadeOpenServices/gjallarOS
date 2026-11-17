@@ -155,9 +155,12 @@ func queueVisit(ctx context.Context, ui UI, out io.Writer, der []byte) (mokVisit
 // RequeueKey runs on the installer stick when the MokManager visit after an
 // install was missed (Q234, Plane 370): shim dropped the requests, so the
 // installed gjallarOS does not start with Secure Boot on. der is the
-// installed system's key; where the caller reads it from is R48. It queues
-// the same visit the install queued and prints the steps. It reports false
-// when nothing needed queueing.
+// installed system's key. The caller reads it from the installed root (R48):
+// on an encrypted install the user types the recovery key and the root is
+// opened read-only; on an unencrypted one it is read from the root as it is,
+// with a warning (Q241). The fingerprint printed here lets the user compare
+// it before MokManager asks. It queues the same visit the install queued and prints the steps.
+// It reports false when nothing needed queueing.
 func RequeueKey(ctx context.Context, ui UI, out io.Writer, der []byte) (bool, error) {
 	cert, err := x509.ParseCertificate(der)
 	if err != nil {

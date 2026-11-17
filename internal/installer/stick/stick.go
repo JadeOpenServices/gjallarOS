@@ -28,6 +28,7 @@ import (
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/installlog"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/prompt"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/region"
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/secureboot"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/stickkeyboard"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/stickrelease"
 )
@@ -97,6 +98,10 @@ type Stick struct {
 	// before an install (Q233). nil refuses to install, as a stick built
 	// without the release key.
 	CheckRelease func(context.Context) stickrelease.Outcome
+	// ShimStarted reports whether this start went through shim. Queue the
+	// key again is shown only then: without shim no MokManager runs. nil
+	// hides it.
+	ShimStarted func() (bool, error)
 
 	channel   string
 	offline   bool
@@ -120,6 +125,7 @@ func New(mode string) *Stick {
 		ReadLayout:  stickkeyboard.Read,
 		WriteLayout: stickkeyboard.Write,
 		Size:        termSize,
+		ShimStarted: secureboot.ShimStarted,
 	}
 }
 
@@ -170,6 +176,7 @@ const (
 	actStart action = iota
 	actInstall
 	actRecovery
+	actRequeue
 	actShell
 	actNetwork
 	actKeyboard
@@ -192,6 +199,7 @@ var menuLayout = [][]entry{
 	},
 	{
 		{actRecovery, "Recovery", "Unlock an installed gjallarOS with its recovery key"},
+		{actRequeue, "Queue the key again", "When the blue MokManager screen after the install was missed"},
 		{actShell, "Shell", "A command line. Type exit to come back here"},
 	},
 	{{act: actNetwork, label: "Network"}, {act: actKeyboard, label: "Keyboard layout"}, {act: actAdvanced, label: "Advanced"}},
@@ -199,14 +207,15 @@ var menuLayout = [][]entry{
 }
 
 // numbered is the menu as shown: Start installed gjallarOS only when an
-// installed system was found, the numbers counted from 1.
-func numbered(installed bool) ([][]calmmenu.Item, map[string]action) {
+// installed system was found, Queue the key again only when shim started
+// this stick, the numbers counted from 1.
+func numbered(installed, shim bool) ([][]calmmenu.Item, map[string]action) {
 	keys := map[string]action{}
 	var groups [][]calmmenu.Item
 	for _, g := range menuLayout {
 		var items []calmmenu.Item
 		for _, e := range g {
-			if e.act == actStart && !installed {
+			if e.act == actStart && !installed || e.act == actRequeue && !shim {
 				continue
 			}
 			key := strconv.Itoa(len(keys) + 1)
@@ -231,6 +240,16 @@ func (s *Stick) installed(ctx context.Context) bool {
 		return false
 	}
 	return len(found) > 0
+}
+
+// shim reports whether this start went through shim. A failed look hides
+// Queue the key again.
+func (s *Stick) shim() bool {
+	if s.ShimStarted == nil {
+		return false
+	}
+	started, err := s.ShimStarted()
+	return err == nil && started
 }
 
 // startInstalled points the next start at the installed system, looked up
@@ -259,7 +278,7 @@ func (s *Stick) startInstalled(ctx context.Context) {
 func (s *Stick) menu(ctx context.Context) error {
 	for {
 		s.flush()
-		groups, keys := numbered(s.installed(ctx))
+		groups, keys := numbered(s.installed(ctx), s.shim())
 		if err := s.draw(s.screen(groups)); err != nil {
 			return err
 		}
@@ -305,6 +324,12 @@ func (s *Stick) menu(ctx context.Context) error {
 		case actRecovery:
 			installlog.Mark(installlog.StickMenuChosen, installlog.Choice("choice", "recovery"))
 			s.runStep(ctx, "the recovery console", "gjallar-recovery-console", "--from-stick")
+			if err := s.pause(ctx); err != nil {
+				return err
+			}
+		case actRequeue:
+			installlog.Mark(installlog.StickMenuChosen, installlog.Choice("choice", "requeue-key"))
+			s.runStep(ctx, "queueing the key", "gjallar-stick", "requeue-key")
 			if err := s.pause(ctx); err != nil {
 				return err
 			}

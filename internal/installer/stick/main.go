@@ -34,6 +34,7 @@ const usage = `usage:
   gjallar-stick menu --mode window --release FILE --logo DIR
   gjallar-stick layout
   gjallar-stick text-console
+  gjallar-stick requeue-key
 `
 
 // Main runs gjallar-stick and returns its exit code.
@@ -52,6 +53,18 @@ func Main(args []string, stdout, stderr io.Writer) int {
 		// from a window that stopped: see textMode.
 		if err := textMode(int(os.Stdin.Fd())); err != nil {
 			fmt.Fprintln(stderr, "Cannot switch the console to text:", err)
+			return 1
+		}
+		return 0
+	}
+	if len(args) == 1 && args[0] == "requeue-key" {
+		// The menu's "Queue the key again" (Q234, R48). Ctrl-C ends the step
+		// through its context, so the root it opened is closed again.
+		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGQUIT, syscall.SIGTERM, syscall.SIGHUP)
+		defer stop()
+		signal.Ignore(syscall.SIGTSTP)
+		if err := requeueKey(ctx, os.Stdin, stdout); err != nil {
+			fmt.Fprintln(stderr, "The key was not queued:", err)
 			return 1
 		}
 		return 0

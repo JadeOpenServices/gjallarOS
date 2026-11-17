@@ -189,7 +189,7 @@ var Registry = []Anchor{
 		Meaning: "The user went on without a network connection."},
 	{ID: StickMenuChosen, Name: "stick.menu.chosen",
 		Meaning: "The user picked an entry of the stick's menu.",
-		Fields: []FieldSpec{{Name: "choice", Kind: KindChoice, Choices: []string{"install", "move-disk", "bring-over", "recovery", "shell"},
+		Fields: []FieldSpec{{Name: "choice", Kind: KindChoice, Choices: []string{"install", "move-disk", "bring-over", "recovery", "requeue-key", "shell"},
 			Meaning: "install, move to a new disk, bring an old system over, recovery, or the shell"}}},
 	{ID: StickChannelAdvanced, Name: "stick.channel.advanced",
 		Meaning: "The user changed the release channel under Advanced.",
