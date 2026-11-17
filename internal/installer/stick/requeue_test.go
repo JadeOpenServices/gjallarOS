@@ -9,6 +9,7 @@ import (
 	"encoding/pem"
 	"math/big"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -222,5 +223,32 @@ func TestNumberedRequeueOnlyWithShim(t *testing.T) {
 		if keys["3"] != map[bool]action{false: actShell, true: actRequeue}[shim] {
 			t.Errorf("shim %v: entry 3 = %v", shim, keys["3"])
 		}
+	}
+}
+
+func TestCryptsetupFailure(t *testing.T) {
+	exit := func(code string) error {
+		return exec.Command("sh", "-c", "exit "+code).Run()
+	}
+	raw := []byte("No key available with this passphrase.\n")
+	if got := cryptsetupFailure(exit("2"), raw).Error(); got != "that password or recovery key did not open the disk" {
+		t.Errorf("exit 2: %q", got)
+	}
+	busy := []byte("Device \x1b[31mroot\x1b[0m is busy.\n\nsecond line\n")
+	got := cryptsetupFailure(exit("5"), busy).Error()
+	if strings.ContainsRune(got, '\x1b') || got != "cryptsetup could not open the disk: Device [31mroot[0m is busy.; second line" {
+		t.Errorf("exit 5: %q", got)
+	}
+	if got := cryptsetupFailure(exit("4"), nil).Error(); got != "cryptsetup could not open the disk: exit status 4" {
+		t.Errorf("exit 4 without text: %q", got)
+	}
+	long := cryptsetupFailure(exit("1"), []byte(strings.Repeat("x", 500))).Error()
+	if n := len([]rune(long)); n != len([]rune("cryptsetup could not open the disk: "))+201 {
+		t.Errorf("long text not capped: %d runes", n)
+	}
+	var c capWriter
+	c.max = 4
+	if n, err := c.Write([]byte("abcdef")); n != 6 || err != nil || c.buf.String() != "abcd" {
+		t.Errorf("capWriter: %d %v %q", n, err, c.buf.String())
 	}
 }

@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"golang.org/x/sys/unix"
 
@@ -273,7 +274,9 @@ func openLUKS(ctx context.Context, out io.Writer, device string) error {
 	ask.Stdin, ask.Stdout, ask.Stderr = os.Stdin, w, os.Stderr
 	open := exec.CommandContext(ctx, "cryptsetup", "open", "--readonly", "--type", "luks",
 		"--key-file=-", "--", device, keyMapping)
-	open.Stdin, open.Stdout, open.Stderr = r, os.Stdout, os.Stderr
+	// cryptsetup's own words for a wrong key are replaced by ours below.
+	stderr := &capWriter{max: 4096}
+	open.Stdin, open.Stdout, open.Stderr = r, os.Stdout, stderr
 	if err := open.Start(); err != nil {
 		r.Close()
 		w.Close()
@@ -289,7 +292,51 @@ func openLUKS(ctx context.Context, out io.Writer, device string) error {
 	case openErr != nil:
 		// The same wait as the recovery console, so guessing stays slow.
 		time.Sleep(5 * time.Second)
-		return errors.New("that password or recovery key did not open the disk")
+		return cryptsetupFailure(openErr, stderr.buf.Bytes())
 	}
 	return nil
+}
+
+// cryptsetupFailure turns a failed cryptsetup open into one line. Exit
+// code 2 means no key slot took the key (cryptsetup(8), RETURN CODES);
+// any other failure keeps cryptsetup's own text, cleaned of terminal codes
+// because it can quote the disk's header.
+func cryptsetupFailure(err error, stderr []byte) error {
+	var exit *exec.ExitError
+	if errors.As(err, &exit) && exit.ExitCode() == 2 {
+		return errors.New("that password or recovery key did not open the disk")
+	}
+	var lines []string
+	for _, line := range strings.Split(string(stderr), "\n") {
+		var b strings.Builder
+		for _, r := range line {
+			if unicode.IsPrint(r) {
+				b.WriteRune(r)
+			}
+		}
+		if text := strings.TrimSpace(b.String()); text != "" {
+			lines = append(lines, text)
+		}
+	}
+	text := []rune(strings.Join(lines, "; "))
+	if len(text) > 200 {
+		text = append(text[:200], '…')
+	}
+	if len(text) == 0 {
+		return fmt.Errorf("cryptsetup could not open the disk: %w", err)
+	}
+	return fmt.Errorf("cryptsetup could not open the disk: %s", string(text))
+}
+
+// capWriter keeps the first max bytes written to it and drops the rest.
+type capWriter struct {
+	buf bytes.Buffer
+	max int
+}
+
+func (c *capWriter) Write(p []byte) (int, error) {
+	if room := c.max - c.buf.Len(); room > 0 {
+		c.buf.Write(p[:min(len(p), room)])
+	}
+	return len(p), nil
 }
