@@ -205,8 +205,14 @@ The bot is a separate GitHub login (a machine account), and you control it.
 GitHub allows one per person, used only for automation, and the person who
 made it is responsible for it.
 
-1. Sign up a new account with an address you own, a password from your
-   password manager and 2FA (an authenticator app; keep its recovery codes
+1. Make a second GitHub account for the bot. Open a private browser
+   window (so your own login stays signed in elsewhere) and go to
+   `https://github.com/signup`. GitHub wants an email address that no
+   other GitHub account uses, so not the one of your own login. Use a
+   second address or an alias that lands in your inbox, for example
+   `release-bot@` on your own domain. Pick a username such as
+   `gjallaros-release-bot`, a password from your password manager, and
+   turn on 2FA right after (an authenticator app; keep its recovery codes
    with the password).
 2. Invite it to the organization as a member and add it to the team
    `gjallaros-release`. Accept the invite on the bot login.
