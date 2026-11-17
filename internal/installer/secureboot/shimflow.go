@@ -282,13 +282,21 @@ func shimKeyFits(ctx context.Context, facts ShimFacts) (localKeys, error) {
 // CheckFreshShim runs before a fresh install from the installer stick with
 // Secure Boot on. Nothing waits for MokManager yet: the live system keeps
 // no answers across a restart, so the key is queued after the install
-// (FinishFreshShim). Here only what would stop it then is checked.
-func CheckFreshShim(ctx context.Context, facts ShimFacts) error {
-	if _, err := shimKeyFits(ctx, facts); err != nil {
+// (FinishFreshShim). Here only what would stop it then is checked, and
+// requests that gjallarOS did not make (L97) are settled before the disk
+// changes; FinishFreshShim checks them once more.
+func CheckFreshShim(ctx context.Context, ui UI, out io.Writer, facts ShimFacts) error {
+	keys, err := shimKeyFits(ctx, facts)
+	if err != nil {
 		return err
 	}
-	_, _, err := StickHash()
-	return err
+	if _, _, err := StickHash(); err != nil {
+		return err
+	}
+	if err := clearForeignMokNew(ctx, ui, out, liveFirmware, keys.dbDER); err != nil {
+		return err
+	}
+	return clearForeignMokDel(ctx, ui, out, liveFirmware, liveStickCopy, keys.dbDER)
 }
 
 // FinishFreshShim runs after a fresh install from the installer stick with

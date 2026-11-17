@@ -1358,7 +1358,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 			// keeps no answers across a restart, so the key is queued after
 			// the install (FinishFreshShim). Check now what would stop it
 			// then, before the disk changes.
-			if err := secureboot.CheckFreshShim(ctx, *s.shimFacts); err != nil {
+			if err := secureboot.CheckFreshShim(ctx, ui, out, *s.shimFacts); err != nil {
 				return fail(errOut, err)
 			}
 		} else if sbOn {
