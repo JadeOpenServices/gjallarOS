@@ -1362,7 +1362,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 				return fail(errOut, err)
 			}
 		} else if sbOn {
-			listed, err := secureboot.QueueShimKey(ctx, out, *s.shimFacts, "the installer")
+			listed, err := secureboot.QueueShimKey(ctx, ui, out, *s.shimFacts, "the installer")
 			if err != nil {
 				return fail(errOut, err)
 			}

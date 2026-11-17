@@ -215,9 +215,12 @@ func ShimStarted() (bool, error) {
 // reports whether shim lists the key. If not, it queues the key for
 // MokManager and prints the steps; the caller stops, the user restarts,
 // confirms the key and runs again ("again" names what to run).
-func QueueShimKey(ctx context.Context, out io.Writer, facts ShimFacts, again string) (bool, error) {
+func QueueShimKey(ctx context.Context, ui UI, out io.Writer, facts ShimFacts, again string) (bool, error) {
 	keys, err := shimKeyFits(ctx, facts)
 	if err != nil {
+		return false, err
+	}
+	if err := clearForeignMokNew(ctx, ui, out, liveFirmware, keys.dbDER); err != nil {
 		return false, err
 	}
 	enrolled, err := mokHolds(liveFirmware, "MokListRT", keys.dbDER)
@@ -238,6 +241,9 @@ func QueueShimKey(ctx context.Context, out io.Writer, facts ShimFacts, again str
 		}
 	} else {
 		fmt.Fprintln(out, "The gjallarOS key already waits for MokManager.")
+	}
+	if err := mokNewOnly(ctx, liveFirmware, keys.dbDER); err != nil {
+		return false, err
 	}
 	if err := holdMokManager(ctx, liveFirmware); err != nil {
 		return false, err
@@ -317,52 +323,9 @@ func FinishFreshShim(ctx context.Context, ui UI, out io.Writer, facts ShimFacts,
 		return "", err
 	}
 
-	var visit mokVisit
-	listed, err := mokHolds(liveFirmware, "MokListRT", keys.dbDER)
+	visit, err := queueVisit(ctx, ui, out, keys.dbDER)
 	if err != nil {
 		return "", err
-	}
-	if !listed {
-		visit.key = keys.dbDER
-		if visit.keyReused, err = mokHolds(liveFirmware, "MokNew", keys.dbDER); err != nil {
-			return "", err
-		}
-		if visit.keyReused {
-			fmt.Fprintln(out, "The gjallarOS key already waits for MokManager.")
-		} else if err := queueMOK(ctx, keys.dbDER, out); err != nil {
-			return "", err
-		}
-	}
-	choose := "Choose a one-time password for MokManager. MokManager reads the keyboard as US layout; letters and digits are safe."
-	again := "Type the same password again: MokManager asks for it once more to confirm the deletions."
-	prompted := visit.key != nil && !visit.keyReused
-	password := func() string {
-		if prompted {
-			return again
-		}
-		return choose
-	}
-	if err := clearForeignMokDel(ctx, ui, out, liveFirmware, liveStickCopy, keys.dbDER); err != nil {
-		return "", err
-	}
-	oldQueued, err := queueOldKeys(ctx, ui, out, liveFirmware, keys.dbDER, password())
-	if err != nil {
-		return "", err
-	}
-	prompted = prompted || oldQueued
-	stick, err := queueStickDelete(ctx, liveFirmware, liveStickCopy, out, password())
-	if err != nil {
-		return "", err
-	}
-	if visit.del, err = readMokDel(liveFirmware); err != nil {
-		return "", err
-	}
-	// MokManager checks the password of the last mokutil delete call.
-	visit.delReused = !oldQueued && (stick == nil || stick.reused)
-	if visit.key != nil || len(visit.del) > 0 {
-		if err := holdMokManager(ctx, liveFirmware); err != nil {
-			return "", err
-		}
 	}
 	if err := run(ctx, "sudo", "install", "-m", "0600", "/dev/null", FinalMarkerPath); err != nil {
 		return "", fmt.Errorf("arm final Secure Boot verification: %w", err)
@@ -378,6 +341,8 @@ type mokVisit struct {
 	// del is MokDel in MokManager's order: one "View key N" per list.
 	del       []SignatureList
 	delReused bool
+	// retry says what to do when the visit was missed; it ends the steps.
+	retry string
 }
 
 // steps walks through MokManager. After each confirmed request MokManager
@@ -429,7 +394,11 @@ func (v mokVisit) steps() string {
 		step("%s", password(v.delReused))
 	}
 	step("Reboot")
-	b.WriteString("If it went on without the changes, start the installer stick again and rerun the installer.\n")
+	retry := v.retry
+	if retry == "" {
+		retry = "start the installer stick again and rerun the installer."
+	}
+	b.WriteString("If it went on without the changes, " + retry + "\n")
 	return b.String()
 }
 
