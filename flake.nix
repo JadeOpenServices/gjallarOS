@@ -199,6 +199,9 @@
         modules = [
           ./system/installer-media/stick.nix
           { gjallar.stick.release.key = releaseKey; }
+          # The installer makes the Secure Boot keys with the stick's sbctl,
+          # so the stick needs the Subject Key Identifier patch too.
+          { nixpkgs.overlays = [ (import ./pkgs/overlays/sbctl.nix) ]; }
         ];
         specialArgs = {
           releaseVersion = releasePolicy.release;
@@ -275,6 +278,7 @@
           hyprland
           libreoffice-fresh
           plymouth
+          sbctl
           udiskie
           usbguard
           wvkbd
@@ -306,6 +310,7 @@
             hyprland
             libreoffice-fresh
             plymouth
+            sbctl
             udiskie
             usbguard
             wvkbd
@@ -324,6 +329,13 @@
       };
 
       checks.${system} = {
+        # The stick makes the Secure Boot keys; mokutil prints "Failed to get
+        # Subject Key ID" during the install when its sbctl is the stock one.
+        stick-sbctl-patched =
+          assert lib.assertMsg (stickImage.pkgs.sbctl.drvPath == pkgs.sbctl.drvPath)
+            "the installer stick's sbctl differs from the patched one in pkgs/overlays/sbctl.nix";
+          pkgs.runCommand "stick-sbctl-patched" { } "touch $out";
+
         build-entrypoint = import ./tests/nix/build-entrypoint.nix { inherit pkgs; };
 
         bootstrap-pins = import ./tests/nix/bootstrap-pins.nix { inherit pkgs; };
