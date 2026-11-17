@@ -383,18 +383,26 @@ func (v mokVisit) steps() string {
 	}
 	if len(v.del) > 0 {
 		step("Delete MOK (press down to it, then Enter)")
-		for i, l := range v.del {
-			view := "View key 0"
-			if i > 0 {
-				view = fmt.Sprintf("Press down to View key %d", i)
+		// MokManager shows one View key per certificate and per hash, also
+		// when one list holds several hashes.
+		i := 0
+		view := func() string {
+			defer func() { i++ }()
+			if i == 0 {
+				return "View key 0"
 			}
+			return fmt.Sprintf("Press down to View key %d", i)
+		}
+		for _, l := range v.del {
 			switch {
 			case len(l.Certs) == 1 && l.Hashes == 0 && l.Other == 0:
-				step("%s; under [Fingerprint] it must read\n     %s\n     (%s). Press Enter to go back.", view, sha1Fingerprint(l.Certs[0].der), strings.Trim(entryName(l.Certs[0].der), `"`))
-			case len(l.FileSums) == 1 && len(l.Certs) == 0 && l.Hashes == 1 && l.Other == 0:
-				step("%s; the SHA256 hash must start with\n     %s\n     (the installer stick). Press Enter to go back.", view, spacedHex(l.FileSums[0][:16]))
+				step("%s; under [Fingerprint] it must read\n     %s\n     (%s). Press Enter to go back.", view(), sha1Fingerprint(l.Certs[0].der), strings.Trim(entryName(l.Certs[0].der), `"`))
+			case len(l.FileSums) > 0 && len(l.Certs) == 0 && l.Hashes == len(l.FileSums) && l.Other == 0:
+				for _, sum := range l.FileSums {
+					step("%s; the SHA256 hash must start with\n     %s\n     (a gjallarOS installer stick). Press Enter to go back.", view(), spacedHex(sum[:16]))
+				}
 			default:
-				step("%s; it holds more than one entry. Press Enter to go back.", view)
+				step("%s; it holds more than one entry. Press Enter to go back.", view())
 			}
 		}
 		step("Continue")

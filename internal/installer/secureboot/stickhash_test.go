@@ -333,89 +333,166 @@ func TestUTF16String(t *testing.T) {
 }
 
 // fakeMokutil stands in for "sudo mokutil --delete-hash": it records the
-// call and, when queue is set, writes the request the way shim reads it.
+// calls and, when queue is set, adds each hash to MokDel as one list per
+// call, as mokutil appends to a request that waits.
 func fakeMokutil(t *testing.T, f stickFixture, queue bool) *[]string {
 	t.Helper()
 	var calls []string
+	var raw []byte
 	saved := run
 	t.Cleanup(func() { run = saved })
 	run = func(_ context.Context, name string, args ...string) error {
 		calls = append(calls, name+" "+strings.Join(args, " "))
 		if queue {
-			f.fw.set("MokDel", shimLockGUID, digestList(t, sha256SignatureType, args[len(args)-1]))
+			if raw == nil {
+				waiting, _, err := f.fw.root.shimRequest("MokDel")
+				if err != nil {
+					t.Fatal(err)
+				}
+				raw = append([]byte{}, waiting...)
+			}
+			raw = append(raw, digestList(t, sha256SignatureType, args[len(args)-1])...)
+			f.fw.set("MokDel", shimLockGUID, raw)
 		}
 		return nil
 	}
 	return &calls
 }
 
-func TestQueueStickDelete(t *testing.T) {
-	other := strings.Repeat("ab", 32)
+func TestQueueHashDeletes(t *testing.T) {
+	// SYNTHETIC hashes of older sticks.
+	old1 := strings.Repeat("ab", 32)
+	old2 := strings.Repeat("cd", 32)
+	listed := func(t *testing.T, f stickFixture, sums ...string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(f.fw.root.mokvars, "MokListRT"), digestList(t, sha256SignatureType, sums...), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ctx := context.Background()
 
-	t.Run("queues and checks the request", func(t *testing.T) {
+	t.Run("the stick and older sticks, one call each", func(t *testing.T) {
 		f := newStickFixture(t)
-		os.WriteFile(filepath.Join(f.fw.root.mokvars, "MokListRT"), digestList(t, sha256SignatureType, other, f.sum), 0o644)
+		listed(t, f, old1, f.sum, old2)
 		calls := fakeMokutil(t, f, true)
+		ui := &scriptedUI{answers: []bool{true}}
 		var out bytes.Buffer
-		del, err := queueStickDelete(context.Background(), f.fw.root, f.copy, &out, "PASSWORD TEXT")
-		if err != nil || del == nil || del.sum != f.sum || del.reused {
+		del, err := queueHashDeletes(ctx, ui, f.fw.root, f.copy, &out, "PASSWORD TEXT")
+		if err != nil || del == nil || del.stick != f.sum || del.reused || !slices.Equal(del.sums, []string{f.sum, old1, old2}) {
 			t.Fatalf("%+v %v", del, err)
 		}
-		if len(*calls) != 1 || !strings.HasSuffix((*calls)[0], "--delete-hash "+f.sum) || !strings.HasPrefix((*calls)[0], "sudo ") {
+		if len(*calls) != 3 {
 			t.Fatalf("calls %q", *calls)
 		}
-		if !strings.Contains(out.String(), "PASSWORD TEXT") {
-			t.Fatalf("out %q", out.String())
+		for i, sum := range del.sums {
+			if (*calls)[i] != "sudo "+privilegedTool("mokutil")+" --delete-hash "+sum {
+				t.Fatalf("call %d %q", i, (*calls)[i])
+			}
 		}
-		if notice := stickDeleteNotice(del); !strings.Contains(notice, f.sum[:16]) || !strings.Contains(notice, "Delete MOK") {
-			t.Fatalf("notice %q", notice)
+		text := out.String()
+		if strings.Count(text, "PASSWORD TEXT") != 1 || strings.Count(text, againPassword) != 2 || strings.Index(text, "PASSWORD TEXT") > strings.Index(text, againPassword) {
+			t.Fatalf("out %q", text)
+		}
+		if !strings.Contains(text, spacedHex(old1[:16])) || !strings.Contains(text, spacedHex(old2[:16])) || strings.Contains(text, spacedHex(f.sum[:16])) {
+			t.Fatalf("listed %q", text)
+		}
+		if len(ui.asked) != 1 {
+			t.Fatalf("asked %q", ui.asked)
+		}
+		notice := hashDeleteNotice(del)
+		for _, sum := range del.sums {
+			if !strings.Contains(notice, spacedHex(sum[:16])) {
+				t.Fatalf("notice %q", notice)
+			}
 		}
 	})
 
-	t.Run("mokutil skipped the hash", func(t *testing.T) {
+	t.Run("older sticks kept", func(t *testing.T) {
 		f := newStickFixture(t)
-		os.WriteFile(filepath.Join(f.fw.root.mokvars, "MokListRT"), digestList(t, sha256SignatureType, f.sum), 0o644)
+		listed(t, f, old1, f.sum)
+		calls := fakeMokutil(t, f, true)
+		del, err := queueHashDeletes(ctx, &scriptedUI{answers: []bool{false}}, f.fw.root, f.copy, &bytes.Buffer{}, "")
+		if err != nil || del == nil || !slices.Equal(del.sums, []string{f.sum}) || len(*calls) != 1 {
+			t.Fatalf("%+v %v %q", del, err, *calls)
+		}
+	})
+
+	t.Run("kept, but already queued", func(t *testing.T) {
+		f := newStickFixture(t)
+		listed(t, f, old1, f.sum)
+		f.fw.set("MokDel", shimLockGUID, digestList(t, sha256SignatureType, old1))
+		calls := fakeMokutil(t, f, true)
+		if del, err := queueHashDeletes(ctx, &scriptedUI{answers: []bool{false}}, f.fw.root, f.copy, &bytes.Buffer{}, ""); err == nil || len(*calls) != 0 {
+			t.Fatalf("%+v %v %q", del, err, *calls)
+		}
+	})
+
+	t.Run("only older sticks", func(t *testing.T) {
+		f := newStickFixture(t)
+		listed(t, f, old1)
+		calls := fakeMokutil(t, f, true)
+		del, err := queueHashDeletes(ctx, &scriptedUI{answers: []bool{true}}, f.fw.root, f.copy, &bytes.Buffer{}, "")
+		if err != nil || del == nil || del.stick != "" || !slices.Equal(del.sums, []string{old1}) || len(*calls) != 1 {
+			t.Fatalf("%+v %v %q", del, err, *calls)
+		}
+	})
+
+	t.Run("mokutil skipped a hash", func(t *testing.T) {
+		f := newStickFixture(t)
+		listed(t, f, f.sum)
 		fakeMokutil(t, f, false)
-		if del, err := queueStickDelete(context.Background(), f.fw.root, f.copy, &bytes.Buffer{}, ""); err == nil {
+		if del, err := queueHashDeletes(ctx, &scriptedUI{}, f.fw.root, f.copy, &bytes.Buffer{}, ""); err == nil {
 			t.Fatalf("no request written, but %+v", del)
 		}
 	})
 
-	t.Run("already queued", func(t *testing.T) {
+	t.Run("part already queued", func(t *testing.T) {
 		f := newStickFixture(t)
-		os.WriteFile(filepath.Join(f.fw.root.mokvars, "MokListRT"), digestList(t, sha256SignatureType, f.sum), 0o644)
+		listed(t, f, f.sum, old1)
 		f.fw.set("MokDel", shimLockGUID, digestList(t, sha256SignatureType, f.sum))
 		calls := fakeMokutil(t, f, true)
-		del, err := queueStickDelete(context.Background(), f.fw.root, f.copy, &bytes.Buffer{}, "")
+		del, err := queueHashDeletes(ctx, &scriptedUI{answers: []bool{true}}, f.fw.root, f.copy, &bytes.Buffer{}, "")
+		if err != nil || del == nil || del.reused || len(*calls) != 1 || !strings.HasSuffix((*calls)[0], old1) {
+			t.Fatalf("%+v %v %q", del, err, *calls)
+		}
+	})
+
+	t.Run("all already queued", func(t *testing.T) {
+		f := newStickFixture(t)
+		listed(t, f, f.sum)
+		f.fw.set("MokDel", shimLockGUID, digestList(t, sha256SignatureType, f.sum))
+		calls := fakeMokutil(t, f, true)
+		del, err := queueHashDeletes(ctx, &scriptedUI{}, f.fw.root, f.copy, &bytes.Buffer{}, "")
 		if err != nil || del == nil || !del.reused || len(*calls) != 0 {
 			t.Fatalf("%+v %v %q", del, err, *calls)
 		}
 	})
 
-	t.Run("shim does not list the stick", func(t *testing.T) {
+	t.Run("shim lists no file hash", func(t *testing.T) {
 		f := newStickFixture(t)
-		os.WriteFile(filepath.Join(f.fw.root.mokvars, "MokListRT"), digestList(t, sha256SignatureType, other), 0o644)
 		calls := fakeMokutil(t, f, true)
-		if del, err := queueStickDelete(context.Background(), f.fw.root, f.copy, &bytes.Buffer{}, ""); del != nil || err != nil || len(*calls) != 0 {
+		if del, err := queueHashDeletes(ctx, &scriptedUI{}, f.fw.root, f.copy, &bytes.Buffer{}, ""); del != nil || err != nil || len(*calls) != 0 {
 			t.Fatalf("%+v %v %q", del, err, *calls)
 		}
 	})
 
 	t.Run("not started from the stick", func(t *testing.T) {
 		f := newStickFixture(t)
+		listed(t, f, old1)
 		os.Remove(filepath.Join(f.fw.root.efivars, "StubImageIdentifier-"+stubLoaderGUID))
 		calls := fakeMokutil(t, f, true)
-		if del, err := queueStickDelete(context.Background(), f.fw.root, f.copy, &bytes.Buffer{}, ""); del != nil || err != nil || len(*calls) != 0 {
+		ui := &scriptedUI{}
+		if del, err := queueHashDeletes(ctx, ui, f.fw.root, f.copy, &bytes.Buffer{}, ""); del != nil || err != nil || len(*calls) != 0 || len(ui.asked) != 0 {
 			t.Fatalf("%+v %v %q", del, err, *calls)
 		}
 	})
 
 	t.Run("planted copy stops before root", func(t *testing.T) {
 		f := newStickFixture(t)
-		os.WriteFile(filepath.Join(f.fw.root.mokvars, "MokListRT"), digestList(t, sha256SignatureType, f.sum), 0o644)
+		listed(t, f, f.sum, old1)
 		os.Chmod(filepath.Join(f.copy.dir, f.copy.name), 0o666)
 		calls := fakeMokutil(t, f, true)
-		if _, err := queueStickDelete(context.Background(), f.fw.root, f.copy, &bytes.Buffer{}, ""); err == nil || len(*calls) != 0 {
+		if _, err := queueHashDeletes(ctx, &scriptedUI{answers: []bool{true}}, f.fw.root, f.copy, &bytes.Buffer{}, ""); err == nil || len(*calls) != 0 {
 			t.Fatalf("%v %q", err, *calls)
 		}
 	})
@@ -477,8 +554,10 @@ func TestMokVisitSteps(t *testing.T) {
 		t.Errorf("stick only:\n%s", onlyStick)
 	}
 	many := mokVisit{del: del(t, digestList(t, sha256SignatureType, sum, strings.Repeat("ab", 32)))}.steps()
-	if !strings.Contains(many, "more than one entry") {
-		t.Errorf("many:\n%s", many)
+	for _, want := range []string{"2. View key 0", "0f 0f 0f 0f 0f 0f 0f 0f", "3. Press down to View key 1", "ab ab ab ab ab ab ab ab", "4. Continue"} {
+		if !strings.Contains(many, want) {
+			t.Errorf("many: missing %q in\n%s", want, many)
+		}
 	}
 	onlyKey := mokVisit{key: ours.Raw}.steps()
 	if strings.Contains(onlyKey, "Delete") || !strings.Contains(onlyKey, "6. Reboot") {

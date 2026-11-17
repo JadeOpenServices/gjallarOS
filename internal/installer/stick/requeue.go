@@ -26,8 +26,8 @@ import (
 // install's public key from its root and queues the same visit again.
 //
 // Where the key comes from (R48, Q241): the root partition. An encrypted
-// root is opened read-only with the recovery key, so a key swapped in by
-// someone without that key cannot be read. An unencrypted root offers no
+// root is opened read-only with the install password or the recovery key, so
+// a key swapped in by someone without either cannot be read. An unencrypted root offers no
 // such check; the step says so and the user compares the fingerprint. The
 // signed boot files on the ESP are not used: anyone with the computer for a
 // few minutes can replace them, and parsing them would run their bytes
@@ -259,8 +259,8 @@ func openSubvolume(top *os.File) (*os.File, error) {
 	return os.NewFile(uintptr(fd), "@"), nil
 }
 
-// openLUKS asks for the recovery key and opens the root read-only. The key
-// goes from systemd-ask-password to cryptsetup through a pipe, never
+// openLUKS asks for the install password or the recovery key and opens the
+// root read-only. It goes from systemd-ask-password to cryptsetup through a pipe, never
 // through this process or a command line.
 func openLUKS(ctx context.Context, out io.Writer, device string) error {
 	fmt.Fprintln(out, "The installed gjallarOS is encrypted. Its key is read from the encrypted disk, read-only.")
@@ -268,8 +268,8 @@ func openLUKS(ctx context.Context, out io.Writer, device string) error {
 	if err != nil {
 		return err
 	}
-	ask := exec.CommandContext(ctx, "systemd-ask-password", "--timeout=0", "-n",
-		"Recovery key of the installed gjallarOS:")
+	ask := exec.CommandContext(ctx, "systemd-ask-password", "--timeout=0", "--emoji=no", "-n",
+		"Install password or recovery key of the installed gjallarOS:")
 	ask.Stdin, ask.Stdout, ask.Stderr = os.Stdin, w, os.Stderr
 	open := exec.CommandContext(ctx, "cryptsetup", "open", "--readonly", "--type", "luks",
 		"--key-file=-", "--", device, keyMapping)
@@ -285,11 +285,11 @@ func openLUKS(ctx context.Context, out io.Writer, device string) error {
 	openErr := open.Wait()
 	switch {
 	case askErr != nil:
-		return fmt.Errorf("read the recovery key: %w", askErr)
+		return fmt.Errorf("read the install password or recovery key: %w", askErr)
 	case openErr != nil:
 		// The same wait as the recovery console, so guessing stays slow.
 		time.Sleep(5 * time.Second)
-		return errors.New("the recovery key did not open the disk")
+		return errors.New("that password or recovery key did not open the disk")
 	}
 	return nil
 }

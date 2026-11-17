@@ -1755,7 +1755,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 	if freshRoot != "" && !freshShim {
 		// The fresh shim path queues this with the gjallarOS key for one
 		// MokManager visit; every other fresh install queues it alone.
-		notice, err := secureboot.QueueStickDelete(ctx, out)
+		notice, err := secureboot.QueueStickDelete(ctx, ui, out)
 		if err != nil {
 			return fail(errOut, err)
 		}

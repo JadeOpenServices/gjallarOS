@@ -200,9 +200,17 @@ func clearForeignMokDel(ctx context.Context, ui UI, out io.Writer, f firmwareFil
 	if err != nil {
 		return err
 	}
-	stick, _, err := f.stickHash(c)
+	stick, fromStick, err := f.stickHash(c)
 	if err != nil {
 		return err
+	}
+	// Deleting a file hash shim lists is what queueHashDeletes asks for
+	// when this start came from the stick (L99); it lists them again.
+	var listed []string
+	if fromStick {
+		if listed, err = mokFileSums(f, "MokListRT"); err != nil {
+			return err
+		}
 	}
 	var foreign []string
 	for _, l := range lists {
@@ -212,7 +220,7 @@ func clearForeignMokDel(ctx context.Context, ui UI, out io.Writer, f firmwareFil
 			}
 		}
 		for _, sum := range l.FileSums {
-			if sum != stick {
+			if sum != stick && !slices.Contains(listed, sum) {
 				foreign = append(foreign, "the file hash "+spacedHex(sum[:16]))
 			}
 		}

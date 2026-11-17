@@ -206,72 +206,137 @@ func verityToken(cmdline string) (string, error) {
 	return found[0], nil
 }
 
-// stickDelete is a queued deletion of the stick's MOK entry.
-type stickDelete struct {
-	sum    string
+// hashDelete is a queued deletion of file hashes from shim's list.
+type hashDelete struct {
+	// sums are the hashes MokManager is asked to delete; stick is the
+	// running stick's own among them, or "".
+	sums  []string
+	stick string
+	// reused: every request waited already, so the password chosen when
+	// it was made still stands.
 	reused bool
+}
+
+// againPassword is printed before each further mokutil call of one visit:
+// MokManager checks the password of the last call.
+const againPassword = "Type the same password again: MokManager asks for it once more to confirm the deletions."
+
+// mokFileSums lists the SHA-256 file hashes in the shim variable name.
+func mokFileSums(f firmwareFiles, name string) ([]string, error) {
+	raw, present, err := f.shimRequest(name)
+	if err != nil || !present {
+		return nil, err
+	}
+	list := parseSignatureList(raw, true)
+	if list.Malformed {
+		return nil, fmt.Errorf("%s does not parse", name)
+	}
+	return list.FileSums, nil
 }
 
 // mokHash tells whether the shim variable name lists the file hash sum.
 func mokHash(f firmwareFiles, name, sum string) (bool, error) {
-	raw, present, err := f.shimRequest(name)
-	if err != nil || !present {
-		return false, err
-	}
-	list := parseSignatureList(raw, true)
-	if list.Malformed {
-		return false, fmt.Errorf("%s does not parse", name)
-	}
-	return slices.Contains(list.FileSums, sum), nil
+	sums, err := mokFileSums(f, name)
+	return slices.Contains(sums, sum), err
 }
 
-// queueStickDelete asks MokManager to delete the stick's entry from shim's
-// list at the next start. It does nothing when this start did not come
-// from the stick or the list holds no entry for it. Root sees only the
-// checked hex hash; the file it came from stays with this process.
-func queueStickDelete(ctx context.Context, f firmwareFiles, c stickCopy, out io.Writer, password string) (*stickDelete, error) {
-	sum, ok, err := f.stickHash(c)
+// queueHashDeletes asks MokManager to delete file hashes from shim's list
+// at the next start: the running stick's own entry, and on confirmation
+// every other file hash (L99). gjallarOS enrolls file hashes only for its
+// installer sticks, so the others are most likely older sticks whose
+// visit after the install was missed or that were used with another
+// install; each would keep starting under Secure Boot. It does nothing
+// when this start did not come from the stick. Root sees only checked hex
+// hashes; the stick file stays with this process. password is printed
+// before the first mokutil call.
+func queueHashDeletes(ctx context.Context, ui UI, f firmwareFiles, c stickCopy, out io.Writer, password string) (*hashDelete, error) {
+	stick, ok, err := f.stickHash(c)
 	if err != nil || !ok {
 		return nil, err
 	}
-	if !sha256Hex.MatchString(sum) {
-		return nil, fmt.Errorf("unexpected stick hash %q", sum)
-	}
-	listed, err := mokHash(f, "MokListRT", sum)
-	if err != nil || !listed {
+	listed, err := mokFileSums(f, "MokListRT")
+	if err != nil || len(listed) == 0 {
 		return nil, err
 	}
-	queued, err := mokHash(f, "MokDel", sum)
+	del := &hashDelete{}
+	var others []string
+	for _, sum := range listed {
+		if !sha256Hex.MatchString(sum) {
+			return nil, fmt.Errorf("unexpected hash %q in shim's list", sum)
+		}
+		switch {
+		case sum == stick:
+			del.stick = sum
+			del.sums = append(del.sums, sum)
+		case !slices.Contains(others, sum):
+			others = append(others, sum)
+		}
+	}
+	queued, err := mokFileSums(f, "MokDel")
 	if err != nil {
 		return nil, err
 	}
-	if queued {
-		fmt.Fprintln(out, "The installer stick's entry already waits for MokManager to delete it.")
-		return &stickDelete{sum: sum, reused: true}, nil
+	if len(others) > 0 {
+		fmt.Fprintln(out, "Shim also trusts these boot files, most likely older gjallarOS installer sticks:")
+		for _, sum := range others {
+			fmt.Fprintln(out, "  SHA256 "+spacedHex(sum[:16]))
+		}
+		fmt.Fprintln(out, "Each of them keeps starting with Secure Boot on until it is deleted.")
+		yes, err := ui.Confirm(ctx, "Delete them too? Keep them only if another system on this computer starts with one of them.", true)
+		if err != nil {
+			return nil, err
+		}
+		if yes {
+			del.sums = append(del.sums, others...)
+		} else if slices.ContainsFunc(others, func(sum string) bool { return slices.Contains(queued, sum) }) {
+			return nil, errors.New("MokManager already holds a request to delete some of them; drop it with mokutil --revoke-delete, or answer yes")
+		}
 	}
-	// One EFI_SIGNATURE_LIST with one SHA-256 entry.
-	if err := efiSpaceFor(f.efivars, 28+16+32); err != nil {
+	if len(del.sums) == 0 {
+		return nil, nil
+	}
+	var todo []string
+	for _, sum := range del.sums {
+		if !slices.Contains(queued, sum) {
+			todo = append(todo, sum)
+		}
+	}
+	if len(todo) == 0 {
+		fmt.Fprintln(out, "These entries already wait for MokManager to delete them.")
+		del.reused = true
+		return del, nil
+	}
+	// At most one EFI_SIGNATURE_LIST with one SHA-256 entry each.
+	if err := efiSpaceFor(f.efivars, len(todo)*(28+16+32)); err != nil {
 		return nil, err
 	}
-	fmt.Fprintln(out, password)
-	if err := run(ctx, "sudo", privilegedTool("mokutil"), "--delete-hash", sum); err != nil {
-		return nil, fmt.Errorf("queue the installer stick's entry for deletion: %w", err)
+	for i, sum := range todo {
+		if i == 0 {
+			fmt.Fprintln(out, password)
+		} else {
+			fmt.Fprintln(out, againPassword)
+		}
+		if err := run(ctx, "sudo", privilegedTool("mokutil"), "--delete-hash", sum); err != nil {
+			return nil, fmt.Errorf("queue a file hash for deletion: %w", err)
+		}
 	}
 	// mokutil prints "Skip hash" and succeeds when it finds nothing to do.
-	if queued, err = mokHash(f, "MokDel", sum); err != nil {
+	if queued, err = mokFileSums(f, "MokDel"); err != nil {
 		return nil, err
 	}
-	if !queued {
-		return nil, errors.New("mokutil returned, but the firmware holds no request to delete the installer stick's entry")
+	for _, sum := range del.sums {
+		if !slices.Contains(queued, sum) {
+			return nil, fmt.Errorf("mokutil returned, but the firmware holds no request to delete the file hash %s", spacedHex(sum[:16]))
+		}
 	}
-	return &stickDelete{sum: sum}, nil
+	return del, nil
 }
 
-// QueueStickDelete queues the deletion of the installer stick's MOK entry
-// on its own (installs that do not go through MokManager for a key). It
-// reports whether a request waits and returns the lines for the summary.
-func QueueStickDelete(ctx context.Context, out io.Writer) (string, error) {
-	del, err := queueStickDelete(ctx, liveFirmware, liveStickCopy, out,
+// QueueStickDelete queues the deletion of the installer stick's MOK entry,
+// and of older sticks' entries, on its own (installs that do not go
+// through MokManager for a key). It returns the lines for the summary.
+func QueueStickDelete(ctx context.Context, ui UI, out io.Writer) (string, error) {
+	del, err := queueHashDeletes(ctx, ui, liveFirmware, liveStickCopy, out,
 		"Choose a one-time password for MokManager. MokManager reads the keyboard as US layout; letters and digits are safe.")
 	if err != nil || del == nil {
 		return "", err
@@ -279,17 +344,22 @@ func QueueStickDelete(ctx context.Context, out io.Writer) (string, error) {
 	if err := holdMokManager(ctx, liveFirmware); err != nil {
 		return "", err
 	}
-	return stickDeleteNotice(del), nil
+	return hashDeleteNotice(del), nil
 }
 
-func stickDeleteNotice(del *stickDelete) string {
+func hashDeleteNotice(del *hashDelete) string {
 	password := "the password you just chose"
 	if del.reused {
 		password = "the password chosen when the request was made"
 	}
+	starts := make([]string, len(del.sums))
+	for i, sum := range del.sums {
+		starts[i] = "  " + spacedHex(sum[:16])
+	}
 	return fmt.Sprintf(`The installer stick stays trusted by shim until MokManager deletes its
-entry. When shim next starts, MokManager shows a blue screen and waits
-until you choose. Choose Delete MOK, check that the hash starts with %s,
+entry, and so do older sticks. When shim next starts, MokManager shows a blue screen and waits
+until you choose. Choose Delete MOK, check that the hashes start with
+%s
 confirm and type %s. Continue boot drops the request.
-`, del.sum[:16], password)
+`, strings.Join(starts, "\n"), password)
 }

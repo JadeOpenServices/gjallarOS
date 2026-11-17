@@ -186,6 +186,31 @@ func TestClearForeignMokDel(t *testing.T) {
 		}
 	})
 
+	t.Run("older stick shim lists (L99)", func(t *testing.T) {
+		f := newOldKeysFixture(t)
+		// SYNTHETIC hash of an older stick.
+		older := strings.Repeat("ab", 32)
+		path := filepath.Join(f.stick.fw.root.mokvars, "MokListRT")
+		list, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, slices.Concat(list, digestList(t, sha256SignatureType, older)), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		f.stick.fw.set("MokDel", shimLockGUID, digestList(t, sha256SignatureType, older))
+		rig := newRootRig(t)
+		ui := &scriptedUI{}
+		if err := clearForeignMokDel(context.Background(), ui, &strings.Builder{}, f.stick.fw.root, f.stick.copy, f.current); err != nil || len(ui.asked) != 0 || len(rig.steps) != 0 {
+			t.Fatalf("%v asked %q steps %q", err, ui.asked, rig.steps)
+		}
+		// Not started from the stick: nothing lists it again, so it counts as foreign.
+		os.Remove(filepath.Join(f.stick.fw.root.efivars, "StubImageIdentifier-"+stubLoaderGUID))
+		if err := clearForeignMokDel(context.Background(), &scriptedUI{answers: []bool{false}}, &strings.Builder{}, f.stick.fw.root, f.stick.copy, f.current); err == nil {
+			t.Fatal("kept without asking")
+		}
+	})
+
 	foreign := map[string][]byte{
 		"vendor key": x509SignatureList(nil),
 		"file hash":  digestList(t, sha256SignatureType, strings.Repeat("ab", 32)),

@@ -91,7 +91,8 @@ func mokNewOnly(ctx context.Context, f firmwareFiles, der []byte) error {
 }
 
 // queueVisit queues one MokManager visit for der: the key itself unless
-// shim lists it, older gjallarOS keys and the installer stick's own entry.
+// shim lists it, older gjallarOS keys, the installer stick's own entry and
+// older sticks' entries (L99).
 // A fresh install runs it, and the installer stick runs it again when that
 // visit was missed (Q234). MokManager waits for a key press when anything
 // was queued.
@@ -119,11 +120,10 @@ func queueVisit(ctx context.Context, ui UI, out io.Writer, der []byte) (mokVisit
 		}
 	}
 	choose := "Choose a one-time password for MokManager. MokManager reads the keyboard as US layout; letters and digits are safe."
-	again := "Type the same password again: MokManager asks for it once more to confirm the deletions."
 	prompted := visit.key != nil && !visit.keyReused
 	password := func() string {
 		if prompted {
-			return again
+			return againPassword
 		}
 		return choose
 	}
@@ -135,7 +135,7 @@ func queueVisit(ctx context.Context, ui UI, out io.Writer, der []byte) (mokVisit
 		return visit, err
 	}
 	prompted = prompted || oldQueued
-	stick, err := queueStickDelete(ctx, liveFirmware, liveStickCopy, out, password())
+	hashes, err := queueHashDeletes(ctx, ui, liveFirmware, liveStickCopy, out, password())
 	if err != nil {
 		return visit, err
 	}
@@ -143,7 +143,7 @@ func queueVisit(ctx context.Context, ui UI, out io.Writer, der []byte) (mokVisit
 		return visit, err
 	}
 	// MokManager checks the password of the last mokutil delete call.
-	visit.delReused = !oldQueued && (stick == nil || stick.reused)
+	visit.delReused = !oldQueued && (hashes == nil || hashes.reused)
 	if visit.key != nil || len(visit.del) > 0 {
 		if err := holdMokManager(ctx, liveFirmware); err != nil {
 			return visit, err
@@ -156,10 +156,11 @@ func queueVisit(ctx context.Context, ui UI, out io.Writer, der []byte) (mokVisit
 // install was missed (Q234, Plane 370): shim dropped the requests, so the
 // installed gjallarOS does not start with Secure Boot on. der is the
 // installed system's key. The caller reads it from the installed root (R48):
-// on an encrypted install the user types the recovery key and the root is
-// opened read-only; on an unencrypted one it is read from the root as it is,
-// with a warning (Q241). The fingerprint printed here lets the user compare
-// it before MokManager asks. It queues the same visit the install queued and prints the steps.
+// on an encrypted install the user types the install password or recovery
+// key and the root is opened read-only; on an unencrypted one it is read from
+// the root as it is, with a warning (Q241). The fingerprint printed here lets
+// the user compare it before MokManager asks. It queues the same visit the
+// install queued and prints the steps.
 // It reports false when nothing needed queueing.
 func RequeueKey(ctx context.Context, ui UI, out io.Writer, der []byte) (bool, error) {
 	cert, err := x509.ParseCertificate(der)
