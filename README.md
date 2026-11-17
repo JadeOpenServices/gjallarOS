@@ -719,7 +719,7 @@ gjallarOS key and the removal of the stick's entry, both with the same
 one-time password. MokManager then offers Enroll MOK and Delete MOK, and
 the installer lists what to pick. After that visit the stick no longer
 starts under Secure Boot on this machine. If the visit is missed, start the
-stick again and rerun the installer. With own keys or Secure Boot off, the
+stick again and pick Queue the key again in its menu. With own keys or Secure Boot off, the
 installer queues only the removal and says so in its summary.
 
 `gjallarctl secure-boot setup --own-keys` replaces the firmware keys with

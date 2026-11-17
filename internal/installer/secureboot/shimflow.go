@@ -350,8 +350,6 @@ type mokVisit struct {
 	// and one per hash list.
 	del       []SignatureList
 	delReused bool
-	// retry says what to do when the visit was missed; it ends the steps.
-	retry string
 }
 
 // steps walks through MokManager. After each confirmed request MokManager
@@ -424,11 +422,7 @@ func (v mokVisit) steps() string {
 		step("%s", password(v.delReused))
 	}
 	step("Reboot")
-	retry := v.retry
-	if retry == "" {
-		retry = "start the installer stick again and rerun the installer."
-	}
-	b.WriteString("If it went on without the changes, " + retry + "\n")
+	b.WriteString("If it went on without the changes, start the installer stick again and pick Queue the key again in its menu.\n")
 	return b.String()
 }
 

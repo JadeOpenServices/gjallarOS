@@ -193,7 +193,6 @@ func RequeueKey(ctx context.Context, ui UI, out io.Writer, der []byte) (bool, er
 		fmt.Fprintln(out, "shim already trusts this key and nothing waits for MokManager.")
 		return false, nil
 	}
-	visit.retry = "start the installer stick again and queue the key once more."
 	fmt.Fprint(out, visit.steps())
 	return true, nil
 }
