@@ -127,8 +127,13 @@ openssl pkey -in release.key -pubout -out deployment/release-key.pem
 
 - Commit `deployment/release-key.pem`. Without it the flake has no
   `gjallar-release` package and the stick refuses to install.
-- Paste the whole of `release.key` (with the `BEGIN` and `END` lines) into
-  the secret `RELEASE_SIGNING_KEY` of the `installer-sign` environment.
+- Put `release.key` into the secret `RELEASE_SIGNING_KEY` of the
+  `installer-sign` environment straight from the file, so it never goes
+  through the clipboard (after step 2):
+
+  ```sh
+  gh secret set RELEASE_SIGNING_KEY --env installer-sign --repo JadeOpenServices/gjallarOS < release.key
+  ```
 - Keep `release.key` offline (an encrypted stick in a drawer) or delete
   it. Without a copy, losing the secret means a new key
   ([Changing the release key](#changing-the-release-key)).
@@ -164,13 +169,61 @@ but not sign.
 
 #### 3. Tag and branch rules
 
-Settings → Rules → Rulesets:
+First a team for the bot: Organization → Teams → New team
+`gjallaros-release`, visibility "Visible" (a secret team cannot be a
+ruleset bypass actor), repository `gjallarOS` with the role "Write". No
+other repository, no other members. You manage it as organization owner
+without being in it; being in it would let your own login push tags.
 
-- A tag ruleset on `v*`: only you and the release bot may create, update
-  or delete these tags; block force pushes.
-- The branch rules for `dev`, `staging` and `stable` you already keep for
-  the channels. `build` refuses a tag whose commit is on none of them, so
-  these branches decide which code can become a release.
+Then Settings → Rules → Rulesets in `gjallarOS`, three rulesets:
+
+| Ruleset | Targets | Rules | Bypass |
+|---|---|---|---|
+| `release tags v*` | tags `v*` | Restrict creations, updates, deletions; block force pushes | team `gjallaros-release` only |
+| `channel branches: no force push or delete` | branches `dev`, `staging`, `stable` | Restrict deletions; block force pushes | nobody |
+| `channel branches: only org owners push` | branches `dev`, `staging`, `stable` | Restrict updates | Organization admin |
+
+- Only the bot makes, moves or deletes release tags. You do not tag
+  yourself: "Prevent self-review" would then stop you from approving
+  your own tag. Fixing a wrong tag goes through the bot too.
+- The bot has write access but cannot push the channel branches, so its
+  token alone cannot put new code on `dev` and tag it.
+- Nobody force pushes or deletes a channel, you included. Promotions are
+  merge commits (`git push origin <commit>:staging` after a merge), so
+  every push is a fast-forward. `build` refuses a tag whose commit is on
+  none of the channels, so these branches decide which code can become
+  a release.
+- An organization owner can still edit a ruleset. That is on purpose for
+  emergencies; each change shows in the organization's audit log.
+
+Also turn on Organization → Settings → Authentication security →
+"Require two-factor authentication" once your login and the bot have 2FA.
+
+#### 3a. Release bot
+
+The bot is a separate GitHub login (a machine account), and you control it.
+GitHub allows one per person, used only for automation, and the person who
+made it is responsible for it.
+
+1. Sign up a new account with an address you own, a password from your
+   password manager and 2FA (an authenticator app; keep its recovery codes
+   with the password).
+2. Invite it to the organization as a member and add it to the team
+   `gjallaros-release`. Accept the invite on the bot login.
+3. On the bot login: Settings → Developer settings → Fine-grained tokens →
+   Generate. Resource owner `JadeOpenServices`, "Only select repositories"
+   → `gjallarOS`, permission Contents "Read and write", nothing else,
+   expiry at most one year. If the organization asks for token approval,
+   approve it as owner.
+4. Store the token in the keyring of the machine that pushes the tags.
+   Paste it into the prompt, so it is on no command line and in no file:
+
+   ```sh
+   secret-tool store --label "gjallarOS release bot" service github.com user gjallaros-release-bot
+   ```
+
+To stop the bot at once: revoke the token, or remove the account from the
+team. Before the token expires, make a new one and store it the same way.
 
 #### 4. Statements repository and builder
 
@@ -207,7 +260,8 @@ Setting it up:
    qm guest exec <vmid> -- cat /var/lib/gjallar-builder/statement-key.pub
    ```
 
-3. Make the token (on the release bot account or yours) and hand it to the
+3. Make the token on your own login, not the bot's, so the login that tags
+   is not the one that writes statements. Hand it to the
    builder through stdin, so it is on no command line. Paste it, press
    Enter, then Ctrl-D:
 
@@ -287,8 +341,17 @@ the repository stay as they are; `sign` only looks at the tag it signs.
    `result/readme-makers` rows into the maker table. The maker rows change
    with every release, because the makers carry the version and the
    floor. The fingerprint changes only with a new key.
-4. Commit and push the branch (`dev`, `staging` or `stable`), then push
-   the tag. `build` runs for 1 to 6 hours.
+4. Commit and push the branch (`dev`, `staging` or `stable`) with your
+   own login, then tag the commit and push the tag with the bot's token
+   from the keyring. The first `credential.helper=` drops every other
+   helper, so the push cannot fall back to your login:
+
+   ```sh
+   git tag vYYYY.MM.N <commit>
+   git -c credential.helper= -c 'credential.helper=!f() { echo username=gjallaros-release-bot; printf "password="; secret-tool lookup service github.com user gjallaros-release-bot; echo; }; f' push origin refs/tags/vYYYY.MM.N
+   ```
+
+   `build` runs for 1 to 6 hours.
 5. Wait for the builder statement: the folder
    `vYYYY.MM.N/gjallar-builder/` in gjallarOS-statements.
 6. Open the run, check what you are about to sign
@@ -308,7 +371,7 @@ The workflow that runs is the one in the tagged commit, `sign` included.
 The approval is the only thing between that file and the signing key. So
 approve only:
 
-- a tag you or the release bot made,
+- a tag the release bot made, for a commit you asked it to tag,
 - whose commit is on `dev`, `staging` or `stable` (the `build` log says
   which),
 - whose `.github/workflows/installer-iso.yml` is unchanged since the last
