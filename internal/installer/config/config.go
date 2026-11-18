@@ -15,6 +15,7 @@ import (
 	"strings"
 
 	"github.com/JadeOpenServices/gjallarOS/apps"
+	"github.com/JadeOpenServices/gjallarOS/internal/input/xkb"
 	"github.com/JadeOpenServices/gjallarOS/internal/sshsig"
 	"github.com/JadeOpenServices/gjallarOS/system/tools/legacy"
 )
@@ -256,10 +257,6 @@ var timezonePattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_+-]*(/[A-Za-z0-9_+
 // file name, never a path (L145).
 var moduleNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
 
-// xkbPattern is an xkb layout or variant, or a comma list of them ("de,us").
-// It goes into the Hyprland config text, so it holds no space or newline.
-var xkbPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,32}(,[A-Za-z0-9_-]{0,32}){0,7}$`)
-
 var localePattern = regexp.MustCompile(`^(C|POSIX|[a-z]{2,3}(_[A-Z]{2})?)(\.[A-Za-z0-9-]+)?(@[a-z]+)?$`)
 
 // DefaultUSBTrustTPMHandle is where the USB trust broker creates its signing
@@ -490,10 +487,10 @@ func validateShapes(user User) error {
 			}
 		}
 	}
-	if user.KeyboardLayout != "" && !xkbPattern.MatchString(user.KeyboardLayout) {
+	if user.KeyboardLayout != "" && !xkb.ValidList(user.KeyboardLayout) {
 		return fmt.Errorf("invalid keyboardLayout: %q", user.KeyboardLayout)
 	}
-	if user.KeyboardVariant != "" && !xkbPattern.MatchString(user.KeyboardVariant) {
+	if user.KeyboardVariant != "" && !xkb.ValidList(user.KeyboardVariant) {
 		return fmt.Errorf("invalid keyboardVariant: %q", user.KeyboardVariant)
 	}
 	if d := user.DotfilesDir; d != "" {

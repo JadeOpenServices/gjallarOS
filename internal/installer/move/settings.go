@@ -14,7 +14,9 @@ import (
 // install never builds from values the helper alone vouched for. Installer
 // keys come from a fresh install. In bring-over the computer is a different
 // one: every device key comes from a fresh install as well, except the ones
-// in config.BringOverKeeps (L142).
+// in config.BringOverKeeps (L142), and the merged settings pass the same
+// checks again, so a longer keep list can never pair values the schema
+// refuses (G5).
 func (f Flow) Settings(ctx context.Context) (config.User, error) {
 	var res movehelper.ConfigResult
 	if err := f.Helper.Run(ctx, movehelper.Request{Op: "config"}, &res); err != nil {
@@ -35,5 +37,17 @@ func (f Flow) Settings(ctx context.Context) (config.User, error) {
 	if err != nil {
 		return config.User{}, err
 	}
-	return config.WithDeviceKeysFrom(user, fresh, config.BringOverKeeps)
+	merged, err := config.WithDeviceKeysFrom(user, fresh, config.BringOverKeeps)
+	if err != nil {
+		return config.User{}, err
+	}
+	raw, err = json.Marshal(merged)
+	if err != nil {
+		return config.User{}, err
+	}
+	merged, err = oldroot.CheckConfig(raw)
+	if err != nil {
+		return config.User{}, f.refused(err)
+	}
+	return merged, nil
 }

@@ -57,6 +57,9 @@ func TestSettingsModes(t *testing.T) {
 		if got.Hostname != c.hostname {
 			t.Errorf("%s: hostname %q, want %q", c.mode, got.Hostname, c.hostname)
 		}
+		if err := config.Validate(got); err != nil {
+			t.Errorf("%s: result refused: %v", c.mode, err)
+		}
 	}
 }
 
