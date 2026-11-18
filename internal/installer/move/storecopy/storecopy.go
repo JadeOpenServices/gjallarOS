@@ -44,6 +44,8 @@ const (
 	// one is still going fails to start instead of running twice.
 	ExportUnit  = "gjallar-move-export"
 	ClosureUnit = "gjallar-move-closure"
+	// PackUnit packs the old system checkout's commits (repocopy, L63).
+	PackUnit = "gjallar-move-pack"
 
 	// NotLoaded is systemctl's exit code for a unit that is not loaded:
 	// nothing of it runs.
@@ -52,6 +54,7 @@ const (
 	// ExportLimit and ClosureLimit stop a unit that runs too long.
 	ExportLimit  = 2 * time.Hour
 	ClosureLimit = 5 * time.Minute
+	PackLimit    = 30 * time.Minute
 
 	features = "nix-command read-only-local-store"
 )
@@ -70,7 +73,7 @@ var (
 // systemd-run waits leaves its unit running, writing into the cache and
 // holding the old disk; each one is stopped before the cache is removed or
 // the old disk closed (L135).
-var Units = []string{ExportUnit + ".service", ClosureUnit + ".service"}
+var Units = []string{ExportUnit + ".service", ClosureUnit + ".service", PackUnit + ".service"}
 
 // unitProps confine the unit. The unit's user exists only while it runs.
 // It sees the stick read-only, no home, no devices, no network, no other
@@ -110,37 +113,71 @@ var unitProps = []string{
 	"InaccessiblePaths=-/nix/var/nix/daemon-socket",
 }
 
-// unitArgs returns systemd-run's arguments for one confined nix run. old is
-// the old @nix subvolume, cache the empty cache folder or "" for none.
+// Bind is one bind mount into a confined unit: Src on the stick, Dst inside
+// the unit. The zero Bind is none.
+type Bind struct{ Src, Dst string }
+
+func (b Bind) check() error {
+	for _, p := range []string{b.Src, b.Dst} {
+		if !strings.HasPrefix(p, "/") || strings.ContainsAny(p, ": \t\n\r\v\f") {
+			return fmt.Errorf("unit folder %q is not a plain absolute path", p)
+		}
+	}
+	return nil
+}
+
+// UnitArgs returns systemd-run's arguments for one confined run of cmd, with
+// ro bound read-only and rw, when not zero, bound writable. Nothing else of
+// the stick is writable for it.
 //
 // systemd sets up the bind mounts by path, as root, and follows links on
 // the way: nosymfollow on the old disk does not cover systemd's own lookup.
-// Both paths are fixed below the helper's closed folder, the old one was
-// checked to be @nix and is mounted read-only, so no one else can change
-// them; a ":" or blank would split the property, so those are refused.
-func unitArgs(unit string, limit time.Duration, old, cache string, nixArgs ...string) ([]string, error) {
-	for _, p := range []string{old, cache} {
-		if p != "" && (!strings.HasPrefix(p, "/") || strings.ContainsAny(p, ": \t\n\r\v\f")) {
-			return nil, fmt.Errorf("unit folder %q is not a plain absolute path", p)
+// Callers pass only paths fixed below the helper's closed folder, on the old
+// disk mounted read-only, so no one else can change them; a ":" or blank
+// would split the property, so those are refused.
+func UnitArgs(unit string, limit time.Duration, ro, rw Bind, cmd ...string) ([]string, error) {
+	if ro == (Bind{}) {
+		return nil, errors.New("unit: no read-only folder")
+	}
+	if err := ro.check(); err != nil {
+		return nil, err
+	}
+	if rw != (Bind{}) {
+		if err := rw.check(); err != nil {
+			return nil, err
 		}
 	}
-	if old == "" {
-		return nil, errors.New("unit: no old store")
+	if len(cmd) == 0 || !strings.HasPrefix(cmd[0], "/") {
+		return nil, errors.New("unit: the program is not an absolute path")
 	}
 	args := []string{
 		"--quiet", "--wait", "--collect", "--pipe",
 		"--unit=" + unit, "--service-type=exec",
 		"--property=RuntimeMaxSec=" + strconv.Itoa(int(limit.Seconds())),
-		"--property=BindReadOnlyPaths=" + old + ":" + oldNix,
+		"--property=BindReadOnlyPaths=" + ro.Src + ":" + ro.Dst,
 	}
-	if cache != "" {
-		args = append(args, "--property=BindPaths="+cache+":"+cacheDir)
+	if rw != (Bind{}) {
+		args = append(args, "--property=BindPaths="+rw.Src+":"+rw.Dst)
 	}
 	for _, p := range unitProps {
 		args = append(args, "--property="+p)
 	}
-	args = append(args, "--", Nix, "--extra-experimental-features", features)
-	return append(args, nixArgs...), nil
+	args = append(args, "--")
+	return append(args, cmd...), nil
+}
+
+// unitArgs runs nix confined, with the old @nix subvolume at oldNix and the
+// cache folder, when not "", at cacheDir.
+func unitArgs(unit string, limit time.Duration, old, cache string, nixArgs ...string) ([]string, error) {
+	var rw Bind
+	if cache != "" {
+		rw = Bind{cache, cacheDir}
+	}
+	if old == "" {
+		return nil, errors.New("unit: no old store")
+	}
+	return UnitArgs(unit, limit, Bind{old, oldNix}, rw,
+		append([]string{Nix, "--extra-experimental-features", features}, nixArgs...)...)
 }
 
 // ExportArgs returns systemd-run's arguments to export the closure of the

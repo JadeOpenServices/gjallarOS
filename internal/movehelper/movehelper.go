@@ -16,12 +16,15 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
+	"time"
 
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/move/freespace"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/move/identity"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/move/oldroot"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/move/prepared"
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/move/repocopy"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/move/storecopy"
 	"github.com/JadeOpenServices/gjallarOS/internal/safefs"
 	"github.com/JadeOpenServices/gjallarOS/internal/usbtrust/btaddr"
@@ -94,7 +97,7 @@ func Run(base string, in io.Reader, out io.Writer) error {
 		result = struct{}{}
 	case "find":
 		result, err = findOp(ctx)
-	case "copy", "check", "open", "inventory", "sizes", "close", "closure", "export", "dropcache":
+	case "copy", "check", "open", "inventory", "sizes", "close", "closure", "export", "dropcache", "repo":
 		var unlock func()
 		if unlock, err = lock(base); err != nil {
 			break
@@ -123,6 +126,8 @@ func Run(base string, in io.Reader, out io.Writer) error {
 		case "dropcache":
 			err = dropCache(ctx, base)
 			result = struct{}{}
+		case "repo":
+			result, err = repoOp(ctx, base, req)
 		}
 	default:
 		return fmt.Errorf("unknown operation %q", req.Op)
@@ -707,4 +712,91 @@ func mountedNew(base string) (*safefs.Dir, error) {
 		return nil, errors.New("the new disk is not mounted")
 	}
 	return safefs.OpenDir(p)
+}
+
+// oldRepo is the old system checkout's git folder below the opened top
+// level: the @config subvolume is the checkout.
+const oldRepo = "@config/.git"
+
+// newCheckout is systemcheckout.Path below the new root. The helper does
+// not link systemcheckout, which starts programs of its own; a test keeps
+// the two the same.
+const newCheckout = "etc/gjallar/system"
+
+// repoOp carries the local branches, stashes and detached HEAD of the old
+// system checkout into the new one (L63). Root runs git only in the new
+// checkout; the old objects are packed by a confined unit (repocopy). A
+// copy that fails takes back what it wrote and says why in Failed.
+func repoOp(ctx context.Context, base string, req Request) (res repocopy.Result, err error) {
+	if req.Budget <= 0 {
+		return res, errors.New("repo: no budget")
+	}
+	top, _, err := openedTop(base)
+	if err != nil {
+		return res, err
+	}
+	defer top.Close()
+	gitDir, refused := oldGitDir(top)
+	if refused != "" {
+		return repocopy.Result{Refused: refused}, nil
+	}
+	defer gitDir.Close()
+	newRoot, err := mountedNew(base)
+	if err != nil {
+		return res, err
+	}
+	defer newRoot.Close()
+	if err := newGitDir(newRoot); err != nil {
+		return res, err
+	}
+	host := repocopy.Host{
+		Pack: func(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer) error {
+			return runPiped(ctx, storecopy.SystemdRun, nil, args, stdin, stdout)
+		},
+		Git: func(ctx context.Context, stdin io.Reader, stdout io.Writer, args ...string) error {
+			return runPiped(ctx, repocopy.Git, repocopy.GitEnv, args, stdin, stdout)
+		},
+	}
+	return repocopy.Copy(ctx, host, gitDir, filepath.Join(base, Old, oldRepo, "objects"),
+		filepath.Join(base, New, newCheckout), req.Budget)
+}
+
+// oldGitDir opens the old checkout's git folder. Every folder on the way is
+// opened without following links, on the old disk mounted read-only: the
+// folder checked is the folder the pack unit binds. No checkout is not an
+// error, the move just has nothing to carry.
+func oldGitDir(top *safefs.Dir) (*safefs.Dir, string) {
+	gitDir, err := top.Sub(oldRepo)
+	if errors.Is(err, unix.ENOENT) {
+		return nil, "no-repo"
+	}
+	if err != nil {
+		return nil, "path"
+	}
+	return gitDir, ""
+}
+
+// newGitDir checks that the new checkout's git folder is a plain folder:
+// root's git runs there.
+func newGitDir(newRoot *safefs.Dir) error {
+	d, err := newRoot.Sub(newCheckout + "/.git")
+	if err != nil {
+		return fmt.Errorf("repo: the new checkout: %w", err)
+	}
+	return d.Close()
+}
+
+// runPiped runs one fixed program with stdin and stdout passed through and
+// its error output capped. It is a plain function, never a variable (L137).
+func runPiped(ctx context.Context, prog string, env, args []string, stdin io.Reader, stdout io.Writer) error {
+	var stderr bytes.Buffer
+	cmd := oldroot.Tool(ctx, prog, args...)
+	cmd.Env = slices.Concat(cmd.Env, env)
+	cmd.Stdin, cmd.Stdout = stdin, stdout
+	cmd.Stderr = &capped{w: &stderr, left: maxUnitErr}
+	cmd.WaitDelay = 10 * time.Second
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("%w: %q", err, stderr.String())
+	}
+	return nil
 }

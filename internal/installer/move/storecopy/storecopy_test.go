@@ -220,3 +220,40 @@ func TestOldSystemOnDisk(t *testing.T) {
 		t.Errorf("planted link on the way: %v", err)
 	}
 }
+
+// UnitArgs is the one way to a confined unit (the pack unit of repocopy too).
+func TestUnitArgsRefused(t *testing.T) {
+	ro, rw := Bind{"/o", "/old"}, Bind{"/c", "/cache"}
+	args, err := UnitArgs(PackUnit, PackLimit, ro, Bind{}, "/bin/sh", "-c", "x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := slices.Index(args, "--")
+	if cmd < 0 || !slices.Equal(args[cmd+1:], []string{"/bin/sh", "-c", "x"}) {
+		t.Fatalf("command %q", args)
+	}
+	if !slices.Contains(args, "--property=RuntimeMaxSec=1800") || !slices.Contains(args, "--property=BindReadOnlyPaths=/o:/old") {
+		t.Errorf("%q", args)
+	}
+	for _, a := range args[:cmd] {
+		if strings.HasPrefix(a, "--property=BindPaths=") {
+			t.Errorf("no writable folder asked, got %q", a)
+		}
+	}
+	for name, c := range map[string]struct {
+		ro, rw Bind
+		cmd    []string
+	}{
+		"no ro":        {Bind{}, rw, []string{"/bin/sh"}},
+		"ro relative":  {Bind{"o", "/old"}, rw, []string{"/bin/sh"}},
+		"ro dst colon": {Bind{"/o", "/old:/etc"}, rw, []string{"/bin/sh"}},
+		"rw half":      {ro, Bind{"/c", ""}, []string{"/bin/sh"}},
+		"rw dst blank": {ro, Bind{"/c", "/ca che"}, []string{"/bin/sh"}},
+		"no program":   {ro, rw, nil},
+		"relative cmd": {ro, rw, []string{"sh", "-c", "x"}},
+	} {
+		if _, err := UnitArgs(PackUnit, PackLimit, c.ro, c.rw, c.cmd...); err == nil {
+			t.Errorf("%s accepted", name)
+		}
+	}
+}

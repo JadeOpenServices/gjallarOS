@@ -13,7 +13,9 @@
 #
 # cryptsetup and util-linux are baked in by store path for the move
 # helper, which runs them as root: nothing is looked up through PATH (L114).
-# nix is baked in the same way for the store export's confined unit (L62).
+# nix is baked in the same way for the store export's confined unit (L62),
+# git and bash for the repository copy (L63): root's git steps and the
+# confined pack unit's script.
 #
 # oddc is the full ODDC source (the flake's oddc input). With it the
 # installer drafts a model for machines ODDC does not match; without it
@@ -28,6 +30,8 @@
   cryptsetup,
   util-linux,
   nix,
+  git,
+  bash,
   oddc ? null,
 }:
 let
@@ -59,6 +63,8 @@ gjallarctl.overrideAttrs (old: {
       "-X github.com/JadeOpenServices/gjallarOS/internal/installer/move/oldroot.Cryptsetup=${lib.getExe' cryptsetup "cryptsetup"}"
       "-X github.com/JadeOpenServices/gjallarOS/internal/installer/move/oldroot.Lsblk=${lib.getExe' util-linux "lsblk"}"
       "-X github.com/JadeOpenServices/gjallarOS/internal/installer/move/storecopy.Nix=${lib.getExe' nix "nix"}"
+      "-X github.com/JadeOpenServices/gjallarOS/internal/installer/move/repocopy.Git=${lib.getExe' git "git"}"
+      "-X github.com/JadeOpenServices/gjallarOS/internal/installer/move/repocopy.Shell=${lib.getExe' bash "bash"}"
     ]
     ++ lib.optional (
       oddc != null
