@@ -46,7 +46,7 @@ type Input struct {
 	// StoreImport is the narSize of the old store paths the new system
 	// reuses; FileCache the file cache they pass through while it exists.
 	StoreImport, FileCache uint64
-	Categories          []Category
+	Categories             []Category
 }
 
 // Result is the answer. Short is zero when the move fits.

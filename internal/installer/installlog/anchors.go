@@ -58,6 +58,10 @@ const (
 	StickMoveUnlockFailed    ID = 2107
 	StickMoveOldRefused      ID = 2108
 	StickMovePINUncheckedYes ID = 2110
+	StickMoveSpaceOK         ID = 2111
+	StickMoveSpaceShort      ID = 2112
+	StickMoveNextcloudWarned ID = 2113
+	StickMoveIdentityChoice  ID = 2114
 
 	MakerRunStarted        ID = 3001
 	MakerKeyConfirmed      ID = 3002
@@ -244,11 +248,30 @@ var Registry = []Anchor{
 		Meaning: "No key the user typed opened the old disk; the move stopped.",
 		Fields:  []FieldSpec{{Name: "tries", Kind: KindCount, Meaning: "how many tries were made"}}},
 	{ID: StickMoveOldRefused, Name: "stick.move.old-refused",
-		Meaning: "The stick could not work with the old disk. Nothing was opened.",
-		Fields: []FieldSpec{{Name: "reason", Kind: KindChoice, Choices: []string{"busy", "old-cryptsetup"},
-			Meaning: "busy: an old disk is already open; old-cryptsetup: the stick's disk tools are too old to open it safely"}}},
+		Meaning: "The stick could not work with the old disk.",
+		Fields: []FieldSpec{{Name: "reason", Kind: KindChoice, Choices: []string{"busy", "old-cryptsetup", "not-open"},
+			Meaning: "busy: an old disk is already open, nothing was opened; old-cryptsetup: the stick's disk tools are too old to open it safely, nothing was opened; not-open: a later step found the old disk no longer open"}}},
 	{ID: StickMovePINUncheckedYes, Name: "stick.move.pin-unchecked",
 		Meaning: "The old disk also unlocks with a startup PIN that the stick cannot check; the user read the warning and went on. Identity items start as \"make new\"."},
+	{ID: StickMoveSpaceOK, Name: "stick.move.space-ok",
+		Meaning: "What the user chose to move fits on the new disk, with the reserve left free.",
+		Fields: []FieldSpec{
+			{Name: "needed", Kind: KindCount, Meaning: "GiB needed, rounded up: the chosen categories, the store import, the file cache and the reserve"},
+			{Name: "free", Kind: KindCount, Meaning: "GiB free on the planned root after the swap and the base system, rounded down"}}},
+	{ID: StickMoveSpaceShort, Name: "stick.move.space-short",
+		Meaning: "What the user chose to move does not fit on the new disk. The stick asks to leave something behind or to stop; nothing is erased.",
+		Fields:  []FieldSpec{{Name: "short", Kind: KindCount, Meaning: "GiB missing, rounded up"}}},
+	{ID: StickMoveNextcloudWarned, Name: "stick.move.nextcloud-warned",
+		Meaning: "The Nextcloud folders are above 50 GiB or above a quarter of the free space, and the stick asked first.",
+		Fields: []FieldSpec{{Name: "answer", Kind: KindChoice, Choices: []string{"copy", "skip"},
+			Meaning: "copy: the folders are copied with their sync state; skip: they stay behind and sync again from the server after the move"}}},
+	{ID: StickMoveIdentityChoice, Name: "stick.move.identity-choice",
+		Meaning: "The user answered one identity screen.",
+		Fields: []FieldSpec{
+			{Name: "item", Kind: KindChoice, Choices: []string{"wifi", "wifi-enterprise", "vpn", "bluetooth", "fingerprints", "tailscale", "ssh-host-keys", "machine-id", "nextcloud"},
+				Meaning: "the identity item"},
+			{Name: "answer", Kind: KindChoice, Choices: []string{"keep", "new"},
+				Meaning: "keep: it comes along to the new disk; new: it stays behind and the new system starts without it"}}},
 
 	{ID: MakerRunStarted, Name: "maker.run.started",
 		Meaning: "The USB stick maker started.",

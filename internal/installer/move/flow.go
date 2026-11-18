@@ -296,6 +296,8 @@ func markRefusal(reason oldroot.Reason) error {
 		installlog.Mark(installlog.StickMoveOldRefused, installlog.Choice("reason", "busy"))
 	case oldroot.OldCryptsetup:
 		installlog.Mark(installlog.StickMoveOldRefused, installlog.Choice("reason", "old-cryptsetup"))
+	case oldroot.NotOpen:
+		installlog.Mark(installlog.StickMoveOldRefused, installlog.Choice("reason", "not-open"))
 	default:
 		return fmt.Errorf("the move helper refused with an unknown reason %q", reason)
 	}
