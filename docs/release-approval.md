@@ -36,7 +36,11 @@ skipped.
 
 ## 1. Wait until it is ready
 
-Approve when all three are true:
+GitHub e-mails the reviewers when `sign` starts to wait. From the first
+tag after v2026.10.67 on, that happens only after the `statement` job
+found the gjallar builder's statement and it lists the same files as
+`build`, so the e-mail itself means both builds agree. Check it anyway;
+approve when all three are true:
 
 ```sh
 gh api repos/$R/actions/runs/$RUN/jobs --jq '.jobs[] | .name + " " + .status + " " + (.conclusion//"")'
@@ -46,26 +50,30 @@ gh api repos/JadeOpenServices/gjallarOS-statements/contents/$NEW/gjallar-builder
 
 | Command | Ready when it prints |
 | --- | --- |
-| Jobs | `build completed success` and `sign waiting` |
+| Jobs | `build completed success`, `statement completed success` and `sign waiting` |
 | Draft | `true`, then six files: the `.iso`, `gjlogs.img`, `RELEASE`, `make-stick.sh`, `make-stick.ps1`, `SHA256SUMS` |
 | Builder statement | `SHA256SUMS` and `SHA256SUMS.sshsig` |
 
 `build` takes 1 to 6 hours. The gjallar builder looks for new tags once
 an hour and then builds for about as long. Until its statement is there,
-the third command fails with `Not Found (HTTP 404)`.
+the third command fails with `Not Found (HTTP 404)` and `statement` shows
+`in_progress`.
 
-You can approve before the statement is there. `sign` then stops with
-`No builder statement for vYYYY.MM.N in JadeOpenServices/gjallarOS-statements yet`
-before it touches the key, and `publish` is skipped. When the statement
-arrives, open the run and click **Re-run jobs** → **Re-run failed jobs**,
-or:
+`statement` waits up to 6 hours. If the builder was slower, it fails with
+`No builder statement for vYYYY.MM.N ... after almost 6 hours`, `sign` and
+`publish` are skipped, and the failure e-mail goes to the release bot,
+not to you. So if no review e-mail came about 8 hours after the tag, run
+the first command above. When the statement is there, open the run and
+click **Re-run jobs** → **Re-run failed jobs**, or:
 
 ```sh
 gh run rerun $RUN --repo $R --failed
 ```
 
-The re-run asks for the approval again; do step 3 once more. It reuses
-the files `build` made. An approval you did not give waits up to 30 days.
+That runs `statement`, `sign` and `publish` again and reuses the files
+`build` made. If `statement` fails with `The builder got other files than
+CI`, do not re-run: see [Maintainers → When a job fails](maintainers.md#when-a-job-fails).
+An approval you did not give waits up to 30 days.
 
 ## 2. Check what you are about to sign
 
@@ -148,8 +156,7 @@ In the browser:
 4. Write a short comment, for example `v2026.10.67 checked`.
 5. Click **Approve and deploy**.
 
-GitHub also sends an e-mail to the reviewers when the run starts to wait;
-its link opens the same run.
+The review e-mail from step 1 links to the same run.
 
 To see from the shell that the approval is open to you:
 

@@ -1,4 +1,7 @@
-# Release builder system, updated in place inside the VM:
+# Release builder system. First disk image (qcow2, for import into a
+# hypervisor):
+#   nix build 'github:JadeOpenServices/gjallarOS/<rev>?dir=deployment/builder#nixosConfigurations.gjallaros-build.config.system.build.image'
+# Updated in place inside the VM:
 #   nixos-rebuild switch --flake github:JadeOpenServices/gjallarOS/<rev>?dir=deployment/builder#gjallaros-build
 # Own flake: the main one needs generated/state.nix, which only exists on a
 # device. nixpkgs is locked to the same revision as the main flake.

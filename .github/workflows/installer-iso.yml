@@ -4,6 +4,8 @@
 # "Installer release".
 #
 #   build    (tag)    nix build gjallar-release -> draft release, no signature
+#   statement (tag)   waits up to 6 hours for the gjallar builder's statement
+#                     and compares it with build's SHA256SUMS (no secrets)
 #   sign     (tag)    environment installer-sign, a reviewer approves:
 #                     builder statement checked, then SHA256SUMS signed
 #   publish  (tag)    files checked against the signature, draft goes public,
@@ -148,8 +150,52 @@ jobs:
             --notes "Installer stick for gjallarOS $TAG. How to make the stick and check it: README \"USB stick\"." \
             "gjallarOS-installer-$TAG.iso" gjlogs.img RELEASE make-stick.sh make-stick.ps1 SHA256SUMS
 
-  sign:
+  # Waits for the gjallar builder's statement, so sign (and GitHub's
+  # "waiting for review" e-mail) starts only when there is something to
+  # approve. No secrets and no checkout: it reads the public statements
+  # repository and compares bytes. sign checks the signature again on its
+  # own and does not trust this job.
+  statement:
     needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    timeout-minutes: 360
+    env:
+      TAG: ${{ github.ref_name }}
+      SUMS: ${{ needs.build.outputs.sums }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Wait for the builder statement
+        working-directory: ${{ runner.temp }}
+        run: |
+          [[ $TAG =~ ^v[0-9]{4}\.(0[1-9]|1[0-2])\.[0-9]{1,6}$ ]] ||
+            { echo "$TAG is not a release name like v2026.10.1" >&2; exit 1; }
+          printf '%s' "$SUMS" | base64 -d > SHA256SUMS
+          # 5 minutes apart, for up to 5 hours 50 minutes (the job stops at 6).
+          for _ in $(seq 70); do
+            if gh api -H 'Accept: application/vnd.github.raw' \
+                "repos/$STATEMENTS_REPO/contents/$TAG/gjallar-builder/SHA256SUMS" > builder.sums 2>/dev/null &&
+                [ -s builder.sums ]; then
+              cmp -s SHA256SUMS builder.sums && { echo "Builder statement for $TAG is there and lists the same files."; exit 0; }
+              [ "$(stat -c %s builder.sums)" -le 65536 ] ||
+                { echo "The builder statement for $TAG is larger than 65536 bytes." >&2; exit 1; }
+              echo "The builder got other files than CI for $TAG:" >&2
+              # Nobody checked this file's signature yet: keep its lines
+              # from being read as workflow commands.
+              stop=$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n')
+              echo "::stop-commands::$stop"
+              diff SHA256SUMS builder.sums >&2 || true
+              echo "::$stop::"
+              exit 1
+            fi
+            sleep 300
+          done
+          echo "No builder statement for $TAG after almost 6 hours. Check the builder (docs/maintainers.md, Statements repository and builder), then re-run the failed jobs." >&2
+          exit 1
+
+  sign:
+    needs: [build, statement]
     runs-on: ubuntu-24.04
     # Holds RELEASE_SIGNING_KEY and BUILDER_SSH_KEY. Its rules (v* tags
     # only, required reviewer, no self-review, no admin bypass) decide

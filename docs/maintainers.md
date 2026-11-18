@@ -95,7 +95,11 @@ git push origin vYYYY.MM.N
   │            meanwhile the gjallar builder builds the same tag on its own
   │            and pushes a signed SHA256SUMS to gjallarOS-statements
   │
-  ├─ sign      waits for your approval (environment installer-sign), then:
+  ├─ statement waits up to 6 hours for that statement, compares it with
+  │            CI's SHA256SUMS (no secrets)
+  │
+  ├─ sign      GitHub e-mails the reviewers; waits for your approval
+  │            (environment installer-sign), then:
   │            builder statement signed by the builder key? same bytes as
   │            CI's SHA256SUMS? -> sign SHA256SUMS with RELEASE_SIGNING_KEY
   │
@@ -292,20 +296,175 @@ and write", nothing else. It cannot touch the gjallarOS repository. The
 `sign` job trusts a statement only through the signature and
 `BUILDER_SSH_KEY`, not because it is in that repository.
 
-Setting it up:
+##### How a statement reaches GitHub
+
+Nothing reaches into the builder. It only connects out, over HTTPS:
+
+1. Once an hour the builder asks github.com for the tags of gjallarOS
+   (public, no token) and picks the oldest tag from `v2026.10.67` on that
+   has no statement yet.
+2. It builds `gjallar-release` from that tag by itself, as an unprivileged
+   user, with only `cache.nixos.org` as a cache. Nothing comes from the
+   gjallarOS cache that CI fills.
+3. Root signs the `SHA256SUMS` of that build with the builder key, which
+   never leaves the VM, and pushes `SHA256SUMS` and `SHA256SUMS.sshsig` as
+   one commit to `main` of gjallarOS-statements. The token for that push
+   can write to that one repository only.
+4. In the release run, the `statement` job looks for that folder every 5
+   minutes, for up to 6 hours. When it is there, it compares the builder's
+   `SHA256SUMS` with CI's, byte for byte. It has no secrets.
+5. Only then does `sign` start. It waits for your approval, checks the
+   signature again with `BUILDER_SSH_KEY`, compares the bytes again, and
+   signs with the release key.
+
+##### How you hear that it is ready
+
+When `sign` starts to wait, GitHub e-mails the reviewers of
+`installer-sign` ("... is waiting for your review"). Because `statement`
+runs first, that e-mail comes only once both builds are done and agree. It
+is the signal to go to [Approving an installer release](release-approval.md).
+
+If it goes wrong, GitHub e-mails a failed run to the account that pushed
+the tag, which is the release bot, not you. So when no review e-mail came
+within about 8 hours of the tag, look at the run:
+
+```sh
+gh run list --repo JadeOpenServices/gjallarOS --workflow installer-iso.yml --limit 3
+```
+
+`statement` failed with `No builder statement for ... after almost 6
+hours`: see what the builder did (journal command below), fix it, start
+the builder now (below) and, once the statement is there, re-run the
+failed jobs. `statement` failed with `The builder got other files than
+CI`: the two builds differ; see [When a job fails](#when-a-job-fails).
+
+##### Setting it up
+
+Our builder is VM 200 on pve01; the commands below use `qm` on the
+Proxmox host. From the laptop, put `ssh root@pve01.openjade.de` in front.
 
 1. Create `gjallarOS-statements` as a public repository with a README, so
    `main` exists. Add a branch ruleset on `main`: block force pushes and
    deletion. The builder only ever adds a commit on top.
-2. Start the builder. On first boot `gjallar-builder-statement-key.service`
-   makes the key. Read the public half through the guest agent and put it
-   into `BUILDER_SSH_KEY` ([step 2](#2-environment-installer-sign)):
+2. Give the VM its own network on the host: a bridge with no physical
+   port and an nftables table that lets the VM open connections to public
+   IPv4 addresses only. It cannot reach the LAN, any private range or the
+   host, and nothing can open a connection to it. On pve01 these are two
+   files, `/etc/network/interfaces.d/gjallar-build`:
 
-   ```sh
-   qm guest exec <vmid> -- cat /var/lib/gjallar-builder/statement-key.pub
+   ```text
+   auto vmbr250
+   iface vmbr250 inet static
+   	address 10.250.0.1/30
+   	bridge-ports none
+   	bridge-stp off
+   	bridge-fd 0
+   	post-up nft -f /etc/gjallar-build.nft
+   	post-up sysctl -q -w net.ipv4.ip_forward=1
+   	pre-down sysctl -q -w net.ipv4.ip_forward=0
+   	pre-down nft destroy table inet gjallar_build
    ```
 
-3. Make the token on your own login, not the bot's, so the login that tags
+   and `/etc/gjallar-build.nft`:
+
+   ```text
+   destroy table inet gjallar_build
+   table inet gjallar_build {
+   	set private4 {
+   		type ipv4_addr
+   		flags interval
+   		elements = { 0.0.0.0/8, 10.0.0.0/8, 100.64.0.0/10, 127.0.0.0/8,
+   			169.254.0.0/16, 172.16.0.0/12, 192.0.0.0/24, 192.0.2.0/24,
+   			192.168.0.0/16, 198.18.0.0/15, 198.51.100.0/24, 203.0.113.0/24,
+   			224.0.0.0/3 }
+   	}
+   	chain input {
+   		type filter hook input priority filter; policy accept;
+   		iifname "vmbr250" drop
+   	}
+   	chain forward {
+   		type filter hook forward priority filter; policy accept;
+   		iifname "vmbr250" oifname "vmbr0" meta nfproto ipv4 ip daddr != @private4 accept
+   		iifname "vmbr250" drop
+   		oifname "vmbr250" ct state established,related accept
+   		oifname "vmbr250" drop
+   		iifname "vmbr0" oifname "vmbr0" drop
+   	}
+   	chain postrouting {
+   		type nat hook postrouting priority srcnat; policy accept;
+   		iifname "vmbr250" oifname "vmbr0" masquerade
+   	}
+   }
+   ```
+
+   `vmbr0` is the host's LAN bridge. The last forward rule keeps the LAN
+   from routing through the host once forwarding is on; drop it only if
+   the host already routes on purpose. `/etc/network/interfaces` must
+   have the line `source /etc/network/interfaces.d/*` (Proxmox has it).
+   Then bring the bridge up with `ifup vmbr250`. The VM's own side
+   (`10.250.0.2/30`, gateway `10.250.0.1`, names over HTTPS to Quad9) is
+   in `deployment/builder/configuration.nix`; change both together.
+3. Build the disk image from a full commit hash on `dev`. Any x86_64
+   machine with Nix will do:
+
+   ```sh
+   nix build --max-jobs 2 --cores 4 'github:JadeOpenServices/gjallarOS/<full commit>?dir=deployment/builder#nixosConfigurations.gjallaros-build.config.system.build.image'
+   ls result/
+   ```
+
+   `result/` holds one `nixos-image-efi-qcow2-...-x86_64-linux.qcow2`.
+   Where you build it does not have to be trusted: step 6 checks every
+   file of the running VM. Copy the image to the host, for example with
+   `scp result/*.qcow2 root@<host>:/var/tmp/gjallaros-build.qcow2`.
+4. Create the VM on the host. `<storage>` is a Proxmox storage for VM
+   disks (`nextcloud-pool-1` on pve01):
+
+   ```sh
+   qm create 200 --name gjallaros-build --ostype l26 --machine q35 --bios ovmf --cores 6 --memory 8192 --scsihw virtio-scsi-single --agent 1 --onboot 1 --net0 virtio,bridge=vmbr250 --efidisk0 <storage>:1,efitype=4m,pre-enrolled-keys=0 --virtio0 <storage>:0,import-from=/var/tmp/gjallaros-build.qcow2 --boot order=virtio0
+   qm resize 200 virtio0 80G
+   qm start 200
+   rm /var/tmp/gjallaros-build.qcow2
+   ```
+
+   The VM has no login at all: no password, no SSH, no console user. The
+   guest agent (`--agent 1`) is the only way in, and only for root on the
+   host. Root grows to the 80 GB on first boot; a weekly garbage
+   collection removes build results older than 14 days.
+5. Wait about a minute, then check that the agent answers and the network
+   works:
+
+   ```sh
+   qm guest exec 200 -- /run/current-system/sw/bin/systemctl is-system-running
+   qm guest exec 200 -- /run/current-system/sw/bin/getent hosts github.com
+   ```
+
+   `running` and an address. `degraded` means a unit failed:
+   `qm guest exec 200 -- /run/current-system/sw/bin/systemctl --failed`.
+6. Check that the VM's own tools came from upstream NixOS and not from
+   the gjallarOS cache, so the second build really is a second one. Run
+   this from the checkout, with the commit of step 3:
+
+   ```sh
+   ssh root@pve01.openjade.de 'qm guest exec 200 --pass-stdin 1 --timeout 3000 -- /run/current-system/sw/bin/bash -s <full commit>' < deployment/builder/check-store.sh
+   ```
+
+   The script takes every file of the running system. Each one must
+   either have the same hash on `cache.nixos.org` or be built again in
+   the VM and come out bit for bit the same. Inside the JSON answer,
+   `out-data` ends with a line like
+   `same_as_cache.nixos.org=618 rebuilt_identical=43 failed=0` and
+   `exitcode` is `0`. Any `DIFFERS` or `REBUILD DIFFERS` line: delete the
+   VM and do not use that image. `cache.nixos.org answered ...` is a
+   network problem, not a result: run it again.
+7. Read the public half of the key and put it into `BUILDER_SSH_KEY`
+   ([step 2](#2-environment-installer-sign)). On first boot
+   `gjallar-builder-statement-key.service` made the key:
+
+   ```sh
+   qm guest exec 200 -- cat /var/lib/gjallar-builder/statement-key.pub
+   ```
+
+8. Make the token on your own login, not the bot's, so the login that tags
    is not the one that writes statements: Settings → Developer settings →
    Personal access tokens → Fine-grained tokens → Generate new token.
    Token name `gjallarOS statements`, Resource owner `JadeOpenServices`,
@@ -317,25 +476,22 @@ Setting it up:
    is on no command line. Paste it, press Enter, then Ctrl-D:
 
    ```sh
-   qm guest exec <vmid> --pass-stdin 1 -- /run/current-system/sw/bin/gjallar-builder-set-token
-   ```
-
-   Our builder is VM 200 on pve01. From the laptop, with the typing
-   hidden (`stty echo` turns it back on):
-
-   ```sh
    stty -echo; ssh root@pve01.openjade.de qm guest exec 200 --pass-stdin 1 -- /run/current-system/sw/bin/gjallar-builder-set-token; stty echo
    ```
 
-   It worked when the output holds `"out-data" : "token saved\n"` and
+   `stty -echo` hides the typing; `stty echo` turns it back on. It worked
+   when the output holds `"out-data" : "token saved\n"` and
    `"exitcode" : 0`. The script accepts only one `github_pat_...` line
    and stores it in `/var/lib/gjallar-builder/statements-token`, readable
    by root only.
 
    Fine-grained tokens expire. Before the date GitHub shows, make a new
    one and run the same command again.
+9. Start the first run now instead of waiting for the timer (below).
 
-What it does: 15 minutes after boot, and then one hour after each run,
+##### What it does
+
+15 minutes after boot, and then one hour after each run,
 `gjallar-builder-statement.service` lists the `v*` tags and takes the
 oldest one from `v2026.10.67` on that has no statement yet. One tag per
 run. Older tags have no installer release and are never built.
@@ -348,11 +504,17 @@ statements repository is never checked out on the builder: the job writes
 the new commit straight from git objects, so a file or link someone put
 into that repository never lands on the builder's disk.
 
-To see what it did:
+To start a run now, see whether it still runs, and see what it did:
 
 ```sh
-qm guest exec <vmid> -- journalctl -u gjallar-builder-statement -n 60 --no-pager
+qm guest exec 200 -- /run/current-system/sw/bin/systemctl start --no-block gjallar-builder-statement.service
+qm guest exec 200 -- /run/current-system/sw/bin/systemctl is-active gjallar-builder-statement.service
+qm guest exec 200 -- journalctl -u gjallar-builder-statement -n 60 --no-pager
+qm guest exec 200 -- /run/current-system/sw/bin/systemctl list-timers gjallar-builder-statement --no-pager
 ```
+
+`is-active` prints `activating` while it builds and `inactive` when it is
+done. The timer line shows when the next run starts.
 
 Each failed try for a tag is counted in
 `/var/lib/gjallar-builder/failed/<tag>`. After three, the builder leaves
@@ -360,7 +522,7 @@ that tag alone and goes on with newer ones. Fix the cause first, then let
 it try again:
 
 ```sh
-qm guest exec <vmid> -- rm /var/lib/gjallar-builder/failed/vYYYY.MM.N
+qm guest exec 200 -- rm /var/lib/gjallar-builder/failed/vYYYY.MM.N
 ```
 
 | Message in the journal | What to do |
@@ -371,23 +533,78 @@ qm guest exec <vmid> -- rm /var/lib/gjallar-builder/failed/vYYYY.MM.N
 | `SHA256SUMS has N lines` / `SHA256SUMS line N is not the hash of ...` | The `gjallar-release` output changed shape. `statement.sh` and the workflow list the same five files and must change together |
 | `... is not a regular file` / `... is larger than ... bytes` | The build put a link or an oversized file where `SHA256SUMS` or `RELEASE` belong. That is the tagged code trying something. Do not retry; find out which commit did it |
 | `... in the statements repository is a blob, not a folder` | Someone put a file or link at the tag's path in gjallarOS-statements. Find out who, remove it with a commit, then clear the failed file |
-| `... does not hold a fine-grained token` | Set the token again (step 3) |
+| `... does not hold a fine-grained token` | Set the token again (step 8) |
 | `pushing the statement for ... failed` | Token expired or without rights, or GitHub was down. The next run tries again |
 
-Updating the builder after a change in `deployment/builder`: switch it in
-place through the guest agent, with the full commit hash, so the disk and
-its key stay. The guest agent finds no `nixos-rebuild` on its own path,
-so the command runs through the system shell:
+##### Keeping the builder up to date
+
+The builder runs its own NixOS. It does not update itself, so it gets
+security fixes only when you switch it. Its nixpkgs is pinned in
+`deployment/builder/flake.lock` and should be the same revision as in the
+main `flake.lock`. Compare them from the checkout:
 
 ```sh
-qm guest exec <vmid> --timeout 3600 -- /run/current-system/sw/bin/sh -c 'PATH=/run/current-system/sw/bin; nixos-rebuild switch --flake "github:JadeOpenServices/gjallarOS/<full commit>?dir=deployment/builder#gjallaros-build"'
+nix shell nixpkgs#jq -c jq -r '.nodes[.nodes.root.inputs.nixpkgs].locked.rev' flake.lock deployment/builder/flake.lock
 ```
 
-Changing the builder key: a new builder disk makes a new key. Then
-`BUILDER_SSH_KEY` has to change too, and `sign` refuses statements until
-it does. Change it only when you know why the key changed, the same way
-as the [release key](#changing-the-release-key). Statements already in
-the repository stay as they are; `sign` only looks at the tag it signs.
+Two different lines: move the builder to the main revision, commit, push
+to `dev`:
+
+```sh
+nix flake lock "git+file://$PWD?dir=deployment/builder" --override-input nixpkgs github:nixos/nixpkgs/<revision from the first line>
+```
+
+Then switch the VM in place to that commit, with its full hash, so the
+disk and its key stay. The guest agent finds no `nixos-rebuild` on its
+own path, so the command runs through the system shell:
+
+```sh
+qm guest exec 200 --timeout 3600 -- /run/current-system/sw/bin/sh -c 'PATH=/run/current-system/sw/bin; nixos-rebuild switch --flake "github:JadeOpenServices/gjallarOS/<full commit>?dir=deployment/builder#gjallaros-build"'
+```
+
+Inside the VM, Nix uses only `cache.nixos.org`, so an update cannot pull
+anything from the gjallarOS cache. Running `check-store.sh` with the new
+commit afterwards ([step 6](#setting-it-up)) costs little and proves it.
+
+##### Security model and its limits
+
+What the setup makes sure of:
+
+- The key that signs statements is made inside the VM and never leaves it.
+  Only root in the VM can read it; the tagged code builds as another user.
+- The VM builds with upstream NixOS only. `check-store.sh` proves this for
+  the running system; the build user cannot add caches or keys.
+- Nobody can connect to the VM. It can reach public addresses only, not
+  the LAN or the host.
+- The token can write to gjallarOS-statements and nothing else, and a
+  ruleset keeps `main` there from being rewritten. `sign` trusts a
+  statement only through `BUILDER_SSH_KEY`, so a statement someone else
+  pushes is refused.
+- The `statement` job only reads public data and has no secrets.
+
+What it does not protect against, on purpose or for now:
+
+- Root on the Proxmox host controls the VM fully (guest agent, disk,
+  memory). Whoever has root on pve01 can sign as the builder. The builder
+  is a second witness against a broken or attacked CI, not against the
+  host it runs on.
+- The VM disk is not encrypted at rest. If a disk of the host leaves the
+  house (repair, sale), treat the key and the token as known: make a new
+  VM and key, change `BUILDER_SSH_KEY`, and revoke the token.
+- Both builds run the same tagged code. When that code is malicious, both
+  agree, and the builder signs. That is what reading the run before you
+  approve ([Approving an installer release](release-approval.md)) is for.
+- There are no backups or snapshots of VM 200, so the key exists only on
+  its disk. Losing the disk means a new key, not a lost release: make a
+  new VM, set `BUILDER_SSH_KEY` again.
+
+##### Changing the builder key
+
+A new builder disk makes a new key. Then `BUILDER_SSH_KEY` has to change
+too, and `sign` refuses statements until it does. Change it only when you
+know why the key changed, the same way as the
+[release key](#changing-the-release-key). Statements already in the
+repository stay as they are; `sign` only looks at the tag it signs.
 
 #### 5. Check the setup
 
@@ -474,15 +691,19 @@ Run these from the checkout, on the branch the release goes to.
    ```
 
    Check first that `headBranch` is the tag you just pushed.
-6. Wait for the builder statement: the folder
-   `vYYYY.MM.N/gjallar-builder/` in gjallarOS-statements. The builder
-   looks for new tags once an hour, then builds for about as long as CI.
+6. Wait for GitHub's e-mail that the installer release run waits for
+   your review. The `statement` job holds `sign` back until the builder
+   statement is there and matches CI, so the e-mail means both builds are
+   done. The builder looks for new tags once an hour, then builds for
+   about as long as CI. To look yourself:
 
    ```sh
    gh api repos/JadeOpenServices/gjallarOS-statements/contents/vYYYY.MM.N/gjallar-builder --jq '.[].name'
    ```
 
-   It prints `SHA256SUMS` and `SHA256SUMS.sshsig` once it is there.
+   It prints `SHA256SUMS` and `SHA256SUMS.sshsig` once it is there. No
+   e-mail within about 8 hours: see
+   [How you hear that it is ready](#how-you-hear-that-it-is-ready).
 7. Open the installer release run, check what you are about to sign
    ([Approving an installer release](release-approval.md)), and approve
    `installer-sign` the same way as in step 5. This one you approve in
@@ -498,10 +719,9 @@ Run these from the checkout, on the branch the release goes to.
    It prints `false` and the seven files of
    [What a release holds](#what-a-release-holds).
 
-The approval waits up to 30 days. If you approve before the statement is
-there, `sign` stops with "No builder statement"; use "Re-run failed jobs"
-once it is there. That re-runs `sign` and `publish` with the files `build`
-already made.
+The approval waits up to 30 days. If `statement` gave up after 6 hours,
+use "Re-run failed jobs" once the builder statement is there. That re-runs
+`statement`, `sign` and `publish` with the files `build` already made.
 
 ### Before you approve
 
@@ -531,7 +751,9 @@ for each check, the clicks, and what to do when a check fails.
 | `deployment/release-key.pem is missing` | [Release key](#1-release-key) |
 | `gjallar-release: README.md ...` | The README lines are stale; [Per release](#per-release) step 2 and 3 |
 | `gjallar-release: the image is over 2000000000 bytes` | The stick image grew past what the makers write; make it smaller |
-| `No builder statement for ... yet` | Wait for the builder, then "Re-run failed jobs" |
+| `No builder statement for ... after almost 6 hours` | The builder is late or failed: [What it does](#what-it-does) has its journal. Start it now if needed; once the statement is there, "Re-run failed jobs" |
+| `No builder statement for ... yet` | `statement` saw it, but it is gone by the time `sign` runs: someone removed it from gjallarOS-statements with a commit. Find out who before anything else |
+| `The builder statement for ... is larger than 65536 bytes` | Not a statement the builder writes. Find out who pushed it to gjallarOS-statements |
 | `... is not signed by the pinned builder key` | Wrong or changed builder key. Check `BUILDER_SSH_KEY` against the builder; do not just replace it |
 | `The builder got other files than CI` | The two builds differ, so the build is not reproducible or one side is wrong. The diff shows which file. Find out why before anything else; never sign around it |
 | `RELEASE_SIGNING_KEY does not belong to deployment/release-key.pem` | The secret and the repository key differ: one of them was changed without the other |
