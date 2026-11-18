@@ -19,7 +19,7 @@ const gb = 1 << 30
 
 // target2T is a 2 TB disk with a recovery partition; the closure numbers
 // are the fixture's own.
-var target2T = Target{DiskBytes: 2000398934016, Recovery: true, BaseClosure: 30 * gb, StoreImport: 40 * gb, FileCache: 40 * gb}
+var target2T = Target{DiskBytes: 2000398934016, Recovery: true, BaseClosure: 30 * gb, FileCache: 40 * gb}
 
 func choose(t *testing.T, h *fakeHelper, mode string, old *Old, tg Target, input string) (Choices, string, error) {
 	t.Helper()
@@ -37,7 +37,7 @@ func invOf(i identity.Inventory) movehelper.InventoryResult {
 // spaceOK is the space-ok line the check writes for cats on tg.
 func spaceOK(tg Target, cats ...freespace.Category) string {
 	r := freespace.Plan(freespace.Input{DiskBytes: tg.DiskBytes, Recovery: tg.Recovery, BaseClosure: tg.BaseClosure,
-		StoreImport: tg.StoreImport, FileCache: tg.FileCache, Categories: cats})
+		FileCache: tg.FileCache, Categories: cats})
 	return fmt.Sprintf("GJA-2111 stick.move.space-ok needed=%d free=%d", gib(r.Needed, true), gib(r.Available, false))
 }
 

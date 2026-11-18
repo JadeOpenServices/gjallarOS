@@ -247,7 +247,7 @@ func Mount(dev, target string) error {
 // mapping if it is open. Both are fine to find already gone.
 func Close(ctx context.Context, target string) error {
 	var errs []error
-	if mounted, err := isMountPoint(target); err != nil && !errors.Is(err, os.ErrNotExist) {
+	if mounted, err := MountPoint(target); err != nil && !errors.Is(err, os.ErrNotExist) {
 		errs = append(errs, err)
 	} else if mounted {
 		if err := unix.Unmount(target, unix.UMOUNT_NOFOLLOW); err != nil {
@@ -274,7 +274,7 @@ func Free(target string) error {
 
 // Opened refuses unless the old disk is mounted at target, as open left it.
 func Opened(target string) error {
-	mounted, err := isMountPoint(target)
+	mounted, err := MountPoint(target)
 	if errors.Is(err, os.ErrNotExist) {
 		return refuse(NotOpen, target+" is not there")
 	}
@@ -314,7 +314,7 @@ func mapped() bool {
 }
 
 func mountFree(target string) error {
-	if mounted, err := isMountPoint(target); err != nil {
+	if mounted, err := MountPoint(target); err != nil {
 		return err
 	} else if mounted {
 		return refuse(Busy, target+" is already a mount point")
@@ -322,9 +322,9 @@ func mountFree(target string) error {
 	return nil
 }
 
-// isMountPoint tells whether something is mounted on the folder p: a mount
+// MountPoint tells whether something is mounted on the folder p: a mount
 // gives it another device than its parent.
-func isMountPoint(p string) (bool, error) {
+func MountPoint(p string) (bool, error) {
 	var st, parent unix.Stat_t
 	if err := unix.Lstat(p, &st); err != nil {
 		return false, fmt.Errorf("check %s: %w", p, err)

@@ -20,7 +20,6 @@ func TestPlanFits(t *testing.T) {
 		DiskBytes:   2000398934016,
 		Recovery:    true,
 		BaseClosure: 30 * gib,
-		StoreImport: 40 * gib,
 		FileCache:   40 * gib,
 		Categories: []Category{
 			{Name: Home, Bytes: 300 * gib, Chosen: true},
@@ -33,7 +32,7 @@ func TestPlanFits(t *testing.T) {
 	if r.Root != root || r.Swap != freshdiskplan.InstallSwap(root) || r.Reserve != root/20 {
 		t.Fatalf("result %+v", r)
 	}
-	if r.Available != root-r.Swap-30*gib || r.Needed != 880*gib+r.Reserve || !r.Fits || r.Short != 0 {
+	if r.Available != root-r.Swap-30*gib || r.Needed != 840*gib+r.Reserve || !r.Fits || r.Short != 0 {
 		t.Fatalf("result %+v", r)
 	}
 	if len(r.Biggest) != 2 || r.Biggest[0].Name != Nextcloud || r.Biggest[1].Name != Home {

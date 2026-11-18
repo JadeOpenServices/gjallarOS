@@ -42,11 +42,13 @@ type Input struct {
 	DiskBytes uint64
 	Recovery  bool
 	// BaseClosure is the new system without anything from the old disk.
+	// Store paths taken from the old disk are part of it: they replace
+	// downloads, they add nothing.
 	BaseClosure uint64
-	// StoreImport is the narSize of the old store paths the new system
-	// reuses; FileCache the file cache they pass through while it exists.
-	StoreImport, FileCache uint64
-	Categories             []Category
+	// FileCache is the old system's closure size, the most the store
+	// export's cache on the new disk takes while the install runs.
+	FileCache  uint64
+	Categories []Category
 }
 
 // Result is the answer. Short is zero when the move fits.
@@ -54,8 +56,7 @@ type Result struct {
 	Root, Swap, Reserve uint64
 	// Available is the root minus the install swap and the base system.
 	Available uint64
-	// Needed is the chosen categories, the store import, the file cache and
-	// the reserve.
+	// Needed is the chosen categories, the file cache and the reserve.
 	Needed, Short uint64
 	Fits          bool
 	// Biggest names the largest chosen categories, largest first, for the
@@ -71,7 +72,7 @@ func Plan(in Input) Result {
 	r.Swap = freshdiskplan.InstallSwap(r.Root)
 	r.Reserve = max(MinReserve, r.Root/20)
 	r.Available = sub(sub(r.Root, r.Swap), in.BaseClosure)
-	r.Needed = add(add(in.StoreImport, in.FileCache), r.Reserve)
+	r.Needed = add(in.FileCache, r.Reserve)
 	var chosen []Category
 	for _, c := range in.Categories {
 		if c.Chosen {

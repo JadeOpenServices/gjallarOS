@@ -22,6 +22,7 @@ import (
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/move/identity"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/move/oldroot"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/move/prepared"
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/move/storecopy"
 	"github.com/JadeOpenServices/gjallarOS/internal/safefs"
 	"github.com/JadeOpenServices/gjallarOS/internal/usbtrust/btaddr"
 	"golang.org/x/sys/unix"
@@ -62,7 +63,8 @@ type Request struct {
 	SrcUID int `json:"srcUid,omitempty"`
 	UID    int `json:"uid,omitempty"`
 	GID    int `json:"gid,omitempty"`
-	// Budget is the most bytes the copy may use on the new disk (copy).
+	// Budget is the most bytes the copy or the store export may use on the
+	// new disk (copy, export).
 	Budget int64 `json:"budget,omitempty"`
 	// Disk is the old disk as find listed it (check, open).
 	Disk string `json:"disk,omitempty"`
@@ -92,7 +94,7 @@ func Run(base string, in io.Reader, out io.Writer) error {
 		result = struct{}{}
 	case "find":
 		result, err = findOp(ctx)
-	case "copy", "check", "open", "inventory", "sizes", "close":
+	case "copy", "check", "open", "inventory", "sizes", "close", "closure", "export", "dropcache":
 		var unlock func()
 		if unlock, err = lock(base); err != nil {
 			break
@@ -111,6 +113,13 @@ func Run(base string, in io.Reader, out io.Writer) error {
 			result, err = sizesOp(base)
 		case "close":
 			err = oldroot.Close(ctx, filepath.Join(base, Old))
+			result = struct{}{}
+		case "closure":
+			result, err = closureOp(ctx, base)
+		case "export":
+			result, err = exportOp(ctx, base, req)
+		case "dropcache":
+			err = dropCache(base)
 			result = struct{}{}
 		}
 	default:
@@ -523,4 +532,147 @@ func openedTop(base string) (*safefs.Dir, oldroot.Info, error) {
 		return nil, oldroot.Info{}, err
 	}
 	return top, info, nil
+}
+
+// oldNix is the old disk's @nix subvolume below the opened top level. It
+// must be a folder, not a link: the unit's bind mount would follow a link
+// to anywhere on the stick. The old disk is mounted read-only, so the
+// folder checked is the folder bound.
+const oldNix = "@nix"
+
+// oldSystem finds the old disk's current system, and the folder of the old
+// @nix subvolume for the unit's bind mount.
+func oldSystem(base string) (sys, nixDir string, err error) {
+	top, _, err := openedTop(base)
+	if err != nil {
+		return "", "", err
+	}
+	defer top.Close()
+	nix, err := top.Sub(oldNix)
+	if err != nil {
+		return "", "", fmt.Errorf("old @nix: %w", err)
+	}
+	defer nix.Close()
+	sys, err = storecopy.OldSystem(nix)
+	if err != nil {
+		return "", "", err
+	}
+	return sys, filepath.Join(base, Old, oldNix), nil
+}
+
+// maxUnitErr caps what of a unit's error output reaches the screen.
+const maxUnitErr = 2048
+
+// runUnit starts one confined nix run (storecopy) and waits for it. Its
+// output is kept up to maxOut bytes, one more to tell an overflow.
+func runUnit(ctx context.Context, args []string, maxOut int) ([]byte, error) {
+	var out, stderr bytes.Buffer
+	cmd := oldroot.Tool(ctx, storecopy.SystemdRun, args...)
+	cmd.Stdout = &capped{w: &out, left: maxOut + 1}
+	cmd.Stderr = &capped{w: &stderr, left: maxUnitErr}
+	if err := cmd.Run(); err != nil {
+		return nil, fmt.Errorf("%w: %q", err, stderr.String())
+	}
+	if out.Len() > maxOut {
+		return nil, fmt.Errorf("the unit printed over %d bytes", maxOut)
+	}
+	return out.Bytes(), nil
+}
+
+// ClosureResult is the old system and the size of everything it needs, for
+// the free-space check of step 8 (closure).
+type ClosureResult struct {
+	System string `json:"system"`
+	Bytes  int64  `json:"bytes"`
+}
+
+// closureOp measures the old system's closure in the old store, read in a
+// confined unit: root does not read the old store as a store.
+func closureOp(ctx context.Context, base string) (res ClosureResult, err error) {
+	sys, nixDir, err := oldSystem(base)
+	if err != nil {
+		return res, err
+	}
+	args, err := storecopy.ClosureArgs(nixDir, sys)
+	if err != nil {
+		return res, err
+	}
+	out, err := runUnit(ctx, args, storecopy.MaxClosureOutput)
+	if err != nil {
+		return res, fmt.Errorf("closure size: %w", err)
+	}
+	res.Bytes, err = storecopy.ParseClosure(out, sys)
+	res.System = sys
+	return res, err
+}
+
+// ExportResult is what the store export left on the new disk (export). An
+// export that failed or was refused leaves nothing and says why in
+// Skipped: the install then downloads and builds everything, as without
+// an old disk.
+type ExportResult struct {
+	storecopy.Stats
+	Skipped string `json:"skipped,omitempty"`
+}
+
+// exportOp exports the old system's closure into a cache folder on the new
+// disk (L62). A confined unit writes it, root takes it over and checks it;
+// what does not pass is removed.
+func exportOp(ctx context.Context, base string, req Request) (res ExportResult, err error) {
+	if req.Budget <= 0 {
+		return res, errors.New("export: no budget")
+	}
+	sys, nixDir, err := oldSystem(base)
+	if err != nil {
+		return res, err
+	}
+	newRoot, err := mountedNew(base)
+	if err != nil {
+		return res, err
+	}
+	defer newRoot.Close()
+	cache, err := newRoot.Mkdir(storecopy.CacheName, 0o777)
+	if err != nil {
+		return res, fmt.Errorf("export: %w", err)
+	}
+	defer cache.Close()
+	args, err := storecopy.ExportArgs(nixDir, filepath.Join(base, New, storecopy.CacheName), sys)
+	if err == nil {
+		_, err = runUnit(ctx, args, maxUnitErr)
+	}
+	if err == nil {
+		res.Stats, err = storecopy.Settle(cache, 0, 0, req.Budget)
+	}
+	if err != nil {
+		res = ExportResult{Skipped: err.Error()}
+		if rmErr := newRoot.RemoveTree(storecopy.CacheName, storecopy.MaxPaths+4); rmErr != nil {
+			return res, fmt.Errorf("export: %v; removing the copy: %w", err, rmErr)
+		}
+	}
+	return res, nil
+}
+
+// dropCache removes the cache folder once the install no longer needs it
+// (dropcache). Gone already is fine.
+func dropCache(base string) error {
+	newRoot, err := mountedNew(base)
+	if err != nil {
+		return err
+	}
+	defer newRoot.Close()
+	return newRoot.RemoveTree(storecopy.CacheName, storecopy.MaxPaths+4)
+}
+
+// mountedNew opens the new root, which must be a mount: without one the
+// cache would fill the stick's memory.
+func mountedNew(base string) (*safefs.Dir, error) {
+	p := filepath.Join(base, New)
+	mounted, err := oldroot.MountPoint(p)
+	if err != nil {
+		return nil, err
+	}
+	if !mounted {
+		return nil, errors.New("the new disk is not mounted")
+	}
+	return safefs.OpenDir(p)
 }

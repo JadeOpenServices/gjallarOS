@@ -15,7 +15,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"strconv"
 
 	"golang.org/x/sys/unix"
@@ -91,19 +90,11 @@ func (d *Dir) Names(rel string, max int) ([]string, error) {
 // inside d.
 func (d *Dir) Lstat(rel string) (unix.Stat_t, error) {
 	var st unix.Stat_t
-	if !filepath.IsLocal(rel) || filepath.Clean(rel) != rel {
-		return st, fmt.Errorf("check %s below %s: %w: not a clean path inside the folder", rel, d.name, ErrNotPlain)
+	dirFD, base, done, err := d.parent(rel, "check")
+	if err != nil {
+		return st, err
 	}
-	parent, base := filepath.Split(rel)
-	dirFD := d.fd
-	if parent != "" {
-		fd, err := openat2(d.fd, filepath.Clean(parent), unix.O_PATH|unix.O_DIRECTORY|unix.O_CLOEXEC)
-		if err != nil {
-			return st, fmt.Errorf("check %s below %s: %w", rel, d.name, refusal(err))
-		}
-		defer unix.Close(fd)
-		dirFD = fd
-	}
+	defer done()
 	if err := unix.Fstatat(dirFD, base, &st, unix.AT_SYMLINK_NOFOLLOW); err != nil {
 		return st, fmt.Errorf("check %s below %s: %w", rel, d.name, err)
 	}

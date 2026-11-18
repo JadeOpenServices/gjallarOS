@@ -19,8 +19,8 @@ import (
 type Target struct {
 	DiskBytes uint64
 	Recovery  bool
-	// BaseClosure, StoreImport and FileCache as in freespace.Input.
-	BaseClosure, StoreImport, FileCache uint64
+	// BaseClosure and FileCache as in freespace.Input.
+	BaseClosure, FileCache uint64
 }
 
 // Choices is what the user chose to move.
@@ -76,7 +76,7 @@ func (f Flow) Choose(ctx context.Context, old *Old, t Target) (Choices, error) {
 
 	in := freespace.Input{
 		DiskBytes: t.DiskBytes, Recovery: t.Recovery,
-		BaseClosure: t.BaseClosure, StoreImport: t.StoreImport, FileCache: t.FileCache,
+		BaseClosure: t.BaseClosure, FileCache: t.FileCache,
 	}
 	in.Categories = c.Categories
 	if sizes.Nextcloud > 0 && freespace.NextcloudWarn(sizes.Nextcloud, freespace.Plan(in).Available) {

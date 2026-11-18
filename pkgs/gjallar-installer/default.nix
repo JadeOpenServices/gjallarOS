@@ -13,6 +13,7 @@
 #
 # cryptsetup and util-linux are baked in by store path for the move
 # helper, which runs them as root: nothing is looked up through PATH (L114).
+# nix is baked in the same way for the store export's confined unit (L62).
 #
 # oddc is the full ODDC source (the flake's oddc input). With it the
 # installer drafts a model for machines ODDC does not match; without it
@@ -26,6 +27,7 @@
   xkeyboard_config,
   cryptsetup,
   util-linux,
+  nix,
   oddc ? null,
 }:
 let
@@ -56,6 +58,7 @@ gjallarctl.overrideAttrs (old: {
       "-X github.com/JadeOpenServices/gjallarOS/internal/installer/region.XKBRules=${regionLists}/base.lst"
       "-X github.com/JadeOpenServices/gjallarOS/internal/installer/move/oldroot.Cryptsetup=${lib.getExe' cryptsetup "cryptsetup"}"
       "-X github.com/JadeOpenServices/gjallarOS/internal/installer/move/oldroot.Lsblk=${lib.getExe' util-linux "lsblk"}"
+      "-X github.com/JadeOpenServices/gjallarOS/internal/installer/move/storecopy.Nix=${lib.getExe' nix "nix"}"
     ]
     ++ lib.optional (
       oddc != null
