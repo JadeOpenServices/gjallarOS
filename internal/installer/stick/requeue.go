@@ -3,21 +3,20 @@ package stick
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"encoding/pem"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
-	"time"
-	"unicode"
 
 	"golang.org/x/sys/unix"
 
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/calmmenu"
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/move/oldroot"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/prompt"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/secureboot"
 )
@@ -36,77 +35,28 @@ import (
 // through a PE and PKCS #7 parser as root (L96).
 
 const (
-	// keyMapping is the device-mapper name of the root opened here.
-	keyMapping = "gjallar-key-root"
 	// keyFile is the db certificate sbctl keeps, inside subvolume @.
 	keyFile = "var/lib/sbctl/keys/db/db.pem"
 	// maxKeyFile caps what is read from the installed root.
 	maxKeyFile = 16 << 10
-	// rootLabel is the PARTLABEL the installer gives the root partition.
-	rootLabel = "GJALLAROS"
 )
 
-// rootPart is one root partition of an installed gjallarOS.
-type rootPart struct {
-	Path      string
-	Encrypted bool
-}
-
 // installedRoots picks the gjallarOS root partitions on internal disks from
-// lsblk -J -p -o PATH,TYPE,FSTYPE,PARTLABEL,PKNAME,TRAN,RM. Disks on USB or
-// marked removable are left out, as the recovery console does: a stick
-// someone plugged in must not supply the key.
-func installedRoots(raw []byte) ([]rootPart, error) {
-	if len(raw) > 1<<20 {
-		return nil, errors.New("lsblk printed too much")
+// lsblk oldroot.LsblkArgs. Disks on USB or marked removable are left out, as
+// the recovery console does: a stick someone plugged in must not supply the
+// key. Disks with something mounted are left out too.
+func installedRoots(raw []byte) ([]oldroot.Part, error) {
+	parts, err := oldroot.Find(raw)
+	if err != nil {
+		return nil, err
 	}
-	var out struct {
-		BlockDevices []struct {
-			Path      string `json:"path"`
-			Type      string `json:"type"`
-			FSType    string `json:"fstype"`
-			PartLabel string `json:"partlabel"`
-			PKName    string `json:"pkname"`
-			Tran      string `json:"tran"`
-			RM        any    `json:"rm"`
-		} `json:"blockdevices"`
-	}
-	if err := json.Unmarshal(raw, &out); err != nil {
-		return nil, fmt.Errorf("decode lsblk: %w", err)
-	}
-	internal := map[string]bool{}
-	for _, d := range out.BlockDevices {
-		if d.Type == "disk" && d.Tran != "usb" && !removable(d.RM) {
-			internal[d.Path] = true
-		}
-	}
-	var roots []rootPart
-	for _, d := range out.BlockDevices {
-		if d.Type != "part" || d.PartLabel != rootLabel || !internal[d.PKName] {
-			continue
-		}
-		switch d.FSType {
-		case "crypto_LUKS":
-			roots = append(roots, rootPart{Path: d.Path, Encrypted: true})
-		case "btrfs":
-			roots = append(roots, rootPart{Path: d.Path})
+	var roots []oldroot.Part
+	for _, p := range parts {
+		if p.Internal {
+			roots = append(roots, p)
 		}
 	}
 	return roots, nil
-}
-
-// removable reads lsblk's RM column, a bool in newer util-linux and "0" or
-// "1" in older ones. Anything else counts as removable.
-func removable(v any) bool {
-	switch rm := v.(type) {
-	case bool:
-		return rm
-	case string:
-		return rm != "0"
-	case float64:
-		return rm != 0
-	}
-	return true
 }
 
 // readKey reads the db certificate below root, an open directory, without
@@ -158,7 +108,7 @@ func requeueKey(ctx context.Context, in io.Reader, out io.Writer) error {
 	ui := prompt.New(in, out)
 	ui.Wrap = true
 	ui.UsePages(in)
-	raw, err := exec.CommandContext(ctx, "lsblk", "-J", "-l", "-p", "-o", "PATH,TYPE,FSTYPE,PARTLABEL,PKNAME,TRAN,RM").Output()
+	raw, err := exec.CommandContext(ctx, "lsblk", oldroot.LsblkArgs...).Output()
 	if err != nil {
 		return fmt.Errorf("list disks: %w", err)
 	}
@@ -166,7 +116,7 @@ func requeueKey(ctx context.Context, in io.Reader, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	var root rootPart
+	var root oldroot.Part
 	switch len(roots) {
 	case 0:
 		return errors.New("no installed gjallarOS was found on this computer's disks")
@@ -204,44 +154,45 @@ func requeueKey(ctx context.Context, in io.Reader, out io.Writer) error {
 
 // keyFromRoot opens the root read-only, reads the key and closes the root
 // again before anything is queued.
-func keyFromRoot(ctx context.Context, out io.Writer, root rootPart) (der []byte, err error) {
+func keyFromRoot(ctx context.Context, out io.Writer, root oldroot.Part) (der []byte, err error) {
+	// base holds the checked header copy and the mount point; only root can
+	// enter it.
+	base, err := os.MkdirTemp("/run", "gjallar-key-root-")
+	if err != nil {
+		return nil, err
+	}
+	// Plain removes: if the unmount failed, nothing walks into the root.
+	defer os.Remove(base)
+	top := filepath.Join(base, "top")
+	if err := os.Mkdir(top, 0o700); err != nil {
+		return nil, err
+	}
+	defer os.Remove(top)
+	// Close below must only ever close what this step opened.
+	if err := oldroot.Free(top); err != nil {
+		return nil, fmt.Errorf("%w; restart the stick", err)
+	}
 	device := root.Path
 	if root.Encrypted {
-		if _, err := os.Lstat("/dev/mapper/" + keyMapping); err == nil {
-			return nil, fmt.Errorf("/dev/mapper/%s is already open; restart the stick", keyMapping)
-		}
-		if err := openLUKS(ctx, out, root.Path); err != nil {
+		if err := openLUKS(ctx, out, base, root.Path); err != nil {
 			return nil, err
 		}
-		defer func() {
-			if cerr := exec.CommandContext(context.WithoutCancel(ctx), "cryptsetup", "close", keyMapping).Run(); cerr != nil && err == nil {
-				der, err = nil, fmt.Errorf("close the installed root: %w", cerr)
-			}
-		}()
-		device = "/dev/mapper/" + keyMapping
-	}
-	dir, err := os.MkdirTemp("/run", "gjallar-key-root-")
-	if err != nil {
-		return nil, err
-	}
-	defer os.Remove(dir)
-	// The top level holds @, where / lives; nologreplay keeps a read-only
-	// mount from needing to write. No device files, no programs, no links.
-	flags := uintptr(unix.MS_RDONLY | unix.MS_NOSUID | unix.MS_NODEV | unix.MS_NOEXEC | unix.MS_NOSYMFOLLOW)
-	if err := unix.Mount(device, dir, "btrfs", flags, "subvolid=5,rescue=nologreplay"); err != nil {
-		return nil, fmt.Errorf("mount the installed root read-only: %w", err)
+		device = "/dev/mapper/" + oldroot.Mapping
 	}
 	defer func() {
-		if uerr := unix.Unmount(dir, 0); uerr != nil && err == nil {
-			der, err = nil, fmt.Errorf("unmount the installed root: %w", uerr)
+		if cerr := oldroot.Close(context.WithoutCancel(ctx), top); cerr != nil && err == nil {
+			der, err = nil, fmt.Errorf("close the installed root: %w", cerr)
 		}
 	}()
-	top, err := os.Open(dir)
+	if err := oldroot.Mount(device, top); err != nil {
+		return nil, fmt.Errorf("mount the installed root read-only: %w", err)
+	}
+	dir, err := os.Open(top)
 	if err != nil {
 		return nil, err
 	}
-	defer top.Close()
-	sub, err := openSubvolume(top)
+	defer dir.Close()
+	sub, err := openSubvolume(dir)
 	if err != nil {
 		return nil, err
 	}
@@ -261,10 +212,20 @@ func openSubvolume(top *os.File) (*os.File, error) {
 	return os.NewFile(uintptr(fd), "@"), nil
 }
 
-// openLUKS asks for the install password or the recovery key and opens the
-// root read-only. It goes from systemd-ask-password to cryptsetup through a pipe, never
-// through this process or a command line.
-func openLUKS(ctx context.Context, out io.Writer, device string) error {
+// openLUKS checks the root's LUKS metadata (L60), asks for the install
+// password or the recovery key and opens the root read-only from the checked
+// header copy in base. The key goes from systemd-ask-password to cryptsetup
+// through a pipe, never through this process or a command line.
+func openLUKS(ctx context.Context, out io.Writer, base, device string) error {
+	cap, err := oldroot.MemoryCap()
+	if err != nil {
+		return err
+	}
+	prep, err := oldroot.Prepare(ctx, base, device, cap)
+	if err != nil {
+		return openFailure(err)
+	}
+	defer prep.Remove()
 	fmt.Fprint(out, calmmenu.Wrap("The installed gjallarOS is encrypted. Its key is read from the encrypted disk, read-only.\n"))
 	r, w, err := os.Pipe()
 	if err != nil {
@@ -273,71 +234,40 @@ func openLUKS(ctx context.Context, out io.Writer, device string) error {
 	ask := exec.CommandContext(ctx, "systemd-ask-password", "--timeout=0", "--emoji=no", "-n",
 		"Install password or recovery key of the installed gjallarOS:")
 	ask.Stdin, ask.Stdout, ask.Stderr = os.Stdin, w, os.Stderr
-	open := exec.CommandContext(ctx, "cryptsetup", "open", "--readonly", "--type", "luks",
-		"--key-file=-", "--", device, keyMapping)
-	// cryptsetup's own words for a wrong key are replaced by ours below.
-	stderr := &capWriter{max: 4096}
-	open.Stdin, open.Stdout, open.Stderr = r, os.Stdout, stderr
-	if err := open.Start(); err != nil {
+	if err := ask.Start(); err != nil {
 		r.Close()
 		w.Close()
-		return fmt.Errorf("start cryptsetup: %w", err)
+		return fmt.Errorf("start systemd-ask-password: %w", err)
 	}
-	r.Close()
-	askErr := ask.Run()
 	w.Close()
-	openErr := open.Wait()
+	openErr := prep.Open(ctx, r)
+	r.Close()
+	askErr := ask.Wait()
 	switch {
 	case askErr != nil:
+		if openErr == nil {
+			oldroot.Close(context.WithoutCancel(ctx), filepath.Join(base, "top"))
+		}
 		return fmt.Errorf("read the install password or recovery key: %w", askErr)
 	case openErr != nil:
-		// The same wait as the recovery console, so guessing stays slow.
-		time.Sleep(5 * time.Second)
-		return cryptsetupFailure(openErr, stderr.buf.Bytes())
+		return openFailure(openErr)
 	}
 	return nil
 }
 
-// cryptsetupFailure turns a failed cryptsetup open into one line. Exit
-// code 2 means no key slot took the key (cryptsetup(8), RETURN CODES);
-// any other failure keeps cryptsetup's own text, cleaned of terminal codes
-// because it can quote the disk's header.
-func cryptsetupFailure(err error, stderr []byte) error {
-	var exit *exec.ExitError
-	if errors.As(err, &exit) && exit.ExitCode() == 2 {
+// openFailure words a refusal from oldroot for this step; its own texts
+// speak of the move's old disk.
+func openFailure(err error) error {
+	r, ok := oldroot.AsRefusal(err)
+	if !ok {
+		return err
+	}
+	if r.Reason == oldroot.WrongKey {
 		return errors.New("that password or recovery key did not open the disk")
 	}
-	var lines []string
-	for _, line := range strings.Split(string(stderr), "\n") {
-		var b strings.Builder
-		for _, r := range line {
-			if unicode.IsPrint(r) {
-				b.WriteRune(r)
-			}
-		}
-		if text := strings.TrimSpace(b.String()); text != "" {
-			lines = append(lines, text)
-		}
+	msg := "the installed gjallarOS failed the safety check of its encryption header, so its key is not read: " + string(r.Reason)
+	if r.Detail != "" {
+		msg += " (" + r.Detail + ")"
 	}
-	text := []rune(strings.Join(lines, "; "))
-	if len(text) > 200 {
-		text = append(text[:200], '…')
-	}
-	if len(text) == 0 {
-		return fmt.Errorf("cryptsetup could not open the disk: %w", err)
-	}
-	return fmt.Errorf("cryptsetup could not open the disk: %s", string(text))
-}
-
-// capWriter keeps the first max bytes written to it and drops the rest.
-type capWriter struct {
-	buf bytes.Buffer
-	max int
-}
-
-func (c *capWriter) Write(p []byte) (int, error) {
-	if room := c.max - c.buf.Len(); room > 0 {
-		c.buf.Write(p[:min(len(p), room)])
-	}
-	return len(p), nil
+	return errors.New(msg)
 }

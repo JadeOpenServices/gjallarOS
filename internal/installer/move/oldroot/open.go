@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,11 +16,12 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// Mapping is the device-mapper name of the opened old disk.
-const Mapping = "gjallar-move-old"
+// Mapping is the device-mapper name of an opened old root: the move's old
+// disk, or the installed root "queue the key again" reads.
+const Mapping = "gjallar-old-root"
 
 // headerFile is the checked copy of the old disk's LUKS metadata, inside
-// the helper's root-only folder.
+// the caller's root-only folder.
 const headerFile = "old-header"
 
 // wrongKeyWait is how long a wrong key holds the next try back, the same
@@ -39,39 +41,63 @@ func CheckEncrypted(ctx context.Context, part string, kdfCapKiB int64) (Header, 
 	return h, err
 }
 
-// Unlock opens the encrypted root part read-only as /dev/mapper/Mapping
-// with key, exactly the bytes given. base is the helper's root-only folder;
-// the checked header copy is written there and removed again. cryptsetup
-// reads that copy, never the disk's own header, and loads no token plugin.
-func Unlock(ctx context.Context, base, part string, key []byte, kdfCapKiB int64) (Header, error) {
+// Prepared is an encrypted root whose metadata was checked and copied, ready
+// to be opened with a key.
+type Prepared struct {
+	part, header string
+	Header       Header
+}
+
+// Prepare checks the LUKS metadata of the encrypted root part and writes the
+// checked copy into base, a root-only folder. cryptsetup reads that copy,
+// never the disk's own header, so the disk cannot show it other bytes than
+// the checked ones. Remove the copy with Remove when done.
+func Prepare(ctx context.Context, base, part string, kdfCapKiB int64) (*Prepared, error) {
 	if err := mapperFree(); err != nil {
-		return Header{}, err
+		return nil, err
 	}
 	if err := cryptsetupVersion(ctx); err != nil {
-		return Header{}, err
+		return nil, err
 	}
 	area, err := ReadHeaderArea(part)
 	if err != nil {
-		return Header{}, err
+		return nil, err
 	}
 	area, h, err := CheckArea(area, kdfCapKiB)
 	if err != nil {
-		return h, err
+		return nil, err
 	}
 	hdr := filepath.Join(base, headerFile)
 	if err := writeNew(hdr, area); err != nil {
-		return h, err
+		return nil, err
 	}
-	defer os.Remove(hdr)
+	return &Prepared{part: part, header: hdr, Header: h}, nil
+}
+
+// Open opens the root read-only as /dev/mapper/Mapping with the key read
+// from key, exactly the bytes given. No token plugin is loaded.
+func (p *Prepared) Open(ctx context.Context, key io.Reader) error {
 	open := exec.CommandContext(ctx, "cryptsetup", "open", "--readonly", "--type", "luks2",
-		"--disable-external-tokens", "--header", hdr, "--key-file=-", "--", part, Mapping)
+		"--disable-external-tokens", "--header", p.header, "--key-file=-", "--", p.part, Mapping)
 	stderr := &capWriter{max: 4096}
-	open.Stdin, open.Stdout, open.Stderr = bytes.NewReader(key), stderr, stderr
+	open.Stdin, open.Stdout, open.Stderr = key, stderr, stderr
 	if err := open.Run(); err != nil {
 		time.Sleep(wrongKeyWait)
-		return h, cryptsetupFailure(err, stderr.buf.Bytes())
+		return cryptsetupFailure(err, stderr.buf.Bytes())
 	}
-	return h, nil
+	return nil
+}
+
+// Remove deletes the header copy.
+func (p *Prepared) Remove() { os.Remove(p.header) }
+
+// MemoryCap is the Argon2 memory cap for this computer now (KDFCap).
+func MemoryCap() (int64, error) {
+	raw, err := os.ReadFile("/proc/meminfo")
+	if err != nil {
+		return 0, err
+	}
+	return KDFCap(raw)
 }
 
 // writeNew writes data to a file that must not exist yet, so nothing

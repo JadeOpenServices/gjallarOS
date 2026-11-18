@@ -309,14 +309,6 @@ func oldDisk(ctx context.Context, disk string) (oldroot.Part, []string, error) {
 	return oldroot.Part{}, nil, fmt.Errorf("%q is not an old gjallarOS disk on this computer", disk)
 }
 
-func kdfCap() (int64, error) {
-	raw, err := os.ReadFile("/proc/meminfo")
-	if err != nil {
-		return 0, err
-	}
-	return oldroot.KDFCap(raw)
-}
-
 type checkResult struct {
 	Encrypted bool `json:"encrypted"`
 	// PINToken: the old disk also unlocks with TPM and PIN (F1 notice).
@@ -337,7 +329,7 @@ func checkOp(ctx context.Context, req Request) (checkResult, error) {
 	if !part.Encrypted {
 		return res, nil
 	}
-	cap, err := kdfCap()
+	cap, err := oldroot.MemoryCap()
 	if err != nil {
 		return res, err
 	}
@@ -375,15 +367,20 @@ func openOp(ctx context.Context, base string, req Request) (res openResult, err 
 	}
 	dev := part.Path
 	if part.Encrypted {
-		cap, err := kdfCap()
+		cap, err := oldroot.MemoryCap()
 		if err != nil {
 			return res, err
 		}
-		h, err := oldroot.Unlock(ctx, base, part.Path, req.Key, cap)
+		prep, err := oldroot.Prepare(ctx, base, part.Path, cap)
 		if err != nil {
 			return res, err
 		}
-		res.PINToken = h.PINToken
+		err = prep.Open(ctx, bytes.NewReader(req.Key))
+		prep.Remove()
+		if err != nil {
+			return res, err
+		}
+		res.PINToken = prep.Header.PINToken
 		dev = "/dev/mapper/" + oldroot.Mapping
 		// The mapping sits on the read-only partition; mark it as well.
 		if err := oldroot.SetReadOnly(dev); err != nil {
