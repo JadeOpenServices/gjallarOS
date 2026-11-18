@@ -15,6 +15,9 @@ import (
 	"github.com/JadeOpenServices/gjallarOS/internal/safefs"
 )
 
+// keyringRel is the login keyring in a home.
+const keyringRel = ".local/share/keyrings/login.keyring"
+
 // homeChild names the folder the namespace child of TestNewHome works in;
 // set only in that child.
 const homeChild = "GJ_MOVE_HOME_CHILD"
@@ -78,6 +81,22 @@ func openOldHome(t *testing.T, top string) *freespace.OldHome {
 // whole.
 func TestCopyHome(t *testing.T) {
 	top, uid := oldHomeTop(t)
+	// The login keyring goes as bytes with the home (L66): root never opens
+	// it, and the user session unlocks or re-keys it after the move. The
+	// bytes here are arbitrary, not a keyring.
+	ring := filepath.Join(top, "@home/example", keyringRel)
+	ringData := []byte{0, 1, 2, 0xfe, 0xff, '\n', 'k'}
+	mkdirs(t, filepath.Dir(ring))
+	if err := os.WriteFile(ring, ringData, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if os.Geteuid() == 0 {
+		for p := ring; p != filepath.Join(top, "@home/example"); p = filepath.Dir(p) {
+			if err := os.Lchown(p, uid, usersGID); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
 	old := openOldHome(t, top)
 
 	dir := t.TempDir()
@@ -93,6 +112,12 @@ func TestCopyHome(t *testing.T) {
 	}
 	if _, err := os.Lstat(filepath.Join(dir, "Nextcloud")); !os.IsNotExist(err) {
 		t.Errorf("the sync folder came along: %v", err)
+	}
+	if got, err := os.ReadFile(filepath.Join(dir, keyringRel)); err != nil || string(got) != string(ringData) {
+		t.Errorf("keyring: %q %v", got, err)
+	}
+	if fi, err := os.Lstat(filepath.Join(dir, keyringRel)); err != nil || fi.Mode().Perm() != 0o600 {
+		t.Errorf("keyring mode: %v %v", fi, err)
 	}
 	if fi, err := os.Lstat(filepath.Join(dir, "Linked")); err != nil || fi.Mode()&os.ModeSymlink == 0 {
 		t.Errorf("Linked: %v %v", fi, err)
