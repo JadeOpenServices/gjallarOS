@@ -238,3 +238,30 @@ func TestTwoDigitKeysAlign(t *testing.T) {
 		t.Errorf("labels start in columns %v, descriptions in %v; want one each", labels, descs)
 	}
 }
+
+// Outside text such as network names may hold escape codes; Render shows
+// them as '?' and never sends them to the terminal (baka-c7 item 4).
+func TestRenderEscapesOutsideText(t *testing.T) {
+	var b strings.Builder
+	m := Menu{
+		Title:  "Network",
+		Body:   []string{"Body \x1b[2J text"},
+		Groups: [][]Item{{{Key: "1", Label: "Cafe\x1b[2J‮\x07", Desc: "dim\x1b]0;x\x07"}}},
+		Prompt: "Choice: ",
+	}
+	if _, err := Render(&b, m, Logo{}, 80, 24, true); err != nil {
+		t.Fatal(err)
+	}
+	out := b.String()
+	if n := strings.Count(out, "\x1b[2J"); n != 1 {
+		t.Fatalf("clear sequence %d times, want only the page's own:\n%q", n, out)
+	}
+	for _, bad := range []string{"‮", "\x07", "\x1b]"} {
+		if strings.Contains(out, bad) {
+			t.Fatalf("raw %q reached the terminal:\n%q", bad, out)
+		}
+	}
+	if !strings.Contains(out, "Cafe?[2J??") {
+		t.Fatalf("label not shown escaped:\n%q", out)
+	}
+}

@@ -48,9 +48,12 @@ func (Exec) Output(ctx context.Context, name string, args ...string) ([]byte, er
 	return exec.CommandContext(ctx, name, args...).Output()
 }
 
+// Interactive passes the page variables on only when ctx asks for pages
+// (prompt.WithPage): the installer steps get them, a shell or nmcli never.
 func (Exec) Interactive(ctx context.Context, name string, args ...string) error {
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
+	cmd.Env = prompt.PageEnviron(ctx, os.Environ())
 	return cmd.Run()
 }
 
@@ -396,7 +399,7 @@ func (s *Stick) menu(ctx context.Context) error {
 			if s.channel != channels[0] {
 				args = append(args, "--channel", s.channel)
 			}
-			s.runStep(ctx, "the installer", "gjallar-recover", args...)
+			s.runStep(prompt.WithPage(ctx, "Install gjallarOS"), "the installer", "gjallar-recover", args...)
 			if err := s.pause(ctx); err != nil {
 				return err
 			}
@@ -410,7 +413,7 @@ func (s *Stick) menu(ctx context.Context) error {
 		case actRequeue:
 			installlog.Mark(installlog.StickMenuChosen, installlog.Choice("choice", "requeue-key"))
 			s.head("Queue the key again")
-			s.runStep(ctx, "queueing the key", "gjallar-stick", "requeue-key")
+			s.runStep(prompt.WithPage(ctx, "Queue the key again"), "queueing the key", "gjallar-stick", "requeue-key")
 			if err := s.pause(ctx); err != nil {
 				return err
 			}

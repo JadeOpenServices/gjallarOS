@@ -16,6 +16,7 @@ import (
 
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/calmmenu"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/installlog"
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/prompt"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/region"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/stickkeyboard"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/stickrelease"
@@ -63,8 +64,11 @@ func Main(args []string, stdout, stderr io.Writer) int {
 		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGQUIT, syscall.SIGTERM, syscall.SIGHUP)
 		defer stop()
 		signal.Ignore(syscall.SIGTSTP)
-		if err := requeueKey(ctx, os.Stdin, stdout); err != nil {
-			fmt.Fprintln(stderr, "The key was not queued:", err)
+		// The menu asks for pages (prompt.WithPage); out of the menu this
+		// prints plain text.
+		out, errOut := prompt.Pages(stdout, stderr)
+		if err := requeueKey(ctx, os.Stdin, out); err != nil {
+			fmt.Fprintln(errOut, "The key was not queued:", err)
 			return 1
 		}
 		return 0

@@ -26,6 +26,9 @@ type UI struct {
 	// Wrap breaks long questions at the calm menu's width. The stick
 	// console sets it; desktop tools keep plain lines.
 	Wrap bool
+	// Flush, when set, runs before each answer is read: page mode drops
+	// keys typed while no question was up (PageFlush).
+	Flush func()
 }
 
 func zenityCommand(ctx context.Context, args ...string) *exec.Cmd {
@@ -316,6 +319,11 @@ Do not continue until you have saved both.
 		fmt.Fprintln(out)
 		fmt.Fprintln(out, text)
 		fmt.Fprintln(out)
+		// The next answer keeps the screen: the confirmation question
+		// shows under the material, not on a new page.
+		if p := pagerOf(u.Out); p != nil {
+			p.showedSecret()
+		}
 		return nil
 	}
 	return u.secureTextDialog(
@@ -559,6 +567,9 @@ func (u UI) readLine(ctx context.Context) (string, error) {
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
+	if u.Flush != nil {
+		u.Flush()
+	}
 	type result struct {
 		line string
 		err  error
@@ -570,6 +581,11 @@ func (u UI) readLine(ctx context.Context) (string, error) {
 	}()
 	select {
 	case r := <-done:
+		// In page mode the answer ends the page; what comes next starts
+		// a new one.
+		if p := pagerOf(u.Out); p != nil && r.err == nil {
+			p.page()
+		}
 		return r.line, r.err
 	case <-ctx.Done():
 		fmt.Fprintln(u.Out)

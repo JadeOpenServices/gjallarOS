@@ -276,6 +276,10 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 	}
 	// The run's log (Plane 343) sees what the installer prints from here on.
 	// It runs last, after the report offer, so the copy holds the whole run.
+	// On the stick console every question ends a page (section 18). The
+	// page column sits under the log's writer, so the log never gets the
+	// escape codes that place the text.
+	out, errOut = prompt.Pages(out, errOut)
 	runLog, out, errOut := startInstallLog(out, errOut)
 	defer func() { runLog.finish(ctx, errOut, code) }()
 	root, err := installercheck.ResolveRepository(opt.repo)
@@ -306,6 +310,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 		}
 	}()
 	ui := prompt.New(in, out)
+	ui.UsePages(in)
 	s := state{control: controlBinary()}
 	runLog.user = &s.user
 	// A failure from here on may become an install report the user saves

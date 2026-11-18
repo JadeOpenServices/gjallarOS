@@ -157,6 +157,7 @@ func requeueKey(ctx context.Context, in io.Reader, out io.Writer) error {
 	}
 	ui := prompt.New(in, out)
 	ui.Wrap = true
+	ui.UsePages(in)
 	raw, err := exec.CommandContext(ctx, "lsblk", "-J", "-l", "-p", "-o", "PATH,TYPE,FSTYPE,PARTLABEL,PKNAME,TRAN,RM").Output()
 	if err != nil {
 		return fmt.Errorf("list disks: %w", err)

@@ -45,6 +45,17 @@ func Run(ctx context.Context, stdin io.Reader, stdout, stderr io.Writer, name st
 	cmd := exec.CommandContext(ctx, name, args...)
 	log := Current()
 	if log == nil {
+		// A page column around the terminal (stick page mode) would give
+		// the program a pipe: it gets a pseudo-terminal, as with a log.
+		if _, plain := stderr.(*os.File); !plain {
+			if term, ok := terminalFile(stderr); ok {
+				err := runInPTY(cmd, term, stderr)
+				if !errors.Is(err, errNoPTY) {
+					return err
+				}
+				cmd = exec.CommandContext(ctx, name, args...)
+			}
+		}
 		cmd.Stdin = stdin
 		cmd.Stdout = stdout
 		cmd.Stderr = stderr
@@ -91,7 +102,16 @@ func teeFor(log *Log, w io.Writer) *Tee {
 	return log.Tee(w)
 }
 
+// terminalFile finds the terminal under writers that place or copy the
+// output, such as the stick's page column.
 func terminalFile(w io.Writer) (*os.File, bool) {
+	for {
+		t, ok := w.(interface{ Terminal() io.Writer })
+		if !ok {
+			break
+		}
+		w = t.Terminal()
+	}
 	f, ok := w.(*os.File)
 	if !ok {
 		return nil, false

@@ -11,6 +11,7 @@ import (
 	"io"
 	"strconv"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 )
 
@@ -128,7 +129,9 @@ func (m Menu) Height() int { return len(m.lines()) }
 // Render clears the screen and draws the menu for a terminal of cols by
 // rows cells. With colour false it writes plain text (for logs and tests)
 // but still positions every line. Text from outside, such as a network
-// name, must be made printable before it reaches the menu.
+// name, should be made printable before it reaches the menu; Render turns
+// any control character that still gets here into '?' as well, so no
+// field can send the terminal a control sequence.
 func Render(w io.Writer, m Menu, logo Logo, cols, rows int, colour bool) (Place, error) {
 	ls := m.lines()
 	width := min(Width, cols)
@@ -161,7 +164,7 @@ func Render(w io.Writer, m Menu, logo Logo, cols, rows int, colour bool) (Place,
 		fmt.Fprintf(&b, "\x1b[%dG", x0)
 		used := 0
 		for _, s := range l {
-			t := clip(s.text, width-used)
+			t := clip(printable(s.text), width-used)
 			used += utf8.RuneCountInString(t)
 			if colour && s.style != "" {
 				b.WriteString(s.style + t + reset)
@@ -175,6 +178,29 @@ func Render(w io.Writer, m Menu, logo Logo, cols, rows int, colour bool) (Place,
 	fmt.Fprintf(&b, "\x1b[%dG", p.PromptCol)
 	_, err := io.WriteString(w, b.String())
 	return p, err
+}
+
+// printable turns control characters, text-direction marks and broken
+// UTF-8 into '?'.
+func printable(s string) string {
+	ok := true
+	for _, r := range s {
+		if r == utf8.RuneError || !unicode.IsPrint(r) {
+			ok = false
+			break
+		}
+	}
+	if ok {
+		return s
+	}
+	var b strings.Builder
+	for _, r := range s {
+		if r == utf8.RuneError || !unicode.IsPrint(r) {
+			r = '?'
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
 }
 
 func clip(s string, n int) string {

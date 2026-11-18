@@ -42,6 +42,8 @@ type fakeNet struct {
 	// diskLooks counts lsblk calls; disksGone empties the disks from that
 	// look on.
 	diskLooks, disksGone int
+	// pages lists the page title each terminal program got, "" for none.
+	pages []string
 }
 
 func (f *fakeNet) Output(_ context.Context, name string, args ...string) ([]byte, error) {
@@ -80,8 +82,15 @@ func (f *fakeNet) Output(_ context.Context, name string, args ...string) ([]byte
 	return nil, fmt.Errorf("unexpected %s", call)
 }
 
-func (f *fakeNet) Interactive(_ context.Context, name string, args ...string) error {
+func (f *fakeNet) Interactive(ctx context.Context, name string, args ...string) error {
 	f.calls = append(f.calls, "RUN "+name+" "+strings.Join(args, " "))
+	title := ""
+	for _, e := range prompt.PageEnviron(ctx, nil) {
+		if t, ok := strings.CutPrefix(e, prompt.PageTitleEnv+"="); ok {
+			title = t
+		}
+	}
+	f.pages = append(f.pages, name+"="+title)
 	if f.interactive != nil {
 		return f.interactive(name, args)
 	}
@@ -329,6 +338,9 @@ func TestInstallChannels(t *testing.T) {
 		if len(got) != 1 || got[0] != c.want {
 			t.Errorf("input %q: ran %q, want %q", c.input, got, c.want)
 		}
+		if strings.Join(net.pages, "|") != "gjallar-recover=Install gjallarOS" {
+			t.Errorf("input %q: page titles %q, want only the installer's", c.input, net.pages)
+		}
 		log := h.logText(t)
 		if !strings.Contains(log, "choice=install") {
 			t.Errorf("input %q: no install anchor", c.input)
@@ -463,6 +475,12 @@ func TestOtherEntries(t *testing.T) {
 	}
 	if strings.Join(got, "|") != strings.Join(want, "|") {
 		t.Fatalf("ran %q, want %q", got, want)
+	}
+	// A shell or the recovery console never gets page mode.
+	for _, p := range net.pages {
+		if !strings.HasSuffix(p, "=") {
+			t.Errorf("%s got page mode", p)
+		}
 	}
 	log := h.logText(t)
 	for _, w := range []string{"choice=recovery", "choice=shell"} {
