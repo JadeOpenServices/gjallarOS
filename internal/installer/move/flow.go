@@ -85,9 +85,22 @@ func (f Flow) OpenOld(ctx context.Context) (*Old, error) {
 	f.say(fmt.Sprintf("Found gjallarOS (%s channel, last updated %s).",
 		res.Channel, res.LastUpdated.UTC().Format("2 January 2006")))
 	// The record of "gjallarctl move prepare" is inside the encrypted
-	// root, so the PIN notice can only come after the unlock.
-	if res.PINToken {
-		goOn, err := f.pinNotice(ctx)
+	// root, so the PIN notice can only come after the unlock. The helper
+	// reads it only on an encrypted disk.
+	if disk.Encrypted {
+		switch res.Prepared {
+		case movehelper.PrepareFound:
+			installlog.Mark(installlog.StickMovePrepareFound, installlog.Bool("pin", res.PINChecked))
+		case movehelper.PrepareStale:
+			installlog.Mark(installlog.StickMovePrepareMissing, installlog.Choice("reason", "stale"))
+		case movehelper.PrepareUnreadable:
+			installlog.Mark(installlog.StickMovePrepareMissing, installlog.Choice("reason", "unreadable"))
+		default:
+			installlog.Mark(installlog.StickMovePrepareMissing, installlog.Choice("reason", "none"))
+		}
+	}
+	if res.PINToken && !res.PINChecked {
+		goOn, err := f.pinNotice(ctx, res.Prepared == movehelper.PrepareStale)
 		if err != nil || !goOn {
 			if cerr := f.Close(context.WithoutCancel(ctx)); cerr != nil {
 				return nil, errors.Join(err, cerr)
@@ -230,10 +243,15 @@ func (f Flow) open(ctx context.Context, disk oldroot.Part) (movehelper.OpenResul
 
 // pinNotice is the warning when the old disk has a startup PIN (F1). It
 // tells whether the user goes on.
-func (f Flow) pinNotice(ctx context.Context) (bool, error) {
-	f.say("The old computer also asks for a PIN at startup. The stick cannot check that PIN. Only the chip in the old computer can, and too many wrong tries there can lock it.\n\n" +
+// stale is true when move prepare ran but the encryption changed after it.
+func (f Flow) pinNotice(ctx context.Context, stale bool) (bool, error) {
+	text := "The old computer also asks for a PIN at startup. The stick cannot check that PIN. Only the chip in the old computer can, and too many wrong tries there can lock it.\n\n" +
 		"If you go on, the new disk gets new VPN keys, a new Tailscale login, new SSH host keys and a new machine ID. You can choose to keep each one later in the move.\n\n" +
-		"To keep them as they are, go back, start the old computer and run gjallarctl move prepare. It checks the PIN there.")
+		"To keep them as they are, go back, start the old computer and run gjallarctl move prepare. It checks the PIN there."
+	if stale {
+		text += "\n\ngjallarctl move prepare ran before, but the disk's PIN or chip setup changed after that, so it has to run again."
+	}
+	f.say(text)
 	choice, err := f.choose(ctx, []string{"Go back", "Continue"}, "Go back")
 	if err != nil {
 		return false, err

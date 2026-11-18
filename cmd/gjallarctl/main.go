@@ -135,6 +135,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runTPM2Reenroll(args[1:], stderr)
 	case "luks":
 		return runLUKSLifecycle(args[1:], stdout, stderr)
+	case "move":
+		return runMove(args[1:], stdout, stderr)
 	case "vpn":
 		return runVPN(args[1:], stdout, stderr)
 	case "addons":
@@ -1921,6 +1923,7 @@ func printUsage(out io.Writer) {
 	fmt.Fprintln(out, "       gjallarctl preset {validate|get|list|bool} --config PATH [--key NAME]")
 	fmt.Fprintln(out, "       gjallarctl tpm2 reenroll")
 	fmt.Fprintln(out, "       gjallarctl luks {status|recovery-key|pin [--remove]|setup|remind [--open|--refresh]}")
+	fmt.Fprintln(out, "       gjallarctl move prepare              (check the recovery key and PIN before moving to a new computer)")
 	fmt.Fprintln(out, "       gjallarctl vpn status")
 	fmt.Fprintln(out, "       gjallarctl network [summary|interfaces|sockets|dns NAME|route IP|tools]")
 	fmt.Fprintln(out, "       gjallarctl register-key [https://LINK]")

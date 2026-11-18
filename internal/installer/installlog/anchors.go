@@ -50,6 +50,8 @@ const (
 	StickFlowFailed       ID = 2098
 
 	StickMoveStarted         ID = 2101
+	StickMovePrepareFound    ID = 2102
+	StickMovePrepareMissing  ID = 2103
 	StickMoveHeaderRefused   ID = 2104
 	StickMoveLayoutRefused   ID = 2105
 	StickMoveUnlockOK        ID = 2106
@@ -220,6 +222,13 @@ var Registry = []Anchor{
 		Meaning: "The disk move started on the stick.",
 		Fields: []FieldSpec{{Name: "mode", Kind: KindChoice, Choices: []string{"new-disk", "bring-over"},
 			Meaning: "new-disk: the system moves to a new disk in this computer; bring-over: an old disk's system comes to this computer"}}},
+	{ID: StickMovePrepareFound, Name: "stick.move.prepare-found",
+		Meaning: "The opened old disk holds a record of gjallarctl move prepare made for its current encryption header.",
+		Fields:  []FieldSpec{{Name: "pin", Kind: KindBool, Meaning: "the startup PIN was checked on the old computer, so the stick skips its PIN notice"}}},
+	{ID: StickMovePrepareMissing, Name: "stick.move.prepare-missing",
+		Meaning: "The opened old disk holds no usable record of gjallarctl move prepare. The move goes on as without one.",
+		Fields: []FieldSpec{{Name: "reason", Kind: KindChoice, Choices: []string{"none", "stale", "unreadable"},
+			Meaning: "none: prepare was not run; stale: the encryption header changed after prepare (new PIN or chip setup); unreadable: the record is damaged or not a plain file"}}},
 	{ID: StickMoveHeaderRefused, Name: "stick.move.header-refused",
 		Meaning: "The old disk's encryption header was refused before any key was asked. Nothing was opened.",
 		Fields: []FieldSpec{{Name: "reason", Kind: KindChoice, Choices: []string{"reencrypt", "unknown-token", "kdf-memory", "not-luks2", "unsupported"},

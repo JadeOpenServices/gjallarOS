@@ -20,6 +20,7 @@ import (
 	"strings"
 
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/move/oldroot"
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/move/prepared"
 	"github.com/JadeOpenServices/gjallarOS/internal/safefs"
 	"golang.org/x/sys/unix"
 )
@@ -344,6 +345,46 @@ func checkOp(ctx context.Context, req Request) (CheckResult, error) {
 type OpenResult struct {
 	oldroot.Info
 	PINToken bool `json:"pinToken"`
+	// Prepared tells what became of the record of gjallarctl move
+	// prepare on an encrypted old disk: PrepareFound, PrepareNone,
+	// PrepareStale or PrepareUnreadable. Empty on an unencrypted disk.
+	Prepared string `json:"prepared,omitempty"`
+	// PINChecked is true when a fitting record says the startup PIN was
+	// checked on the old computer.
+	PINChecked bool `json:"pinChecked"`
+}
+
+// The states of OpenResult.Prepared.
+const (
+	PrepareFound      = "found"
+	PrepareNone       = "none"
+	PrepareStale      = "stale"
+	PrepareUnreadable = "unreadable"
+)
+
+// preparedRecord is where move prepare leaves its record, seen from the
+// old disk's top level.
+const preparedRecord = "@" + prepared.Dir + "/" + prepared.Name
+
+// readPrepared reads the move prepare record on the opened old disk and
+// checks it against the header the disk was opened with. The record only
+// changes what the stick says, so any trouble with it counts as no record.
+func readPrepared(top *safefs.Dir, digest string) (state string, pin bool) {
+	raw, err := top.ReadFile(preparedRecord, prepared.MaxSize)
+	if errors.Is(err, os.ErrNotExist) {
+		return PrepareNone, false
+	}
+	if err != nil {
+		return PrepareUnreadable, false
+	}
+	r, err := prepared.Parse(raw)
+	if err != nil {
+		return PrepareUnreadable, false
+	}
+	if !r.Fits(digest) {
+		return PrepareStale, false
+	}
+	return PrepareFound, r.PIN
 }
 
 // openOp unlocks the old disk if it is encrypted, mounts its top level
@@ -370,6 +411,7 @@ func openOp(ctx context.Context, base string, req Request) (res OpenResult, err 
 		return res, err
 	}
 	dev := part.Path
+	var digest string
 	if part.Encrypted {
 		cap, err := oldroot.MemoryCap()
 		if err != nil {
@@ -384,7 +426,7 @@ func openOp(ctx context.Context, base string, req Request) (res OpenResult, err 
 		if err != nil {
 			return res, err
 		}
-		res.PINToken = prep.Header.PINToken
+		res.PINToken, digest = prep.Header.PINToken, prep.Digest
 		if dev, err = oldroot.MappedDevice(part.Path); err == nil {
 			// The mapping sits on the read-only partition; mark it as well.
 			err = oldroot.SetReadOnly(dev)
@@ -406,6 +448,11 @@ func openOp(ctx context.Context, base string, req Request) (res OpenResult, err 
 		return res, err
 	}
 	defer top.Close()
-	res.Info, err = oldroot.Inspect(top)
-	return res, err
+	if res.Info, err = oldroot.Inspect(top); err != nil {
+		return res, err
+	}
+	if part.Encrypted {
+		res.Prepared, res.PINChecked = readPrepared(top, digest)
+	}
+	return res, nil
 }

@@ -161,7 +161,7 @@ func TestOneEncryptedDisk(t *testing.T) {
 	if strings.Contains(out, "right-key") {
 		t.Error("the key reached the screen text")
 	}
-	if m := got(); m != "GJA-2101 stick.move.started mode=new-disk\nGJA-2106 stick.move.unlock-ok tries=1" {
+	if m := got(); m != "GJA-2101 stick.move.started mode=new-disk\nGJA-2106 stick.move.unlock-ok tries=1\nGJA-2103 stick.move.prepare-missing reason=none" {
 		t.Errorf("marks:\n%s", m)
 	}
 }
@@ -302,7 +302,7 @@ func TestWrongKeyThenRight(t *testing.T) {
 	if len(h.keys) != 4 || h.keys[2] != "wrong" || h.keys[3] != "right" {
 		t.Fatalf("keys sent = %d", len(h.keys))
 	}
-	if m := got(); !strings.HasSuffix(m, "GJA-2106 stick.move.unlock-ok tries=2") {
+	if m := got(); !strings.Contains(m, "GJA-2106 stick.move.unlock-ok tries=2\n") {
 		t.Errorf("marks:\n%s", m)
 	}
 }
@@ -352,6 +352,76 @@ func TestPINContinue(t *testing.T) {
 		t.Error("PINUnchecked not set")
 	}
 	if m := got(); !strings.HasSuffix(m, "GJA-2110 stick.move.pin-unchecked") {
+		t.Errorf("marks:\n%s", m)
+	}
+}
+
+// A record of move prepare that fits the header skips the PIN notice.
+func TestPINCheckedByPrepare(t *testing.T) {
+	got := marks(t)
+	withPIN := opened
+	withPIN.PINToken, withPIN.Prepared, withPIN.PINChecked = true, movehelper.PrepareFound, true
+	h := &fakeHelper{answers: map[string][]any{
+		"find":  {movehelper.FindResult{Disks: []oldroot.Part{encDisk}}},
+		"check": {movehelper.CheckResult{Encrypted: true, PINToken: true}},
+		"open":  {withPIN},
+	}}
+	old, out, err := run(t, h, "y\nkey\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if old.PINUnchecked || strings.Contains(out, "gjallarctl move prepare") {
+		t.Errorf("PIN notice shown after prepare:\n%s", out)
+	}
+	if h.ops() != "find check open" {
+		t.Fatalf("ops = %q", h.ops())
+	}
+	if m := got(); !strings.HasSuffix(m, "GJA-2102 stick.move.prepare-found pin=true") {
+		t.Errorf("marks:\n%s", m)
+	}
+}
+
+// A record made before the PIN or chip changed still shows the notice and
+// says prepare has to run again.
+func TestPINPrepareStale(t *testing.T) {
+	got := marks(t)
+	withPIN := opened
+	withPIN.PINToken, withPIN.Prepared = true, movehelper.PrepareStale
+	h := &fakeHelper{answers: map[string][]any{
+		"find":  {movehelper.FindResult{Disks: []oldroot.Part{encDisk}}},
+		"check": {movehelper.CheckResult{Encrypted: true, PINToken: true}},
+		"open":  {withPIN},
+	}}
+	old, out, err := run(t, h, "y\nkey\n2\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !old.PINUnchecked || !strings.Contains(out, "so it has to run again") {
+		t.Errorf("stale notice:\n%s", out)
+	}
+	if m := got(); !strings.Contains(m, "GJA-2103 stick.move.prepare-missing reason=stale\nGJA-2110") {
+		t.Errorf("marks:\n%s", m)
+	}
+}
+
+// An unreadable record counts as none: the notice shows, nothing breaks.
+func TestPINPrepareUnreadable(t *testing.T) {
+	got := marks(t)
+	withPIN := opened
+	withPIN.PINToken, withPIN.Prepared = true, movehelper.PrepareUnreadable
+	h := &fakeHelper{answers: map[string][]any{
+		"find":  {movehelper.FindResult{Disks: []oldroot.Part{encDisk}}},
+		"check": {movehelper.CheckResult{Encrypted: true, PINToken: true}},
+		"open":  {withPIN},
+	}}
+	old, out, err := run(t, h, "y\nkey\n2\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !old.PINUnchecked || strings.Contains(out, "so it has to run again") {
+		t.Errorf("notice:\n%s", out)
+	}
+	if m := got(); !strings.Contains(m, "GJA-2103 stick.move.prepare-missing reason=unreadable") {
 		t.Errorf("marks:\n%s", m)
 	}
 }

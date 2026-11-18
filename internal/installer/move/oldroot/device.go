@@ -106,9 +106,9 @@ func CheckArea(area []byte, kdfCapKiB int64) ([]byte, Header, error) {
 	return area, h2, nil
 }
 
-// maxKDFMemoryKiB is the most memory an Argon2 key slot may ask for, the
+// MaxKDFMemoryKiB is the most memory an Argon2 key slot may ask for, the
 // limit cryptsetup itself sets (4 GiB).
-const maxKDFMemoryKiB = 4 << 20
+const MaxKDFMemoryKiB = 4 << 20
 
 // KDFCap is the Argon2 memory cap for this computer: three quarters of the
 // memory that is free now, and never over 4 GiB. A header asking for more
@@ -121,7 +121,7 @@ func KDFCap(meminfo []byte) (int64, error) {
 			if kib <= 0 {
 				break
 			}
-			return min(kib/4*3, maxKDFMemoryKiB), nil
+			return min(kib/4*3, MaxKDFMemoryKiB), nil
 		}
 	}
 	return 0, errors.New("/proc/meminfo has no MemAvailable line")

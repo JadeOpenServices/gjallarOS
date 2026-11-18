@@ -463,6 +463,7 @@ _gjallarctl() {
     'wine:Wine apps and their network switches'
     'tpm2:TPM2 disk unlock'
     'luks:system disk unlock methods and recovery key'
+    'move:prepare moving this system to a new computer'
     'secure-boot:Secure Boot with gjallarOS keys'
     'security:security checks and notes for this device'
     'oddc:ODDC hardware catalogue'
@@ -502,6 +503,7 @@ _gjallarctl() {
         helpme) _arguments '--text[print instead of opening a window]' ;;
         tpm2) _arguments '1:tpm2 command:((reenroll\:"enroll the TPM2 key again"))' ;;
         luks) _gjallarctl_luks ;;
+        move) _arguments '1:move command:((prepare\:"check the recovery key and PIN before the USB stick moves this system"))' ;;
         security) _gjallarctl_security ;;
         media) _arguments '1:media command:((notice\:"offer writing on disks from another system (session service)"))' ;;
         secure-boot)

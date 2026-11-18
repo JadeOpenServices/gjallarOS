@@ -3,6 +3,8 @@ package oldroot
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -46,6 +48,8 @@ func CheckEncrypted(ctx context.Context, part string, kdfCapKiB int64) (Header, 
 type Prepared struct {
 	part, header string
 	Header       Header
+	// Digest is AreaDigest of the checked copy.
+	Digest string
 }
 
 // Prepare checks the LUKS metadata of the encrypted root part and writes the
@@ -71,7 +75,15 @@ func Prepare(ctx context.Context, base, part string, kdfCapKiB int64) (*Prepared
 	if err := writeNew(hdr, area); err != nil {
 		return nil, err
 	}
-	return &Prepared{part: part, header: hdr, Header: h}, nil
+	return &Prepared{part: part, header: hdr, Header: h, Digest: AreaDigest(area)}, nil
+}
+
+// AreaDigest is the hex SHA-256 of a metadata area cut by CheckArea. Any
+// change of the header, a new PIN or a new TPM enrolment included, changes
+// it. The move-prepared record is bound to it.
+func AreaDigest(area []byte) string {
+	sum := sha256.Sum256(area)
+	return hex.EncodeToString(sum[:])
 }
 
 // Open opens the root read-only as /dev/mapper/Mapping with the key read
