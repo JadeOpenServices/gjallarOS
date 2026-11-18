@@ -1,0 +1,176 @@
+// Package safefs reads and copies files as root in trees that someone else
+// may have shaped: an old disk brought to the move (345), or a new root that
+// gets a user's files.
+//
+// Every name is resolved below an open folder handle with openat2 and
+// RESOLVE_BENEATH, RESOLVE_NO_SYMLINKS, RESOLVE_NO_MAGICLINKS and
+// RESOLVE_NO_XDEV: a link in any part of a path, a ".." that climbs out, or
+// a mount point on the way refuses the path. A file is opened as O_PATH
+// first and checked before it is opened for reading, so a pipe or a device
+// is never opened at all. Owners and modes are set on the open handle.
+package safefs
+
+import (
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"strconv"
+
+	"golang.org/x/sys/unix"
+)
+
+var (
+	// ErrNotPlain refuses something that is not a plain file or folder
+	// where one is needed, or a path with a link in it.
+	ErrNotPlain = errors.New("not a plain file or folder")
+	// ErrTooBig refuses a file over the size cap.
+	ErrTooBig = errors.New("file is over the size cap")
+	// ErrChanged refuses a file that was swapped while it was opened.
+	ErrChanged = errors.New("file changed while it was opened")
+)
+
+const resolve = unix.RESOLVE_BENEATH | unix.RESOLVE_NO_SYMLINKS | unix.RESOLVE_NO_MAGICLINKS | unix.RESOLVE_NO_XDEV
+
+// Dir is an open folder. Paths given to its methods are relative to it and
+// never leave it.
+type Dir struct {
+	fd   int
+	name string
+}
+
+// OpenDir opens the folder at path. path itself must be trusted: its
+// parents are walked by the kernel as usual. Only the last part may not be
+// a link.
+func OpenDir(path string) (*Dir, error) {
+	fd, err := unix.Open(path, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
+	if err != nil {
+		return nil, fmt.Errorf("open folder %s: %w", path, refusal(err))
+	}
+	return &Dir{fd: fd, name: path}, nil
+}
+
+// Close closes the folder handle.
+func (d *Dir) Close() error { return unix.Close(d.fd) }
+
+// Name is the path the folder was opened with, for messages.
+func (d *Dir) Name() string { return d.name }
+
+// Sub opens the folder rel below d.
+func (d *Dir) Sub(rel string) (*Dir, error) {
+	fd, err := openat2(d.fd, rel, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC)
+	if err != nil {
+		return nil, fmt.Errorf("open folder %s below %s: %w", rel, d.name, refusal(err))
+	}
+	return &Dir{fd: fd, name: d.name + "/" + rel}, nil
+}
+
+// ReadFile reads the plain file rel below d. A file over max bytes, a pipe,
+// a device, a socket or a path with a link in it is refused without
+// reading anything.
+func (d *Dir) ReadFile(rel string, max int64) ([]byte, error) {
+	f, st, err := d.openPlain(rel)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	if st.Size > max {
+		return nil, fmt.Errorf("read %s below %s: %w (%d bytes, cap %d)", rel, d.name, ErrTooBig, st.Size, max)
+	}
+	data, err := io.ReadAll(io.LimitReader(f, max+1))
+	if err != nil {
+		return nil, fmt.Errorf("read %s below %s: %w", rel, d.name, err)
+	}
+	if int64(len(data)) > max {
+		return nil, fmt.Errorf("read %s below %s: %w", rel, d.name, ErrTooBig)
+	}
+	return data, nil
+}
+
+// openPlain opens rel for reading once it is known to be a plain file.
+func (d *Dir) openPlain(rel string) (*os.File, unix.Stat_t, error) {
+	var st unix.Stat_t
+	pathFD, err := openat2(d.fd, rel, unix.O_PATH|unix.O_NOFOLLOW|unix.O_CLOEXEC)
+	if err != nil {
+		return nil, st, fmt.Errorf("open %s below %s: %w", rel, d.name, refusal(err))
+	}
+	defer unix.Close(pathFD)
+	f, st, err := reopen(pathFD)
+	if err != nil {
+		return nil, st, fmt.Errorf("open %s below %s: %w", rel, d.name, err)
+	}
+	return f, st, nil
+}
+
+// reopen opens the O_PATH handle pathFD for reading after checking it
+// holds a plain file. The /proc link names the inode the handle holds, so a
+// swap after the check does not count; the inode is compared again anyway.
+func reopen(pathFD int) (*os.File, unix.Stat_t, error) {
+	var st unix.Stat_t
+	if err := unix.Fstat(pathFD, &st); err != nil {
+		return nil, st, err
+	}
+	if st.Mode&unix.S_IFMT != unix.S_IFREG {
+		return nil, st, fmt.Errorf("%w: %s", ErrNotPlain, kind(st.Mode))
+	}
+	fd, err := unix.Open("/proc/self/fd/"+strconv.Itoa(pathFD), unix.O_RDONLY|unix.O_NONBLOCK|unix.O_NOCTTY|unix.O_CLOEXEC, 0)
+	if err != nil {
+		return nil, st, err
+	}
+	var again unix.Stat_t
+	if err := unix.Fstat(fd, &again); err != nil {
+		unix.Close(fd)
+		return nil, st, err
+	}
+	if again.Dev != st.Dev || again.Ino != st.Ino || again.Mode&unix.S_IFMT != unix.S_IFREG {
+		unix.Close(fd)
+		return nil, st, ErrChanged
+	}
+	return os.NewFile(uintptr(fd), "safefs"), again, nil
+}
+
+func openat2(dirFD int, rel string, flags uint64) (int, error) {
+	return openat2Mode(dirFD, rel, flags, 0)
+}
+
+func openat2Mode(dirFD int, rel string, flags, mode uint64) (int, error) {
+	for {
+		fd, err := unix.Openat2(dirFD, rel, &unix.OpenHow{Flags: flags, Mode: mode, Resolve: resolve})
+		if err == unix.EINTR || err == unix.EAGAIN {
+			// openat2 returns EAGAIN when a rename raced the lookup.
+			continue
+		}
+		return fd, err
+	}
+}
+
+// refusal names the errors openat2 gives for a refused path.
+func refusal(err error) error {
+	switch {
+	case errors.Is(err, unix.ELOOP):
+		return fmt.Errorf("%w: a part of the path is a link", ErrNotPlain)
+	case errors.Is(err, unix.EXDEV):
+		return fmt.Errorf("%w: the path leaves the folder or crosses a mount", ErrNotPlain)
+	case errors.Is(err, unix.ENOTDIR):
+		return fmt.Errorf("%w: a part of the path is not a folder", ErrNotPlain)
+	}
+	return err
+}
+
+func kind(mode uint32) string {
+	switch mode & unix.S_IFMT {
+	case unix.S_IFREG:
+		return "file"
+	case unix.S_IFDIR:
+		return "folder"
+	case unix.S_IFLNK:
+		return "link"
+	case unix.S_IFIFO:
+		return "pipe"
+	case unix.S_IFSOCK:
+		return "socket"
+	case unix.S_IFCHR, unix.S_IFBLK:
+		return "device"
+	}
+	return "unknown"
+}
