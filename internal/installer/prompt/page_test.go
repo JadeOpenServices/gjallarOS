@@ -294,3 +294,68 @@ func TestPageTitlePrintable(t *testing.T) {
 		t.Fatalf("long title kept %d characters", len(got))
 	}
 }
+
+// A question given up on (Ctrl-C) leaves its read running. The next
+// question takes over that read instead of resetting the Reader under it,
+// and in page mode a line typed in between does not answer it.
+func TestAbandonedReadIsTakenOver(t *testing.T) {
+	in, typed := io.Pipe()
+	defer typed.Close()
+	u := UI{Reader: bufio.NewReader(in), Out: io.Discard}
+	flushed := 0
+	u.Flush = func() {
+		flushed++
+		u.Reader.Reset(in)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(20 * time.Millisecond)
+		cancel()
+	}()
+	if _, err := u.Value(ctx, "First", ""); err == nil {
+		t.Fatal("cancelled question returned an answer")
+	}
+	// Still no question up: this line is typed early.
+	go func() { _, _ = typed.Write([]byte("typed early\n")) }()
+	for i := 0; ; i++ {
+		abandoned.Lock()
+		done := abandoned.reads[u.Reader]
+		abandoned.Unlock()
+		if done != nil && len(done) == 1 {
+			break
+		}
+		if i > 500 {
+			t.Fatal("early line never reached the left read")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	go func() { _, _ = typed.Write([]byte("answer\n")) }()
+	got, err := u.Value(context.Background(), "Second", "")
+	if err != nil || got != "answer" {
+		t.Fatalf("second question = %q, %v; want the line typed after it came up", got, err)
+	}
+	if flushed != 2 {
+		t.Fatalf("flushed %d times, want 2 (first question, and after the early line was dropped)", flushed)
+	}
+
+	// Without a line in between the next question takes the left read
+	// as it is, with no Flush under it.
+	ctx, cancel = context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(20 * time.Millisecond)
+		cancel()
+	}()
+	if _, err := u.Value(ctx, "Third", ""); err == nil {
+		t.Fatal("cancelled question returned an answer")
+	}
+	// Typed once the question is up; a line there earlier would be
+	// dropped as typed early.
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		_, _ = typed.Write([]byte("later\n"))
+	}()
+	got, err = u.Value(context.Background(), "Fourth", "")
+	if err != nil || got != "later" || flushed != 3 {
+		t.Fatalf("fourth question = %q, %v, flushed %d; want \"later\" and no Flush under the left read", got, err, flushed)
+	}
+}

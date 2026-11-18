@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"sync"
 	"unicode/utf8"
 
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/calmmenu"
@@ -27,7 +28,7 @@ type UI struct {
 	// console sets it; desktop tools keep plain lines.
 	Wrap bool
 	// Flush, when set, runs before each answer is read: page mode drops
-	// keys typed while no question was up (PageFlush).
+	// keys typed while no question was up (UsePages).
 	Flush func()
 }
 
@@ -567,18 +568,33 @@ func (u UI) readLine(ctx context.Context) (string, error) {
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
-	if u.Flush != nil {
-		u.Flush()
+	done := takeAbandoned(u.Reader)
+	if done != nil && u.Flush != nil {
+		select {
+		case r := <-done:
+			if r.err != nil {
+				return "", r.err
+			}
+			// A line typed while no question was up: dropped, as Flush
+			// drops it.
+			done = nil
+		default:
+		}
 	}
-	type result struct {
-		line string
-		err  error
+	if done == nil {
+		if u.Flush != nil {
+			u.Flush()
+		}
+		done = make(chan lineResult, 1)
+		go func() {
+			line, err := u.Reader.ReadString('\n')
+			done <- lineResult{line, err}
+		}()
 	}
-	done := make(chan result, 1)
-	go func() {
-		line, err := u.Reader.ReadString('\n')
-		done <- result{line, err}
-	}()
+	// A read left by a question given up on still owns the Reader: this
+	// question takes its line, and Flush is skipped, as it would reset
+	// the Reader under that read. In page mode a line that read already
+	// got before this question came up was dropped above.
 	select {
 	case r := <-done:
 		// In page mode the answer ends the page; what comes next starts
@@ -588,9 +604,36 @@ func (u UI) readLine(ctx context.Context) (string, error) {
 		}
 		return r.line, r.err
 	case <-ctx.Done():
+		leaveAbandoned(u.Reader, done)
 		fmt.Fprintln(u.Out)
 		return "", ctx.Err()
 	}
+}
+
+type lineResult struct {
+	line string
+	err  error
+}
+
+// abandoned holds, per Reader, the read of a question given up on. Only
+// one read may use a Reader at a time.
+var abandoned = struct {
+	sync.Mutex
+	reads map[*bufio.Reader]chan lineResult
+}{reads: map[*bufio.Reader]chan lineResult{}}
+
+func leaveAbandoned(r *bufio.Reader, done chan lineResult) {
+	abandoned.Lock()
+	abandoned.reads[r] = done
+	abandoned.Unlock()
+}
+
+func takeAbandoned(r *bufio.Reader) chan lineResult {
+	abandoned.Lock()
+	defer abandoned.Unlock()
+	done := abandoned.reads[r]
+	delete(abandoned.reads, r)
+	return done
 }
 
 // Line reads one answer for a question the caller drew itself, such as a

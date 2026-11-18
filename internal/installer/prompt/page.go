@@ -114,6 +114,10 @@ func pageTitle(s string) string {
 	return b.String()
 }
 
+// PageWidth is the width of the page column. Programs the installer runs
+// on a pseudo-terminal get it as their terminal width (installlog.Run).
+func (p *Pager) PageWidth() int { return calmmenu.Width }
+
 func (p *Pager) Write(b []byte) (int, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -155,6 +159,7 @@ type pageErr struct {
 
 func (e *pageErr) Write(b []byte) (int, error) { return e.p.Write(b) }
 func (e *pageErr) Terminal() io.Writer         { return e.file }
+func (e *pageErr) PageWidth() int              { return e.p.PageWidth() }
 
 // pagerOf finds the Pager under logging writers around out.
 func pagerOf(out io.Writer) *Pager {

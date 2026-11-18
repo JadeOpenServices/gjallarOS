@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"golang.org/x/sys/unix"
 )
 
 // standIn puts a script named nixos-rebuild first on PATH. It says whether
@@ -183,5 +185,47 @@ func TestPTYIsOwnerOnly(t *testing.T) {
 	}
 	if mode := info.Mode().Perm(); mode != 0o600 {
 		t.Errorf("pseudo-terminal mode %o, want 600", mode)
+	}
+}
+
+// paged stands for the stick's page column: it writes to the terminal and
+// says how wide the column is.
+type paged struct{ term *os.File }
+
+func (p paged) Write(b []byte) (int, error) { return p.term.Write(b) }
+func (p paged) Terminal() io.Writer         { return p.term }
+func (p paged) PageWidth() int              { return 66 }
+
+// A program run in a page column gets the column's width, so its output
+// wraps inside the column, not at the screen edge.
+func TestRunInPageColumnGetsColumnWidth(t *testing.T) {
+	bin := t.TempDir()
+	script := "#!/bin/sh\necho \"cols: $(stty size <&2)\" >&2\n"
+	if err := os.WriteFile(filepath.Join(bin, "nixos-rebuild"), []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	SetCurrent(nil)
+	master, slave, err := openPTY()
+	if err != nil {
+		t.Skipf("no pseudo-terminal here: %v", err)
+	}
+	defer master.Close()
+	defer slave.Close()
+	if err := unix.IoctlSetWinsize(int(slave.Fd()), unix.TIOCSWINSZ, &unix.Winsize{Row: 40, Col: 120}); err != nil {
+		t.Fatal(err)
+	}
+	shown := make(chan string)
+	go func() {
+		data, _ := io.ReadAll(master)
+		shown <- string(data)
+	}()
+	out := paged{slave}
+	if err := Run(context.Background(), nil, out, out, "nixos-rebuild"); err != nil {
+		t.Fatal(err)
+	}
+	slave.Close()
+	if screen := <-shown; !strings.Contains(screen, "cols: 40 66") {
+		t.Fatalf("program did not get the column width: %q", screen)
 	}
 }

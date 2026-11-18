@@ -27,8 +27,10 @@ const (
 	reset  = "\x1b[0m"
 )
 
-// Clear resets the colours, clears the screen and puts the cursor home.
-const Clear = "\x1b[0m\x1b[2J\x1b[H"
+// Clear resets the colours, clears the screen and its scrollback and puts
+// the cursor home. A page that showed recovery material must not stay
+// in the scrollback of a terminal emulator or ssh client.
+const Clear = "\x1b[0m\x1b[2J\x1b[3J\x1b[H"
 
 // Item is one numbered choice.
 type Item struct {

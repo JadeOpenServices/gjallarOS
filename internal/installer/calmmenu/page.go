@@ -19,7 +19,7 @@ import (
 func Head(w io.Writer, title string, cols int, colour bool) (*Column, error) {
 	c := NewColumn(w, cols)
 	var b strings.Builder
-	b.WriteString("\x1b[0m\x1b[2J\x1b[H")
+	b.WriteString(Clear)
 	t, r := title, strings.Repeat("─", min(Width, cols))
 	if colour {
 		t, r = bold+t+reset, dim+r+reset

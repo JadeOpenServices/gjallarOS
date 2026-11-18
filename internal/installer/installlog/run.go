@@ -122,6 +122,21 @@ func terminalFile(w io.Writer) (*os.File, bool) {
 	return f, true
 }
 
+// pageWidth is the width of the page column out writes into, or 0 when
+// out is not in one.
+func pageWidth(w io.Writer) int {
+	for {
+		if p, ok := w.(interface{ PageWidth() int }); ok {
+			return p.PageWidth()
+		}
+		t, ok := w.(interface{ Terminal() io.Writer })
+		if !ok {
+			return 0
+		}
+		w = t.Terminal()
+	}
+}
+
 var errNoPTY = errors.New("no pseudo-terminal")
 
 // runInPTY runs cmd with stdout and stderr on a new pseudo-terminal of the
@@ -133,8 +148,14 @@ func runInPTY(cmd *exec.Cmd, term *os.File, out io.Writer) error {
 	}
 	defer master.Close()
 
+	width := pageWidth(out)
 	resize := func() {
 		if size, err := unix.IoctlGetWinsize(int(term.Fd()), unix.TIOCGWINSZ); err == nil {
+			// In a page column the program gets the column's width, so its
+			// lines and bars wrap inside the column, not at the screen edge.
+			if width > 0 && int(size.Col) > width {
+				size.Col = uint16(width)
+			}
 			_ = control(master, func(fd int) error { return unix.IoctlSetWinsize(fd, unix.TIOCSWINSZ, size) })
 		}
 	}
