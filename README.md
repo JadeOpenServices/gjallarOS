@@ -117,7 +117,8 @@ it downloads anything, it shows the fingerprint of that key:
 
 ```text
 Release key fingerprint (SHA-256):
-  not set yet: filled in with the first signed release
+  4842 E541 75E8 F9F0 0D3D 37B0 0DC2 8CC6
+  B1D8 ACDB A690 5A22 4C40 AB76 40A7 8A86
 ```
 
 If the maker shows other numbers, type nothing but Enter and get the maker
@@ -129,8 +130,8 @@ the value below, and only then run it.
 
 | Maker | SHA-256 of the current release |
 | --- | --- |
-| `make-stick.sh` | not set yet: filled in with the first signed release |
-| `make-stick.ps1` | not set yet: filled in with the first signed release |
+| `make-stick.sh` | 1aa141d0805f9b1d74e8d23f1a57b9ab6920e3a1a2b03b67f952b0def69eb788 |
+| `make-stick.ps1` | dee62147d024115d28f252e9c090c12c758c4783c022519e41c78e78f1d3c846 |
 
 On Linux:
 
