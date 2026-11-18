@@ -30,9 +30,6 @@ type Choices struct {
 	// Identity holds one entry per identity screen shown, with the
 	// answer in Keep.
 	Identity []identity.Choice
-	// NextcloudSkipped: the user chose at the Nextcloud note to sync the
-	// folders again from the server.
-	NextcloudSkipped bool
 	// Space is the free-space check for the chosen categories; it fits.
 	Space freespace.Result
 }
@@ -78,7 +75,6 @@ func (f Flow) Choose(ctx context.Context, old *Old, t Target) (Choices, error) {
 		}
 		if skip {
 			setChosen(c.Categories, freespace.Nextcloud, false)
-			c.NextcloudSkipped = true
 		}
 	}
 
@@ -88,7 +84,7 @@ func (f Flow) Choose(ctx context.Context, old *Old, t Target) (Choices, error) {
 	}
 	c.Space = space
 
-	c.Identity, err = f.identityScreens(ctx, old, inv.Inventory, c.Chosen(freespace.Home))
+	c.Identity, err = f.identityScreens(ctx, old, inv.Inventory, c.Chosen(freespace.Home), c.Chosen(freespace.Nextcloud))
 	if err != nil {
 		return c, f.stop(ctx, err)
 	}
@@ -138,6 +134,27 @@ func label(name string) string {
 	return name
 }
 
+// behind is a category as the space check names it when it stays behind.
+func behind(name string) string {
+	switch name {
+	case freespace.Home:
+		return "your home folder (all your files)"
+	case freespace.Nextcloud:
+		return "the Nextcloud folders"
+	case freespace.Branches:
+		return "the system settings and their history"
+	}
+	return name
+}
+
+// plural picks the word form for n.
+func plural(n int, one, many string) string {
+	if n == 1 {
+		return one
+	}
+	return many
+}
+
 // sizeList is step 6.
 func (f Flow) sizeList(cats []freespace.Category, s freespace.Sizes) {
 	var b strings.Builder
@@ -145,8 +162,8 @@ func (f Flow) sizeList(cats []freespace.Category, s freespace.Sizes) {
 	for _, cat := range cats {
 		fmt.Fprintf(&b, "  %s: %s\n", label(cat.Name), usize(cat.Bytes))
 	}
-	if s.Skipped > 0 || s.Foreign > 0 {
-		fmt.Fprintf(&b, "%d special files (pipes, sockets, devices or files of other users) stay behind.\n", s.Skipped+s.Foreign)
+	if n := s.Skipped + s.Foreign; n > 0 {
+		fmt.Fprintf(&b, "%d %s (pipes, sockets, devices or files of other users) %s behind.\n", n, plural(n, "special file", "special files"), plural(n, "stays", "stay"))
 	}
 	f.say(strings.TrimSuffix(b.String(), "\n"))
 }
@@ -154,7 +171,7 @@ func (f Flow) sizeList(cats []freespace.Category, s freespace.Sizes) {
 // nextcloudNote is the note of section 4.6. It tells whether the user
 // skips the Nextcloud folders.
 func (f Flow) nextcloudNote(ctx context.Context, bytes uint64) (bool, error) {
-	f.say(fmt.Sprintf("Your Nextcloud folders take %s. Copying them keeps them as they are, and the Nextcloud app goes on syncing without downloading anything. Skipping them makes the move shorter and smaller; the Nextcloud app then downloads them again from the server after the move.", usize(bytes)))
+	f.say(fmt.Sprintf("Your Nextcloud folders take %s. Copying them keeps them as they are, and the Nextcloud app goes on syncing without downloading anything. Skipping them makes the move shorter and smaller. The Nextcloud app then downloads them again from the server after the move.", usize(bytes)))
 	n, err := f.choose(ctx, []string{"Copy them", "Skip them, sync again from the server after the move"}, "Copy them")
 	if err != nil {
 		return false, err
@@ -177,7 +194,7 @@ func (f Flow) spaceCheck(ctx context.Context, in freespace.Input, cats []freespa
 		if r.Fits {
 			installlog.Mark(installlog.StickMoveSpaceOK,
 				installlog.Count("needed", gib(r.Needed, true)), installlog.Count("free", gib(r.Available, false)))
-			f.say("Space check passed: everything you chose fits on the new disk.")
+			f.say(passLine(cats))
 			return r, nil
 		}
 		installlog.Mark(installlog.StickMoveSpaceShort, installlog.Count("short", gib(r.Short, true)))
@@ -195,7 +212,7 @@ func (f Flow) spaceCheck(ctx context.Context, in freespace.Input, cats []freespa
 		f.say(fmt.Sprintf("The new disk is %s short. Leave something behind or use a bigger disk.", usize(r.Short)))
 		options := make([]string, 0, len(biggest)+1)
 		for _, cat := range biggest {
-			line := fmt.Sprintf("Leave behind: %s (%s)", label(cat.Name), usize(cat.Bytes))
+			line := fmt.Sprintf("Leave behind: %s, %s", behind(cat.Name), usize(cat.Bytes))
 			if cat.Name == freespace.Home && chosen(cats, freespace.Nextcloud) {
 				line += ", with the Nextcloud folders inside it"
 			}
@@ -217,6 +234,20 @@ func (f Flow) spaceCheck(ctx context.Context, in freespace.Input, cats []freespa
 	}
 }
 
+// passLine says the check passed and, when something stays behind, what.
+func passLine(cats []freespace.Category) string {
+	var left []string
+	for _, cat := range cats {
+		if !cat.Chosen {
+			left = append(left, behind(cat.Name))
+		}
+	}
+	if len(left) == 0 {
+		return "Space check passed: everything you chose fits on the new disk."
+	}
+	return "Space check passed. Stays behind: " + strings.Join(left, ", ") + "."
+}
+
 func chosen(cats []freespace.Category, name string) bool {
 	return Choices{Categories: cats}.Chosen(name)
 }
@@ -226,25 +257,36 @@ func chosen(cats []freespace.Category, name string) bool {
 var itemText = map[identity.Item]struct{ name, keep, renew string }{
 	identity.WiFi:           {"Saved Wi-Fi networks", "the new disk joins them at once", "type the passwords again"},
 	identity.WiFiEnterprise: {"Work or school Wi-Fi with certificates", "the certificates and logins come along", "set them up again"},
-	identity.VPN:            {"VPN connections and their keys", "the same VPN identity", "the profiles stay behind; set them up again"},
+	identity.VPN:            {"VPN connections and their keys", "the same VPN identity", "the profiles stay behind. Set them up again"},
 	identity.Bluetooth:      {"Bluetooth devices paired with this computer", "they connect at once", "pair them again"},
 	identity.Fingerprints:   {"Enrolled fingerprints", "no new enrolment", "enrol your fingers again"},
-	identity.Tailscale:      {"Tailscale", "the same machine on your tailnet", "log in again; it shows as a new machine"},
+	identity.Tailscale:      {"Tailscale", "the same machine on your tailnet", "log in again, and it shows as a new machine"},
 	identity.SSHHostKeys:    {"SSH host keys", "other computers keep trusting this one", "they warn that the key changed"},
 	identity.MachineID:      {"Machine ID", "pairings and logs stay linked to this computer", "the new disk gets a new ID"},
 	identity.Nextcloud:      {"Nextcloud account", "the Nextcloud app keeps syncing with no new login", "log in to Nextcloud again"},
 }
 
+// nextcloudRefetch is the keep text for the Nextcloud account when its
+// folders stay behind.
+const nextcloudRefetch = "the Nextcloud app logs in by itself and downloads your folders again"
+
 // identityScreens is step 7, one screen per item. home tells whether the
 // home moves; without it the Nextcloud account has nothing to sync into.
-func (f Flow) identityScreens(ctx context.Context, old *Old, inv identity.Inventory, home bool) ([]identity.Choice, error) {
+// ncFolders tells whether the Nextcloud folders move.
+func (f Flow) identityScreens(ctx context.Context, old *Old, inv identity.Inventory, home, ncFolders bool) ([]identity.Choice, error) {
 	offer := identity.Offer(inv, identity.Options{PINUnchecked: old.PINUnchecked, SameComputer: f.Mode == NewDisk})
 	var notes []string
-	if inv.BluetoothOther > 0 {
-		notes = append(notes, fmt.Sprintf("%d Bluetooth pairings were made with an adapter that is not in this computer. They stay behind; pair those devices again.", inv.BluetoothOther))
+	if n := inv.BluetoothOther; n > 0 {
+		pairings := fmt.Sprintf("%d Bluetooth %s made with an adapter", n, plural(n, "pairing was", "pairings were"))
+		if f.Mode == NewDisk {
+			// Same computer: the adapter may be a dongle that is unplugged.
+			notes = append(notes, fmt.Sprintf("%s that is not connected now. Plug the adapter in and start the move again to keep %s. Otherwise pair %s again.", pairings, plural(n, "it", "them"), plural(n, "that device", "those devices")))
+		} else {
+			notes = append(notes, fmt.Sprintf("%s that is not in this computer. %s behind. Pair %s again.", pairings, plural(n, "It stays", "They stay"), plural(n, "that device", "those devices")))
+		}
 	}
-	if inv.Skipped > 0 {
-		notes = append(notes, fmt.Sprintf("%d settings files could not be read safely. They stay behind.", inv.Skipped))
+	if n := inv.Skipped; n > 0 {
+		notes = append(notes, fmt.Sprintf("%d settings %s could not be read safely. %s behind.", n, plural(n, "file", "files"), plural(n, "It stays", "They stay")))
 	}
 	if len(notes) > 0 {
 		f.say(strings.Join(notes, "\n"))
@@ -262,7 +304,11 @@ func (f Flow) identityScreens(ctx context.Context, old *Old, inv identity.Invent
 		if ch.Count > 1 {
 			screen += fmt.Sprintf(" (%d)", ch.Count)
 		}
-		screen += "\nKeep: " + text.keep + ".\nMake new: " + text.renew + "."
+		keep := text.keep
+		if ch.Item == identity.Nextcloud && !ncFolders {
+			keep = nextcloudRefetch
+		}
+		screen += "\nKeep: " + keep + ".\nMake new: " + text.renew + "."
 		if ch.Risk {
 			screen += "\n" + identity.RiskLine
 		}

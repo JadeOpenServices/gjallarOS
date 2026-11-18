@@ -56,7 +56,7 @@ func TestChooseFits(t *testing.T) {
 	if h.ops() != "sizes inventory" {
 		t.Fatalf("ops %q", h.ops())
 	}
-	if !c.Chosen(freespace.Home) || !c.Chosen(freespace.Branches) || c.Chosen(freespace.Nextcloud) || !c.Space.Fits || c.NextcloudSkipped {
+	if !c.Chosen(freespace.Home) || !c.Chosen(freespace.Branches) || c.Chosen(freespace.Nextcloud) || !c.Space.Fits {
 		t.Fatalf("choices %+v", c)
 	}
 	if len(c.Identity) != 5 {
@@ -78,7 +78,7 @@ func TestChooseFits(t *testing.T) {
 	if m := got(); m != want {
 		t.Fatalf("marks\n%s\nwant\n%s", m, want)
 	}
-	for _, s := range []string{"Your files (home folder): 322.1 GB", "Saved Wi-Fi networks (3)", "1 Bluetooth pairings were made with an adapter", "2 settings files could not be read safely", identity.RiskLine} {
+	for _, s := range []string{"Your files (home folder): 322.1 GB", "Saved Wi-Fi networks (3)", "1 Bluetooth pairing was made with an adapter that is not connected now. Plug the adapter in and start the move again to keep it. Otherwise pair that device again.", "2 settings files could not be read safely. They stay behind.", "Space check passed: everything you chose fits", identity.RiskLine} {
 		if !strings.Contains(out, s) {
 			t.Errorf("screen lacks %q:\n%s", s, out)
 		}
@@ -120,8 +120,8 @@ func TestChoosePINUnchecked(t *testing.T) {
 func TestChooseBringOverNoFingerprints(t *testing.T) {
 	marks(t)
 	h := &fakeHelper{answers: map[string][]any{
-		"sizes":     {sizesOf(freespace.Sizes{Home: 10 * gb})},
-		"inventory": {invOf(identity.Inventory{Fingerprints: 2, WiFi: 1})},
+		"sizes":     {sizesOf(freespace.Sizes{Home: 10 * gb, Skipped: 1})},
+		"inventory": {invOf(identity.Inventory{Fingerprints: 2, WiFi: 1, BluetoothOther: 2, Skipped: 1})},
 	}}
 	c, out, err := choose(t, h, BringOver, &Old{}, target2T, "\n")
 	if err != nil {
@@ -129,6 +129,17 @@ func TestChooseBringOverNoFingerprints(t *testing.T) {
 	}
 	if len(c.Identity) != 1 || c.Identity[0].Item != identity.WiFi || strings.Contains(out, "fingerprints") {
 		t.Fatalf("identity %+v\n%s", c.Identity, out)
+	}
+	// Another computer: its adapter is never here, and counts of one read
+	// as one.
+	for _, s := range []string{
+		"1 special file (pipes, sockets, devices or files of other users) stays behind.",
+		"2 Bluetooth pairings were made with an adapter that is not in this computer. They stay behind. Pair those devices again.",
+		"1 settings file could not be read safely. It stays behind.",
+	} {
+		if !strings.Contains(out, s) {
+			t.Errorf("screen lacks %q:\n%s", s, out)
+		}
 	}
 }
 
@@ -151,7 +162,7 @@ func TestChooseNextcloudNote(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if ch.Chosen(freespace.Nextcloud) != c.chosen || ch.NextcloudSkipped == c.chosen {
+		if ch.Chosen(freespace.Nextcloud) != c.chosen {
 			t.Fatalf("%s: choices %+v", c.answer, ch)
 		}
 		cats := []freespace.Category{{Name: freespace.Home, Bytes: 100 * gb, Chosen: true}, {Name: freespace.Nextcloud, Bytes: 60 * gb, Chosen: c.chosen}}
@@ -163,7 +174,13 @@ func TestChooseNextcloudNote(t *testing.T) {
 		if m := got(); m != want {
 			t.Fatalf("%s: marks\n%s\nwant\n%s", c.answer, m, want)
 		}
-		if !strings.Contains(out, "Your Nextcloud folders take 64.4 GB") {
+		keep := "Keep: the Nextcloud app keeps syncing with no new login."
+		pass := "Space check passed: everything you chose fits"
+		if !c.chosen {
+			keep = "Keep: the Nextcloud app logs in by itself and downloads your folders again."
+			pass = "Space check passed. Stays behind: the Nextcloud folders."
+		}
+		if !strings.Contains(out, "Your Nextcloud folders take 64.4 GB") || !strings.Contains(out, keep) || !strings.Contains(out, pass) {
 			t.Fatalf("%s: screen\n%s", c.answer, out)
 		}
 	}
@@ -199,7 +216,8 @@ func TestChooseShortLeaveHome(t *testing.T) {
 	if m := got(); m != want {
 		t.Fatalf("marks\n%s\nwant\n%s", m, want)
 	}
-	if !strings.Contains(out, "Leave behind: Your files (home folder) (966.4 GB), with the Nextcloud folders inside it") || strings.Contains(out, "Nextcloud account") {
+	if !strings.Contains(out, "Leave behind: your home folder (all your files), 966.4 GB, with the Nextcloud folders inside it") ||
+		!strings.Contains(out, "Space check passed. Stays behind: your home folder (all your files), the Nextcloud folders.") || strings.Contains(out, "Nextcloud account") {
 		t.Fatalf("screen\n%s", out)
 	}
 	if h.ops() != "sizes inventory" {
