@@ -15,10 +15,10 @@ import (
 // No test runs the real systemctl or systemd-run: the package default is a
 // systemctl that finds no unit loaded and a systemd-run that fails. A plain
 // user cannot mount, so lock leaves base as it is, except in the namespace
-// child of TestPrivateBase, where the test is root of its own namespaces.
+// child of TestIsolateBase, where the test is root of its own namespaces.
 func TestMain(m *testing.M) {
 	if os.Getenv(usernsChild) == "" {
-		makePrivate = func(string) error { return nil }
+		prepareBase = func(string) error { return nil }
 	}
 	dir, err := os.MkdirTemp("", "movehelper-units-")
 	if err != nil {

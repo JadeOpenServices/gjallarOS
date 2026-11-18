@@ -1,7 +1,10 @@
 package movehelper
 
 import (
+	"bufio"
 	"errors"
+	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -12,18 +15,26 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// usernsChild names the folder the namespace child of TestPrivateBase works
-// in; set only in that child.
+// usernsChild names the folder the namespace child of TestIsolateBase works
+// in; set only in that child and in its namespace helpers.
 const usernsChild = "GJ_MOVE_USERNS_CHILD"
 
-// L153: in namespaces of its own, with a shared /run and a peer of it the
-// way a service's namespace is, nothing the helper mounts below base shows
-// up at the peer. Skipped where user namespaces are off.
-func TestPrivateBase(t *testing.T) {
+// nsHelper is set only in a namespace helper of the child: "before" keeps a
+// plain copy of the child's mounts, "service" turns its copy into what
+// systemd gives a namespaced unit (rslave, then rshared).
+const nsHelper = "GJ_MOVE_NS_HELPER"
+
+// L153, L154: in namespaces of its own, with a shared /run, a peer of it in
+// the same namespace and other namespaces the way services have them,
+// nothing the helper mounts below base reaches a namespace that existed
+// before the first lock; a namespace made later gets the helper's mounts
+// and its unmounts too, and sends nothing back. Skipped where user
+// namespaces are off.
+func TestIsolateBase(t *testing.T) {
 	if os.Getenv(usernsChild) != "" {
 		t.Skip("parent test only")
 	}
-	cmd := exec.Command(os.Args[0], "-test.run=^TestPrivateBaseChild$", "-test.count=1", "-test.v")
+	cmd := exec.Command(os.Args[0], "-test.run=^TestIsolateBaseChild$", "-test.count=1", "-test.v")
 	cmd.Env = append(os.Environ(), usernsChild+"="+t.TempDir())
 	cmd.SysProcAttr = &syscall.SysProcAttr{
 		Cloneflags:  syscall.CLONE_NEWUSER | syscall.CLONE_NEWNS,
@@ -34,15 +45,120 @@ func TestPrivateBase(t *testing.T) {
 	if errors.Is(err, syscall.EPERM) || errors.Is(err, syscall.EINVAL) || errors.Is(err, syscall.ENOSPC) {
 		t.Skipf("no user namespaces here: %v", err)
 	}
-	if err != nil || !strings.Contains(string(out), "--- PASS: TestPrivateBaseChild") {
+	if err != nil || !strings.Contains(string(out), "--- PASS: TestIsolateBaseChild") {
 		t.Fatalf("namespace child: %v\n%s", err, out)
 	}
 }
 
-func TestPrivateBaseChild(t *testing.T) {
+// nsProc is a namespace helper: another mount namespace in the child's
+// user namespace, asked over its stdin.
+type nsProc struct {
+	cmd *exec.Cmd
+	in  io.WriteCloser
+	out *bufio.Reader
+}
+
+func startNS(t *testing.T, mode string) *nsProc {
+	t.Helper()
+	cmd := exec.Command(os.Args[0], "-test.run=^TestIsolateBaseHelper$", "-test.count=1")
+	cmd.Env = append(os.Environ(), nsHelper+"="+mode)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Cloneflags: syscall.CLONE_NEWNS}
+	cmd.Stderr = os.Stderr
+	in, err := cmd.StdinPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	p := &nsProc{cmd, in, bufio.NewReader(out)}
+	t.Cleanup(func() { p.in.Close(); p.cmd.Wait() })
+	if got := p.answer(t); got != "ready" {
+		t.Fatalf("namespace helper %s: %q", mode, got)
+	}
+	return p
+}
+
+func (p *nsProc) answer(t *testing.T) string {
+	t.Helper()
+	for {
+		line, err := p.out.ReadString('\n')
+		if err != nil {
+			t.Fatalf("namespace helper: %v", err)
+		}
+		if a, ok := strings.CutPrefix(strings.TrimSpace(line), "GJ:"); ok {
+			return a
+		}
+	}
+}
+
+func (p *nsProc) ask(t *testing.T, cmd, path string) string {
+	t.Helper()
+	if _, err := fmt.Fprintf(p.in, "%s %s\n", cmd, path); err != nil {
+		t.Fatal(err)
+	}
+	return p.answer(t)
+}
+
+func (p *nsProc) mounted(t *testing.T, path string) bool {
+	t.Helper()
+	switch a := p.ask(t, "mounted", path); a {
+	case "yes":
+		return true
+	case "no":
+		return false
+	default:
+		t.Fatalf("namespace helper: %s", a)
+		return false
+	}
+}
+
+func TestIsolateBaseHelper(t *testing.T) {
+	mode := os.Getenv(nsHelper)
+	if mode == "" {
+		t.Skip("runs only as a namespace helper")
+	}
+	if mode == "service" {
+		for _, prop := range []uintptr{unix.MS_SLAVE, unix.MS_SHARED} {
+			if err := unix.Mount("", "/", "", prop|unix.MS_REC, ""); err != nil {
+				fmt.Println("GJ:setup", err)
+				return
+			}
+		}
+	}
+	fmt.Println("GJ:ready")
+	sc := bufio.NewScanner(os.Stdin)
+	for sc.Scan() {
+		cmd, path, _ := strings.Cut(sc.Text(), " ")
+		switch cmd {
+		case "mounted":
+			m, err := mountRootAt(path)
+			switch {
+			case err != nil:
+				fmt.Println("GJ:", err)
+			case m:
+				fmt.Println("GJ:yes")
+			default:
+				fmt.Println("GJ:no")
+			}
+		case "mount":
+			if err := unix.Mount("tmpfs", path, "tmpfs", unix.MS_NOSUID|unix.MS_NODEV, "mode=755"); err != nil {
+				fmt.Println("GJ:", err)
+			} else {
+				fmt.Println("GJ:ok")
+			}
+		}
+	}
+}
+
+func TestIsolateBaseChild(t *testing.T) {
 	dir := os.Getenv(usernsChild)
-	if dir == "" {
-		t.Skip("runs only inside TestPrivateBase")
+	if dir == "" || os.Getenv(nsHelper) != "" {
+		t.Skip("runs only inside TestIsolateBase")
 	}
 	run, peer := filepath.Join(dir, "run"), filepath.Join(dir, "peer")
 	tmpfsMode := func(p, mode string) {
@@ -74,11 +190,15 @@ func TestPrivateBaseChild(t *testing.T) {
 	if !mountedAt(filepath.Join(peer, "ctl")) {
 		t.Fatal("control mount did not reach the peer: the test proves nothing")
 	}
-	if err := checkPrivate(run); err == nil {
-		t.Error("shared /run passed checkPrivate")
+	if err := checkBase(run); err == nil {
+		t.Error("/run with a peer outside it passed checkBase")
 	}
 
 	base := filepath.Join(run, "gjallar-move")
+	old, newDir := filepath.Join(base, Old), filepath.Join(base, New)
+	// A namespace that exists before the first lock, a plain copy that
+	// receives everything /run's group gets.
+	before := startNS(t, "before")
 	unlock, err := lock(base)
 	if err != nil {
 		t.Fatal(err)
@@ -86,13 +206,21 @@ func TestPrivateBaseChild(t *testing.T) {
 	if !mountedAt(base) {
 		t.Error("base is not a mount after lock")
 	}
+	// A service started during the move.
+	service := startNS(t, "service")
 	// The old disk, as openOp mounts it.
-	tmpfs(filepath.Join(base, Old))
-	if err := checkPrivate(base); err != nil {
+	tmpfs(old)
+	if err := checkBase(base); err != nil {
 		t.Error(err)
 	}
 	if mountedAt(filepath.Join(peer, "gjallar-move", Old)) {
 		t.Error("old disk mount reached the peer")
+	}
+	if before.mounted(t, old) {
+		t.Error("old disk mount reached a namespace made before the lock")
+	}
+	if !service.mounted(t, old) {
+		t.Fatal("old disk mount did not reach a namespace made during the move: the unmount check proves nothing")
 	}
 	// The new root, as attach moves it.
 	target := filepath.Join(dir, "mnt")
@@ -100,21 +228,50 @@ func TestPrivateBaseChild(t *testing.T) {
 	if err := attach(base, target); err != nil {
 		t.Fatal(err)
 	}
-	if !mountedAt(filepath.Join(base, New)) {
+	if !mountedAt(newDir) {
 		t.Fatal("new root not attached")
 	}
 	if mountedAt(filepath.Join(peer, "gjallar-move", New)) {
 		t.Error("attached new root reached the peer")
 	}
+	if before.mounted(t, newDir) {
+		t.Error("attached new root reached a namespace made before the lock")
+	}
+	// L154: a service started with both disks mounted copies them.
+	late := startNS(t, "service")
+	if !late.mounted(t, old) || !late.mounted(t, newDir) {
+		t.Fatal("a namespace made with the disks mounted has no copy: the unmount check proves nothing")
+	}
 	if err := detachOp(base); err != nil {
 		t.Fatal(err)
 	}
-	if err := unix.Unmount(filepath.Join(base, Old), 0); err != nil {
+	for name, ns := range map[string]*nsProc{"during": service, "late": late} {
+		if ns.mounted(t, newDir) {
+			t.Errorf("detach did not reach the %s namespace", name)
+		}
+	}
+	if err := unix.Unmount(old, 0); err != nil {
 		t.Fatal(err)
+	}
+	// The unmount reaches the services' copies, so the disk is free.
+	for name, ns := range map[string]*nsProc{"during": service, "late": late} {
+		if ns.mounted(t, old) {
+			t.Errorf("unmount did not reach the %s namespace", name)
+		}
+	}
+	// Nothing comes back from the service's copy.
+	if a := service.ask(t, "mount", newDir); a != "ok" {
+		t.Fatalf("mount in the service namespace: %s", a)
+	}
+	if mountedAt(newDir) {
+		t.Error("a mount made in a service namespace reached base")
+	}
+	if err := checkBase(base); err != nil {
+		t.Error(err)
 	}
 	unlock()
 
-	// A second step finds base already private and goes on.
+	// A second step finds base set up and goes on.
 	unlock, err = lock(base)
 	if err != nil {
 		t.Fatalf("second lock: %v", err)
@@ -132,6 +289,26 @@ func TestPrivateBaseChild(t *testing.T) {
 	if _, err := lock(stale); err == nil || !strings.Contains(err.Error(), "earlier run") {
 		t.Errorf("mount below a plain base: %v", err)
 	}
+
+	// A base left half done: bound on itself but still in /run's group, or
+	// private after a crash before the shared step. Later locks refuse.
+	for name, prop := range map[string]uintptr{"run-group": 0, "private": unix.MS_PRIVATE} {
+		half := filepath.Join(run, "half-"+name)
+		if err := Dirs(half); err != nil {
+			t.Fatal(err)
+		}
+		if err := unix.Mount(half, half, "", unix.MS_BIND, ""); err != nil {
+			t.Fatal(err)
+		}
+		if prop != 0 {
+			if err := unix.Mount("", half, "", prop, ""); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if _, err := lock(half); err == nil || !strings.Contains(err.Error(), restart) {
+			t.Errorf("half done base %s: %v", name, err)
+		}
+	}
 }
 
 func TestParseMountinfo(t *testing.T) {
@@ -143,15 +320,17 @@ func TestParseMountinfo(t *testing.T) {
 		"43 22 0:30 / /run/gjallar-move2 rw shared:9 - tmpfs tmpfs rw",
 		`44 40 0:31 / /run/gjallar-move/old/a\040b rw shared:3 master:2 - tmpfs tmpfs rw`,
 	}, "\n") + "\n"
-	got, err := parseMountinfo([]byte(data), "/run/gjallar-move")
+	got, err := parseMountinfo([]byte(data))
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := []mountEntry{
-		{"/run/gjallar-move", false},
-		{"/run/gjallar-move/old", false},
-		{"/run/gjallar-move/new", true},
-		{"/run/gjallar-move/old/a b", true},
+		{"/run", 5, false},
+		{"/run/gjallar-move", 0, false},
+		{"/run/gjallar-move/old", 0, false},
+		{"/run/gjallar-move/new", 0, true},
+		{"/run/gjallar-move2", 9, false},
+		{"/run/gjallar-move/old/a b", 3, true},
 	}
 	if len(got) != len(want) {
 		t.Fatalf("got %v", got)
@@ -165,8 +344,10 @@ func TestParseMountinfo(t *testing.T) {
 		"22 1 0:20 / /run rw shared:5 tmpfs tmpfs rw\n",
 		"22 1 0:20 / /run\n",
 		"- 1 0:20 / /run rw\n",
+		"22 1 0:20 / /run rw shared:x - tmpfs tmpfs rw\n",
+		"22 1 0:20 / /run rw shared:0 - tmpfs tmpfs rw\n",
 	} {
-		if _, err := parseMountinfo([]byte(bad), "/run"); err == nil {
+		if _, err := parseMountinfo([]byte(bad)); err == nil {
 			t.Errorf("malformed line accepted: %q", bad)
 		}
 	}
@@ -185,6 +366,21 @@ func TestUnescapeMount(t *testing.T) {
 	} {
 		if got := unescapeMount(in); got != want {
 			t.Errorf("unescapeMount(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestBelow(t *testing.T) {
+	for point, want := range map[string]bool{
+		"/run/gjallar-move":      true,
+		"/run/gjallar-move/old":  true,
+		"/run/gjallar-move2":     false,
+		"/run/gjallar-move2/old": false,
+		"/run":                   false,
+		"/run/gjallar-mov":       false,
+	} {
+		if below(point, "/run/gjallar-move") != want {
+			t.Errorf("below(%q) = %v", point, !want)
 		}
 	}
 }

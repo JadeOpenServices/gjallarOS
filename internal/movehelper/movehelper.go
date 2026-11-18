@@ -195,15 +195,14 @@ func Dirs(base string) error {
 	return nil
 }
 
-// makePrivate is privateBase. Unit tests that run as a plain user, who
+// prepareBase is isolateBase. Unit tests that run as a plain user, who
 // cannot mount, swap it; the namespace test runs the real one.
-var makePrivate = privateBase
+var prepareBase = isolateBase
 
 // lock makes the helper folders and holds base locked, so a second helper
 // run (from another console) waits its turn instead of closing or reusing
 // what this one opened. A held lock refuses at once rather than queueing.
-// Base is then a private mount (L153): nothing mounted below it reaches
-// another namespace.
+// Base is then a mount with a peer group of its own (L153, L154).
 func lock(base string) (func(), error) {
 	if err := Dirs(base); err != nil {
 		return nil, err
@@ -220,7 +219,7 @@ func lock(base string) (func(), error) {
 		return nil, fmt.Errorf("lock %s: %w", base, err)
 	}
 	// Locked first: two helpers must not both bind base on itself.
-	if err := makePrivate(base); err != nil {
+	if err := prepareBase(base); err != nil {
 		unix.Close(fd)
 		return nil, err
 	}
@@ -525,7 +524,7 @@ func openOp(ctx context.Context, base string, req Request) (res OpenResult, err 
 	if err := oldroot.Mount(dev, old); err != nil {
 		return res, err
 	}
-	if err := checkPrivate(old); err != nil {
+	if err := checkBase(base); err != nil {
 		return res, err
 	}
 	top, err := safefs.OpenDir(old)

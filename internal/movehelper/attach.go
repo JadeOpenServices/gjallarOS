@@ -57,7 +57,7 @@ func attach(base, target string) error {
 	if err := unix.MoveMount(tree, "", dst, "", unix.MOVE_MOUNT_F_EMPTY_PATH|unix.MOVE_MOUNT_T_EMPTY_PATH); err != nil {
 		return fmt.Errorf("attach the new disk at %s: %w", newDir, err)
 	}
-	if err := checkPrivate(newDir); err != nil {
+	if err := checkBase(base); err != nil {
 		return errors.Join(err, detachOp(base))
 	}
 	return nil
