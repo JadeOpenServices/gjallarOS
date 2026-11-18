@@ -226,6 +226,11 @@ func TestSavePrivilegedDoesNotActivateAfterInstallFailure(t *testing.T) {
 	}
 
 	moved := false
+	prev := writeRootFile
+	t.Cleanup(func() { writeRootFile = prev })
+	writeRootFile = func(context.Context, []byte, string, string) error {
+		return errors.New("install failed")
+	}
 
 	run := func(
 		_ context.Context,
@@ -237,9 +242,6 @@ func TestSavePrivilegedDoesNotActivateAfterInstallFailure(t *testing.T) {
 			" ",
 		)
 
-		if strings.Contains(call, "install -m 0600") {
-			return nil, errors.New("install failed")
-		}
 		if strings.Contains(call, " mv ") {
 			moved = true
 		}
