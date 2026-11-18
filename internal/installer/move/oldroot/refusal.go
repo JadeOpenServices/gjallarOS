@@ -39,7 +39,7 @@ var texts = map[Reason]string{
 	NotBtrfs:      "The old disk opened, but it does not hold a gjallarOS system.",
 	NoEvidence:    "The old disk does not hold a complete gjallarOS with the current layout.",
 	Managed:       "This computer is managed by your organisation. Ask your administrator to move it.",
-	WrongKey:      "That recovery key or disk password did not open the old disk.",
+	WrongKey:      "That recovery key or disk passphrase did not open the old disk.",
 	OldCryptsetup: "This stick's disk tools are too old to open the old disk safely. Make a new stick.",
 	Busy:          "The old disk is already open. Restart from the stick and try again.",
 }

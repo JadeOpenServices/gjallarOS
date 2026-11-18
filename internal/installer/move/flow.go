@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -82,7 +83,7 @@ func (f Flow) OpenOld(ctx context.Context) (*Old, error) {
 	}
 	old := &Old{Disk: disk, Info: res.Info}
 	f.say(fmt.Sprintf("Found gjallarOS (%s channel, last updated %s).",
-		res.Channel, res.LastUpdated.Format("2 January 2006")))
+		res.Channel, res.LastUpdated.UTC().Format("2 January 2006")))
 	// The record of "gjallarctl move prepare" is inside the encrypted
 	// root, so the PIN notice can only come after the unlock.
 	if res.PINToken {
@@ -116,7 +117,7 @@ func (f Flow) pickOld(ctx context.Context) (oldroot.Part, error) {
 		}
 		switch len(found.Disks) {
 		case 0:
-			f.say("No disk with gjallarOS was found. Connect the old disk now if it is not connected yet.")
+			f.say("No disk with gjallarOS was found. If the old disk is not connected, connect it now.")
 			again, err := f.UI.Confirm(ctx, "Look again?", true)
 			if err != nil {
 				return oldroot.Part{}, err
@@ -137,20 +138,40 @@ func (f Flow) pickOld(ctx context.Context) (oldroot.Part, error) {
 			return d, nil
 		}
 		f.say("Which disk has your old gjallarOS?")
+		lines := make([]string, len(found.Disks))
 		for i, d := range found.Disks {
-			fmt.Fprintf(f.UI.Out, "  %d) %s\n", i+1, diskLine(d))
+			lines[i] = diskLine(d)
 		}
-		for {
-			line, err := f.UI.Value(ctx, "Number", "")
-			if err != nil {
-				return oldroot.Part{}, err
-			}
-			n, err := strconv.Atoi(line)
-			if err == nil && n >= 1 && n <= len(found.Disks) {
-				return found.Disks[n-1], nil
-			}
-			fmt.Fprintf(f.UI.Out, "Type a number from 1 to %d.\n", len(found.Disks))
+		n, err := f.choose(ctx, lines, "")
+		if err != nil {
+			return oldroot.Part{}, err
 		}
+		return found.Disks[n], nil
+	}
+}
+
+// choose lists options by number, as the stick menus do, and returns the
+// index of the one picked. Enter takes def when it is not empty.
+func (f Flow) choose(ctx context.Context, options []string, def string) (int, error) {
+	for i, o := range options {
+		fmt.Fprintf(f.UI.Out, "  %d) %s\n", i+1, o)
+	}
+	fmt.Fprintln(f.UI.Out, "Type a number and press Enter.")
+	for {
+		line, err := f.UI.Value(ctx, "Choice", def)
+		if err != nil {
+			return 0, err
+		}
+		if def != "" && line == def {
+			if i := slices.Index(options, def); i >= 0 {
+				return i, nil
+			}
+		}
+		n, err := strconv.Atoi(line)
+		if err == nil && n >= 1 && n <= len(options) {
+			return n - 1, nil
+		}
+		fmt.Fprintf(f.UI.Out, "Type a number from 1 to %d.\n", len(options))
 	}
 }
 
@@ -167,7 +188,7 @@ func (f Flow) open(ctx context.Context, disk oldroot.Part) (movehelper.OpenResul
 	}
 	tries := 0
 	for tries < keyTries {
-		line, err := f.UI.Secret(ctx, "Recovery key or disk password of the old disk", f.Term)
+		line, err := f.UI.Secret(ctx, "Recovery key or disk passphrase of the old disk", f.Term)
 		if err != nil {
 			return res, err
 		}
@@ -175,7 +196,7 @@ func (f Flow) open(ctx context.Context, disk oldroot.Part) (movehelper.OpenResul
 			continue
 		}
 		if len(line) > maxKey {
-			f.say("That is longer than any key or password gjallarOS sets up.")
+			f.say("That is longer than any key or passphrase gjallarOS sets up.")
 			continue
 		}
 		tries++
@@ -203,21 +224,21 @@ func (f Flow) open(ctx context.Context, disk oldroot.Part) (movehelper.OpenResul
 		return res, nil
 	}
 	installlog.Mark(installlog.StickMoveUnlockFailed, installlog.Count("tries", tries))
-	f.say("The old disk stays locked. The recovery key is in the install report and in the place you saved it when gjallarOS was installed. Start the move again when you have it.")
+	f.say("The old disk stays locked. The recovery key was shown at the first startup of the old computer, so look where you wrote it down. If the old computer still starts, gjallarctl luks recovery-key makes a new one there. Start the move again when you have the key or passphrase.")
 	return res, ErrStopped
 }
 
 // pinNotice is the warning when the old disk has a startup PIN (F1). It
 // tells whether the user goes on.
 func (f Flow) pinNotice(ctx context.Context) (bool, error) {
-	f.say("The old disk also starts with a PIN. The stick cannot check that PIN: only the old computer's own chip can, and wrong tries there could lock you out.\n\n" +
-		"If you go on, these start as \"make new\" on the new disk: VPN keys, Tailscale, the SSH host keys and the machine ID. You can switch each one to \"keep\" later in the move.\n\n" +
+	f.say("The old computer also asks for a PIN at startup. The stick cannot check that PIN. Only the chip in the old computer can, and too many wrong tries there can lock it.\n\n" +
+		"If you go on, the new disk gets new VPN keys, a new Tailscale login, new SSH host keys and a new machine ID. You can choose to keep each one later in the move.\n\n" +
 		"To keep them as they are, go back, start the old computer and run gjallarctl move prepare. It checks the PIN there.")
-	choice, err := f.UI.Choice(ctx, "Your choice", "Go back", []string{"Go back", "Continue"})
+	choice, err := f.choose(ctx, []string{"Go back", "Continue"}, "Go back")
 	if err != nil {
 		return false, err
 	}
-	return choice == "Continue", nil
+	return choice == 1, nil
 }
 
 // refused shows a refusal and marks it; other errors pass through.

@@ -185,6 +185,9 @@ func TestSeveralDisksPickByNumber(t *testing.T) {
 	if strings.Count(out, "Type a number from 1 to 2.") != 2 {
 		t.Errorf("wrong numbers not asked again:\n%s", out)
 	}
+	if !strings.Contains(out, "Type a number and press Enter.\nChoice: ") {
+		t.Errorf("no hint and Choice prompt:\n%s", out)
+	}
 	if h.keys[2] != "" {
 		t.Error("a key went with an unencrypted disk")
 	}
@@ -324,6 +327,9 @@ func TestPINGoBackCloses(t *testing.T) {
 	if !strings.Contains(out, "gjallarctl move prepare") {
 		t.Errorf("notice:\n%s", out)
 	}
+	if !strings.Contains(out, "  1) Go back\n  2) Continue\nType a number and press Enter.\nChoice [Go back]: ") {
+		t.Errorf("PIN choice:\n%s", out)
+	}
 	if strings.Contains(got(), "GJA-2110") {
 		t.Error("going back marked the PIN as accepted")
 	}
@@ -367,5 +373,24 @@ func TestUnknownMode(t *testing.T) {
 	f := Flow{UI: prompt.New(strings.NewReader(""), &bytes.Buffer{}), Helper: &fakeHelper{}, Mode: "other"}
 	if _, err := f.OpenOld(context.Background()); err == nil {
 		t.Fatal("unknown mode accepted")
+	}
+}
+
+// The date is the UTC day, as in the install report, whatever zone the
+// stick or the old disk's time stamp has.
+func TestLastUpdatedIsUTCDay(t *testing.T) {
+	late := opened
+	late.LastUpdated = time.Date(2026, 11, 2, 23, 30, 0, 0, time.FixedZone("west", -2*3600))
+	h := &fakeHelper{answers: map[string][]any{
+		"find":  {movehelper.FindResult{Disks: []oldroot.Part{plainDisk}}},
+		"check": {movehelper.CheckResult{}},
+		"open":  {late},
+	}}
+	_, out, err := run(t, h, "y\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "last updated 3 November 2026") {
+		t.Errorf("date:\n%s", out)
 	}
 }
