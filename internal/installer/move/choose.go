@@ -277,6 +277,16 @@ var itemText = map[identity.Item]struct{ name, keep, renew string }{
 	identity.Nextcloud:      {"Nextcloud account", "the Nextcloud app keeps syncing with no new login", "log in to Nextcloud again"},
 }
 
+// ItemLabel is how the screens name an identity item, and what making it
+// new means for the user.
+type ItemLabel struct{ Name, Renew string }
+
+// ItemText gives the label of it; false for an item with no screen.
+func ItemText(it identity.Item) (ItemLabel, bool) {
+	t, ok := itemText[it]
+	return ItemLabel{Name: t.name, Renew: t.renew}, ok
+}
+
 // nextcloudRefetch is the keep text for the Nextcloud account when its
 // folders stay behind.
 const nextcloudRefetch = "the Nextcloud app logs in by itself and downloads your folders again"

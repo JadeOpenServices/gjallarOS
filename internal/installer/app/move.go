@@ -18,6 +18,7 @@ import (
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/installlog"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/move"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/move/freespace"
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/move/identity"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/move/repocopy"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/move/storecopy"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/prompt"
@@ -341,6 +342,57 @@ func (m *moveRun) copyHome(ctx context.Context) error {
 	}
 	if n := res.Skipped + res.Foreign; n > 0 {
 		fmt.Fprintf(m.out, "%d entries stay on the old disk: pipes, sockets, devices or files of another account.\n", n)
+	}
+	return nil
+}
+
+// identity runs step 15 (design 345, 4.4): the helper writes the identity
+// items the user kept onto the new disk and leaves out the ones made new.
+// A kept item that could not be written stays behind and is told; the
+// install goes on. A helper error stops the install, as for the home.
+func (m *moveRun) identity(ctx context.Context) error {
+	if m == nil {
+		return nil
+	}
+	var keep []identity.Item
+	var renew []string
+	for _, c := range m.choices.Identity {
+		if c.Keep {
+			keep = append(keep, c.Item)
+		} else if t, ok := move.ItemText(c.Item); ok {
+			renew = append(renew, t.Name+": "+t.Renew)
+		}
+	}
+	var res movehelper.IdentityResult
+	if err := m.flow.Helper.Run(ctx, movehelper.Request{Op: "identity", Keep: keep}, &res); err != nil {
+		return fmt.Errorf("carry over what identifies this computer: %w", err)
+	}
+	installlog.Mark(installlog.StickMoveIdentityWritten,
+		installlog.Count("kept", len(keep)),
+		installlog.Count("written", len(res.Written)),
+		installlog.Count("failed", len(res.Failed)),
+		installlog.Count("sync", res.SyncFolders))
+	for _, it := range res.Written {
+		if t, ok := move.ItemText(it); ok {
+			fmt.Fprintf(m.out, "Kept: %s.\n", t.Name)
+		}
+	}
+	if res.SyncFolders > 0 {
+		fmt.Fprintf(m.out, "Nextcloud folders made again, empty: %d. They download from the server.\n", res.SyncFolders)
+	}
+	for _, it := range identity.Items {
+		why, failed := res.Failed[it]
+		if !failed {
+			continue
+		}
+		name := string(it)
+		if t, ok := move.ItemText(it); ok {
+			name = t.Name
+		}
+		fmt.Fprintf(m.out, "%s stays on the old disk: %s\n", name, oneLine(why))
+	}
+	for _, line := range renew {
+		fmt.Fprintf(m.out, "Made new: %s.\n", line)
 	}
 	return nil
 }

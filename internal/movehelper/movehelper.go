@@ -77,6 +77,9 @@ type Request struct {
 	Disk string `json:"disk,omitempty"`
 	// Key unlocks an encrypted old disk, exactly these bytes (open).
 	Key []byte `json:"key,omitempty"`
+	// Keep lists the identity items the user keeps (identity); every other
+	// item is made new.
+	Keep []identity.Item `json:"keep,omitempty"`
 }
 
 // RefusalResult is what a refused step returns. It is an answer for the
@@ -101,7 +104,7 @@ func Run(base string, in io.Reader, out io.Writer) error {
 		result = struct{}{}
 	case "find":
 		result, err = findOp(ctx)
-	case "home", "check", "open", "inventory", "sizes", "config", "close", "closure", "export", "dropcache", "repo", "attach", "detach":
+	case "home", "check", "open", "inventory", "sizes", "config", "close", "closure", "export", "dropcache", "repo", "attach", "detach", "identity":
 		var unlock func()
 		if unlock, err = lock(base); err != nil {
 			break
@@ -110,6 +113,8 @@ func Run(base string, in io.Reader, out io.Writer) error {
 		switch req.Op {
 		case "home":
 			result, err = homeOp(base, req)
+		case "identity":
+			result, err = identityOp(base, req)
 		case "check":
 			result, err = checkOp(ctx, req)
 		case "open":
@@ -288,13 +293,30 @@ func homeOp(base string, req Request) (res HomeResult, err error) {
 	return copyHome(old, dst, uid, usersGID, req.Sync, req.Budget)
 }
 
-// newHome opens home/<username> on the new root. home is the @home mount,
-// entered on its own (L156) and checked to be the new disk's @home. The
-// folder must be a plain, empty folder of a normal user in the users group,
-// never a Nix build account (L152): what nixos-install made, nothing put
-// there since. The checks are made on the opened folder, so it cannot be
-// swapped after them.
+// newHome opens home/<username> on the new root, as installedHome does,
+// and refuses it unless it is empty: what nixos-install made, nothing put
+// there since.
 func newHome(newRoot *safefs.Dir, username string) (*safefs.Dir, int, error) {
+	d, uid, err := installedHome(newRoot, username)
+	if err != nil {
+		return nil, 0, err
+	}
+	if _, err = d.Names(".", 0); errors.Is(err, safefs.ErrTooMany) {
+		err = fmt.Errorf("the new home of %s is not empty", username)
+	}
+	if err != nil {
+		d.Close()
+		return nil, 0, err
+	}
+	return d, uid, nil
+}
+
+// installedHome opens home/<username> on the new root. home is the @home
+// mount, entered on its own (L156) and checked to be the new disk's @home.
+// The folder must be a plain folder of a normal user in the users group,
+// never a Nix build account (L152). The checks are made on the opened
+// folder, so it cannot be swapped after them.
+func installedHome(newRoot *safefs.Dir, username string) (*safefs.Dir, int, error) {
 	if !config.ValidUsername(username) {
 		return nil, 0, fmt.Errorf("%q is not a valid user name", username)
 	}
@@ -322,12 +344,6 @@ func newHome(newRoot *safefs.Dir, username string) (*safefs.Dir, int, error) {
 		err = fmt.Errorf("the new home of %s belongs to user %d, not a normal user", username, st.Uid)
 	case st.Gid != usersGID:
 		err = fmt.Errorf("the new home of %s is in group %d, not users", username, st.Gid)
-	default:
-		if _, lerr := d.Names(".", 0); errors.Is(lerr, safefs.ErrTooMany) {
-			err = fmt.Errorf("the new home of %s is not empty", username)
-		} else {
-			err = lerr
-		}
 	}
 	if err != nil {
 		d.Close()
@@ -1035,8 +1051,9 @@ const (
 	maxGitDepth   = 32
 )
 
-// rootUID owns the new checkout; tests run as their own user.
-var rootUID uint32
+// rootUID owns the new checkout; tests run as their own user. rootGID is
+// the group of the files root writes on the new root.
+var rootUID, rootGID uint32
 
 func rootsOnly(rel string, st unix.Stat_t, dir bool) error {
 	switch {

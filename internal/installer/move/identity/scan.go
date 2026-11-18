@@ -214,18 +214,41 @@ func (s *scanner) machineID() bool {
 		return false
 	}
 	defer clear(raw)
+	if !validMachineID(raw) {
+		s.inv.Skipped++
+		return false
+	}
+	return true
+}
+
+// validMachineID is true for 32 lowercase hex digits and a newline, not
+// all zero.
+func validMachineID(raw []byte) bool {
 	id, ok := bytes.CutSuffix(raw, []byte("\n"))
 	if !ok || len(id) != 32 || bytes.Count(id, []byte("0")) == 32 {
-		s.inv.Skipped++
 		return false
 	}
 	for _, c := range id {
 		if !('0' <= c && c <= '9' || 'a' <= c && c <= 'f') {
-			s.inv.Skipped++
 			return false
 		}
 	}
 	return true
+}
+
+// ReadMachineID reads the old disk's machine-id below top, checked as Scan
+// checks it: exactly what goes into the new disk's /etc/machine-id. The
+// caller clears it after use.
+func ReadMachineID(top *safefs.Dir) ([]byte, error) {
+	raw, err := top.ReadFile(machineIDRel, 64)
+	if err != nil {
+		return nil, err
+	}
+	if !validMachineID(raw) {
+		clear(raw)
+		return nil, errors.New("the old machine-id is not a valid machine-id")
+	}
+	return raw, nil
 }
 
 type kind int

@@ -13,6 +13,7 @@ import (
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/config"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/move"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/move/freespace"
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/move/identity"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/move/oldroot"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/move/repocopy"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/move/storecopy"
@@ -33,7 +34,9 @@ type fakeMoveHelper struct {
 	closure movehelper.ClosureResult
 	repo    repocopy.Result
 	home    movehelper.HomeResult
+	ident   movehelper.IdentityResult
 	syncs   map[string]bool
+	keep    []identity.Item
 }
 
 func (h *fakeMoveHelper) Run(ctx context.Context, req movehelper.Request, result any) error {
@@ -49,6 +52,9 @@ func (h *fakeMoveHelper) Run(ctx context.Context, req movehelper.Request, result
 		h.syncs = map[string]bool{}
 	}
 	h.syncs[req.Op] = req.Sync
+	if req.Op == "identity" {
+		h.keep = req.Keep
+	}
 	if err := h.fail[req.Op]; err != nil {
 		return err
 	}
@@ -61,6 +67,8 @@ func (h *fakeMoveHelper) Run(ctx context.Context, req movehelper.Request, result
 		*r = h.repo
 	case *movehelper.HomeResult:
 		*r = h.home
+	case *movehelper.IdentityResult:
+		*r = h.ident
 	}
 	return nil
 }
@@ -369,6 +377,44 @@ func TestCopyHome(t *testing.T) {
 	m = testMoveRun(h, &bytes.Buffer{})
 	m.choices = chosen(true, false)
 	if err := m.copyHome(ctx); err == nil {
+		t.Fatal("a helper error is no hard stop")
+	}
+}
+
+// identity sends the kept items only, names each item as the screens do,
+// tells what stays behind and what was made new, and stops on a helper
+// error.
+func TestMoveIdentity(t *testing.T) {
+	ctx := context.Background()
+	var nilRun *moveRun
+	if err := nilRun.identity(ctx); err != nil {
+		t.Fatalf("no move: %v", err)
+	}
+	var out bytes.Buffer
+	h := &fakeMoveHelper{ident: movehelper.IdentityResult{
+		Written:     []identity.Item{identity.MachineID},
+		Failed:      map[identity.Item]string{identity.WiFi: "not\nyet"},
+		SyncFolders: 2,
+	}}
+	m := testMoveRun(h, &out)
+	m.choices.Identity = []identity.Choice{
+		{Item: identity.WiFi, Keep: true},
+		{Item: identity.Tailscale},
+		{Item: identity.MachineID, Keep: true},
+	}
+	if err := m.identity(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(h.ops, []string{"identity"}) || !slices.Equal(h.keep, []identity.Item{identity.WiFi, identity.MachineID}) {
+		t.Errorf("ops %v, keep %v", h.ops, h.keep)
+	}
+	for _, w := range []string{"Kept: Machine ID.", "Saved Wi-Fi networks stays on the old disk: not yet", "Made new: Tailscale: log in again", "made again, empty: 2"} {
+		if !strings.Contains(out.String(), w) {
+			t.Errorf("output %q lacks %q", out.String(), w)
+		}
+	}
+	h = &fakeMoveHelper{fail: map[string]error{"identity": errors.New("helper gone")}}
+	if err := testMoveRun(h, &bytes.Buffer{}).identity(ctx); err == nil {
 		t.Fatal("a helper error is no hard stop")
 	}
 }

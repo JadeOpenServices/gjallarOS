@@ -68,6 +68,7 @@ const (
 	StickMoveRepoCopied      ID = 2118
 	StickMoveEnded           ID = 2119
 	StickMoveHomeCopied      ID = 2120
+	StickMoveIdentityWritten ID = 2121
 
 	MakerRunStarted        ID = 3001
 	MakerKeyConfirmed      ID = 3002
@@ -310,6 +311,13 @@ var Registry = []Anchor{
 			{Name: "foreign", Kind: KindCount, Meaning: "entries owned by another account, left behind"},
 			{Name: "sync", Kind: KindBool, Meaning: "true: the Nextcloud folders were asked to come along"},
 			{Name: "failed", Kind: KindBool, Meaning: "true: the copy failed and what it wrote was taken back"}}},
+	{ID: StickMoveIdentityWritten, Name: "stick.move.identity-written",
+		Meaning: "The identity items the user kept were written onto the new disk; the ones made new were left out.",
+		Fields: []FieldSpec{
+			{Name: "kept", Kind: KindCount, Meaning: "items the user chose to keep"},
+			{Name: "written", Kind: KindCount, Meaning: "kept items now on the new disk"},
+			{Name: "failed", Kind: KindCount, Meaning: "kept items that stay behind, told on screen"},
+			{Name: "sync", Kind: KindCount, Meaning: "Nextcloud folders made again, empty, to download from the server"}}},
 
 	{ID: MakerRunStarted, Name: "maker.run.started",
 		Meaning: "The USB stick maker started.",
