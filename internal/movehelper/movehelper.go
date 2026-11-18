@@ -15,7 +15,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -677,15 +676,16 @@ func removeCache(ctx context.Context, newRoot *safefs.Dir) error {
 }
 
 // stopUnits stops every confined unit of the move and waits until each has
-// ended (L135). A unit that is not loaded is fine. Tests swap it.
-var stopUnits = func(ctx context.Context) error {
+// ended (L135). A unit that is not loaded is fine. It is a plain function,
+// never a variable: a package-level value that leads to a program is what
+// the exec guard refuses (L137).
+func stopUnits(ctx context.Context) error {
 	for _, u := range storecopy.Units {
 		var stderr bytes.Buffer
 		cmd := oldroot.Tool(ctx, storecopy.Systemctl, "stop", "--", u)
 		cmd.Stderr = &capped{w: &stderr, left: maxUnitErr}
 		err := cmd.Run()
-		var exit *exec.ExitError
-		if errors.As(err, &exit) && exit.ExitCode() == storecopy.NotLoaded {
+		if err != nil && oldroot.ExitCode(err) == storecopy.NotLoaded {
 			continue
 		}
 		if err != nil {

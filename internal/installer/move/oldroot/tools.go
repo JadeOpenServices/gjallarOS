@@ -2,6 +2,7 @@ package oldroot
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os/exec"
 	"path/filepath"
@@ -31,4 +32,15 @@ func Tool(ctx context.Context, path string, args ...string) *exec.Cmd {
 		cmd.Err = fmt.Errorf("%q is not an absolute path, so it is not run as root", path)
 	}
 	return cmd
+}
+
+// ExitCode is the exit code of a program that ran and failed, or -1 for
+// any other error. Callers check codes through it, so os/exec stays in
+// this reviewed file (L137).
+func ExitCode(err error) int {
+	var exit *exec.ExitError
+	if errors.As(err, &exit) {
+		return exit.ExitCode()
+	}
+	return -1
 }

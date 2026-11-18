@@ -70,7 +70,7 @@ func TestUnitArgs(t *testing.T) {
 		"--property=ProtectSystem=strict", "--property=ProtectHome=yes",
 		"--property=BindReadOnlyPaths=/run/gjallar-move/old/@nix:/oldnix",
 		"--property=BindPaths=/run/gjallar-move/new/gjallar-move-cache:/cache",
-		"--property=RuntimeMaxSec=7200",
+		"--property=RuntimeMaxSec=7200", "--property=TimeoutStopSec=10s",
 	} {
 		if !slices.Contains(props, want) {
 			t.Errorf("missing %q", want)

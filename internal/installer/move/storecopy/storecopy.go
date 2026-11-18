@@ -102,6 +102,9 @@ var unitProps = []string{
 	"UMask=0022",
 	"MemoryMax=4G",
 	"TasksMax=64",
+	// A stop before cleanup (L135) kills a unit that does not end within
+	// this, so close and the cache removal never wait systemd's 90 s.
+	"TimeoutStopSec=10s",
 	"Environment=HOME=/tmp",
 	// nix would ask the stick's daemon for anything it cannot do alone.
 	"InaccessiblePaths=-/nix/var/nix/daemon-socket",

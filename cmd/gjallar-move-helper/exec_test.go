@@ -53,7 +53,7 @@ var refused = []string{"C", "plugin", "unsafe"}
 // needs a root loophole review first.
 var linkedStarters = map[string]int{
 	"internal/installer/move/oldroot/open.go":     1,
-	"internal/installer/move/oldroot/tools.go":    2,
+	"internal/installer/move/oldroot/tools.go":    3,
 	"internal/installer/targetdisk/discover.go":   1,
 	"internal/installer/targetdisk/targetdisk.go": 1,
 	"internal/sshsig/sshsig.go":                   2,
@@ -118,14 +118,12 @@ func TestOnlyReviewedFilesStartPrograms(t *testing.T) {
 	for _, f := range files {
 		byPkg[f.pkg] = append(byPkg[f.pkg], f)
 	}
-	all := map[string]map[string]bool{} // package → every name that leads to a starter
 	var leads []string
 	for pkg, fs := range byPkg {
-		all[pkg] = leadToStarter(fs)
 		if pkg == calledStarters {
 			continue
 		}
-		for name := range all[pkg] {
+		for name := range leadToStarter(fs, nil) {
 			if ast.IsExported(name) {
 				leads = append(leads, pkg+"."+name)
 			}
@@ -145,28 +143,64 @@ func TestOnlyReviewedFilesStartPrograms(t *testing.T) {
 		}
 	}
 
-	// Go runs init functions and the values of package-level variables as
-	// soon as a package is linked, as root, with nothing in the helper
-	// naming them (baka-c7). None of that may lead to a starter, oldroot's
-	// included.
+	for _, path := range startUpHits(files) {
+		t.Errorf("%s: runs at start-up and leads to a starter", path)
+	}
+}
+
+// startUpHits returns the files whose start-up code leads to a starter. Go
+// runs init functions and the values of package-level variables as soon as
+// a package is linked, as root, with nothing in the helper naming them
+// (baka-c7). None of that may lead to a starter, oldroot's included, and
+// through any package: a local function that calls oldroot counts (L137).
+func startUpHits(files []file) []string {
+	all := crossLeads(files)
+	var hits []string
 	for _, f := range files {
 		for _, n := range startUp(f.ast) {
-			hit := count(n, f.imports, starters) > 0 || count(n, f.imports, rawCalls) > 0
-			ast.Inspect(n, func(n ast.Node) bool {
-				if id, ok := n.(*ast.Ident); ok && all[f.pkg][id.Name] {
-					hit = true
-				}
-				return !hit
-			})
-			for _, use := range namesUsed(n, f.imports) {
-				pkg, name, _ := strings.Cut(use, ".")
-				hit = hit || all[pkg][name]
-			}
-			if hit {
-				t.Errorf("%s: runs at start-up and leads to a starter", f.path)
+			if names(n, f, all) {
+				hits = append(hits, f.path)
 			}
 		}
 	}
+	return hits
+}
+
+// crossLeads returns, by package, every name that leads to a starter
+// through any linked package, oldroot's included, until nothing changes.
+func crossLeads(files []file) map[string]map[string]bool {
+	byPkg := map[string][]file{}
+	for _, f := range files {
+		byPkg[f.pkg] = append(byPkg[f.pkg], f)
+	}
+	all := map[string]map[string]bool{}
+	for changed := true; changed; {
+		changed = false
+		for pkg, fs := range byPkg {
+			if l := leadToStarter(fs, all); len(l) != len(all[pkg]) {
+				all[pkg] = l
+				changed = true
+			}
+		}
+	}
+	return all
+}
+
+// names reports whether n names a starter, a raw system call, a lead of
+// its own package, or a lead of another package in all.
+func names(n ast.Node, f file, all map[string]map[string]bool) bool {
+	hit := count(n, f.imports, starters) > 0 || count(n, f.imports, rawCalls) > 0
+	ast.Inspect(n, func(n ast.Node) bool {
+		if id, ok := n.(*ast.Ident); ok && all[f.pkg][id.Name] {
+			hit = true
+		}
+		return !hit
+	})
+	for _, use := range namesUsed(n, f.imports) {
+		pkg, name, _ := strings.Cut(use, ".")
+		hit = hit || all[pkg][name]
+	}
+	return hit
 }
 
 // startUp returns what Go runs when the package is linked: init functions
@@ -286,12 +320,12 @@ func count(n ast.Node, imports map[string]string, names map[string]func(string) 
 }
 
 // leadToStarter returns the names of one package that lead to a starter. A
-// declaration leads to one when it names a starter or names a declaration
-// of its package that does. Methods count under their receiver's type, so
+// declaration leads to one when it names a starter, names a declaration
+// of its package that does, or names pkg.Name with Name in ext[pkg]. Methods count under their receiver's type, so
 // a value of that type leads there too. Names are matched by spelling,
 // which can only find too many. The blank name is never one: it would
 // make every declaration with a "_" in it a lead.
-func leadToStarter(fs []file) map[string]bool {
+func leadToStarter(fs []file, ext map[string]map[string]bool) map[string]bool {
 	type decl struct {
 		names []string
 		node  ast.Node
@@ -339,6 +373,10 @@ func leadToStarter(fs []file) map[string]bool {
 				}
 				return !hit
 			})
+			for _, use := range namesUsed(d.node, d.file.imports) {
+				pkg, name, _ := strings.Cut(use, ".")
+				hit = hit || ext[pkg][name]
+			}
 			if hit {
 				for _, n := range d.names {
 					if n != "_" && !leads[n] {
@@ -382,4 +420,50 @@ func namesUsed(n ast.Node, imports map[string]string) []string {
 		return true
 	})
 	return used
+}
+
+// baka-c7's probes for L137: start-up code that reaches oldroot through a
+// local function, or through another package, is refused.
+func TestStartUpProbes(t *testing.T) {
+	files := linked(t)
+	if hits := startUpHits(files); len(hits) > 0 {
+		t.Fatalf("shipped files hit: %v", hits)
+	}
+	for name, src := range map[string]struct{ pkg, code string }{
+		"direct": {"internal/movehelper", `package movehelper
+import "context"
+var c7probe, _ = runUnit(context.Background(), []string{"--version"}, 10)`},
+		"through a function": {"internal/movehelper", `package movehelper
+import "context"
+func c7step() int { runUnit(context.Background(), nil, 10); return 0 }
+var c7probe = c7step()`},
+		"init": {"internal/movehelper", `package movehelper
+import "context"
+func init() { stopUnits(context.Background()) }`},
+		"other package": {"cmd/gjallar-move-helper", `package main
+import mh "` + module + `/internal/movehelper"
+var c7probe = mh.Run`},
+		"oldroot in a literal": {"internal/movehelper", `package movehelper
+import ("context"; "` + module + `/internal/installer/move/oldroot")
+var c7probe = func() { oldroot.Tool(context.Background(), "/x") }`},
+	} {
+		path := src.pkg + "/c7probe.go"
+		f, err := parser.ParseFile(token.NewFileSet(), path, src.code, 0)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		imports := map[string]string{}
+		for _, imp := range f.Imports {
+			ipath, _ := strconv.Unquote(imp.Path.Value)
+			local := filepath.Base(ipath)
+			if imp.Name != nil {
+				local = imp.Name.Name
+			}
+			imports[local] = ipath
+		}
+		probe := file{pkg: src.pkg, path: path, ast: f, imports: imports}
+		if !slices.Contains(startUpHits(append(slices.Clone(files), probe)), path) {
+			t.Errorf("%s: probe not refused", name)
+		}
+	}
 }
