@@ -117,26 +117,47 @@ write, but only checks and moves files.
 #### 1. Release key
 
 Make the key on your own machine. It needs no network. RSA, at least 3072
-bits, exponent 65537 (openssl's default):
+bits, exponent 65537 (openssl's default). Make it in a private folder
+outside the checkout, so it can never be committed. Run these from the
+checkout:
 
 ```sh
-umask 077
-openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:4096 -out release.key
-openssl pkey -in release.key -pubout -out deployment/release-key.pem
+mkdir -m 700 ~/release-key
+(umask 077; openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:4096 -out ~/release-key/release.key)
+openssl pkey -in ~/release-key/release.key -pubout -out deployment/release-key.pem
+git add deployment/release-key.pem
 ```
 
 - Commit `deployment/release-key.pem`. Without it the flake has no
-  `gjallar-release` package and the stick refuses to install.
-- Put `release.key` into the secret `RELEASE_SIGNING_KEY` of the
+  `gjallar-release` package and the stick refuses to install. The flake
+  is read as `git+file`, which sees only files git knows: until the
+  `git add`, every build says the flake "does not provide attribute
+  ... gjallar-release-makers".
+- Put the key into the secret `RELEASE_SIGNING_KEY` of the
   `installer-sign` environment straight from the file, so it never goes
-  through the clipboard (after step 2):
+  through the clipboard (after step 2). `gh` prints
+  `✓ Set Actions secret RELEASE_SIGNING_KEY for JadeOpenServices/gjallarOS`:
 
   ```sh
-  gh secret set RELEASE_SIGNING_KEY --env installer-sign --repo JadeOpenServices/gjallarOS < release.key
+  gh secret set RELEASE_SIGNING_KEY --env installer-sign --repo JadeOpenServices/gjallarOS < ~/release-key/release.key
   ```
-- Keep `release.key` offline (an encrypted stick in a drawer) or delete
-  it. Without a copy, losing the secret means a new key
-  ([Changing the release key](#changing-the-release-key)).
+- Keep one encrypted copy, then delete the plain file. Without a copy,
+  losing the secret means a new key
+  ([Changing the release key](#changing-the-release-key)). We keep it
+  in Nextcloud, encrypted with a passphrase that lives in the password
+  manager. The second command decrypts the copy, compares it with the
+  original and deletes the original only when they match (it prints
+  `MATCH`). `--no-symkey-cache` keeps gpg-agent from remembering the
+  passphrase:
+
+  ```sh
+  mkdir -p ~/Nextcloud/Backup/gjallarOS
+  gpg --symmetric --no-symkey-cache --cipher-algo AES256 --s2k-digest-algo SHA512 --s2k-count 65011712 -o ~/Nextcloud/Backup/gjallarOS/release.key.gpg ~/release-key/release.key
+  gpg --no-symkey-cache -d ~/Nextcloud/Backup/gjallarOS/release.key.gpg | cmp - ~/release-key/release.key && echo MATCH && rm -r ~/release-key
+  ```
+
+  An encrypted stick in a drawer works the same way. Only decrypt the
+  copy to set the secret again; it never goes anywhere else.
 
 The key signs `SHA256SUMS` and nothing else. The `sign` job checks that the
 secret belongs to `deployment/release-key.pem` of the tag, so a key change
@@ -213,7 +234,8 @@ made it is responsible for it.
    `release-bot@` on your own domain. Pick a username such as
    `gjallaros-release-bot`, a password from your password manager, and
    turn on 2FA right after (an authenticator app; keep its recovery codes
-   with the password).
+   with the password). Our bot's login is `release-botGjallar`; the
+   commands below use it. A fork puts its own bot's login there.
 2. Invite it to the organization as a member and add it to the team
    `gjallaros-release`. Accept the invite on the bot login.
 3. On the bot login: Settings → Developer settings → Personal access
@@ -225,17 +247,28 @@ made it is responsible for it.
      then switch its access from "Read-only" to "Read and write".
      "Metadata: Read-only" is added by itself and is required. Add
      nothing else.
-   - Generate token. If the organization asks for token approval,
-     approve it as owner.
+   - Generate token.
+   - Approve it on your own login: Organization → Settings → Personal
+     access tokens → Pending requests → the bot's request → Approve. The
+     organization requires approval for fine-grained tokens. Until then
+     the token works for nothing, and a tag push fails with `403` and
+     `Permission to JadeOpenServices/gjallarOS.git denied to
+     release-botGjallar`.
 4. Store the token in the keyring of the machine that pushes the tags.
-   Paste it into the prompt, so it is on no command line and in no file:
+   Paste it into the prompt, so it is on no command line and in no file.
+   `service github.com user gjallaros-release-bot` only names the
+   keyring entry; the push below looks it up by those words:
 
    ```sh
    secret-tool store --label "gjallarOS release bot" service github.com user gjallaros-release-bot
    ```
 
+   gjallarOS ships `secret-tool` (libsecret). On a machine without it,
+   put `nix shell nixpkgs#libsecret -c` in front of the command.
+
 To stop the bot at once: revoke the token, or remove the account from the
-team. Before the token expires, make a new one and store it the same way.
+team. Before the token expires, make a new one, have it approved and
+store it the same way (`secret-tool store` replaces the old entry).
 
 #### 4. Statements repository and builder
 
@@ -279,12 +312,25 @@ Setting it up:
    expiration at most one year, "Only select repositories" →
    `gjallarOS-statements`. Click "Add permissions", tick "Contents" and
    switch it to "Read and write"; "Metadata: Read-only" comes with it.
-   Nothing else. Hand the token to the builder through stdin, so it is on
-   no command line. Paste it, press Enter, then Ctrl-D:
+   Nothing else. If the organization lists it under Pending requests,
+   approve it there. Hand the token to the builder through stdin, so it
+   is on no command line. Paste it, press Enter, then Ctrl-D:
 
    ```sh
    qm guest exec <vmid> --pass-stdin 1 -- /run/current-system/sw/bin/gjallar-builder-set-token
    ```
+
+   Our builder is VM 200 on pve01. From the laptop, with the typing
+   hidden (`stty echo` turns it back on):
+
+   ```sh
+   stty -echo; ssh root@pve01.openjade.de qm guest exec 200 --pass-stdin 1 -- /run/current-system/sw/bin/gjallar-builder-set-token; stty echo
+   ```
+
+   It worked when the output holds `"out-data" : "token saved\n"` and
+   `"exitcode" : 0`. The script accepts only one `github_pat_...` line
+   and stores it in `/var/lib/gjallar-builder/statements-token`, readable
+   by root only.
 
    Fine-grained tokens expire. Before the date GitHub shows, make a new
    one and run the same command again.
@@ -343,13 +389,47 @@ it does. Change it only when you know why the key changed, the same way
 as the [release key](#changing-the-release-key). Statements already in
 the repository stay as they are; `sign` only looks at the tag it signs.
 
+#### 5. Check the setup
+
+None of these print a secret. Each line says what it should show.
+
+```sh
+gh api orgs/JadeOpenServices --jq .two_factor_requirement_enabled
+gh api orgs/JadeOpenServices/teams/gjallaros-release/members --jq '.[].login'
+gh api orgs/JadeOpenServices/teams/gjallaros-release/repos --jq '.[] | .full_name + " " + .role_name'
+gh api repos/JadeOpenServices/gjallarOS/rulesets --jq '.[].name'
+gh api repos/JadeOpenServices/gjallarOS/environments/installer-sign/secrets --jq '.secrets[].name'
+gh api repos/JadeOpenServices/gjallarOS/environments/installer-sign/variables --jq '.variables[].name'
+gh api repos/JadeOpenServices/gjallarOS/environments/release-cache/secrets --jq '.secrets[].name'
+secret-tool lookup service github.com user gjallaros-release-bot >/dev/null && echo bot token stored
+git ls-files deployment/release-key.pem
+```
+
+1. `true`
+2. the bot's login (`release-botGjallar`), nobody else
+3. `JadeOpenServices/gjallarOS write`
+4. the three rulesets of [step 3](#3-tag-and-branch-rules)
+5. `RELEASE_SIGNING_KEY`
+6. `BUILDER_SSH_KEY`
+7. `NIX_SIGNING_KEY`
+8. `bot token stored`
+9. `deployment/release-key.pem`
+
+The bot's token approval shows under Organization → Settings → Personal
+access tokens → Active tokens. The builder's token shows only by working:
+its journal says the statement was pushed.
+
 ### Per release
 
+Run these from the checkout, on the branch the release goes to.
+
 1. On the release commit, set `system/release` to the new tag name.
-2. Build the makers and get the README lines:
+2. Build the makers and get the README lines. Any new file the build
+   needs must be `git add`ed first (see [Release key](#1-release-key)).
+   `nice`, `ionice` and the job limits keep the machine usable meanwhile:
 
    ```sh
-   nix build "git+file://$PWD?submodules=1#gjallar-release-makers"
+   nice -n 10 ionice -c3 nix build --max-jobs 2 --cores 4 "git+file://$PWD?submodules=1#gjallar-release-makers"
    cat result/readme-fingerprint result/readme-makers
    ```
 
@@ -357,25 +437,66 @@ the repository stay as they are; `sign` only looks at the tag it signs.
    fingerprint (SHA-256):" in `README.md` and the two
    `result/readme-makers` rows into the maker table. The maker rows change
    with every release, because the makers carry the version and the
-   floor. The fingerprint changes only with a new key.
+   floor. The fingerprint changes only with a new key. Check that the
+   README now holds exactly those lines:
+
+   ```sh
+   grep -cFf result/readme-fingerprint README.md
+   grep -cFf result/readme-makers README.md
+   ```
+
+   Both print `2`. The `gjallar-release` build in CI checks the same and
+   stops on a stale README.
 4. Commit and push the branch (`dev`, `staging` or `stable`) with your
    own login, then tag the commit and push the tag with the bot's token
    from the keyring. The first `credential.helper=` drops every other
-   helper, so the push cannot fall back to your login:
+   helper, so the push cannot fall back to your login. `username=` is
+   the bot's GitHub login:
 
    ```sh
+   git push origin HEAD:dev
    git tag vYYYY.MM.N <commit>
-   git -c credential.helper= -c 'credential.helper=!f() { echo username=gjallaros-release-bot; printf "password="; secret-tool lookup service github.com user gjallaros-release-bot; echo; }; f' push origin refs/tags/vYYYY.MM.N
+   git -c credential.helper= -c 'credential.helper=!f() { echo username=release-botGjallar; printf "password="; secret-tool lookup service github.com user gjallaros-release-bot; echo; }; f' push origin refs/tags/vYYYY.MM.N
    ```
 
-   `build` runs for 1 to 6 hours.
-5. Wait for the builder statement: the folder
-   `vYYYY.MM.N/gjallar-builder/` in gjallarOS-statements.
-6. Open the run, check what you are about to sign
+   Without `secret-tool` on the path, put
+   `nix shell nixpkgs#libsecret -c` in front of the last `git`. The tag
+   starts two workflows: the installer release (`installer-iso.yml`) and
+   the release cache (`cache.yml`). `build` runs for 1 to 6 hours.
+5. Approve the release cache. Its job waits for the `release-cache`
+   environment: open the "Release cache" run under Actions → "Review
+   deployments" → tick `release-cache` → Approve. With `gh`:
+
+   ```sh
+   gh run list --repo JadeOpenServices/gjallarOS --workflow cache.yml --limit 1 --json databaseId,status,headBranch
+   gh api repos/JadeOpenServices/gjallarOS/environments/release-cache --jq .id
+   gh api -X POST repos/JadeOpenServices/gjallarOS/actions/runs/<run id>/pending_deployments -F 'environment_ids[]=<environment id>' -f state=approved -f comment='vYYYY.MM.N cache'
+   ```
+
+   Check first that `headBranch` is the tag you just pushed.
+6. Wait for the builder statement: the folder
+   `vYYYY.MM.N/gjallar-builder/` in gjallarOS-statements. The builder
+   looks for new tags once an hour, then builds for about as long as CI.
+
+   ```sh
+   gh api repos/JadeOpenServices/gjallarOS-statements/contents/vYYYY.MM.N/gjallar-builder --jq '.[].name'
+   ```
+
+   It prints `SHA256SUMS` and `SHA256SUMS.sshsig` once it is there.
+7. Open the installer release run, check what you are about to sign
    ([Before you approve](#before-you-approve)), and approve
-   `installer-sign`.
-7. `publish` puts the release online. If `stable` has the same tree, it
-   becomes Latest.
+   `installer-sign` the same way as in step 5. This one you approve in
+   the web page, after reading the run; the bot pushed the tag, so
+   "Prevent self-review" lets you.
+8. `publish` puts the release online. If `stable` has the same tree, it
+   becomes Latest. Check it:
+
+   ```sh
+   gh release view vYYYY.MM.N --repo JadeOpenServices/gjallarOS --json isDraft,assets --jq '.isDraft, (.assets[].name)'
+   ```
+
+   It prints `false` and the seven files of
+   [What a release holds](#what-a-release-holds).
 
 The approval waits up to 30 days. If you approve before the statement is
 there, `sign` stops with "No builder statement"; use "Re-run failed jobs"
@@ -402,6 +523,9 @@ approve only:
 
 | Message | What to do |
 | --- | --- |
+| Tag push: `403`, `Permission to JadeOpenServices/gjallarOS.git denied to <bot>` | The bot's token is not approved yet (Organization → Settings → Personal access tokens → Pending requests), lacks Contents "Read and write", expired, or the bot left the team `gjallaros-release` |
+| Tag push: `GH013: Repository rule violations found for refs/tags/...` | The push used your own login, not the bot's; the tag ruleset lets only the team `gjallaros-release` make tags. Use the command of [Per release](#per-release) step 4 as it is, with `credential.helper=` first |
+| Local build: `does not provide attribute ... gjallar-release-makers` | `deployment/release-key.pem` or another new file is not known to git: `git add` it |
 | `... is not a release name like v2026.10.1` | Tags are `vYYYY.MM.N`. Delete the tag and push a correct one |
 | `... points at a commit that is on none of dev, staging, stable` | Push the commit to its channel branch first, then delete and push the tag again |
 | `A release or draft for ... exists` | A draft from an earlier run: delete it under Releases, then re-run. A published release stays; make a new tag |
