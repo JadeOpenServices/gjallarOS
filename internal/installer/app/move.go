@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"unicode"
 
 	"github.com/JadeOpenServices/gjallarOS/internal/binarycache"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/config"
@@ -378,7 +379,9 @@ func oneLine(s string) string {
 		s = s[:300] + "..."
 	}
 	return strings.Map(func(r rune) rune {
-		if r < ' ' || r == 0x7f {
+		// C0, DEL and C1 (U+009B starts an escape on some terminals) and
+		// format runes such as the bidi overrides, which reorder the line.
+		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) {
 			return '?'
 		}
 		return r

@@ -3,8 +3,10 @@ package freespace
 import (
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -300,5 +302,81 @@ func TestMeasureNoCheckout(t *testing.T) {
 	s, err := measure(t, top, "example")
 	if err != nil || s.Branches != 0 {
 		t.Fatalf("sizes %+v, %v", s, err)
+	}
+}
+
+const foreignChild = "GJ_FREESPACE_FOREIGN_CHILD"
+
+// foreignCfg names two sync folders; the test hands Nextcloud to another
+// account.
+const foreignCfg = "[Accounts]\n0\\Folders\\1\\localPath=/home/example/Nextcloud/\n0\\Folders\\2\\localPath=/home/example/Work/Cloud/\n"
+
+// A sync line that names a folder of another account is odd (L157, review
+// T6): it is never a sync folder. As root the folder is handed to another
+// id. Otherwise a user namespace child binds a folder of an id it does not
+// map in its place, which it sees as owned by the overflow id.
+func TestOpenHomeForeignSync(t *testing.T) {
+	if os.Geteuid() == 0 {
+		foreignSync(t, func(p string) error { return os.Lchown(p, 1001, 100) })
+		return
+	}
+	if os.Getenv(foreignChild) != "" {
+		t.Skip("parent test only")
+	}
+	if os.Getuid() < minUserID || os.Getuid() > maxUserID {
+		t.Skip("the fixture home needs an account id between 1000 and 59999")
+	}
+	cmd := exec.Command(os.Args[0], "-test.run=^TestOpenHomeForeignSyncChild$", "-test.count=1", "-test.v")
+	cmd.Env = append(os.Environ(), foreignChild+"=1")
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		Cloneflags:  syscall.CLONE_NEWUSER | syscall.CLONE_NEWNS,
+		UidMappings: []syscall.SysProcIDMap{{ContainerID: os.Getuid(), HostID: os.Getuid(), Size: 1}},
+		GidMappings: []syscall.SysProcIDMap{{ContainerID: os.Getgid(), HostID: os.Getgid(), Size: 1}},
+		AmbientCaps: []uintptr{unix.CAP_SYS_ADMIN},
+	}
+	out, err := cmd.CombinedOutput()
+	if errors.Is(err, syscall.EPERM) || errors.Is(err, syscall.EINVAL) || errors.Is(err, syscall.ENOSPC) {
+		t.Skipf("no user namespaces here: %v", err)
+	}
+	if err != nil || !strings.Contains(string(out), "--- PASS: TestOpenHomeForeignSyncChild") {
+		t.Fatalf("namespace child: %v\n%s", err, out)
+	}
+}
+
+func TestOpenHomeForeignSyncChild(t *testing.T) {
+	if os.Getenv(foreignChild) == "" {
+		t.Skip("namespace child only")
+	}
+	if err := unix.Mount("", "/", "", unix.MS_REC|unix.MS_PRIVATE, ""); err != nil {
+		t.Fatal(err)
+	}
+	foreignSync(t, func(p string) error {
+		// Read-only and taken off again before the temp folder is
+		// removed, so the cleanup never reaches into the bound folder.
+		if err := unix.Mount("/usr", p, "", unix.MS_BIND|unix.MS_REC, ""); err != nil {
+			return err
+		}
+		t.Cleanup(func() { unix.Unmount(p, unix.MNT_DETACH) })
+		return unix.Mount("", p, "", unix.MS_BIND|unix.MS_REMOUNT|unix.MS_RDONLY, "")
+	})
+}
+
+func foreignSync(t *testing.T, plant func(string) error) {
+	top := oldDisk(t, foreignCfg)
+	if err := plant(filepath.Join(top, homeDir, "example/Nextcloud")); err != nil {
+		t.Fatal(err)
+	}
+	d, err := safefs.OpenDir(top)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	h, err := OpenHome(d, "example")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer h.Close()
+	if h.Odd != 1 || len(h.Sync) != 1 || h.Sync[0] != "Work/Cloud" {
+		t.Fatalf("odd %d, sync %q", h.Odd, h.Sync)
 	}
 }

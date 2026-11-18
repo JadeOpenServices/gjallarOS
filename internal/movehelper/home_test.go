@@ -118,6 +118,17 @@ func TestCopyHome(t *testing.T) {
 	if entries, _ := os.ReadDir(dir); len(entries) != 0 {
 		t.Errorf("not taken back: %v", entries)
 	}
+
+	// A budget that runs out halfway (review T5): what was written before
+	// is taken back too.
+	dir = t.TempDir()
+	res, err = copyHome(old, openTest(t, dir), uid, usersGID, true, 4*safefs.EntryCost)
+	if err != nil || res.Failed == "" || res.Files+res.Folders == 0 {
+		t.Fatalf("halfway: %+v %v", res, err)
+	}
+	if entries, _ := os.ReadDir(dir); len(entries) != 0 {
+		t.Errorf("halfway copy not taken back: %v", entries)
+	}
 }
 
 // A link planted as the old home is not followed.
@@ -283,5 +294,62 @@ func TestNewHomeChild(t *testing.T) {
 	bind(t, filepath.Join(disk, "@home"), filepath.Join(disk, "home"))
 	if _, _, err := newHome(openTest(t, disk), "example"); err == nil || !strings.Contains(err.Error(), "as the installer mounts it") {
 		t.Errorf("the whole disk as the new root: %v", err)
+	}
+}
+
+const homeOwnerChild = "GJ_MOVE_HOME_OWNER_CHILD"
+
+// The new home must belong to a normal account in the users group (L152,
+// review T3/T4): run as a Nix build account, as root or in another group,
+// the namespace child makes a home that newHome refuses. Each id is real
+// in the child, so no check can be skipped by a test seam.
+func TestNewHomeOwner(t *testing.T) {
+	if os.Getenv(homeOwnerChild) != "" {
+		t.Skip("parent test only")
+	}
+	for _, c := range []struct {
+		name     string
+		uid, gid int
+		want     string
+	}{
+		{"nixbld", nixbldUID + 1, usersGID, "not a normal user"},
+		{"root", 0, usersGID, "not a normal user"},
+		{"group", minUserID, usersGID + 1, "not users"},
+	} {
+		cmd := exec.Command(os.Args[0], "-test.run=^TestNewHomeOwnerChild$", "-test.count=1", "-test.v")
+		cmd.Env = append(os.Environ(), homeOwnerChild+"="+t.TempDir()+"|"+c.want)
+		cmd.SysProcAttr = &syscall.SysProcAttr{
+			Cloneflags:  syscall.CLONE_NEWUSER | syscall.CLONE_NEWNS,
+			UidMappings: []syscall.SysProcIDMap{{ContainerID: c.uid, HostID: os.Getuid(), Size: 1}},
+			GidMappings: []syscall.SysProcIDMap{{ContainerID: c.gid, HostID: os.Getgid(), Size: 1}},
+			AmbientCaps: []uintptr{unix.CAP_SYS_ADMIN},
+		}
+		out, err := cmd.CombinedOutput()
+		if errors.Is(err, syscall.EPERM) || errors.Is(err, syscall.EINVAL) || errors.Is(err, syscall.ENOSPC) {
+			t.Skipf("no user namespaces here: %v", err)
+		}
+		if err != nil || !strings.Contains(string(out), "--- PASS: TestNewHomeOwnerChild") {
+			t.Errorf("%s: namespace child: %v\n%s", c.name, err, out)
+		}
+	}
+}
+
+func TestNewHomeOwnerChild(t *testing.T) {
+	dir, want, ok := strings.Cut(os.Getenv(homeOwnerChild), "|")
+	if !ok {
+		t.Skip("namespace child only")
+	}
+	if err := unix.Mount("", "/", "", unix.MS_REC|unix.MS_PRIVATE, ""); err != nil {
+		t.Fatal(err)
+	}
+	was := rootUID
+	rootUID = uint32(os.Getuid())
+	t.Cleanup(func() { rootUID = was })
+	root, _ := newDisk(t, dir, "new")
+	if err := os.Mkdir(filepath.Join(root, "home/example"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := newHome(openTest(t, root), "example"); err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("uid %d gid %d: %v, want %q", os.Getuid(), os.Getgid(), err, want)
 	}
 }

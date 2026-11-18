@@ -423,6 +423,13 @@ func TestOneLine(t *testing.T) {
 	if got := oneLine("a\n\tb\x1b[0m\x7f"); got != "a b?[0m?" {
 		t.Errorf("oneLine = %q", got)
 	}
+	// C1 and bidi controls too (review N2).
+	if got := oneLine("a\u009b2Jb\u0085c\u202ed\u2066e"); got != "a?2Jb c?d?e" {
+		t.Errorf("oneLine C1/bidi = %q", got)
+	}
+	if got := oneLine("grüße ✓"); got != "grüße ✓" {
+		t.Errorf("oneLine printable = %q", got)
+	}
 	if got := oneLine(strings.Repeat("x", 400)); len(got) != 303 {
 		t.Errorf("len %d", len(got))
 	}
