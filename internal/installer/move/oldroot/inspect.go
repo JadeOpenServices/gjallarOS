@@ -16,6 +16,9 @@ type Info struct {
 	Channel string `json:"channel"`
 	// LastUpdated is when the old system last switched to a new build.
 	LastUpdated time.Time `json:"lastUpdated"`
+	// Username is the account of the old system. It stays inside the
+	// helper: the identity inventory needs it to find the home folder.
+	Username string `json:"-"`
 }
 
 // subvolumes are the btrfs subvolumes a gjallarOS install creates on the
@@ -58,6 +61,7 @@ func inspectFiles(top *safefs.Dir) (Info, error) {
 		return info, refuse(NoEvidence, "user.config.json cannot be read")
 	}
 	var cfg struct {
+		Username       string `json:"username"`
 		ReleaseChannel string `json:"releaseChannel"`
 		Management     struct {
 			Enable bool `json:"enable"`
@@ -69,6 +73,10 @@ func inspectFiles(top *safefs.Dir) (Info, error) {
 	if cfg.Management.Enable {
 		return info, refuse(Managed, "management.enable is on")
 	}
+	if !config.ValidUsername(cfg.Username) {
+		return info, refuse(NoEvidence, "user.config.json has no valid username")
+	}
+	info.Username = cfg.Username
 	info.Channel = config.DefaultReleaseChannel
 	if cfg.ReleaseChannel != "" {
 		if !slices.Contains(config.ReleaseChannels, cfg.ReleaseChannel) {

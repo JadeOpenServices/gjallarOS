@@ -1,0 +1,12 @@
+# Sample "Main eth0" from nm-settings-keyfile(5), NetworkManager 1.56.0.
+[connection]
+id=Main eth0
+uuid=27afa607-ee36-43f0-b8c3-9d245cdc4bb3
+type=802-3-ethernet
+autoconnect=true
+
+[ipv4]
+method=auto
+
+[802-3-ethernet]
+mac-address=00:23:5a:47:1f:71

@@ -173,6 +173,28 @@ func TestCloseNothingOpen(t *testing.T) {
 	}
 }
 
+// Inventory reads only the old disk that open mounted: a plain folder at
+// Old, or none at all, is not looked at.
+func TestInventoryNeedsOpenDisk(t *testing.T) {
+	base := filepath.Join(t.TempDir(), "gjallar-move")
+	for name, prep := range map[string]func() error{
+		"no folders": func() error { return nil },
+		"not mounted": func() error {
+			_, err := run(t, base, `{"op":"dirs"}`)
+			return err
+		},
+	} {
+		if err := prep(); err != nil {
+			t.Fatal(err)
+		}
+		out, err := run(t, base, `{"op":"inventory"}`)
+		var res RefusalResult
+		if err != nil || json.Unmarshal([]byte(out), &res) != nil || res.Refusal == nil || res.Refusal.Reason != "not-open" {
+			t.Errorf("%s: got %q, %v", name, out, err)
+		}
+	}
+}
+
 // L58: a second helper run while one holds the folder is turned away.
 func TestSecondRunRefused(t *testing.T) {
 	base := filepath.Join(t.TempDir(), "gjallar-move")

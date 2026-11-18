@@ -26,6 +26,7 @@ const (
 	WrongKey      Reason = "wrong-key"
 	OldCryptsetup Reason = "old-cryptsetup"
 	Busy          Reason = "busy"
+	NotOpen       Reason = "not-open"
 )
 
 // texts are what the screen shows. They say what to do; the detail stays in
@@ -42,6 +43,7 @@ var texts = map[Reason]string{
 	WrongKey:      "That recovery key or disk passphrase did not open the old disk.",
 	OldCryptsetup: "This stick's disk tools are too old to open the old disk safely. Make a new stick.",
 	Busy:          "The old disk is already open. Restart from the stick and try again.",
+	NotOpen:       "The old disk is not open any more. Go back and open it again.",
 }
 
 // Refusal stops the move with a text for the user. It is not a failure of

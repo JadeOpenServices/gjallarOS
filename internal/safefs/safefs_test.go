@@ -453,3 +453,38 @@ func TestLstatNeverFollows(t *testing.T) {
 		t.Errorf("missing: %v", err)
 	}
 }
+
+func TestNamesRefusesPlantedAndCaps(t *testing.T) {
+	old := t.TempDir()
+	write(t, filepath.Join(old, "home/x/b"), "")
+	write(t, filepath.Join(old, "home/x/a"), "")
+	write(t, filepath.Join(old, "home/file"), "")
+	if err := os.Symlink("home/x", filepath.Join(old, "etc")); err != nil {
+		t.Fatal(err)
+	}
+	if err := unix.Mkfifo(filepath.Join(old, "home/fifo"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	d := mustDir(t, old)
+
+	names, err := d.Names("home/x", 2)
+	if err != nil || len(names) != 2 || names[0] != "a" || names[1] != "b" {
+		t.Fatalf("home/x: %v %v", names, err)
+	}
+	if names, err := d.Names(".", -1); err != nil || len(names) != 2 {
+		t.Fatalf(".: %v %v", names, err)
+	}
+	if _, err := d.Names("home/x", 1); !errors.Is(err, ErrTooMany) {
+		t.Errorf("over the cap: %v", err)
+	}
+	for _, rel := range []string{"etc", "etc/", "home/file", "home/fifo", "../" + filepath.Base(old), "/etc"} {
+		withTimeout(t, func() {
+			if _, err := d.Names(rel, 10); err == nil {
+				t.Errorf("%q: listed", rel)
+			}
+		})
+	}
+	if _, err := d.Names("home/missing", 10); !errors.Is(err, unix.ENOENT) {
+		t.Errorf("missing: %v", err)
+	}
+}

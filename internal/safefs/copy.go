@@ -113,7 +113,7 @@ func (c *copier) tree(srcFD, dstFD int, name string, depth int) error {
 	if depth >= MaxDepth {
 		return fmt.Errorf("copy %s: %w", name, ErrTooDeep)
 	}
-	names, err := readNames(srcFD)
+	names, err := readNames(srcFD, -1)
 	if err != nil {
 		return fmt.Errorf("list %s: %w", name, err)
 	}
@@ -387,8 +387,9 @@ func made(err error) error {
 	return refusal(err)
 }
 
-// readNames lists a folder, sorted, without . and ..
-func readNames(fd int) ([]string, error) {
+// readNames lists a folder, sorted, without . and .. . With max >= 0 a
+// folder with more than max entries is refused with ErrTooMany.
+func readNames(fd, max int) ([]string, error) {
 	if _, err := unix.Seek(fd, 0, 0); err != nil {
 		return nil, err
 	}
@@ -403,6 +404,9 @@ func readNames(fd int) ([]string, error) {
 			break
 		}
 		_, _, names = unix.ParseDirent(buf[:n], -1, names)
+		if max >= 0 && len(names) > max {
+			return nil, ErrTooMany
+		}
 	}
 	sort.Strings(names)
 	return names, nil

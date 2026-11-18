@@ -64,13 +64,19 @@ func TestInspectFiles(t *testing.T) {
 			write(t, filepath.Join(top, "@/var/lib/gjallarOS/installation-complete"), "")
 		}, channel: "stable"},
 		"staging channel": {plant: func(top string) {
-			write(t, filepath.Join(top, "@config/user.config.json"), `{"releaseChannel":"staging"}`)
+			write(t, filepath.Join(top, "@config/user.config.json"), `{"username":"example","releaseChannel":"staging"}`)
 		}, channel: "staging"},
 		"managed": {plant: func(top string) {
 			write(t, filepath.Join(top, "@config/user.config.json"), `{"management":{"enable":true}}`)
 		}, refusal: Managed},
+		"no username": {plant: func(top string) {
+			write(t, filepath.Join(top, "@config/user.config.json"), `{"management":{"enable":false}}`)
+		}, refusal: NoEvidence},
+		"username with a path": {plant: func(top string) {
+			write(t, filepath.Join(top, "@config/user.config.json"), `{"username":"../root"}`)
+		}, refusal: NoEvidence},
 		"unknown channel": {plant: func(top string) {
-			write(t, filepath.Join(top, "@config/user.config.json"), `{"releaseChannel":"nightly"}`)
+			write(t, filepath.Join(top, "@config/user.config.json"), `{"username":"example","releaseChannel":"nightly"}`)
 		}, refusal: NoEvidence},
 		"config is a link": {plant: func(top string) {
 			p := filepath.Join(top, "@config/user.config.json")
@@ -98,7 +104,7 @@ func TestInspectFiles(t *testing.T) {
 			top := t.TempDir()
 			write(t, filepath.Join(top, "@/etc/NIXOS"), "")
 			write(t, filepath.Join(top, "@/etc/gjallar/repository"), "/etc/gjallar/system\n")
-			write(t, filepath.Join(top, "@config/user.config.json"), `{"management":{"enable":false}}`)
+			write(t, filepath.Join(top, "@config/user.config.json"), `{"username":"example","management":{"enable":false}}`)
 			mkdir(t, filepath.Join(top, "@nix/var/nix/profiles"))
 			if err := os.Symlink("system-1-link", filepath.Join(top, "@nix/var/nix/profiles/system")); err != nil {
 				t.Fatal(err)
@@ -117,7 +123,7 @@ func TestInspectFiles(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if info.Channel != c.channel || info.LastUpdated.IsZero() {
+			if info.Channel != c.channel || info.LastUpdated.IsZero() || info.Username != "example" {
 				t.Fatalf("info %+v, want channel %s and a time", info, c.channel)
 			}
 		})

@@ -1,0 +1,26 @@
+# Sample "RedHat-openvpn" from nm-settings-keyfile(5), NetworkManager 1.56.0.
+[connection]
+id=RedHat-openvpn
+uuid=7f9b3356-b210-4c0e-8123-bd116c9c280f
+type=vpn
+timestamp=1385401165
+
+[vpn]
+service-type=org.freedesktop.NetworkManager.openvpn
+connection-type=password
+password-flags=3
+remote=ovpn.my-company.com
+cipher=AES-256-CBC
+reneg-seconds=0
+port=443
+username=joe
+ca=/etc/openvpn/ISCA.pem
+tls-remote=ovpn.my-company.com
+
+[ipv6]
+method=auto
+
+[ipv4]
+method=auto
+ignore-auto-dns=true
+never-default=true

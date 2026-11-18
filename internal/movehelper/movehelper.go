@@ -19,9 +19,11 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/move/identity"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/move/oldroot"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/move/prepared"
 	"github.com/JadeOpenServices/gjallarOS/internal/safefs"
+	"github.com/JadeOpenServices/gjallarOS/internal/usbtrust/btaddr"
 	"golang.org/x/sys/unix"
 )
 
@@ -90,7 +92,7 @@ func Run(base string, in io.Reader, out io.Writer) error {
 		result = struct{}{}
 	case "find":
 		result, err = findOp(ctx)
-	case "copy", "check", "open", "close":
+	case "copy", "check", "open", "inventory", "close":
 		var unlock func()
 		if unlock, err = lock(base); err != nil {
 			break
@@ -103,6 +105,8 @@ func Run(base string, in io.Reader, out io.Writer) error {
 			result, err = checkOp(ctx, req)
 		case "open":
 			result, err = openOp(ctx, base, req)
+		case "inventory":
+			result, err = inventoryOp(ctx, base)
 		case "close":
 			err = oldroot.Close(ctx, filepath.Join(base, Old))
 			result = struct{}{}
@@ -454,5 +458,38 @@ func openOp(ctx context.Context, base string, req Request) (res OpenResult, err 
 	if part.Encrypted {
 		res.Prepared, res.PINChecked = readPrepared(top, digest)
 	}
+	return res, nil
+}
+
+// InventoryResult counts what of this computer's identity the open old disk
+// holds (step 6, move.identity.choice). Counts only: no name, address, key
+// or id leaves the helper.
+type InventoryResult struct {
+	identity.Inventory
+}
+
+// inventoryOp looks through the old disk that open left mounted at Old.
+// Bluetooth pairings count as this computer's when the old disk's adapter
+// address is one of the USB Bluetooth adapters here.
+func inventoryOp(ctx context.Context, base string) (res InventoryResult, err error) {
+	old := filepath.Join(base, Old)
+	if err := oldroot.Opened(old); err != nil {
+		return res, err
+	}
+	top, err := safefs.OpenDir(old)
+	if err != nil {
+		return res, err
+	}
+	defer top.Close()
+	// Again, for the user name: the files below are read for that user.
+	info, err := oldroot.Inspect(top)
+	if err != nil {
+		return res, err
+	}
+	adapters := map[string]bool{}
+	for _, a := range (btaddr.Sysfs{Root: "/sys"}).Addresses(ctx) {
+		adapters[a] = true
+	}
+	res.Inventory = identity.Scan(top, info.Username, adapters)
 	return res, nil
 }

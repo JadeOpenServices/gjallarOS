@@ -1,0 +1,21 @@
+# The "CompanyWIFI" sample of nm-settings-keyfile(5), NetworkManager 1.56.0,
+# without its [802-1x] group and with WPA-PSK; no psk line.
+[connection]
+id=CompanyWIFI
+uuid=cdac6154-a33b-4b15-9904-666772cfa5ee
+type=wifi
+autoconnect=false
+
+[wifi]
+ssid=CorpWLAN
+mode=infrastructure
+security=802-11-wireless-security
+
+[wifi-security]
+key-mgmt=wpa-psk
+
+[ipv4]
+method=auto
+
+[ipv6]
+method=auto

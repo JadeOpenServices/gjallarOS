@@ -29,6 +29,8 @@ var (
 	ErrTooBig = errors.New("file is over the size cap")
 	// ErrChanged refuses a file that was swapped while it was opened.
 	ErrChanged = errors.New("file changed while it was opened")
+	// ErrTooMany refuses a folder with more entries than the cap.
+	ErrTooMany = errors.New("folder has more entries than the cap")
 )
 
 const resolve = unix.RESOLVE_BENEATH | unix.RESOLVE_NO_SYMLINKS | unix.RESOLVE_NO_MAGICLINKS | unix.RESOLVE_NO_XDEV
@@ -64,6 +66,22 @@ func (d *Dir) Sub(rel string) (*Dir, error) {
 		return nil, fmt.Errorf("open folder %s below %s: %w", rel, d.name, refusal(err))
 	}
 	return &Dir{fd: fd, name: d.name + "/" + rel}, nil
+}
+
+// Names lists the folder rel below d ("." for d itself), sorted, without
+// . and .. . A folder with more than max entries is refused with
+// ErrTooMany, so a crafted folder cannot make root hold millions of names.
+func (d *Dir) Names(rel string, max int) ([]string, error) {
+	fd, err := openat2(d.fd, rel, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC)
+	if err != nil {
+		return nil, fmt.Errorf("list %s below %s: %w", rel, d.name, refusal(err))
+	}
+	defer unix.Close(fd)
+	names, err := readNames(fd, max)
+	if err != nil {
+		return nil, fmt.Errorf("list %s below %s: %w", rel, d.name, err)
+	}
+	return names, nil
 }
 
 // Lstat reports on rel below d without following a link at its end; links

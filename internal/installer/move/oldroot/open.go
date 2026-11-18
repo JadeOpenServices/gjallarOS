@@ -230,6 +230,21 @@ func Free(target string) error {
 	return mountFree(target)
 }
 
+// Opened refuses unless the old disk is mounted at target, as open left it.
+func Opened(target string) error {
+	mounted, err := isMountPoint(target)
+	if errors.Is(err, os.ErrNotExist) {
+		return refuse(NotOpen, target+" is not there")
+	}
+	if err != nil {
+		return err
+	}
+	if !mounted {
+		return refuse(NotOpen, target+" is not a mount point")
+	}
+	return nil
+}
+
 func mapperFree() error {
 	if _, err := os.Lstat("/dev/mapper/" + Mapping); err == nil {
 		return refuse(Busy, "/dev/mapper/"+Mapping+" exists")

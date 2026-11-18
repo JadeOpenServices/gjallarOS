@@ -232,6 +232,12 @@ func WriteAtomic(path string, user User) error {
 
 var usernamePattern = regexp.MustCompile(`^[a-z_][a-z0-9_-]*$`)
 
+// ValidUsername tells whether s is a user name the installer accepts. Such a
+// name is also one safe path part: no slash, no dot.
+func ValidUsername(s string) bool {
+	return usernamePattern.MatchString(s)
+}
+
 // hostnamePattern is the networking.hostName rule of NixOS: one DNS label of
 // at most 63 characters, underscores allowed as NixOS does.
 var hostnamePattern = regexp.MustCompile(`^[A-Za-z0-9]([A-Za-z0-9_-]{0,61}[A-Za-z0-9])?$`)
@@ -369,7 +375,7 @@ func Parse(contents []byte) (User, error) {
 }
 
 func Validate(user User) error {
-	if !usernamePattern.MatchString(user.Username) {
+	if !ValidUsername(user.Username) {
 		return fmt.Errorf("invalid username: %q", user.Username)
 	}
 	if user.Hostname == "" || user.Theme == "" || user.Shell == "" {
