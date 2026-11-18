@@ -190,9 +190,11 @@ func (u *UI) UsePages(in io.Reader) {
 	}
 	u.Wrap = true
 	if file, ok := in.(*os.File); ok && tty.Is(file) {
-		u.Flush = func() {
+		u.Flush = func(reset bool) {
 			_ = unix.IoctlSetInt(int(file.Fd()), unix.TCFLSH, unix.TCIFLUSH)
-			u.Reader.Reset(file)
+			if reset {
+				u.Reader.Reset(file)
+			}
 		}
 	}
 }

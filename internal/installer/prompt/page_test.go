@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -41,6 +42,27 @@ func (l *logged) Terminal() io.Writer { return l.term }
 // side reads, complete once the terminal side is closed.
 func testPTY(t *testing.T) (master, term *os.File, screen func() string) {
 	t.Helper()
+	master, term = openPTY(t)
+	var out bytes.Buffer
+	done := make(chan struct{})
+	go func() {
+		_, _ = io.Copy(&out, master)
+		close(done)
+	}()
+	return master, term, func() string {
+		term.Close()
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Fatal("terminal output did not end")
+		}
+		return out.String()
+	}
+}
+
+// openPTY opens a pseudo-terminal pair with echo off.
+func openPTY(t *testing.T) (master, term *os.File) {
+	t.Helper()
 	master, err := os.OpenFile("/dev/ptmx", os.O_RDWR|unix.O_NOCTTY, 0)
 	if err != nil {
 		t.Skipf("no pseudo-terminals here: %v", err)
@@ -64,21 +86,7 @@ func testPTY(t *testing.T) (master, term *os.File, screen func() string) {
 	if err := unix.IoctlSetTermios(int(term.Fd()), unix.TCSETS, tio); err != nil {
 		t.Fatal(err)
 	}
-	var out bytes.Buffer
-	done := make(chan struct{})
-	go func() {
-		_, _ = io.Copy(&out, master)
-		close(done)
-	}()
-	return master, term, func() string {
-		term.Close()
-		select {
-		case <-done:
-		case <-time.After(5 * time.Second):
-			t.Fatal("terminal output did not end")
-		}
-		return out.String()
-	}
+	return master, term
 }
 
 // Item 1: the passphrase never reaches a file that is not a terminal,
@@ -187,9 +195,9 @@ func TestPagedFlushBeforeEveryQuestion(t *testing.T) {
 	asked := 0
 	// Each flush first drops a line typed early, then the real answer
 	// comes, as on the stick.
-	u.Flush = func() {
+	u.Flush = func(reset bool) {
 		asked++
-		flush()
+		flush(reset)
 		if _, err := master.Write([]byte("answer\n")); err != nil {
 			t.Error(err)
 		}
@@ -302,10 +310,13 @@ func TestAbandonedReadIsTakenOver(t *testing.T) {
 	in, typed := io.Pipe()
 	defer typed.Close()
 	u := UI{Reader: bufio.NewReader(in), Out: io.Discard}
-	flushed := 0
-	u.Flush = func() {
+	flushed, resets := 0, 0
+	u.Flush = func(reset bool) {
 		flushed++
-		u.Reader.Reset(in)
+		if reset {
+			resets++
+			u.Reader.Reset(in)
+		}
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
@@ -334,12 +345,12 @@ func TestAbandonedReadIsTakenOver(t *testing.T) {
 	if err != nil || got != "answer" {
 		t.Fatalf("second question = %q, %v; want the line typed after it came up", got, err)
 	}
-	if flushed != 2 {
-		t.Fatalf("flushed %d times, want 2 (first question, and after the early line was dropped)", flushed)
+	if flushed != 2 || resets != 2 {
+		t.Fatalf("flushed %d times with %d resets, want 2 and 2 (first question, and after the early line was dropped)", flushed, resets)
 	}
 
 	// Without a line in between the next question takes the left read
-	// as it is, with no Flush under it.
+	// as it is: Flush runs without resetting the Reader under it.
 	ctx, cancel = context.WithCancel(context.Background())
 	go func() {
 		time.Sleep(20 * time.Millisecond)
@@ -355,7 +366,71 @@ func TestAbandonedReadIsTakenOver(t *testing.T) {
 		_, _ = typed.Write([]byte("later\n"))
 	}()
 	got, err = u.Value(context.Background(), "Fourth", "")
-	if err != nil || got != "later" || flushed != 3 {
-		t.Fatalf("fourth question = %q, %v, flushed %d; want \"later\" and no Flush under the left read", got, err, flushed)
+	if err != nil || got != "later" || flushed != 4 || resets != 3 {
+		t.Fatalf("fourth question = %q, %v, flushed %d with %d resets; want \"later\", 4 and 3: no reset under the left read", got, err, flushed, resets)
+	}
+}
+
+// Keys typed without Enter while no question was up do not end up in
+// front of the answer when the next question takes over a left read.
+func TestTakeoverDropsHalfTypedKeys(t *testing.T) {
+	master, term := openPTY(t)
+	var mu sync.Mutex
+	var out bytes.Buffer
+	go func() {
+		buf := make([]byte, 4096)
+		for {
+			n, err := master.Read(buf)
+			mu.Lock()
+			out.Write(buf[:n])
+			mu.Unlock()
+			if err != nil {
+				return
+			}
+		}
+	}()
+	shown := func(s string) bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return strings.Contains(out.String(), s)
+	}
+	u := New(term, &logged{term: newPager(term, "Install gjallarOS")})
+	u.UsePages(term)
+	if u.Flush == nil {
+		t.Fatal("UsePages did not set up page mode")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(20 * time.Millisecond)
+		cancel()
+	}()
+	if _, err := u.Value(ctx, "First", ""); err == nil {
+		t.Fatal("cancelled question returned an answer")
+	}
+	// Echo shows when the terminal has taken the keys into its line.
+	tio, err := unix.IoctlGetTermios(int(term.Fd()), unix.TCGETS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tio.Lflag |= unix.ECHO
+	if err := unix.IoctlSetTermios(int(term.Fd()), unix.TCSETS, tio); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := master.Write([]byte("abc")); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; !shown("abc"); i++ {
+		if i > 500 {
+			t.Fatal("typed keys never arrived")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		_, _ = master.Write([]byte("yes\n"))
+	}()
+	got, err := u.Value(context.Background(), "Second", "")
+	if err != nil || got != "yes" {
+		t.Fatalf("second question = %q, %v; want \"yes\" without the keys typed before it", got, err)
 	}
 }

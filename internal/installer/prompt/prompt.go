@@ -28,8 +28,10 @@ type UI struct {
 	// console sets it; desktop tools keep plain lines.
 	Wrap bool
 	// Flush, when set, runs before each answer is read: page mode drops
-	// keys typed while no question was up (UsePages).
-	Flush func()
+	// keys typed while no question was up (UsePages). reset also starts
+	// the Reader again; it is false while a read left by a question given
+	// up on still owns the Reader.
+	Flush func(reset bool)
 }
 
 func zenityCommand(ctx context.Context, args ...string) *exec.Cmd {
@@ -581,20 +583,23 @@ func (u UI) readLine(ctx context.Context) (string, error) {
 		default:
 		}
 	}
-	if done == nil {
+	switch {
+	case done == nil:
 		if u.Flush != nil {
-			u.Flush()
+			u.Flush(true)
 		}
 		done = make(chan lineResult, 1)
 		go func() {
 			line, err := u.Reader.ReadString('\n')
 			done <- lineResult{line, err}
 		}()
+	case u.Flush != nil:
+		// A read left by a question given up on still owns the Reader:
+		// this question takes its line. Keys typed without Enter while no
+		// question was up are dropped, but the Reader is not reset under
+		// that read. A whole line it already got was dropped above.
+		u.Flush(false)
 	}
-	// A read left by a question given up on still owns the Reader: this
-	// question takes its line, and Flush is skipped, as it would reset
-	// the Reader under that read. In page mode a line that read already
-	// got before this question came up was dropped above.
 	select {
 	case r := <-done:
 		// In page mode the answer ends the page; what comes next starts
