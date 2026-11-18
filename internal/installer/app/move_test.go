@@ -331,12 +331,12 @@ func TestMoveDetachesBeforeTargetCloses(t *testing.T) {
 	calls := recordPrivileged(t, "")
 	h := &fakeMoveHelper{}
 	var order []string
-	func() {
-		closeTarget := closeFreshTarget(context.Background(), "/mnt", "cryptroot", &bytes.Buffer{})
-		defer func() { closeTarget(); order = append(order, *calls...) }()
-		m := testMoveRun(h, &bytes.Buffer{})
-		defer func() { m.end(context.Background()); order = append(order, h.ops...) }()
-	}()
+	closeTarget := closeFreshTarget(context.Background(), "/mnt", "cryptroot", &bytes.Buffer{})
+	releaseFreshTarget(context.Background(), testMoveRun(h, &bytes.Buffer{}), func() {
+		order = append(order, h.ops...)
+		closeTarget()
+		order = append(order, *calls...)
+	})
 	want := []string{"close", "detach", "umount -R -- /mnt", "cryptsetup close cryptroot"}
 	if !slices.Equal(order, want) {
 		t.Fatalf("order = %v, want %v", order, want)

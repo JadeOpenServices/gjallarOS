@@ -162,13 +162,7 @@ func runFreshBareMetal(
 	keepTarget := false
 	defer func() {
 		if !keepTarget {
-			closeTarget()
-		}
-	}()
-	// A move's helper holds the new disk too: it lets go first (L151).
-	defer func() {
-		if !keepTarget {
-			mv.end(ctx)
+			releaseFreshTarget(ctx, mv, closeTarget)
 		}
 	}()
 
@@ -463,6 +457,15 @@ func zero(secret []byte) {
 // Compile-time contract: fresh canonical storage is a diskplan.Plan and does
 // not gain another parallel storage-model representation.
 var _ diskplan.Plan
+
+// releaseFreshTarget lets go of the new system disk after a failed
+// install. A move's helper holds the disk too, so it lets go first: the
+// close checks every mount namespace and leaves the mapping open while the
+// helper's still mounts it (L151).
+func releaseFreshTarget(ctx context.Context, mv *moveRun, closeTarget func()) {
+	mv.end(ctx)
+	closeTarget()
+}
 
 // closeFreshTarget returns the teardown for a failed fresh install: unmount
 // everything below the target root, then close its LUKS mapping. Both names
