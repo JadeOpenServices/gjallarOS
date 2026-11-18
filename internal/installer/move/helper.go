@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"unicode"
 
@@ -30,17 +31,25 @@ const (
 	maxStderr = 4096
 )
 
-// ExecHelper runs the helper as its own process. Argv is the fixed command
-// (the sudo rule and its PATH are set where the stick wires it). The
-// request goes through stdin, never the command line, because it can carry
-// the old disk's key.
+// ExecHelper runs the helper as its own process. Argv is the fixed command,
+// starting with an absolute path: a bare name would be looked up through
+// PATH (L114). The request goes through stdin, never the command line,
+// because it can carry the old disk's key.
 type ExecHelper struct {
 	Argv []string
 }
 
+// helperEnv is the whole environment the helper starts with. Nothing comes
+// from the caller, so no variable set in the session reaches root's
+// process (L114).
+var helperEnv = []string{"PATH=/run/current-system/sw/bin", "LC_ALL=C"}
+
 func (h ExecHelper) Run(ctx context.Context, req movehelper.Request, result any) error {
 	if len(h.Argv) == 0 {
 		return errors.New("no move helper set")
+	}
+	if !filepath.IsAbs(h.Argv[0]) {
+		return fmt.Errorf("move helper %q is not an absolute path", h.Argv[0])
 	}
 	data, err := json.Marshal(req)
 	if err != nil {
@@ -48,6 +57,7 @@ func (h ExecHelper) Run(ctx context.Context, req movehelper.Request, result any)
 	}
 	defer clear(data)
 	cmd := exec.CommandContext(ctx, h.Argv[0], h.Argv[1:]...)
+	cmd.Env = helperEnv
 	stdout := &capped{max: maxResult}
 	stderr := &capped{max: maxStderr}
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = bytes.NewReader(data), stdout, stderr

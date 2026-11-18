@@ -42,11 +42,15 @@ esac
 	if err := os.WriteFile(filepath.Join(bin, "cryptsetup"), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
-	oldLimit, oldKill, oldWait, oldBlock := openTryLimit, killWait, wrongKeyWait, sysBlock
+	oldLimit, oldKill, oldWait, oldBlock, oldTool, oldEnv := openTryLimit, killWait, wrongKeyWait, sysBlock, Cryptsetup, toolEnv
 	openTryLimit, killWait, wrongKeyWait, sysBlock = 300*time.Millisecond, 300*time.Millisecond, 0, sysBlockDir
+	// The fake runs by its absolute path, as the real one does; its own
+	// shell tools come from the test's PATH.
+	Cryptsetup = filepath.Join(bin, "cryptsetup")
+	toolEnv = []string{"PATH=" + os.Getenv("PATH"), "LC_ALL=C"}
 	t.Cleanup(func() {
 		openTryLimit, killWait, wrongKeyWait, sysBlock, mapperDir = oldLimit, oldKill, oldWait, oldBlock, "/dev/mapper"
+		Cryptsetup, toolEnv = oldTool, oldEnv
 	})
 	return log
 }

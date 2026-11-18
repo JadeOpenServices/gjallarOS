@@ -105,7 +105,7 @@ func AreaDigest(area []byte) string {
 func (p *Prepared) Open(ctx context.Context, key io.Reader) error {
 	try, cancel := context.WithTimeout(ctx, openTryLimit)
 	defer cancel()
-	open := exec.CommandContext(try, "cryptsetup", "open", "--readonly", "--type", "luks2",
+	open := Tool(try, Cryptsetup, "open", "--readonly", "--type", "luks2",
 		"--disable-external-tokens", "--header", p.header, "--key-file=-", "--", p.part, Mapping)
 	open.Cancel = func() error { return open.Process.Signal(unix.SIGTERM) }
 	open.WaitDelay = killWait
@@ -135,7 +135,7 @@ func closeMapping(ctx context.Context) error {
 	}
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, "cryptsetup", "close", "--", Mapping).CombinedOutput()
+	out, err := Tool(ctx, Cryptsetup, "close", "--", Mapping).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("close %s: %v: %s", Mapping, err, printable(string(out)))
 	}
@@ -255,7 +255,7 @@ func Close(ctx context.Context, target string) error {
 		}
 	}
 	if mapped() {
-		out, err := exec.CommandContext(ctx, "cryptsetup", "close", "--", Mapping).CombinedOutput()
+		out, err := Tool(ctx, Cryptsetup, "close", "--", Mapping).CombinedOutput()
 		if err != nil {
 			errs = append(errs, fmt.Errorf("close %s: %v: %s", Mapping, err, printable(string(out))))
 		}
@@ -340,7 +340,7 @@ func isMountPoint(p string) (bool, error) {
 
 func cryptsetupVersion(ctx context.Context) error {
 	out := &capWriter{max: 256}
-	cmd := exec.CommandContext(ctx, "cryptsetup", "--version")
+	cmd := Tool(ctx, Cryptsetup, "--version")
 	cmd.Stdout = out
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("run cryptsetup --version: %w", err)

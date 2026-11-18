@@ -34,10 +34,12 @@ buildGoModule {
       ../../internal/installer
       ../../internal/localchanges
       ../../internal/managedapps
+      ../../internal/movehelper
       ../../internal/nettrust
       ../../internal/noctalia
       ../../internal/oddccli
       ../../internal/preset
+      ../../internal/safefs
       ../../internal/settings
       ../../internal/snapshots
       ../../internal/sshsig

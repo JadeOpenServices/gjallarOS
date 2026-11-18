@@ -15,7 +15,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -258,7 +257,7 @@ func openBelow(top, rel string) (*safefs.Dir, error) {
 // over its cap, so one byte more is enough to tell.
 func lsblk(ctx context.Context) ([]byte, error) {
 	var out bytes.Buffer
-	cmd := exec.CommandContext(ctx, "lsblk", oldroot.LsblkArgs...)
+	cmd := oldroot.Tool(ctx, oldroot.Lsblk, oldroot.LsblkArgs...)
 	cmd.Stdout = &capped{w: &out, left: 1<<20 + 1}
 	if err := cmd.Run(); err != nil {
 		return nil, fmt.Errorf("run lsblk: %w", err)

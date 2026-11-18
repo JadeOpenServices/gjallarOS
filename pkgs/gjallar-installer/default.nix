@@ -11,6 +11,9 @@
 # unchecked. Only the two list files are copied in (regionLists): the
 # glibcLocales package alone is over 200 MiB.
 #
+# cryptsetup and util-linux are baked in by store path for the move
+# helper, which runs them as root: nothing is looked up through PATH (L114).
+#
 # oddc is the full ODDC source (the flake's oddc input). With it the
 # installer drafts a model for machines ODDC does not match; without it
 # (recovery tools) it skips the draft.
@@ -21,6 +24,8 @@
   tzdata,
   glibcLocales,
   xkeyboard_config,
+  cryptsetup,
+  util-linux,
   oddc ? null,
 }:
 let
@@ -37,6 +42,7 @@ gjallarctl.overrideAttrs (old: {
     "cmd/gjallar-installer"
     "cmd/gjallar-recovery-maintenance"
     "cmd/gjallar-stick"
+    "cmd/gjallar-move-helper"
   ];
 
   # The installer runs gjallarctl, which no longer sits next to it.
@@ -48,6 +54,8 @@ gjallarctl.overrideAttrs (old: {
       "-X github.com/JadeOpenServices/gjallarOS/internal/installer/region.ZoneDir=${tzdata}/share/zoneinfo"
       "-X github.com/JadeOpenServices/gjallarOS/internal/installer/region.LocaleList=${regionLists}/SUPPORTED"
       "-X github.com/JadeOpenServices/gjallarOS/internal/installer/region.XKBRules=${regionLists}/base.lst"
+      "-X github.com/JadeOpenServices/gjallarOS/internal/installer/move/oldroot.Cryptsetup=${lib.getExe' cryptsetup "cryptsetup"}"
+      "-X github.com/JadeOpenServices/gjallarOS/internal/installer/move/oldroot.Lsblk=${lib.getExe' util-linux "lsblk"}"
     ]
     ++ lib.optional (
       oddc != null

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 
@@ -44,6 +45,8 @@ func fakeHelperMain(mode string) {
 	case "fail":
 		fmt.Fprint(os.Stderr, "first line\n\x1b[31mopen \x1b]0;title\x07failed\x00 here"+strings.Repeat("x", 300)+"\n")
 		os.Exit(1)
+	case "env":
+		json.NewEncoder(os.Stdout).Encode(oldroot.Info{Channel: strings.Join(os.Environ(), "\n")})
 	case "silent":
 		os.Exit(3)
 	case "big":
@@ -53,8 +56,31 @@ func fakeHelperMain(mode string) {
 
 func fake(t *testing.T, mode string) ExecHelper {
 	t.Helper()
-	t.Setenv(fakeMode, mode)
+	old := helperEnv
+	helperEnv = append(slices.Clip(old), fakeMode+"="+mode)
+	t.Cleanup(func() { helperEnv = old })
 	return ExecHelper{Argv: []string{os.Args[0], "-test.run=^$"}}
+}
+
+// L114: a bare or relative helper name is refused before anything runs,
+// and the caller's environment does not reach the helper.
+func TestExecHelperFixedPathAndEnv(t *testing.T) {
+	for _, argv0 := range []string{"gjallar-move-helper", "./gjallar-move-helper"} {
+		err := ExecHelper{Argv: []string{argv0}}.Run(context.Background(), movehelper.Request{Op: "open"}, nil)
+		if err == nil || !strings.Contains(err.Error(), "not an absolute path") {
+			t.Errorf("%s: %v", argv0, err)
+		}
+	}
+	h := fake(t, "env")
+	t.Setenv("DM_DEV_DIR", "/run/example/fake-dev")
+	t.Setenv("LD_PRELOAD", "/run/example/evil.so")
+	var got oldroot.Info
+	if err := h.Run(context.Background(), movehelper.Request{Op: "open"}, &got); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(got.Channel, "DM_DEV_DIR") || strings.Contains(got.Channel, "LD_PRELOAD") || !strings.Contains(got.Channel, "LC_ALL=C") {
+		t.Errorf("helper env %q", got.Channel)
+	}
 }
 
 func TestExecHelperSendsRequestOnStdin(t *testing.T) {

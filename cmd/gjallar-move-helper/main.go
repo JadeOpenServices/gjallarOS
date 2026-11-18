@@ -18,6 +18,12 @@ func main() {
 	if os.Geteuid() != 0 {
 		log.Fatal("gjallar-move-helper runs as root")
 	}
+	// Nothing of the caller's environment is used: the tools run by fixed
+	// path with their own fixed environment (L114), and this keeps it so
+	// for anything the helper might start later.
+	os.Clearenv()
+	os.Setenv("PATH", "/run/current-system/sw/bin")
+	os.Setenv("LC_ALL", "C")
 	if err := movehelper.Run(movehelper.Base, os.Stdin, os.Stdout); err != nil {
 		log.Fatal(err)
 	}
