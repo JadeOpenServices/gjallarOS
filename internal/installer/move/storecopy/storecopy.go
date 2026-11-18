@@ -298,22 +298,24 @@ func keyList(keys []string) bool {
 	return nixos
 }
 
-// VerifyArgs returns the nix arguments that check the new system's closure
-// in the new store at root against keys, after the install.
-func VerifyArgs(root, toplevel string, keys ...string) ([]string, error) {
+// VerifyArgs returns the nix arguments that check, after the install, that
+// every path of the new system's closure in the new store at root still
+// matches the hash its database row records. It checks content only
+// (--no-trust): nixos-install copies paths from the stick's own store into
+// root as a trusted substituter, so they arrive with no signature, and a
+// signature check would refuse every move. Trust is checked when a path is
+// taken from the move cache, which SubstituteArgs leaves untrusted with
+// require-sigs on.
+func VerifyArgs(root, toplevel string) ([]string, error) {
 	if !strings.HasPrefix(root, "/") || strings.ContainsAny(root, "?#& \t\n") {
 		return nil, fmt.Errorf("new root %q is not a plain absolute path", root)
 	}
 	if !StorePath(toplevel) {
 		return nil, fmt.Errorf("%q is not a store path", toplevel)
 	}
-	if !keyList(keys) {
-		return nil, errors.New("verify keys: not a list of named keys with the NixOS key")
-	}
 	return []string{
 		"--extra-experimental-features", "nix-command",
-		"--option", "trusted-public-keys", strings.Join(keys, " "),
-		"store", "verify", "--store", "local?root=" + root, "--recursive", toplevel,
+		"store", "verify", "--no-trust", "--store", "local?root=" + root, "--recursive", toplevel,
 	}, nil
 }
 

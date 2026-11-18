@@ -609,3 +609,23 @@ func TestInstallSwapCleanupRunsAfterCancel(t *testing.T) {
 		}
 	}
 }
+
+// A guided move's local cache comes before the release cache, so nix asks it
+// first (wiki 1133 step 12).
+func TestInstallPutsSubstituteFirst(t *testing.T) {
+	createInstalledProfile(t)
+	r := mountedRunner()
+	var out bytes.Buffer
+	sub := []string{"--option", "extra-substituters", "file:///mnt/gjallar-move-cache?priority=10"}
+	if _, err := install(context.Background(), Input{Repo: testRepo(t), Hostname: "gjallarOS", Out: &out, Substitute: sub}, r); err != nil {
+		t.Fatal(err)
+	}
+	i := callIndex(r.calls, "sudo nixos-install")
+	if i < 0 {
+		t.Fatalf("no nixos-install:\n%s", callsText(r.calls))
+	}
+	call := strings.Join(r.calls[i], " ")
+	if !strings.Contains(call, strings.Join(sub, " ")) {
+		t.Fatalf("substitute options missing: %s", call)
+	}
+}

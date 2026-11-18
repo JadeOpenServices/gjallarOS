@@ -51,6 +51,7 @@ func runFreshBareMetal(
 	enableRecovery bool,
 	passwordFiles []string,
 	hostOverlay *oddc.HostOverlay,
+	mv *moveRun,
 	out io.Writer,
 ) (freshBareMetalResult, error) {
 	if out == nil {
@@ -164,6 +165,12 @@ func runFreshBareMetal(
 			closeTarget()
 		}
 	}()
+	// A move's helper holds the new disk too: it lets go first (L151).
+	defer func() {
+		if !keepTarget {
+			mv.end(ctx)
+		}
+	}()
 
 	// Fresh canonical storage has exactly one owner. mounttree prepares the
 	// ESP, encrypted Btrfs root mount, and the exact 12 GiB recovery
@@ -182,6 +189,10 @@ func runFreshBareMetal(
 			"prepare fresh target mount tree: %w",
 			err,
 		)
+	}
+	substitute, err := mv.prepareNew(ctx, repo, rootResult.MountPoint)
+	if err != nil {
+		return freshBareMetalResult{}, err
 	}
 
 	fmt.Fprintln(
@@ -261,9 +272,10 @@ func runFreshBareMetal(
 	if _, err := baremetalinstall.Install(
 		ctx,
 		baremetalinstall.Input{
-			Repo:     repo,
-			Hostname: hostname,
-			Out:      out,
+			Repo:       repo,
+			Hostname:   hostname,
+			Substitute: substitute,
+			Out:        out,
 		},
 	); err != nil {
 		return freshBareMetalResult{}, fmt.Errorf(
@@ -273,6 +285,9 @@ func runFreshBareMetal(
 	}
 
 	installlog.Mark(installlog.NixOSInstallFinished)
+	if err := mv.checkInstalled(ctx); err != nil {
+		return freshBareMetalResult{}, err
+	}
 
 	if err := saveODDCHostOverlay(
 		ctx,
@@ -305,6 +320,9 @@ func runFreshBareMetal(
 		return freshBareMetalResult{}, err
 	}
 	installlog.Mark(installlog.CheckoutCloned)
+	if err := mv.copyBranches(ctx); err != nil {
+		return freshBareMetalResult{}, err
+	}
 
 	result := freshBareMetalResult{
 		TargetDisk:         plan.TargetDisk.Path,
@@ -458,6 +476,10 @@ func closeFreshTarget(ctx context.Context, mountPoint, mappingName string, out i
 			return
 		}
 		if mappingName == "" || strings.HasPrefix(mappingName, "-") {
+			return
+		}
+		if users := mappingUsers(mappingName); len(users) > 0 {
+			fmt.Fprintf(out, "The new system disk is still in use by %s. Restart before you install again.\n", users[0])
 			return
 		}
 		if _, err := privilegedCommand(cleanupCtx, "cryptsetup", "close", mappingName); err != nil {

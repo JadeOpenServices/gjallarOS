@@ -136,14 +136,14 @@ func TestParseClosure(t *testing.T) {
 }
 
 func TestVerifyArgs(t *testing.T) {
-	args, err := VerifyArgs("/run/gjallar-move/new", oldSys, NixOSKey, gjalKey)
+	args, err := VerifyArgs("/mnt", oldSys)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if slices.Contains(args, "--no-trust") || !slices.Contains(args, "local?root=/run/gjallar-move/new") {
+	if !slices.Contains(args, "--no-trust") || !slices.Contains(args, "local?root=/mnt") || args[len(args)-1] != oldSys {
 		t.Errorf("%q", args)
 	}
-	if _, err := VerifyArgs("/new?root=/", oldSys, NixOSKey); err == nil {
+	if _, err := VerifyArgs("/new?root=/", oldSys); err == nil {
 		t.Error("root with options accepted")
 	}
 }

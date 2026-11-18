@@ -20,19 +20,37 @@ type cache struct {
 // Args returns the nix options that add the cache, or nil when the checkout
 // names none. The rules match the NixOS module: an https url and a key.
 func Args(repo string) []string {
-	data, err := os.ReadFile(filepath.Join(repo, "deployment", "binary-cache.json"))
-	if err != nil {
-		return nil
-	}
-	var c cache
-	if json.Unmarshal(data, &c) != nil {
-		return nil
-	}
-	if !strings.HasPrefix(c.URL, "https://") || c.PublicKey == "" {
+	c, ok := read(repo)
+	if !ok {
 		return nil
 	}
 	return []string{
 		"--option", "extra-substituters", c.URL,
 		"--option", "extra-trusted-public-keys", c.PublicKey,
 	}
+}
+
+// Key returns the cache's public key, or "" when the checkout names no cache
+// by the same rules as Args.
+func Key(repo string) string {
+	c, ok := read(repo)
+	if !ok {
+		return ""
+	}
+	return c.PublicKey
+}
+
+func read(repo string) (cache, bool) {
+	data, err := os.ReadFile(filepath.Join(repo, "deployment", "binary-cache.json"))
+	if err != nil {
+		return cache{}, false
+	}
+	var c cache
+	if json.Unmarshal(data, &c) != nil {
+		return cache{}, false
+	}
+	if !strings.HasPrefix(c.URL, "https://") || c.PublicKey == "" {
+		return cache{}, false
+	}
+	return c, true
 }

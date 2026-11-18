@@ -28,6 +28,9 @@ func TestArgs(t *testing.T) {
 	if got := Args(repo); !slices.Equal(got, want) {
 		t.Fatalf("Args = %q, want %q", got, want)
 	}
+	if got := Key(repo); got != "example.cachix.org-1:abc=" {
+		t.Fatalf("Key = %q", got)
+	}
 }
 
 func TestArgsNone(t *testing.T) {
@@ -40,6 +43,9 @@ func TestArgsNone(t *testing.T) {
 	} {
 		if got := Args(repo); got != nil {
 			t.Errorf("%s: Args = %q, want nil", name, got)
+		}
+		if got := Key(repo); got != "" {
+			t.Errorf("%s: Key = %q, want none", name, got)
 		}
 	}
 }

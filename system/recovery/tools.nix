@@ -56,7 +56,7 @@ let
           '  gjallar-recover repair-boot ROOT' \
           '  gjallar-recover rebuild ROOT FLAKE#HOST' \
           '  gjallar-recover developer-off' \
-          '  gjallar-recover guided {repair|reinstall|fresh [--channel CHANNEL]}' \
+          '  gjallar-recover guided {repair|reinstall|fresh [--channel CHANNEL]|move {new-disk|bring-over}}' \
           '  gjallar-recover install'
       }
 
@@ -584,8 +584,29 @@ let
               confirm_phrase ERASE-FOR-FRESH-INSTALL
               run_installer --recovery "''${channel_args[@]}"
               ;;
+            move)
+              # The mode is one of two fixed words; the installer takes every
+              # other answer from the old disk.
+              case "''${3:-}" in
+                new-disk | bring-over) ;;
+                *)
+                  printf '%s\n' 'Usage: gjallar-recover guided move {new-disk|bring-over}' >&2
+                  exit 2
+                  ;;
+              esac
+              if [ "$#" -ne 3 ]; then
+                printf '%s\n' 'Usage: gjallar-recover guided move {new-disk|bring-over}' >&2
+                exit 2
+              fi
+              require_root
+              printf '%s\n' \
+                'DANGER: GUIDED MOVE TO A NEW DISK' \
+                'The old disk is only read. The new disk you select in the installer is erased.'
+              confirm_phrase ERASE-FOR-MOVE
+              run_installer --recovery --move "$3"
+              ;;
             *)
-              printf '%s\n' 'Usage: gjallar-recover guided {repair|reinstall|fresh [--channel CHANNEL]}' >&2
+              printf '%s\n' 'Usage: gjallar-recover guided {repair|reinstall|fresh [--channel CHANNEL]|move {new-disk|bring-over}}' >&2
               exit 2
               ;;
           esac
@@ -634,7 +655,7 @@ let
       'repair-boot:write the boot entries of a mounted root again'
       'rebuild:rebuild a mounted root from FLAKE#HOST'
       'developer-off:turn developer mode off and go back to the official system'
-      'guided:guided repair, reinstall or fresh install'
+      'guided:guided repair, reinstall, fresh install or move to a new disk'
       'install:run the installer after the recovery console erased the disk'
     )
     if (( CURRENT == 2 )); then
@@ -656,7 +677,11 @@ let
         (( CURRENT == 3 )) && _directories
         ;;
       guided)
-        (( CURRENT == 3 )) && compadd repair reinstall fresh
+        if (( CURRENT == 3 )); then
+          compadd repair reinstall fresh move
+        elif (( CURRENT == 4 )) && [[ $words[3] == move ]]; then
+          compadd new-disk bring-over
+        fi
         ;;
     esac
   '';

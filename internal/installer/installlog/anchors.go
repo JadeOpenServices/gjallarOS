@@ -62,6 +62,11 @@ const (
 	StickMoveSpaceShort      ID = 2112
 	StickMoveNextcloudWarned ID = 2113
 	StickMoveIdentityChoice  ID = 2114
+	StickMoveExported        ID = 2115
+	StickMoveVerified        ID = 2116
+	StickMoveVerifyFailed    ID = 2117
+	StickMoveRepoCopied      ID = 2118
+	StickMoveEnded           ID = 2119
 
 	MakerRunStarted        ID = 3001
 	MakerKeyConfirmed      ID = 3002
@@ -272,6 +277,27 @@ var Registry = []Anchor{
 				Meaning: "the identity item"},
 			{Name: "answer", Kind: KindChoice, Choices: []string{"keep", "new"},
 				Meaning: "keep: it comes along to the new disk; new: it stays behind and the new system starts without it"}}},
+	{ID: StickMoveExported, Name: "stick.move.exported",
+		Meaning: "The old system's store paths were copied into a cache on the new disk for the install, or the copy was skipped and the install downloads everything.",
+		Fields: []FieldSpec{
+			{Name: "paths", Kind: KindCount, Meaning: "store paths in the cache"},
+			{Name: "gib", Kind: KindCount, Meaning: "GiB in the cache, rounded up"},
+			{Name: "skipped", Kind: KindBool, Meaning: "true: nothing was copied and the install went on without the cache"}}},
+	{ID: StickMoveVerified, Name: "stick.move.verified",
+		Meaning: "Every store path of the new system matches the hash its database row records."},
+	{ID: StickMoveVerifyFailed, Name: "stick.move.verify-failed",
+		Meaning: "A store path of the new system does not match its recorded hash; the move stopped before anything was copied from the old home."},
+	{ID: StickMoveRepoCopied, Name: "stick.move.repo-copied",
+		Meaning: "The local branches and stashes of the old system checkout were carried into the new one, or the copy was refused or rolled back.",
+		Fields: []FieldSpec{
+			{Name: "branches", Kind: KindCount, Meaning: "local branches found"},
+			{Name: "moved", Kind: KindCount, Meaning: "branches carried over"},
+			{Name: "stashes", Kind: KindCount, Meaning: "stashes carried over"},
+			{Name: "skipped", Kind: KindCount, Meaning: "branches left behind"},
+			{Name: "refused", Kind: KindBool, Meaning: "true: the old checkout was refused and nothing was tried"},
+			{Name: "failed", Kind: KindBool, Meaning: "true: the copy failed and what it wrote was taken back"}}},
+	{ID: StickMoveEnded, Name: "stick.move.ended",
+		Meaning: "The old disk is closed and the new disk is no longer shown to the move helper."},
 
 	{ID: MakerRunStarted, Name: "maker.run.started",
 		Meaning: "The USB stick maker started.",

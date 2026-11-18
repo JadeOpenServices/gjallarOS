@@ -41,6 +41,7 @@ import (
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/installreport"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/installstate"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/localgit"
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/move"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/nixrender"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/oddc"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/prompt"
@@ -66,6 +67,8 @@ type options struct {
 	recoveryDisk, recoveryPartition, recoverySigningKey      string
 	recoverySigningPublicKey                                 string
 	channel                                                  string
+	// move is a guided move to a new disk (move.NewDisk, move.BringOver).
+	move string
 }
 type state struct {
 	user                     config.User
@@ -265,6 +268,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 	f.StringVar(&opt.recoverySigningKey, "recovery-signing-key", "", "runtime path to offline Ed25519 recovery release private key")
 	f.StringVar(&opt.recoverySigningPublicKey, "recovery-signing-public-key", "", "runtime path to separately pinned Ed25519 recovery release public key")
 	f.StringVar(&opt.channel, "channel", "", "release channel the install follows: "+strings.Join(config.ReleaseChannels, ", "))
+	f.StringVar(&opt.move, "move", "", "move an installed gjallarOS to a new disk: "+move.NewDisk+" or "+move.BringOver)
 	if err := f.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
@@ -272,6 +276,10 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 		return 2
 	}
 	if f.NArg() != 0 {
+		return 2
+	}
+	if err := checkMoveFlags(opt); err != nil {
+		fmt.Fprintf(errOut, "ERROR: %v\n", err)
 		return 2
 	}
 	// The run's log (Plane 343) sees what the installer prints from here on.
@@ -341,6 +349,18 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 		if err := importInstalledAnswers(installedRoot, presetPath, out); err != nil {
 			return fail(errOut, err)
 		}
+	}
+	var mv *moveRun
+	if opt.move != "" {
+		mv, err = startMove(ctx, ui, opt.move, presetPath, out)
+		if errors.Is(err, move.ErrStopped) {
+			fmt.Fprintln(out, "The move stopped. Nothing was changed on any disk.")
+			return 0
+		}
+		if err != nil {
+			return fail(errOut, err)
+		}
+		defer mv.end(ctx)
 	}
 	if _, err := os.Stat(presetPath); err == nil {
 		s.user, err = config.Load(presetPath)
@@ -714,6 +734,14 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 			return fail(errOut, fmt.Errorf("select fresh installation target: %w", err))
 		}
 		s.targetDisk = freshTarget
+		if err := mv.pickTarget(ctx, freshTarget, s.user); errors.Is(err, move.ErrStopped) {
+			fmt.Fprintln(out, "The move stopped. Nothing was changed on any disk.")
+			return 0
+		} else if err != nil {
+			return fail(errOut, err)
+		}
+	} else if mv != nil {
+		return fail(errOut, errors.New("the move needs a fresh install on a new disk, and this run would not make one"))
 	}
 	usbSystemDisk := systemDiskOnUSB(ctx, persistentInstalledHost, root, freshTarget)
 	if s.preset {
@@ -1685,6 +1713,9 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 			}
 		} else {
 			targetDisk := freshTarget
+			if targetDisk == "" && mv != nil {
+				return fail(errOut, errors.New("the move has no checked new disk"))
+			}
 			if targetDisk == "" {
 				targetDisk, err = selectFreshTargetDisk(
 					ctx,
@@ -1723,6 +1754,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 				freshRecoveryPartition(s.user),
 				freshPasswordFiles(s.render),
 				hostOverlayToCommit,
+				mv,
 				out,
 			)
 			if err != nil {
@@ -1735,6 +1767,9 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 				)
 			}
 
+			// The old disk closes before the Secure Boot continuation, which
+			// may restart the machine.
+			mv.end(ctx)
 			// The Secure Boot continuation below still works on the target.
 			defer result.ReleaseTargetState()
 			runLog.target = result.MountPoint

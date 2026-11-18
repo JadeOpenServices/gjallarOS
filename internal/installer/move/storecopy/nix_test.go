@@ -162,7 +162,7 @@ func TestNixStoreCopy(t *testing.T) {
 	// Signed with a trusted key: taken, and the new store verifies.
 	good := filepath.Join(tmp, "good")
 	n.run(false, "nix", "", importArgs(t, cache, good, NixOSKey, pk)...)
-	verify, err := VerifyArgs(good, testPath, NixOSKey, pk)
+	verify, err := VerifyArgs(good, testPath)
 	if err != nil {
 		t.Fatal(err)
 	}

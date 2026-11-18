@@ -52,6 +52,9 @@ type Input struct {
 	Repo     string
 	Hostname string
 	Out      io.Writer
+	// Substitute are nix options that put a local cache before the release
+	// cache: the old disk's closure in a guided move (wiki 1133 step 12).
+	Substitute []string
 }
 
 type Result struct {
@@ -168,6 +171,7 @@ func install(
 		)
 		installArgs = append(installArgs, limits...)
 	}
+	installArgs = append(installArgs, input.Substitute...)
 	installArgs = append(installArgs, binarycache.Args(repo)...)
 	if err := r.Run(
 		ctx,
