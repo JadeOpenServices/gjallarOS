@@ -2,7 +2,6 @@ package oldroot
 
 import (
 	"encoding/json"
-	"errors"
 	"slices"
 	"time"
 
@@ -31,26 +30,28 @@ const maxUserConfig = 1 << 20
 // refused: its organisation moves it. Nothing on the old disk is run or
 // followed; links are only looked at.
 func Inspect(top *safefs.Dir) (Info, error) {
-	var info Info
 	for _, sv := range subvolumes {
 		st, err := top.Lstat(sv)
 		if err != nil {
-			return info, refuse(NoEvidence, "subvolume "+sv+" is missing")
+			return Info{}, refuse(NoEvidence, "subvolume "+sv+" is missing")
 		}
 		// 256 is the inode number of the root of every btrfs subvolume.
 		if st.Mode&unix.S_IFMT != unix.S_IFDIR || st.Ino != 256 {
-			return info, refuse(NoEvidence, sv+" is not a subvolume")
+			return Info{}, refuse(NoEvidence, sv+" is not a subvolume")
 		}
 	}
+	return inspectFiles(top)
+}
+
+// inspectFiles is Inspect after the subvolume check. Managed means
+// management.enable in user.config.json, nothing else: installation-complete
+// is also written by the Secure Boot setup of an unmanaged install.
+func inspectFiles(top *safefs.Dir) (Info, error) {
+	var info Info
 	for _, p := range []string{"@/etc/NIXOS", "@/etc/gjallar/repository"} {
 		if _, err := top.Lstat(p); err != nil {
 			return info, refuse(NoEvidence, p+" is missing")
 		}
-	}
-	if _, err := top.Lstat("@/var/lib/gjallarOS/installation-complete"); err == nil {
-		return info, refuse(Managed, "installation-complete is there")
-	} else if !errors.Is(err, unix.ENOENT) {
-		return info, refuse(NoEvidence, "installation-complete: "+err.Error())
 	}
 	raw, err := top.ReadFile("@config/user.config.json", maxUserConfig)
 	if err != nil {

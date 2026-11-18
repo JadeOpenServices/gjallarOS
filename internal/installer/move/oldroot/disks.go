@@ -29,8 +29,8 @@ type Part struct {
 }
 
 // Find picks the gjallarOS root partitions from the output of lsblk
-// LsblkArgs. A disk with anything mounted from it is left out: that is
-// the stick itself, or a disk something else is using.
+// LsblkArgs. A disk in use is left out (markBusy): that is the stick
+// itself, or a disk something else is using.
 func Find(raw []byte) ([]Part, error) {
 	if len(raw) > maxLsblk {
 		return nil, errors.New("lsblk printed too much")
@@ -58,18 +58,24 @@ func Find(raw []byte) ([]Part, error) {
 		model    string
 	}
 	disks := map[string]disk{}
-	busy := map[string]bool{}
+	// parents maps a device to the devices it sits on. A device on more
+	// than one (RAID, LVM) is listed once per parent.
+	parents := map[string][]string{}
 	for _, d := range out.BlockDevices {
 		if d.Type == "disk" {
 			disks[d.Path] = disk{internal: d.Tran != "usb" && !removable(d.RM), size: d.Size, model: printable(d.Model)}
-			if d.MountPoint != "" {
-				busy[d.Path] = true
-			}
+		}
+		if d.PKName != "" {
+			parents[d.Path] = append(parents[d.Path], d.PKName)
 		}
 	}
+	// A disk is busy when anything on it is mounted or used as swap, at any
+	// depth, or when anything but a partition sits on it: an open LUKS
+	// mapping, LVM or RAID is in use even with nothing mounted.
+	busy := map[string]bool{}
 	for _, d := range out.BlockDevices {
-		if d.Type == "part" && d.MountPoint != "" {
-			busy[d.PKName] = true
+		if d.MountPoint != "" || (d.PKName != "" && d.Type != "part") {
+			markBusy(busy, parents, d.Path)
 		}
 	}
 	var parts []Part
@@ -89,6 +95,20 @@ func Find(raw []byte) ([]Part, error) {
 		parts = append(parts, p)
 	}
 	return parts, nil
+}
+
+// markBusy marks path and every device below it, up to the disks, as busy.
+func markBusy(busy map[string]bool, parents map[string][]string, path string) {
+	todo := []string{path}
+	for len(todo) > 0 {
+		p := todo[len(todo)-1]
+		todo = todo[:len(todo)-1]
+		if busy[p] {
+			continue
+		}
+		busy[p] = true
+		todo = append(todo, parents[p]...)
+	}
 }
 
 // Partitions lists every partition of disk in the same lsblk output, so all

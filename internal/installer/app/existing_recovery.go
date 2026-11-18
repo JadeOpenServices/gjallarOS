@@ -68,9 +68,9 @@ var detectCurrentRootFilesystem = func(
 
 // installedSystemEvidence reports whether the running system was deployed by
 // gjallarOS. Every flake-built system names its checkout in
-// /etc/gjallar/repository; installation-complete is written only by JODS
-// enrollment, so unmanaged installs have the first one alone. Swapped in tests,
-// both read the live host.
+// /etc/gjallar/repository; installation-complete is written by JODS
+// enrollment and by the Secure Boot setup. Swapped in tests, both read the
+// live host.
 var installedSystemEvidence = func(ctx context.Context) bool {
 	if _, err := os.Stat(installercheck.SystemRepositoryFile); err == nil {
 		return true

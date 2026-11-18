@@ -350,16 +350,17 @@ func openOp(ctx context.Context, base string, req Request) (res openResult, err 
 	if len(req.Key) > maxKey {
 		return res, fmt.Errorf("key is over %d bytes", maxKey)
 	}
+	// First: an open old disk counts as in use, so Find would not list it.
+	old := filepath.Join(base, Old)
+	if err := oldroot.Free(old); err != nil {
+		return res, err
+	}
 	part, all, err := oldDisk(ctx, req.Disk)
 	if err != nil {
 		return res, err
 	}
 	if part.Encrypted == (len(req.Key) == 0) {
 		return res, errors.New("a key goes with an encrypted disk and only with one")
-	}
-	old := filepath.Join(base, Old)
-	if err := oldroot.Free(old); err != nil {
-		return res, err
 	}
 	// Set again: the disk may have been plugged out and in since check.
 	if err := oldroot.SetReadOnly(append([]string{part.Disk}, all...)...); err != nil {

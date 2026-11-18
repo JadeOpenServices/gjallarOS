@@ -1,0 +1,126 @@
+{
+   "blockdevices": [
+      {
+         "path": "/dev/sda",
+         "type": "disk",
+         "fstype": null,
+         "partlabel": null,
+         "pkname": null,
+         "tran": "usb",
+         "rm": true,
+         "mountpoint": null,
+         "size": 4294967296,
+         "model": "QEMU HARDDISK"
+      },{
+         "path": "/dev/sda1",
+         "type": "part",
+         "fstype": null,
+         "partlabel": "ESP",
+         "pkname": "/dev/sda",
+         "tran": null,
+         "rm": true,
+         "mountpoint": null,
+         "size": 536870912,
+         "model": null
+      },{
+         "path": "/dev/sda2",
+         "type": "part",
+         "fstype": "crypto_LUKS",
+         "partlabel": "GJALLAROS",
+         "pkname": "/dev/sda",
+         "tran": null,
+         "rm": true,
+         "mountpoint": null,
+         "size": 3757030912,
+         "model": null
+      },{
+         "path": "/dev/sr0",
+         "type": "rom",
+         "fstype": null,
+         "partlabel": null,
+         "pkname": null,
+         "tran": "sata",
+         "rm": true,
+         "mountpoint": null,
+         "size": 1073741312,
+         "model": "QEMU DVD-ROM"
+      },{
+         "path": "/dev/vda",
+         "type": "disk",
+         "fstype": null,
+         "partlabel": null,
+         "pkname": null,
+         "tran": "virtio",
+         "rm": false,
+         "mountpoint": null,
+         "size": 107374182400,
+         "model": null
+      },{
+         "path": "/dev/vda1",
+         "type": "part",
+         "fstype": "vfat",
+         "partlabel": "ESP",
+         "pkname": "/dev/vda",
+         "tran": "virtio",
+         "rm": false,
+         "mountpoint": "/boot",
+         "size": 1073741824,
+         "model": null
+      },{
+         "path": "/dev/vda2",
+         "type": "part",
+         "fstype": "btrfs",
+         "partlabel": "primary",
+         "pkname": "/dev/vda",
+         "tran": "virtio",
+         "rm": false,
+         "mountpoint": "/",
+         "size": 106298343424,
+         "model": null
+      },{
+         "path": "/dev/vdb",
+         "type": "disk",
+         "fstype": null,
+         "partlabel": null,
+         "pkname": null,
+         "tran": "virtio",
+         "rm": false,
+         "mountpoint": null,
+         "size": 107374182400,
+         "model": null
+      },{
+         "path": "/dev/vdb1",
+         "type": "part",
+         "fstype": "vfat",
+         "partlabel": "ESP",
+         "pkname": "/dev/vdb",
+         "tran": "virtio",
+         "rm": false,
+         "mountpoint": null,
+         "size": 1073741824,
+         "model": null
+      },{
+         "path": "/dev/vdb2",
+         "type": "part",
+         "fstype": "crypto_LUKS",
+         "partlabel": "primary",
+         "pkname": "/dev/vdb",
+         "tran": "virtio",
+         "rm": false,
+         "mountpoint": null,
+         "size": 92339699712,
+         "model": null
+      },{
+         "path": "/dev/vdb3",
+         "type": "part",
+         "fstype": "vfat",
+         "partlabel": "JODS-RECOVERY",
+         "pkname": "/dev/vdb",
+         "tran": "virtio",
+         "rm": false,
+         "mountpoint": null,
+         "size": 12884901888,
+         "model": null
+      }
+   ]
+}
