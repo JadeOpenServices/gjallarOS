@@ -484,7 +484,7 @@ Run these from the checkout, on the branch the release goes to.
 
    It prints `SHA256SUMS` and `SHA256SUMS.sshsig` once it is there.
 7. Open the installer release run, check what you are about to sign
-   ([Before you approve](#before-you-approve)), and approve
+   ([Approving an installer release](release-approval.md)), and approve
    `installer-sign` the same way as in step 5. This one you approve in
    the web page, after reading the run; the bot pushed the tag, so
    "Prevent self-review" lets you.
@@ -510,14 +510,12 @@ The approval is the only thing between that file and the signing key. So
 approve only:
 
 - a tag the release bot made, for a commit you asked it to tag,
-- whose commit is on `dev`, `staging` or `stable` (the `build` log says
-  which),
+- whose commit is on `dev`, `staging` or `stable`,
 - whose `.github/workflows/installer-iso.yml` is unchanged since the last
-  release, or changed in a way you read:
+  release, or changed in a way you read.
 
-  ```sh
-  git diff vLAST vYYYY.MM.N -- .github/workflows/installer-iso.yml
-  ```
+[Approving an installer release](release-approval.md) has the commands
+for each check, the clicks, and what to do when a check fails.
 
 ### When a job fails
 
