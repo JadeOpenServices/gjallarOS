@@ -63,6 +63,10 @@ func TestOwn(t *testing.T) {
 	if err := unix.Mkfifo(filepath.Join(top, "fifo"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	// L136: a hard link names the outside file itself.
+	if err := os.Link(outside, filepath.Join(top, "hard")); err != nil {
+		t.Fatal(err)
+	}
 	d := mustDir(t, top)
 	uid, gid := os.Getuid(), os.Getgid()
 
@@ -75,13 +79,13 @@ func TestOwn(t *testing.T) {
 		t.Fatalf("folder: %o, %v", st.Mode, err)
 	}
 	// A pipe would hang a reader; a link would hand over what it points at.
-	for _, bad := range []string{"fifo", "link", "up/f"} {
+	for _, bad := range []string{"fifo", "link", "up/f", "hard"} {
 		if _, err := d.Own(bad, uid, gid, 0o644); !errors.Is(err, ErrNotPlain) {
 			t.Errorf("%s: %v", bad, err)
 		}
 	}
 	if fi, err := os.Stat(outside); err != nil || fi.Mode().Perm() != 0o600 {
-		t.Errorf("link target changed: %v, %v", fi.Mode(), err)
+		t.Errorf("outside file changed: %v, %v", fi.Mode(), err)
 	}
 }
 
@@ -110,7 +114,7 @@ func TestMkdir(t *testing.T) {
 		t.Errorf("planted: %v", err)
 	}
 	if fi, err := os.Stat(target); err != nil || fi.Mode().Perm() == 0o777 {
-		t.Errorf("link target changed: %v, %v", fi.Mode(), err)
+		t.Errorf("outside file changed: %v, %v", fi.Mode(), err)
 	}
 	for _, bad := range []string{"a/b", "..", "../x", ""} {
 		if _, err := d.Mkdir(bad, 0o755); !errors.Is(err, ErrNotPlain) {

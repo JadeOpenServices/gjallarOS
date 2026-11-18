@@ -45,6 +45,10 @@ const (
 	ExportUnit  = "gjallar-move-export"
 	ClosureUnit = "gjallar-move-closure"
 
+	// NotLoaded is systemctl's exit code for a unit that is not loaded:
+	// nothing of it runs.
+	NotLoaded = 5
+
 	// ExportLimit and ClosureLimit stop a unit that runs too long.
 	ExportLimit  = 2 * time.Hour
 	ClosureLimit = 5 * time.Minute
@@ -58,7 +62,15 @@ var (
 	// SystemdRun starts the units. It stays the system's own, so it
 	// matches the systemd that runs as PID 1.
 	SystemdRun = "/run/current-system/sw/bin/systemd-run"
+	// Systemctl stops them, for the same reason the system's own.
+	Systemctl = "/run/current-system/sw/bin/systemctl"
 )
+
+// Units are every confined unit of the move. A helper killed while
+// systemd-run waits leaves its unit running, writing into the cache and
+// holding the old disk; each one is stopped before the cache is removed or
+// the old disk closed (L135).
+var Units = []string{ExportUnit + ".service", ClosureUnit + ".service"}
 
 // unitProps confine the unit. The unit's user exists only while it runs.
 // It sees the stick read-only, no home, no devices, no network, no other
@@ -97,7 +109,21 @@ var unitProps = []string{
 
 // unitArgs returns systemd-run's arguments for one confined nix run. old is
 // the old @nix subvolume, cache the empty cache folder or "" for none.
-func unitArgs(unit string, limit time.Duration, old, cache string, nixArgs ...string) []string {
+//
+// systemd sets up the bind mounts by path, as root, and follows links on
+// the way: nosymfollow on the old disk does not cover systemd's own lookup.
+// Both paths are fixed below the helper's closed folder, the old one was
+// checked to be @nix and is mounted read-only, so no one else can change
+// them; a ":" or blank would split the property, so those are refused.
+func unitArgs(unit string, limit time.Duration, old, cache string, nixArgs ...string) ([]string, error) {
+	for _, p := range []string{old, cache} {
+		if p != "" && (!strings.HasPrefix(p, "/") || strings.ContainsAny(p, ": \t\n\r\v\f")) {
+			return nil, fmt.Errorf("unit folder %q is not a plain absolute path", p)
+		}
+	}
+	if old == "" {
+		return nil, errors.New("unit: no old store")
+	}
 	args := []string{
 		"--quiet", "--wait", "--collect", "--pipe",
 		"--unit=" + unit, "--service-type=exec",
@@ -111,7 +137,7 @@ func unitArgs(unit string, limit time.Duration, old, cache string, nixArgs ...st
 		args = append(args, "--property="+p)
 	}
 	args = append(args, "--", Nix, "--extra-experimental-features", features)
-	return append(args, nixArgs...)
+	return append(args, nixArgs...), nil
 }
 
 // ExportArgs returns systemd-run's arguments to export the closure of the
@@ -120,8 +146,11 @@ func ExportArgs(old, cache, path string) ([]string, error) {
 	if !StorePath(path) {
 		return nil, fmt.Errorf("%q is not a store path", path)
 	}
+	if cache == "" {
+		return nil, errors.New("export: no cache folder")
+	}
 	return unitArgs(ExportUnit, ExportLimit, old, cache,
-		"copy", "--no-check-sigs", "--from", FromURL, "--to", ToURL, path), nil
+		"copy", "--no-check-sigs", "--from", FromURL, "--to", ToURL, path)
 }
 
 // ClosureArgs returns systemd-run's arguments to measure the closure of the
@@ -131,7 +160,7 @@ func ClosureArgs(old, path string) ([]string, error) {
 		return nil, fmt.Errorf("%q is not a store path", path)
 	}
 	return unitArgs(ClosureUnit, ClosureLimit, old, "",
-		"path-info", "--closure-size", "--store", FromURL, path), nil
+		"path-info", "--closure-size", "--store", FromURL, path)
 }
 
 // MaxClosureOutput caps what ClosureArgs' run may print.

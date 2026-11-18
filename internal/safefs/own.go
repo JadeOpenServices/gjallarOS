@@ -73,8 +73,9 @@ func (d *Dir) Mkdir(name string, mode uint32) (*Dir, error) {
 
 // Own sets owner and mode of the plain file or folder rel below d through
 // its own handle, so a name swapped on the way is never what gets changed.
-// Anything else (a link, a pipe, a device, a socket) is refused. It returns
-// what the handle holds afterwards.
+// Anything else (a link, a pipe, a device, a socket) is refused, and so is a
+// file with other names: a hard link can name a file outside d, which must
+// not change (L136). It returns what the handle holds afterwards.
 func (d *Dir) Own(rel string, uid, gid int, mode uint32) (unix.Stat_t, error) {
 	var st unix.Stat_t
 	pathFD, err := openat2(d.fd, rel, unix.O_PATH|unix.O_NOFOLLOW|unix.O_CLOEXEC)
@@ -88,6 +89,9 @@ func (d *Dir) Own(rel string, uid, gid int, mode uint32) (unix.Stat_t, error) {
 	var f *os.File
 	switch st.Mode & unix.S_IFMT {
 	case unix.S_IFREG:
+		if st.Nlink != 1 {
+			return st, fmt.Errorf("own %s below %s: %w: the file has %d names", rel, d.name, ErrNotPlain, st.Nlink)
+		}
 		if f, _, err = reopen(pathFD); err != nil {
 			return st, fmt.Errorf("own %s below %s: %w", rel, d.name, err)
 		}
@@ -106,7 +110,7 @@ func (d *Dir) Own(rel string, uid, gid int, mode uint32) (unix.Stat_t, error) {
 	if err := unix.Fstat(fd, &again); err != nil {
 		return st, err
 	}
-	if again.Dev != st.Dev || again.Ino != st.Ino {
+	if again.Dev != st.Dev || again.Ino != st.Ino || again.Mode&unix.S_IFMT == unix.S_IFREG && again.Nlink != 1 {
 		return st, fmt.Errorf("own %s below %s: %w", rel, d.name, ErrChanged)
 	}
 	// chown first: it clears set-id bits, and the mode is set after.

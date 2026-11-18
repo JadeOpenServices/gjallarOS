@@ -93,6 +93,18 @@ func TestUnitArgs(t *testing.T) {
 			t.Errorf("closure gets a writable folder: %q", a)
 		}
 	}
+	// systemd splits a bind property at ":" and blanks (comment 3, c7).
+	for _, dirs := range [][2]string{
+		{"/o:/etc", "/c"}, {"/o", "/c:/etc"}, {"/o x", "/c"}, {"/o", "/c\tx"},
+		{"/o", "/c\n"}, {"o", "/c"}, {"/o", "c"}, {"", "/c"}, {"/o", ""},
+	} {
+		if _, err := ExportArgs(dirs[0], dirs[1], oldSys); err == nil {
+			t.Errorf("export folders %q accepted", dirs)
+		}
+	}
+	if _, err := ClosureArgs("/o:/etc", oldSys); err == nil {
+		t.Error("closure folder with a colon accepted")
+	}
 	for _, bad := range []string{"/etc/passwd", "/nix/store/x", oldSys + "/../../x", "--to=file:///", "/nix/store/" + pathHash + "-.hidden"} {
 		if _, err := ExportArgs("/o", "/c", bad); err == nil {
 			t.Errorf("export %q", bad)

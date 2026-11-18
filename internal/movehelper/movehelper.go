@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -112,14 +113,16 @@ func Run(base string, in io.Reader, out io.Writer) error {
 		case "sizes":
 			result, err = sizesOp(base)
 		case "close":
-			err = oldroot.Close(ctx, filepath.Join(base, Old))
+			if err = stopUnits(ctx); err == nil {
+				err = oldroot.Close(ctx, filepath.Join(base, Old))
+			}
 			result = struct{}{}
 		case "closure":
 			result, err = closureOp(ctx, base)
 		case "export":
 			result, err = exportOp(ctx, base, req)
 		case "dropcache":
-			err = dropCache(base)
+			err = dropCache(ctx, base)
 			result = struct{}{}
 		}
 	default:
@@ -645,7 +648,7 @@ func exportOp(ctx context.Context, base string, req Request) (res ExportResult, 
 	}
 	if err != nil {
 		res = ExportResult{Skipped: err.Error()}
-		if rmErr := newRoot.RemoveTree(storecopy.CacheName, storecopy.MaxPaths+4); rmErr != nil {
+		if rmErr := removeCache(ctx, newRoot); rmErr != nil {
 			return res, fmt.Errorf("export: %v; removing the copy: %w", err, rmErr)
 		}
 	}
@@ -654,13 +657,42 @@ func exportOp(ctx context.Context, base string, req Request) (res ExportResult, 
 
 // dropCache removes the cache folder once the install no longer needs it
 // (dropcache). Gone already is fine.
-func dropCache(base string) error {
+func dropCache(ctx context.Context, base string) error {
 	newRoot, err := mountedNew(base)
 	if err != nil {
 		return err
 	}
 	defer newRoot.Close()
+	return removeCache(ctx, newRoot)
+}
+
+// removeCache stops the units first: a unit left from a killed helper
+// would go on writing while the folder is removed (L135). A unit that does
+// not stop keeps the cache where it is.
+func removeCache(ctx context.Context, newRoot *safefs.Dir) error {
+	if err := stopUnits(ctx); err != nil {
+		return err
+	}
 	return newRoot.RemoveTree(storecopy.CacheName, storecopy.MaxPaths+4)
+}
+
+// stopUnits stops every confined unit of the move and waits until each has
+// ended (L135). A unit that is not loaded is fine. Tests swap it.
+var stopUnits = func(ctx context.Context) error {
+	for _, u := range storecopy.Units {
+		var stderr bytes.Buffer
+		cmd := oldroot.Tool(ctx, storecopy.Systemctl, "stop", "--", u)
+		cmd.Stderr = &capped{w: &stderr, left: maxUnitErr}
+		err := cmd.Run()
+		var exit *exec.ExitError
+		if errors.As(err, &exit) && exit.ExitCode() == storecopy.NotLoaded {
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("stopping %s: %w: %q", u, err, stderr.String())
+		}
+	}
+	return nil
 }
 
 // mountedNew opens the new root, which must be a mount: without one the
