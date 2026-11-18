@@ -23,6 +23,14 @@ var ErrTooDeep = errors.New("folders are nested too deep")
 // MaxDepth is how deep a copied tree may nest.
 const MaxDepth = 256
 
+// MaxNameBytes caps the memory the name lists of one walk take at once:
+// the folder being read and every folder above it, whose lists stay held
+// until the walk leaves them. A crafted folder of millions of long names,
+// or a deep chain of big folders, is refused with ErrTooMany instead of
+// filling root's memory. Copy, Measure and Names use the same cap, so a
+// tree that Measure passes does not stop a Copy halfway on it.
+var MaxNameBytes int64 = 64 << 20
+
 // EntryCost is what every copied file, folder and link counts against the
 // budget besides its data: a tree of many empty files fills the inode and
 // metadata space too.
@@ -99,6 +107,9 @@ type copier struct {
 	opt   CopyOptions
 	stats *Stats
 	buf   []byte
+	// names is what the name lists of the open folders cost, from the top
+	// down to the one being copied.
+	names int64
 }
 
 func (c *copier) charge(n int64) error {
@@ -113,10 +124,12 @@ func (c *copier) tree(srcFD, dstFD int, name string, depth int) error {
 	if depth >= MaxDepth {
 		return fmt.Errorf("copy %s: %w", name, ErrTooDeep)
 	}
-	names, err := readNames(srcFD, -1)
+	names, cost, err := readNames(srcFD, -1, MaxNameBytes-c.names)
 	if err != nil {
 		return fmt.Errorf("list %s: %w", name, err)
 	}
+	c.names += cost
+	defer func() { c.names -= cost }()
 	for _, n := range names {
 		if err := c.entry(srcFD, dstFD, n, name+"/"+n, depth); err != nil {
 			return err
@@ -388,26 +401,42 @@ func made(err error) error {
 }
 
 // readNames lists a folder, sorted, without . and .. . With max >= 0 a
-// folder with more than max entries is refused with ErrTooMany.
-func readNames(fd, max int) ([]string, error) {
+// folder with more than max entries is refused with ErrTooMany. room caps
+// what the list may cost in memory, counted as nameCost per name; a folder
+// over it is refused with ErrTooMany as well. It returns the cost of the
+// list, which a walk holds until it leaves the folder.
+func readNames(fd, max int, room int64) ([]string, int64, error) {
 	if _, err := unix.Seek(fd, 0, 0); err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	var names []string
+	var cost int64
 	buf := make([]byte, 64<<10)
 	for {
 		n, err := unix.Getdents(fd, buf)
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		if n <= 0 {
 			break
 		}
+		start := len(names)
 		_, _, names = unix.ParseDirent(buf[:n], -1, names)
-		if max >= 0 && len(names) > max {
-			return nil, ErrTooMany
+		for _, name := range names[start:] {
+			cost += nameCost(name)
+		}
+		if max >= 0 && len(names) > max || cost > room {
+			return nil, 0, ErrTooMany
 		}
 	}
 	sort.Strings(names)
-	return names, nil
+	return names, cost, nil
 }
+
+// nameCost is what one listed name counts against MaxNameBytes: its bytes
+// plus nameOverhead.
+func nameCost(name string) int64 { return int64(len(name)) + nameOverhead }
+
+// nameOverhead covers the string header, its slot in the list and the room
+// a growing list keeps spare.
+const nameOverhead = 48

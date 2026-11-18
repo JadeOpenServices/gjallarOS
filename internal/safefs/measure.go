@@ -69,6 +69,8 @@ type measurer struct {
 	opt     MeasureOptions
 	size    *Size
 	entries int
+	// names is what the name lists of the open folders cost, as in copier.
+	names int64
 }
 
 func (m *measurer) owned(uid uint32) bool {
@@ -83,10 +85,12 @@ func (m *measurer) tree(fd int, name, rel string, depth int) error {
 	if m.opt.MaxFolder > 0 && m.opt.MaxFolder < limit {
 		limit = m.opt.MaxFolder
 	}
-	names, err := readNames(fd, limit)
+	names, cost, err := readNames(fd, limit, MaxNameBytes-m.names)
 	if err != nil {
 		return fmt.Errorf("list %s: %w", name, err)
 	}
+	m.names += cost
+	defer func() { m.names -= cost }()
 	m.entries += len(names)
 	for _, n := range names {
 		r := n
