@@ -1,6 +1,7 @@
 package movehelper
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"path"
@@ -31,8 +32,9 @@ type IdentityResult struct {
 	// SyncFolders counts the Nextcloud folders made again, empty, for the
 	// client to fill from the server (L158).
 	SyncFolders int `json:"syncFolders,omitempty"`
-	// Left counts for each written network item the profiles that stay
-	// on the old disk: refused by the allowlist (L64) or unreadable.
+	// Left counts for each network or Bluetooth item the profiles and
+	// pairings that stay on the old disk: refused by the allowlist (L64)
+	// or unreadable.
 	Left map[identity.Item]int `json:"left,omitempty"`
 }
 
@@ -42,7 +44,7 @@ type IdentityResult struct {
 // item that is not kept is made new: the new disk has none of it, and for
 // Nextcloud the settings the home copy brought along are removed. One
 // item that fails stays behind and the others still go.
-func identityOp(base string, req Request) (res IdentityResult, err error) {
+func identityOp(ctx context.Context, base string, req Request) (res IdentityResult, err error) {
 	keep := map[identity.Item]bool{}
 	for _, it := range req.Keep {
 		if !slices.Contains(identity.Items, it) {
@@ -76,21 +78,24 @@ func identityOp(base string, req Request) (res IdentityResult, err error) {
 			continue
 		}
 		var err error
+		left := 0
 		switch it {
 		case identity.WiFi, identity.WiFiEnterprise, identity.VPN:
-			var left int
-			if left, err = keepNetworks(top, newRoot, it); left > 0 {
-				if res.Left == nil {
-					res.Left = map[identity.Item]int{}
-				}
-				res.Left[it] = left
-			}
+			left, err = keepNetworks(top, newRoot, it)
+		case identity.Bluetooth:
+			left, err = keepBluetooth(top, newRoot, thisAdapters(ctx))
 		case identity.MachineID:
 			err = keepMachineID(top, newRoot)
 		case identity.Nextcloud:
 			res.SyncFolders, err = keepNextcloud(top, newRoot, info.Username)
 		default:
 			err = errNotYet
+		}
+		if left > 0 {
+			if res.Left == nil {
+				res.Left = map[identity.Item]int{}
+			}
+			res.Left[it] = left
 		}
 		if err != nil {
 			if res.Failed == nil {
@@ -124,7 +129,7 @@ func keepNetworks(top, newRoot *safefs.Dir, it identity.Item) (left int, err err
 		if !identity.ProfileName(n) {
 			continue
 		}
-		raw, err := readRootFile(top, identity.ProfileDir+"/"+n, 0o077)
+		raw, err := readRootFile(top, identity.ProfileDir+"/"+n, 0o077, identity.MaxProfile)
 		if err != nil {
 			// Not a profile NetworkManager loads, as the scan saw it.
 			continue
@@ -137,7 +142,7 @@ func keepNetworks(top, newRoot *safefs.Dir, it identity.Item) (left int, err err
 		}
 		var certs [][]byte
 		for _, c := range p.Certs {
-			b, cerr := readRootFile(top, identity.ProfileDir+"/"+c, 0o022)
+			b, cerr := readRootFile(top, identity.ProfileDir+"/"+c, 0o022, identity.MaxProfile)
 			if cerr != nil && err == nil {
 				err = cerr
 			}
@@ -178,9 +183,86 @@ func keepNetworks(top, newRoot *safefs.Dir, it identity.Item) (left int, err err
 	return left, nil
 }
 
+// newBluezDir holds the Bluetooth pairings on the new root.
+var newBluezDir = strings.TrimPrefix(identity.BluezDir, "@/")
+
+// keepBluetooth writes the old disk's Bluetooth pairings of this
+// computer's adapters onto the new root, each info file written again from
+// the allowlist of identity.CleanBluezInfo (L64). Pairings of an adapter
+// that is not in this computer stay behind: the device would not know the
+// adapter. A device BlueZ only saw, with no pairing key, is not carried
+// and not counted; a pairing that is refused or unreadable is counted in
+// left. When no pairing can go, the item fails.
+func keepBluetooth(top, newRoot *safefs.Dir, adapters map[string]bool) (left int, err error) {
+	names, err := top.Names(identity.BluezDir, identity.MaxAdapters)
+	if err != nil {
+		return 0, err
+	}
+	written, made := 0, false
+	for _, a := range names {
+		if !identity.BTAddress(a) || !adapters[a] {
+			continue
+		}
+		devices, err := top.Names(identity.BluezDir+"/"+a, identity.MaxDevices)
+		if err != nil {
+			// Not a folder the scan counted.
+			continue
+		}
+		for _, d := range devices {
+			if !identity.BTAddress(d) {
+				// BlueZ keeps "settings" and "cache" next to the devices.
+				continue
+			}
+			rel := a + "/" + d + "/info"
+			if st, err := top.Lstat(identity.BluezDir + "/" + rel); err != nil || st.Mode&unix.S_IFMT != unix.S_IFREG || st.Size == 0 {
+				// Not a pairing the scan counted.
+				continue
+			}
+			raw, err := readRootFile(top, identity.BluezDir+"/"+rel, 0o022, identity.MaxInfo)
+			var info []byte
+			if err == nil {
+				info, err = identity.CleanBluezInfo(raw)
+				clear(raw)
+			}
+			if errors.Is(err, identity.ErrNotPaired) {
+				continue
+			}
+			if err == nil && !made {
+				if err = newRoot.MakeDirs(path.Dir(newBluezDir), int(rootUID), int(rootGID), 0o755); err == nil {
+					err = newRoot.MakeDirs(newBluezDir, int(rootUID), int(rootGID), 0o700)
+				}
+				if err != nil {
+					return left, err
+				}
+				made = true
+			}
+			if err == nil {
+				err = newRoot.MakeDirs(newBluezDir+"/"+a+"/"+d, int(rootUID), int(rootGID), 0o700)
+			}
+			if err == nil {
+				err = newRoot.WriteFile(newBluezDir+"/"+rel, info, int(rootUID), int(rootGID), 0o600)
+			}
+			clear(info)
+			if err != nil {
+				left++
+				continue
+			}
+			written++
+		}
+	}
+	switch {
+	case written > 0:
+	case left == 0:
+		return 0, errors.New("the old disk has no pairing of this computer's Bluetooth")
+	default:
+		return left, fmt.Errorf("none of its %d pairings can be carried over", left)
+	}
+	return left, nil
+}
+
 // readRootFile reads rel below top when it is a plain file of root's that
-// grants nothing in mask, capped at identity.MaxProfile.
-func readRootFile(top *safefs.Dir, rel string, mask uint32) ([]byte, error) {
+// grants nothing in mask, capped at max bytes.
+func readRootFile(top *safefs.Dir, rel string, mask uint32, max int64) ([]byte, error) {
 	st, err := top.Lstat(rel)
 	if err != nil {
 		return nil, err
@@ -188,7 +270,7 @@ func readRootFile(top *safefs.Dir, rel string, mask uint32) ([]byte, error) {
 	if st.Mode&unix.S_IFMT != unix.S_IFREG || st.Uid != rootUID || st.Mode&mask != 0 {
 		return nil, fmt.Errorf("%s: %w", rel, safefs.ErrNotPlain)
 	}
-	return top.ReadFile(rel, identity.MaxProfile)
+	return top.ReadFile(rel, max)
 }
 
 // keepMachineID writes the old disk's machine-id, checked as the scan

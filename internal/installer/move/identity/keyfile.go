@@ -371,29 +371,40 @@ func CleanProfile(raw []byte) (Profile, error) {
 			return p, fmt.Errorf("%w: a plugin VPN", ErrNotCarried)
 		}
 	}
+	data, err := rewrite(groups, len(raw), &p, func(name string) func(string) check { return keysFor(k, name) })
+	if err != nil {
+		return Profile{Item: p.Item}, err
+	}
+	p.Data = data
+	return p, nil
+}
+
+// rewrite writes groups again with only the groups and keys allowed names;
+// a kept key whose value fails its check refuses the whole file. size is
+// the length of the raw file.
+func rewrite(groups []group, size int, p *Profile, allowed func(group string) func(key string) check) ([]byte, error) {
 	var out bytes.Buffer
 	// Room for all of it at once: no copy of a secret is left behind in a
 	// smaller buffer.
-	out.Grow(2*len(raw) + 64)
+	out.Grow(2*size + 64)
 	for _, g := range groups {
-		allowed := keysFor(k, g.name)
-		if allowed == nil {
+		keys := allowed(g.name)
+		if keys == nil {
 			continue
 		}
 		fmt.Fprintf(&out, "[%s]\n", g.name)
 		for _, kv := range g.keys {
-			ok := allowed(kv.key)
+			ok := keys(kv.key)
 			if ok == nil {
 				continue
 			}
-			if !ok(&p, kv.value) {
+			if !ok(p, kv.value) {
 				clear(out.Bytes())
-				return Profile{Item: p.Item}, fmt.Errorf("%w: [%s] %s", ErrNotCarried, g.name, kv.key)
+				return nil, fmt.Errorf("%w: [%s] %s", ErrNotCarried, g.name, kv.key)
 			}
 			fmt.Fprintf(&out, "%s=%s\n", kv.key, kv.value)
 		}
 		out.WriteByte('\n')
 	}
-	p.Data = out.Bytes()
-	return p, nil
+	return out.Bytes(), nil
 }

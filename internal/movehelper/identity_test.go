@@ -2,6 +2,7 @@ package movehelper
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -27,7 +28,7 @@ func TestIdentityKeepChecked(t *testing.T) {
 		{identity.MachineID, identity.MachineID},
 		{""},
 	} {
-		if _, err := identityOp(t.TempDir(), Request{Keep: keep}); err == nil || !strings.HasPrefix(err.Error(), "identity: ") {
+		if _, err := identityOp(t.Context(), t.TempDir(), Request{Keep: keep}); err == nil || !strings.HasPrefix(err.Error(), "identity: ") {
 			t.Errorf("%q: %v", keep, err)
 		}
 	}
@@ -332,6 +333,103 @@ func TestIdentityChild(t *testing.T) {
 			t.Error("linked profile folder followed")
 		}
 		if names, _ := os.ReadDir(filepath.Join(dir, "nmelse")); len(names) != 0 {
+			t.Errorf("written through a link: %v", names)
+		}
+	})
+
+	t.Run("bluetooth", func(t *testing.T) {
+		raw, err := os.ReadFile("../installer/move/identity/testdata/bluez-headset.info")
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Addresses from the documentation range of RFC 7042.
+		const here, other = "00:00:5E:00:53:01", "00:00:5E:00:53:02"
+		dev := func(n int) string { return fmt.Sprintf("00:00:5E:00:53:%02X", 0x10+n) }
+		old := t.TempDir()
+		bz := filepath.Join(old, identity.BluezDir)
+		info := func(adapter, device, s string) {
+			mkdirs(t, filepath.Join(bz, adapter, device))
+			if err := os.WriteFile(filepath.Join(bz, adapter, device, "info"), []byte(s), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		info(here, dev(1), string(raw))
+		// Seen, never paired: not carried, not counted.
+		info(here, dev(2), "[General]\nName=Example\n")
+		// Refused by the allowlist: counted.
+		info(here, dev(3), strings.Replace(string(raw), "Key=00112233445566778899AABBCCDDEEFF", "Key=0011", 1))
+		// A link and a FIFO are not opened.
+		mkdirs(t, filepath.Join(bz, here, dev(4)), filepath.Join(bz, here, dev(5)))
+		if err := os.Symlink(outside, filepath.Join(bz, here, dev(4), "info")); err != nil {
+			t.Fatal(err)
+		}
+		if err := unix.Mkfifo(filepath.Join(bz, here, dev(5), "info"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		// One others could write is not read: counted.
+		info(here, dev(7), string(raw))
+		if err := os.Chmod(filepath.Join(bz, here, dev(7), "info"), 0o622); err != nil {
+			t.Fatal(err)
+		}
+		// A pairing of an adapter this computer does not have stays.
+		info(other, dev(6), string(raw))
+		if err := os.WriteFile(filepath.Join(bz, here, "settings"), []byte("[General]\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		this := map[string]bool{here: true}
+
+		root, _ := newHomeWith(t, "bt", false)
+		newBZ := filepath.Join(root, newBluezDir)
+		if left, err := keepBluetooth(openTest(t, old), openTest(t, root), this); err != nil || left != 2 {
+			t.Errorf("left %d, %v", left, err)
+		}
+		b, err := os.ReadFile(filepath.Join(newBZ, here, dev(1), "info"))
+		want, _ := identity.CleanBluezInfo(raw)
+		if err != nil || string(b) != string(want) {
+			t.Errorf("written info %v:\n%s", err, b)
+		}
+		for _, f := range []string{"", here, here + "/" + dev(1)} {
+			if st, err := os.Lstat(filepath.Join(newBZ, f)); err != nil || st.Mode().Perm() != 0o700 {
+				t.Errorf("folder %q: %v %v", f, st, err)
+			}
+		}
+		if st, err := os.Lstat(filepath.Join(newBZ, here, dev(1), "info")); err != nil || st.Mode().Perm() != 0o600 {
+			t.Errorf("info: %v %v", st, err)
+		}
+		for _, f := range []string{other, here + "/" + dev(2), here + "/" + dev(3), here + "/" + dev(4), here + "/" + dev(5), here + "/" + dev(7), here + "/settings"} {
+			if _, err := os.Lstat(filepath.Join(newBZ, f)); err == nil {
+				t.Errorf("%s written", f)
+			}
+		}
+		// None of this computer's adapters.
+		if _, err := keepBluetooth(openTest(t, old), openTest(t, root), map[string]bool{}); err == nil || !strings.Contains(err.Error(), "no pairing") {
+			t.Errorf("other computer: %v", err)
+		}
+
+		// A link planted at the new info is refused and its target stays.
+		root, _ = newHomeWith(t, "btlink", false)
+		newBZ = filepath.Join(root, newBluezDir)
+		mkdirs(t, filepath.Join(newBZ, here, dev(1)))
+		if err := os.Symlink(outside, filepath.Join(newBZ, here, dev(1), "info")); err != nil {
+			t.Fatal(err)
+		}
+		if left, err := keepBluetooth(openTest(t, old), openTest(t, root), this); left != 3 || err == nil {
+			t.Errorf("planted link: left %d, %v", left, err)
+		}
+		if b, _ := os.ReadFile(outside); string(b) != "keep" {
+			t.Errorf("link target changed: %q", b)
+		}
+		// A device folder planted as a link is not followed.
+		root, _ = newHomeWith(t, "btdirlink", false)
+		newBZ = filepath.Join(root, newBluezDir)
+		mkdirs(t, filepath.Join(newBZ, here), filepath.Join(dir, "btelse"))
+		if err := os.Symlink(filepath.Join(dir, "btelse"), filepath.Join(newBZ, here, dev(1))); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := keepBluetooth(openTest(t, old), openTest(t, root), this); err == nil {
+			t.Error("linked device folder followed")
+		}
+		if names, _ := os.ReadDir(filepath.Join(dir, "btelse")); len(names) != 0 {
 			t.Errorf("written through a link: %v", names)
 		}
 	})

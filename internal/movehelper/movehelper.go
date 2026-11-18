@@ -114,7 +114,7 @@ func Run(base string, in io.Reader, out io.Writer) error {
 		case "home":
 			result, err = homeOp(base, req)
 		case "identity":
-			result, err = identityOp(base, req)
+			result, err = identityOp(ctx, base, req)
 		case "check":
 			result, err = checkOp(ctx, req)
 		case "open":
@@ -607,12 +607,18 @@ func inventoryOp(ctx context.Context, base string) (res InventoryResult, err err
 		return res, err
 	}
 	defer top.Close()
+	res.Inventory = identity.Scan(top, info.Username, thisAdapters(ctx))
+	return res, nil
+}
+
+// thisAdapters returns the addresses of this computer's Bluetooth
+// adapters; tests change it.
+var thisAdapters = func(ctx context.Context) map[string]bool {
 	adapters := map[string]bool{}
 	for _, a := range (btaddr.Sysfs{Root: "/sys"}).Addresses(ctx) {
 		adapters[a] = true
 	}
-	res.Inventory = identity.Scan(top, info.Username, adapters)
-	return res, nil
+	return adapters
 }
 
 // SizesResult is the size of each category on the open old disk (step 6,
