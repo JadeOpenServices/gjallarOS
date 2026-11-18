@@ -186,6 +186,22 @@ func TestChooseNextcloudNote(t *testing.T) {
 	}
 }
 
+// The account is there but no sync folder is in the home: nothing stays
+// behind, so the keep text is the plain one.
+func TestChooseNextcloudNoFolders(t *testing.T) {
+	h := &fakeHelper{answers: map[string][]any{
+		"sizes":     {sizesOf(freespace.Sizes{Home: 100 * gb})},
+		"inventory": {invOf(identity.Inventory{Nextcloud: true})},
+	}}
+	_, out, err := choose(t, h, NewDisk, &Old{}, target2T, "\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "Keep: the Nextcloud app keeps syncing with no new login.") || strings.Contains(out, "downloads your folders again") {
+		t.Fatalf("screen\n%s", out)
+	}
+}
+
 // small is a 512 GB disk without a recovery partition.
 var small = Target{DiskBytes: 512110190592, BaseClosure: 30 * gb}
 

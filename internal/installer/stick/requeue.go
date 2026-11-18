@@ -245,7 +245,10 @@ func openLUKS(ctx context.Context, out io.Writer, base, device string) error {
 	}
 	w.Close()
 	// The key waits in the pipe until it is typed in full, so the time limit
-	// of one try (R50) counts the open only, not the typing.
+	// of one try (R50) counts the open only, not the typing. Input longer
+	// than the pipe buffer (64 KiB) blocks ask here; only the person at the
+	// keyboard can do that, to their own session, and Ctrl+C ends it. Keep
+	// it so: reading the key into this process would put it in our memory.
 	if err := ask.Wait(); err != nil {
 		r.Close()
 		return fmt.Errorf("read the install password or recovery key: %w", err)
@@ -269,7 +272,7 @@ func openFailure(err error) error {
 	case oldroot.WrongKey:
 		return errors.New("that password or recovery key did not open the disk")
 	case oldroot.TooSlow:
-		return errors.New("the installed gjallarOS took too long to open, so the try was stopped; restart from the stick and try again")
+		return errors.New("the installed gjallarOS took too long to open, so the try was stopped. Restart from the stick and try again")
 	}
 	msg := "the installed gjallarOS failed the safety check of its encryption header, so its key is not read: " + string(r.Reason)
 	if r.Detail != "" {

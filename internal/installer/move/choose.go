@@ -44,6 +44,17 @@ func (c Choices) Chosen(name string) bool {
 	return false
 }
 
+// left tells whether the category was offered and stays behind. A category
+// that was never offered (nothing to move) is not left behind.
+func (c Choices) left(name string) bool {
+	for _, cat := range c.Categories {
+		if cat.Name == name {
+			return !cat.Chosen
+		}
+	}
+	return false
+}
+
 // Choose runs steps 6 to 8 on the opened old disk: the size list, the
 // Nextcloud note, the free-space check and the identity screens. The space
 // check comes before the identity screens, so a home left behind also
@@ -84,7 +95,7 @@ func (f Flow) Choose(ctx context.Context, old *Old, t Target) (Choices, error) {
 	}
 	c.Space = space
 
-	c.Identity, err = f.identityScreens(ctx, old, inv.Inventory, c.Chosen(freespace.Home), c.Chosen(freespace.Nextcloud))
+	c.Identity, err = f.identityScreens(ctx, old, inv.Inventory, c.Chosen(freespace.Home), c.left(freespace.Nextcloud))
 	if err != nil {
 		return c, f.stop(ctx, err)
 	}
@@ -272,8 +283,8 @@ const nextcloudRefetch = "the Nextcloud app logs in by itself and downloads your
 
 // identityScreens is step 7, one screen per item. home tells whether the
 // home moves; without it the Nextcloud account has nothing to sync into.
-// ncFolders tells whether the Nextcloud folders move.
-func (f Flow) identityScreens(ctx context.Context, old *Old, inv identity.Inventory, home, ncFolders bool) ([]identity.Choice, error) {
+// ncLeft tells whether Nextcloud folders were found and stay behind.
+func (f Flow) identityScreens(ctx context.Context, old *Old, inv identity.Inventory, home, ncLeft bool) ([]identity.Choice, error) {
 	offer := identity.Offer(inv, identity.Options{PINUnchecked: old.PINUnchecked, SameComputer: f.Mode == NewDisk})
 	var notes []string
 	if n := inv.BluetoothOther; n > 0 {
@@ -305,7 +316,7 @@ func (f Flow) identityScreens(ctx context.Context, old *Old, inv identity.Invent
 			screen += fmt.Sprintf(" (%d)", ch.Count)
 		}
 		keep := text.keep
-		if ch.Item == identity.Nextcloud && !ncFolders {
+		if ch.Item == identity.Nextcloud && ncLeft {
 			keep = nextcloudRefetch
 		}
 		screen += "\nKeep: " + keep + ".\nMake new: " + text.renew + "."

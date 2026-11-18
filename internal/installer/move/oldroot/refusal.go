@@ -45,7 +45,7 @@ var texts = map[Reason]string{
 	OldCryptsetup: "This stick's disk tools are too old to open the old disk safely. Make a new stick.",
 	Busy:          "The old disk is already open. Restart from the stick and try again.",
 	NotOpen:       "The old disk is not open any more. Go back and open it again.",
-	TooSlow:       "The old disk took too long to open, so the move stops here. Restart from the stick and try again; if it happens again, the disk may be failing.",
+	TooSlow:       "The old disk took too long to open, so the move stops here. Restart from the stick and try again. If it happens again, the disk may be failing.",
 }
 
 // Refusal stops the move with a text for the user. It is not a failure of
