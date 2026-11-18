@@ -367,14 +367,24 @@ func (m *moveRun) identity(ctx context.Context) error {
 	if err := m.flow.Helper.Run(ctx, movehelper.Request{Op: "identity", Keep: keep}, &res); err != nil {
 		return fmt.Errorf("carry over what identifies this computer: %w", err)
 	}
+	left := 0
+	for _, n := range res.Left {
+		left += n
+	}
 	installlog.Mark(installlog.StickMoveIdentityWritten,
 		installlog.Count("kept", len(keep)),
 		installlog.Count("written", len(res.Written)),
 		installlog.Count("failed", len(res.Failed)),
-		installlog.Count("sync", res.SyncFolders))
+		installlog.Count("sync", res.SyncFolders),
+		installlog.Count("left", left))
 	for _, it := range res.Written {
-		if t, ok := move.ItemText(it); ok {
-			fmt.Fprintf(m.out, "Kept: %s.\n", t.Name)
+		t, ok := move.ItemText(it)
+		if !ok {
+			continue
+		}
+		fmt.Fprintf(m.out, "Kept: %s.\n", t.Name)
+		if n := res.Left[it]; n > 0 {
+			fmt.Fprintf(m.out, "  %d of them stay on the old disk. Set them up again by hand.\n", n)
 		}
 	}
 	if res.SyncFolders > 0 {

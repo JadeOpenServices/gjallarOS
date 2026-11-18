@@ -210,4 +210,129 @@ func TestIdentityChild(t *testing.T) {
 			t.Errorf("removed through a link: %v", err)
 		}
 	})
+
+	t.Run("networks", func(t *testing.T) {
+		fixture := func(name string) string {
+			b, err := os.ReadFile(filepath.Join("../installer/move/identity/testdata", name+".nmconnection"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			return string(b)
+		}
+		company := strings.Replace(fixture("companywifi"), "ca-cert=/home/joe/.cert/corp.crt", "ca-cert=corp.crt", 1)
+		// oldNM makes an old disk with the given profile files.
+		oldNM := func(files map[string]string, mode os.FileMode) string {
+			old := t.TempDir()
+			nm := filepath.Join(old, identity.ProfileDir)
+			mkdirs(t, nm)
+			for n, s := range files {
+				if err := os.WriteFile(filepath.Join(nm, n), []byte(s), mode); err != nil {
+					t.Fatal(err)
+				}
+			}
+			return old
+		}
+		old := oldNM(map[string]string{
+			"home.nmconnection":    fixture("personal-wifi"),
+			"corp.nmconnection":    company,
+			"openvpn.nmconnection": fixture("redhat-openvpn"),
+		}, 0o600)
+		nm := filepath.Join(old, identity.ProfileDir)
+		if err := os.WriteFile(filepath.Join(nm, "corp.crt"), []byte("cert"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		// Others may read it: NetworkManager does not load it, so it is
+		// not counted.
+		if err := os.WriteFile(filepath.Join(nm, "open.nmconnection"), []byte(fixture("personal-wifi")), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(outside, filepath.Join(nm, "link.nmconnection")); err != nil {
+			t.Fatal(err)
+		}
+		// A FIFO is not opened: the read would hang.
+		if err := unix.Mkfifo(filepath.Join(nm, "fifo.nmconnection"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+
+		root, _ := newHomeWith(t, "nm", false)
+		newNM := filepath.Join(root, newProfileDir)
+		for it, files := range map[identity.Item][]string{
+			identity.WiFi:           {"home.nmconnection"},
+			identity.WiFiEnterprise: {"corp.nmconnection", "corp.crt"},
+		} {
+			if left, err := keepNetworks(openTest(t, old), openTest(t, root), it); err != nil || left != 0 {
+				t.Errorf("%s: left %d, %v", it, left, err)
+			}
+			for _, f := range files {
+				st, err := os.Lstat(filepath.Join(newNM, f))
+				if err != nil || !st.Mode().IsRegular() || st.Mode().Perm() != 0o600 {
+					t.Errorf("%s: %v %v", f, st, err)
+				}
+			}
+		}
+		if st, err := os.Lstat(newNM); err != nil || st.Mode().Perm() != 0o700 {
+			t.Errorf("profile folder: %v %v", st, err)
+		}
+		b, _ := os.ReadFile(filepath.Join(newNM, "home.nmconnection"))
+		want, _ := identity.CleanProfile([]byte(fixture("personal-wifi")))
+		if string(b) != string(want.Data) {
+			t.Errorf("written profile:\n%s", b)
+		}
+		names, _ := os.ReadDir(newNM)
+		if len(names) != 3 {
+			t.Errorf("written: %v", names)
+		}
+		// A plugin VPN stays behind; with nothing else the item fails.
+		if left, err := keepNetworks(openTest(t, old), openTest(t, root), identity.VPN); left != 1 || err == nil || !strings.Contains(err.Error(), "none of its 1") {
+			t.Errorf("plugin VPN: left %d, %v", left, err)
+		}
+		if _, err := os.Lstat(filepath.Join(newNM, "openvpn.nmconnection")); err == nil {
+			t.Error("plugin VPN written")
+		}
+		// An old disk with none of the item.
+		if _, err := keepNetworks(openTest(t, oldNM(nil, 0o600)), openTest(t, root), identity.WiFi); err == nil || !strings.Contains(err.Error(), "no such profile") {
+			t.Errorf("no profile: %v", err)
+		}
+
+		// A certificate planted as a link is not read: the profile stays.
+		linked := oldNM(map[string]string{"corp.nmconnection": company}, 0o600)
+		if err := os.Symlink(outside, filepath.Join(linked, identity.ProfileDir, "corp.crt")); err != nil {
+			t.Fatal(err)
+		}
+		root, _ = newHomeWith(t, "nmcert", false)
+		if left, err := keepNetworks(openTest(t, linked), openTest(t, root), identity.WiFiEnterprise); left != 1 || err == nil {
+			t.Errorf("linked cert: left %d, %v", left, err)
+		}
+		if _, err := os.Lstat(filepath.Join(root, newProfileDir, "corp.nmconnection")); err == nil {
+			t.Error("profile of a linked cert written")
+		}
+
+		// A link planted at the new profile is refused and its target stays.
+		root, _ = newHomeWith(t, "nmlink", false)
+		newNM = filepath.Join(root, newProfileDir)
+		if err := os.MkdirAll(newNM, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(outside, filepath.Join(newNM, "home.nmconnection")); err != nil {
+			t.Fatal(err)
+		}
+		if left, err := keepNetworks(openTest(t, old), openTest(t, root), identity.WiFi); left != 1 || err == nil {
+			t.Errorf("planted link: left %d, %v", left, err)
+		}
+		if b, _ := os.ReadFile(outside); string(b) != "keep" {
+			t.Errorf("link target changed: %q", b)
+		}
+		// A profile folder planted as a link is refused before any write.
+		root, _ = newHomeWith(t, "nmdirlink", false)
+		mkdirs(t, filepath.Join(root, "etc/NetworkManager"), filepath.Join(dir, "nmelse"))
+		if err := os.Symlink(filepath.Join(dir, "nmelse"), filepath.Join(root, newProfileDir)); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := keepNetworks(openTest(t, old), openTest(t, root), identity.WiFi); err == nil {
+			t.Error("linked profile folder followed")
+		}
+		if names, _ := os.ReadDir(filepath.Join(dir, "nmelse")); len(names) != 0 {
+			t.Errorf("written through a link: %v", names)
+		}
+	})
 }

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"regexp"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/config"
 	"github.com/JadeOpenServices/gjallarOS/internal/safefs"
@@ -249,65 +248,4 @@ func ReadMachineID(top *safefs.Dir) ([]byte, error) {
 		return nil, errors.New("the old machine-id is not a valid machine-id")
 	}
 	return raw, nil
-}
-
-type kind int
-
-const (
-	kindOther kind = iota // a profile that is not an identity item (ethernet, bridge, ...)
-	kindBad               // not a profile NetworkManager would load
-	kindWiFi
-	kindWiFiEnterprise
-	kindVPN
-)
-
-// profileKind reads the connection type of a keyfile, nm-settings-keyfile(5):
-// the GLib key file format, comments with #, [group] lines and key=value
-// lines. Anything else makes the whole file bad, as it does for
-// NetworkManager. Only the type and the presence of [802-1x] are looked at.
-func profileKind(raw []byte) kind {
-	if !utf8.Valid(raw) || bytes.IndexByte(raw, 0) >= 0 {
-		return kindBad
-	}
-	group, typ, enterprise, typed := "", "", false, false
-	for line := range strings.SplitSeq(string(raw), "\n") {
-		line = strings.TrimRight(strings.TrimLeft(line, " \t"), "\r")
-		switch {
-		case line == "" || line[0] == '#':
-		case line[0] == '[':
-			if len(line) < 3 || line[len(line)-1] != ']' || strings.ContainsAny(line[1:len(line)-1], "[]") {
-				return kindBad
-			}
-			group = line[1 : len(line)-1]
-			if group == "802-1x" {
-				enterprise = true
-			}
-		default:
-			key, value, ok := strings.Cut(line, "=")
-			key = strings.TrimRight(key, " \t")
-			if !ok || key == "" || group == "" {
-				return kindBad
-			}
-			if group != "connection" || key != "type" {
-				continue
-			}
-			value = strings.TrimSpace(value)
-			if typed && value != typ {
-				return kindBad
-			}
-			typ, typed = value, true
-		}
-	}
-	switch typ {
-	case "":
-		return kindBad
-	case "wifi", "802-11-wireless":
-		if enterprise {
-			return kindWiFiEnterprise
-		}
-		return kindWiFi
-	case "vpn", "wireguard":
-		return kindVPN
-	}
-	return kindOther
 }

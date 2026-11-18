@@ -317,7 +317,8 @@ var Registry = []Anchor{
 			{Name: "kept", Kind: KindCount, Meaning: "items the user chose to keep"},
 			{Name: "written", Kind: KindCount, Meaning: "kept items now on the new disk"},
 			{Name: "failed", Kind: KindCount, Meaning: "kept items that stay behind, told on screen"},
-			{Name: "sync", Kind: KindCount, Meaning: "Nextcloud folders made again, empty, to download from the server"}}},
+			{Name: "sync", Kind: KindCount, Meaning: "Nextcloud folders made again, empty, to download from the server"},
+			{Name: "left", Kind: KindCount, Meaning: "network profiles of written items that stay behind, refused by the allowlist"}}},
 
 	{ID: MakerRunStarted, Name: "maker.run.started",
 		Meaning: "The USB stick maker started.",

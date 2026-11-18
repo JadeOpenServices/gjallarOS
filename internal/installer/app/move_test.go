@@ -392,7 +392,8 @@ func TestMoveIdentity(t *testing.T) {
 	}
 	var out bytes.Buffer
 	h := &fakeMoveHelper{ident: movehelper.IdentityResult{
-		Written:     []identity.Item{identity.MachineID},
+		Written:     []identity.Item{identity.MachineID, identity.VPN},
+		Left:        map[identity.Item]int{identity.VPN: 2},
 		Failed:      map[identity.Item]string{identity.WiFi: "not\nyet"},
 		SyncFolders: 2,
 	}}
@@ -408,7 +409,7 @@ func TestMoveIdentity(t *testing.T) {
 	if !slices.Equal(h.ops, []string{"identity"}) || !slices.Equal(h.keep, []identity.Item{identity.WiFi, identity.MachineID}) {
 		t.Errorf("ops %v, keep %v", h.ops, h.keep)
 	}
-	for _, w := range []string{"Kept: Machine ID.", "Saved Wi-Fi networks stays on the old disk: not yet", "Made new: Tailscale: log in again", "made again, empty: 2"} {
+	for _, w := range []string{"Kept: Machine ID.", "Saved Wi-Fi networks stays on the old disk: not yet", "Made new: Tailscale: log in again", "made again, empty: 2", "Kept: VPN connections and their keys.\n  2 of them stay on the old disk."} {
 		if !strings.Contains(out.String(), w) {
 			t.Errorf("output %q lacks %q", out.String(), w)
 		}
