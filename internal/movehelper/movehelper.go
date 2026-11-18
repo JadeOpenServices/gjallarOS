@@ -382,9 +382,11 @@ func openOp(ctx context.Context, base string, req Request) (res openResult, err 
 			return res, err
 		}
 		res.PINToken = prep.Header.PINToken
-		dev = "/dev/mapper/" + oldroot.Mapping
-		// The mapping sits on the read-only partition; mark it as well.
-		if err := oldroot.SetReadOnly(dev); err != nil {
+		if dev, err = oldroot.MappedDevice(part.Path); err == nil {
+			// The mapping sits on the read-only partition; mark it as well.
+			err = oldroot.SetReadOnly(dev)
+		}
+		if err != nil {
 			return res, errors.Join(err, oldroot.Close(ctx, old))
 		}
 	}

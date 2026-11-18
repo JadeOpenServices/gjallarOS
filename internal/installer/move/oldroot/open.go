@@ -88,6 +88,61 @@ func (p *Prepared) Open(ctx context.Context, key io.Reader) error {
 	return nil
 }
 
+// sysBlock is where the kernel lists block devices and devDir where their
+// nodes are; tests point them elsewhere.
+var sysBlock, devDir = "/sys/block", "/dev"
+
+// MappedDevice returns the device node of the opened Mapping, /dev/dm-N.
+// /dev/mapper/Mapping is a link made by udev and is never followed: the
+// kernel's own list names the node, and it must be a LUKS2 mapping of part
+// and nothing else.
+func MappedDevice(part string) (string, error) {
+	entries, err := os.ReadDir(sysBlock)
+	if err != nil {
+		return "", fmt.Errorf("list block devices: %w", err)
+	}
+	for _, e := range entries {
+		dm := e.Name()
+		if !strings.HasPrefix(dm, "dm-") {
+			continue
+		}
+		dir := filepath.Join(sysBlock, dm)
+		name, err := os.ReadFile(filepath.Join(dir, "dm", "name"))
+		if err != nil || strings.TrimSpace(string(name)) != Mapping {
+			continue
+		}
+		uuid, err := os.ReadFile(filepath.Join(dir, "dm", "uuid"))
+		if err != nil || !strings.HasPrefix(string(uuid), "CRYPT-LUKS2-") {
+			return "", fmt.Errorf("%s is not a LUKS2 mapping", Mapping)
+		}
+		slaves, err := os.ReadDir(filepath.Join(dir, "slaves"))
+		if err != nil {
+			return "", fmt.Errorf("check %s: %w", Mapping, err)
+		}
+		if len(slaves) != 1 || slaves[0].Name() != filepath.Base(part) {
+			return "", fmt.Errorf("%s does not sit on %s", Mapping, part)
+		}
+		var major, minor uint32
+		raw, err := os.ReadFile(filepath.Join(dir, "dev"))
+		if err != nil {
+			return "", fmt.Errorf("check %s: %w", Mapping, err)
+		}
+		if n, _ := fmt.Sscanf(strings.TrimSpace(string(raw)), "%d:%d", &major, &minor); n != 2 {
+			return "", fmt.Errorf("check %s: no device number", Mapping)
+		}
+		node := filepath.Join(devDir, dm)
+		var st unix.Stat_t
+		if err := unix.Lstat(node, &st); err != nil {
+			return "", fmt.Errorf("check %s: %w", node, err)
+		}
+		if st.Mode&unix.S_IFMT != unix.S_IFBLK || st.Rdev != unix.Mkdev(major, minor) {
+			return "", fmt.Errorf("%s is not the device of %s", node, Mapping)
+		}
+		return node, nil
+	}
+	return "", fmt.Errorf("%s is not open", Mapping)
+}
+
 // Remove deletes the header copy.
 func (p *Prepared) Remove() { os.Remove(p.header) }
 

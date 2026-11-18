@@ -177,13 +177,17 @@ func keyFromRoot(ctx context.Context, out io.Writer, root oldroot.Part) (der []b
 		if err := openLUKS(ctx, out, base, root.Path); err != nil {
 			return nil, err
 		}
-		device = "/dev/mapper/" + oldroot.Mapping
 	}
 	defer func() {
 		if cerr := oldroot.Close(context.WithoutCancel(ctx), top); cerr != nil && err == nil {
 			der, err = nil, fmt.Errorf("close the installed root: %w", cerr)
 		}
 	}()
+	if root.Encrypted {
+		if device, err = oldroot.MappedDevice(root.Path); err != nil {
+			return nil, err
+		}
+	}
 	if err := oldroot.Mount(device, top); err != nil {
 		return nil, fmt.Errorf("mount the installed root read-only: %w", err)
 	}
