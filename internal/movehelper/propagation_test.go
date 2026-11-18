@@ -225,7 +225,24 @@ func TestIsolateBaseChild(t *testing.T) {
 	// The new root, as attach moves it.
 	target := filepath.Join(dir, "mnt")
 	tmpfs(target)
+	// On the stick /mnt is shared: give it a peer, so that a copy attach
+	// left shared would fail checkBase (c7 S1).
+	if err := unix.Mount("", target, "", unix.MS_SHARED, ""); err != nil {
+		t.Fatal(err)
+	}
+	mntPeer := filepath.Join(dir, "mntpeer")
+	mkdirs(t, mntPeer)
+	if err := unix.Mount(target, mntPeer, "", unix.MS_BIND, ""); err != nil {
+		t.Fatal(err)
+	}
 	if err := attach(base, target); err != nil {
+		t.Fatal(err)
+	}
+	tmpfs(filepath.Join(newDir, "boot"))
+	if mountedAt(filepath.Join(mntPeer, "boot")) || mountedAt(filepath.Join(target, "boot")) {
+		t.Error("a mount below the attached new root reached /mnt or its peer")
+	}
+	if err := unix.Unmount(filepath.Join(newDir, "boot"), 0); err != nil {
 		t.Fatal(err)
 	}
 	if !mountedAt(newDir) {
@@ -291,8 +308,10 @@ func TestIsolateBaseChild(t *testing.T) {
 	}
 
 	// A base left half done: bound on itself but still in /run's group, or
-	// private after a crash before the shared step. Later locks refuse.
-	for name, prop := range map[string]uintptr{"run-group": 0, "private": unix.MS_PRIVATE} {
+	// private after a crash before the shared step. Later locks refuse. A
+	// slave of /run's group that has a group of its own as well is refused
+	// by the master check alone (c7 S2).
+	for name, prop := range map[string]uintptr{"run-group": 0, "private": unix.MS_PRIVATE, "slave-shared": unix.MS_SLAVE} {
 		half := filepath.Join(run, "half-"+name)
 		if err := Dirs(half); err != nil {
 			t.Fatal(err)
@@ -302,6 +321,11 @@ func TestIsolateBaseChild(t *testing.T) {
 		}
 		if prop != 0 {
 			if err := unix.Mount("", half, "", prop, ""); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if prop == unix.MS_SLAVE {
+			if err := unix.Mount("", half, "", unix.MS_SHARED, ""); err != nil {
 				t.Fatal(err)
 			}
 		}
