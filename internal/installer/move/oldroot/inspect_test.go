@@ -45,6 +45,9 @@ func TestInspectRefusesNonSubvolumes(t *testing.T) {
 	}
 }
 
+// lt is the longest string checkStrings lets through, all of it <.
+var lt = strings.Repeat("<", maxConfigString)
+
 func mkdir(t *testing.T, p string) {
 	t.Helper()
 	if err := os.MkdirAll(p, 0o755); err != nil {
@@ -85,6 +88,15 @@ func TestInspectFiles(t *testing.T) {
 		"oversized value": {plant: with(map[string]any{"name": strings.Repeat("x", maxConfigString+1)}), refusal: BadConfig},
 		"oversized key":   {plant: with(map[string]any{strings.Repeat("k", maxConfigString+1): 1}), refusal: BadConfig},
 		"wrong type":      {plant: with(map[string]any{"snapshotsKeepDays": "SYNTHETIC"}), refusal: BadConfig},
+		// L143: each < takes six bytes once encoded again; the file stays
+		// under maxUserConfig, the encoded settings do not.
+		"escapes past the answer cap": {plant: with(map[string]any{
+			"name": lt, "email": lt, "githubUsername": lt, "weatherCity": lt,
+			"weatherCountry": lt, "nextcloudHost": lt, "aiRemoteModel": lt,
+		}), refusal: BadConfig},
+		// L145: a theme or shell names a file the build imports.
+		"theme is a path": {plant: with(map[string]any{"theme": "../../SYNTHETIC"}), refusal: BadConfig},
+		"shell is a path": {plant: with(map[string]any{"shell": "../SYNTHETIC"}), refusal: BadConfig},
 		"trailing data": {plant: func(top string) {
 			write(t, filepath.Join(top, cfg), userConfig(t, nil)+`{"unattendedInstall":true}`)
 		}, refusal: NoEvidence},
@@ -186,10 +198,14 @@ func userConfig(t *testing.T, change map[string]any) string {
 			fields[k] = v
 		}
 	}
-	if b, err = json.Marshal(fields); err != nil {
+	// Written like a person or another tool would: < > & as they are.
+	var out strings.Builder
+	enc := json.NewEncoder(&out)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(fields); err != nil {
 		t.Fatal(err)
 	}
-	return string(b)
+	return strings.TrimSuffix(out.String(), "\n")
 }
 
 // L65 and loophole 138: the old disk's file never steers the stick's

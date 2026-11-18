@@ -122,3 +122,39 @@ func WithInstallerKeysFrom(user, from User) User {
 	}
 	return user
 }
+
+// BringOverKeeps lists the device keys a bring-over keeps from the old
+// disk, each with its reason (L142). Every other device key describes the
+// old computer (USB trust, TPM unlock, Secure Boot, recovery, host name,
+// tailscale, signing key...) and takes the value of a fresh install here.
+var BringOverKeeps = map[string]string{
+	"username": "the home folder and every file in it belong to this account; the move copies them under the same name",
+}
+
+// WithDeviceKeysFrom returns user with every device-scoped key taken from
+// fresh, except the keys in keep. A key in keep must be device-scoped and
+// have a reason.
+func WithDeviceKeysFrom(user, fresh User, keep map[string]string) (User, error) {
+	keys, err := deviceScoped()
+	if err != nil {
+		return User{}, err
+	}
+	for key, reason := range keep {
+		if !keys[key] {
+			return User{}, fmt.Errorf("%s is kept but is not a device key", key)
+		}
+		if strings.TrimSpace(reason) == "" {
+			return User{}, fmt.Errorf("%s is kept without a reason", key)
+		}
+	}
+	u := reflect.ValueOf(&user).Elem()
+	f := reflect.ValueOf(fresh)
+	t := u.Type()
+	for i := range t.NumField() {
+		key, _, _ := strings.Cut(t.Field(i).Tag.Get("json"), ",")
+		if _, kept := keep[key]; keys[key] && !kept {
+			u.Field(i).Set(f.Field(i))
+		}
+	}
+	return user, nil
+}

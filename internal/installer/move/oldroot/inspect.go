@@ -35,6 +35,11 @@ var subvolumes = []string{"@", "@home", "@nix", "@config"}
 // installer reads the helper's answer with a 64 KiB cap.
 const maxUserConfig = 32 << 10
 
+// MaxEncodedConfig caps the checked settings once encoded again. The move
+// helper's config answer wraps them and must stay below the installer's
+// 64 KiB cap on the helper's answer.
+const MaxEncodedConfig = 56 << 10
+
 // maxConfigString caps every key and string value in user.config.json.
 // Validate checks the shape of most strings, not all of their lengths.
 const maxConfigString = 4096
@@ -95,6 +100,18 @@ func UserConfig(top *safefs.Dir) (config.User, error) {
 	if err != nil {
 		return config.User{}, refuse(NoEvidence, "user.config.json cannot be read")
 	}
+	return CheckConfig(raw)
+}
+
+// CheckConfig runs the checks of UserConfig on settings already read. The
+// installer runs it again on the helper's answer, so both sides hold the
+// same rules.
+func CheckConfig(raw []byte) (config.User, error) {
+	// ReadFile caps the file itself at maxUserConfig; the helper's answer
+	// is the file encoded again and can be larger.
+	if len(raw) > MaxEncodedConfig {
+		return config.User{}, refuse(BadConfig, "user.config.json is too large")
+	}
 	if !json.Valid(raw) {
 		return config.User{}, refuse(NoEvidence, "user.config.json is not valid")
 	}
@@ -126,7 +143,14 @@ func UserConfig(top *safefs.Dir) (config.User, error) {
 	if err != nil {
 		return config.User{}, err
 	}
-	return config.WithInstallerKeysFrom(user, defaults), nil
+	user = config.WithInstallerKeysFrom(user, defaults)
+	// L143: JSON encoding escapes < > & as six bytes each, so a file under
+	// maxUserConfig can still grow past what the helper may answer.
+	b, err := json.Marshal(user)
+	if err != nil || len(b) > MaxEncodedConfig {
+		return config.User{}, refuse(BadConfig, "user.config.json is too large once encoded")
+	}
+	return user, nil
 }
 
 // usernameOf is the username in raw, or "" when there is none.

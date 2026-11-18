@@ -250,6 +250,16 @@ var timezonePattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_+-]*(/[A-Za-z0-9_+
 
 // localePattern is the shape of a glibc locale name such as en_US.UTF-8,
 // sr_RS@latin or C.UTF-8.
+// moduleNamePattern is a shell, editor, browser or theme name. The build
+// imports a file by that name (user/default.nix ./shells/${shell}.nix, the
+// tmux ./themes/${theme}.nix) or looks up pkgs.${name}, so it is a plain
+// file name, never a path (L145).
+var moduleNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
+
+// xkbPattern is an xkb layout or variant, or a comma list of them ("de,us").
+// It goes into the Hyprland config text, so it holds no space or newline.
+var xkbPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,32}(,[A-Za-z0-9_-]{0,32}){0,7}$`)
+
 var localePattern = regexp.MustCompile(`^(C|POSIX|[a-z]{2,3}(_[A-Z]{2})?)(\.[A-Za-z0-9-]+)?(@[a-z]+)?$`)
 
 // DefaultUSBTrustTPMHandle is where the USB trust broker creates its signing
@@ -393,6 +403,9 @@ func Validate(user User) error {
 	if len(user.Editors) == 0 || len(user.Browsers) == 0 {
 		return fmt.Errorf("at least one editor and browser are required")
 	}
+	if err := validateShapes(user); err != nil {
+		return err
+	}
 	if user.ReleaseChannel != "" && !slices.Contains(ReleaseChannels, user.ReleaseChannel) {
 		return fmt.Errorf("invalid releaseChannel: %q; use %s", user.ReleaseChannel, strings.Join(ReleaseChannels, ", "))
 	}
@@ -451,6 +464,43 @@ func Validate(user User) error {
 		return err
 	}
 
+	return nil
+}
+
+// validateShapes checks the strings the build turns into file names,
+// package names or config text (L145). Which modules exist is a question
+// for the repository the build uses (discovery), not for this file.
+func validateShapes(user User) error {
+	names := map[string]string{"shell": user.Shell, "theme": user.Theme}
+	if user.PreferredEditor != "" {
+		names["preferredEditor"] = user.PreferredEditor
+	}
+	if user.PreferredBrowser != "" {
+		names["preferredBrowser"] = user.PreferredBrowser
+	}
+	for key, value := range names {
+		if !moduleNamePattern.MatchString(value) {
+			return fmt.Errorf("invalid %s: %q", key, value)
+		}
+	}
+	for key, list := range map[string][]string{"editors": user.Editors, "browsers": user.Browsers} {
+		for _, value := range list {
+			if !moduleNamePattern.MatchString(value) {
+				return fmt.Errorf("invalid %s entry: %q", key, value)
+			}
+		}
+	}
+	if user.KeyboardLayout != "" && !xkbPattern.MatchString(user.KeyboardLayout) {
+		return fmt.Errorf("invalid keyboardLayout: %q", user.KeyboardLayout)
+	}
+	if user.KeyboardVariant != "" && !xkbPattern.MatchString(user.KeyboardVariant) {
+		return fmt.Errorf("invalid keyboardVariant: %q", user.KeyboardVariant)
+	}
+	if d := user.DotfilesDir; d != "" {
+		if !filepath.IsAbs(d) || filepath.Clean(d) != d || strings.ContainsFunc(d, func(r rune) bool { return r < 0x20 || r == 0x7f }) {
+			return fmt.Errorf("invalid dotfilesDir: %q; use an absolute, clean path on one line", d)
+		}
+	}
 	return nil
 }
 

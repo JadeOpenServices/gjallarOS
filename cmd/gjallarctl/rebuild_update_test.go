@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -300,5 +301,53 @@ func TestODDCOverrideRevision(t *testing.T) {
 		if (err != nil) != c.wantErr || got != c.want {
 			t.Errorf("oddcOverrideRevision(%q) = %q, %v; want %q, error %v", c.args, got, err, c.want, c.wantErr)
 		}
+	}
+}
+
+// L146: hooks and an fsmonitor program set in the checkout's .git never run
+// during the root pull.
+func TestPullCheckoutRunsNoHooks(t *testing.T) {
+	upstream, checkout := channelCheckout(t, "stable", "stable")
+	gitRun(t, upstream, "checkout", "-q", "stable")
+	gitRun(t, upstream, "commit", "-q", "--allow-empty", "-m", "two")
+	ran := filepath.Join(t.TempDir(), "ran")
+	hooks := filepath.Join(t.TempDir(), "hooks")
+	if err := os.MkdirAll(hooks, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	script := "#!/bin/sh\necho SYNTHETIC >> " + ran + "\n"
+	for _, h := range []string{"post-merge", "post-checkout", "reference-transaction", "fsmonitor"} {
+		if err := os.WriteFile(filepath.Join(hooks, h), []byte(script), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(checkout, ".git/hooks", h), []byte(script), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	gitRun(t, checkout, "config", "core.hooksPath", hooks)
+	gitRun(t, checkout, "config", "core.fsmonitor", filepath.Join(hooks, "fsmonitor"))
+	var stdout, stderr bytes.Buffer
+	if code := pullCheckout(checkout, &stdout, &stderr); code != 0 {
+		t.Fatalf("code %d: %s", code, stderr.String())
+	}
+	if gitOut(t, checkout, "log", "-1", "--format=%s") != "two" {
+		t.Fatal("not pulled")
+	}
+	if _, err := os.Stat(ran); err == nil {
+		t.Error("a hook ran during the pull")
+	}
+}
+
+// N2: the error names the ref root looked for.
+func TestPullCheckoutNamesMissingRef(t *testing.T) {
+	_, checkout := channelCheckout(t, "stable", "stable")
+	gitRun(t, checkout, "update-ref", "-d", "refs/remotes/origin/stable")
+	gitRun(t, checkout, "config", "remote.origin.fetch", "+refs/heads/dev:refs/remotes/origin/dev")
+	var stdout, stderr bytes.Buffer
+	if code := pullCheckout(checkout, &stdout, &stderr); code == 0 {
+		t.Fatal("pull without the channel branch went on")
+	}
+	if !strings.Contains(stderr.String(), "refs/remotes/origin/stable") {
+		t.Errorf("stderr: %s", stderr.String())
 	}
 }

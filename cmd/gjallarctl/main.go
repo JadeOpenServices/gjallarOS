@@ -2405,25 +2405,25 @@ func pullCheckout(repo string, stdout, stderr io.Writer) int {
 	channel := user.Channel()
 	upstream := "refs/remotes/origin/" + channel
 	git := func(args ...string) int {
-		return runCommand(context.Background(), stdout, stderr, "git", append([]string{"-C", repo}, args...)...)
+		return runCommand(context.Background(), stdout, stderr, "git", systemGitArgs(repo, args...)...)
 	}
 	failed := func(what string) int {
 		fmt.Fprintf(stderr, "[gjallarOS] Error: %s in %s failed; nothing rebuilt\n", what, repo)
 		return 1
 	}
 	isAncestor := func(a, b string) bool {
-		return exec.Command("git", "-C", repo, "merge-base", "--is-ancestor", a, b).Run() == nil
+		return exec.Command("git", systemGitArgs(repo, "merge-base", "--is-ancestor", a, b)...).Run() == nil
 	}
 
 	before := gitHead(repo)
 	if git("fetch", "--quiet", "--prune", "origin") != 0 {
 		return failed("git fetch origin")
 	}
-	if exec.Command("git", "-C", repo, "rev-parse", "--verify", "--quiet", upstream).Run() != nil {
-		fmt.Fprintf(stderr, "[gjallarOS] Error: origin has no %s branch for releaseChannel %q; nothing rebuilt\n", channel, channel)
+	if exec.Command("git", systemGitArgs(repo, "rev-parse", "--verify", "--quiet", upstream)...).Run() != nil {
+		fmt.Fprintf(stderr, "[gjallarOS] Error: origin has no %s branch (%s) for releaseChannel %q; nothing rebuilt\n", channel, upstream, channel)
 		return 1
 	}
-	out, err := exec.Command("git", "-C", repo, "symbolic-ref", "--quiet", "--short", "HEAD").Output()
+	out, err := exec.Command("git", systemGitArgs(repo, "symbolic-ref", "--quiet", "--short", "HEAD")...).Output()
 	if err != nil {
 		fmt.Fprintf(stderr, "[gjallarOS] Error: %s is not on a branch; check out %s first; nothing rebuilt\n", repo, channel)
 		return 1
@@ -2550,8 +2550,15 @@ the system checkout.
 `)
 }
 
+// systemGitArgs are root's git arguments for the system checkout. Root
+// never runs a hook or an fsmonitor program from the checkout's config, even
+// one that came in with a moved or restored .git (L146).
+func systemGitArgs(repo string, args ...string) []string {
+	return append([]string{"-C", repo, "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false"}, args...)
+}
+
 func gitHead(repo string) string {
-	out, err := exec.Command("git", "-C", repo, "rev-parse", "--short", "HEAD").Output()
+	out, err := exec.Command("git", systemGitArgs(repo, "rev-parse", "--short", "HEAD")...).Output()
 	if err != nil {
 		return "unknown"
 	}
