@@ -22,6 +22,7 @@ const (
 	NotBtrfs   Reason = "not-btrfs"
 	NoEvidence Reason = "no-evidence"
 	Managed    Reason = "managed"
+	BadConfig  Reason = "bad-config"
 	// Others.
 	WrongKey      Reason = "wrong-key"
 	OldCryptsetup Reason = "old-cryptsetup"
@@ -41,6 +42,7 @@ var texts = map[Reason]string{
 	NotBtrfs:      "The old disk opened, but it does not hold a gjallarOS system.",
 	NoEvidence:    "The old disk does not hold a complete gjallarOS with the current layout.",
 	Managed:       "This computer is managed by your organisation. Ask your administrator to move it.",
+	BadConfig:     "The settings file on the old disk has keys or values this stick does not accept. Update the old computer to the current release, then try again.",
 	WrongKey:      "That recovery key or disk passphrase did not open the old disk.",
 	OldCryptsetup: "This stick's disk tools are too old to open the old disk safely. Make a new stick.",
 	Busy:          "The old disk is already open. Restart from the stick and try again.",

@@ -1,10 +1,13 @@
 package oldroot
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/config"
 	"github.com/JadeOpenServices/gjallarOS/internal/safefs"
 	"golang.org/x/sys/unix"
 )
@@ -54,6 +57,10 @@ func mkdir(t *testing.T, p string) {
 // (system/security/secure-boot/lifecycle.nix), so only management.enable
 // makes it managed.
 func TestInspectFiles(t *testing.T) {
+	cfg := filepath.Join("@config", "user.config.json")
+	with := func(change map[string]any) func(top string) {
+		return func(top string) { write(t, filepath.Join(top, cfg), userConfig(t, change)) }
+	}
 	cases := map[string]struct {
 		plant   func(top string)
 		refusal Reason
@@ -63,30 +70,47 @@ func TestInspectFiles(t *testing.T) {
 		"unmanaged, Secure Boot setup done": {plant: func(top string) {
 			write(t, filepath.Join(top, "@/var/lib/gjallarOS/installation-complete"), "")
 		}, channel: "stable"},
-		"staging channel": {plant: func(top string) {
-			write(t, filepath.Join(top, "@config/user.config.json"), `{"username":"example","releaseChannel":"staging"}`)
-		}, channel: "staging"},
-		"managed": {plant: func(top string) {
-			write(t, filepath.Join(top, "@config/user.config.json"), `{"management":{"enable":true}}`)
-		}, refusal: Managed},
-		"no username": {plant: func(top string) {
-			write(t, filepath.Join(top, "@config/user.config.json"), `{"management":{"enable":false}}`)
+		"staging channel":      {plant: with(map[string]any{"releaseChannel": "staging"}), channel: "staging"},
+		"no channel":           {plant: with(map[string]any{"releaseChannel": nil}), channel: "stable"},
+		"managed":              {plant: with(map[string]any{"management": map[string]any{"enable": true}}), refusal: Managed},
+		"managed, no more":     {plant: func(top string) { write(t, filepath.Join(top, cfg), `{"management":{"enable":true}}`) }, refusal: Managed},
+		"managed, unknown key": {plant: with(map[string]any{"management": map[string]any{"enable": true}, "SYNTHETICunknown": 1}), refusal: Managed},
+		"no username":          {plant: with(map[string]any{"username": nil}), refusal: NoEvidence},
+		"username with a path": {plant: with(map[string]any{"username": "../root"}), refusal: NoEvidence},
+		"only a username":      {plant: func(top string) { write(t, filepath.Join(top, cfg), `{"username":"example"}`) }, refusal: BadConfig},
+		"unknown channel":      {plant: with(map[string]any{"releaseChannel": "nightly"}), refusal: BadConfig},
+		// L65: the 1133 test, an unknown key and an oversized string.
+		"unknown key":     {plant: with(map[string]any{"SYNTHETICunknown": true}), refusal: BadConfig},
+		"renamed key":     {plant: with(map[string]any{"aiEnable": true}), refusal: BadConfig},
+		"oversized value": {plant: with(map[string]any{"name": strings.Repeat("x", maxConfigString+1)}), refusal: BadConfig},
+		"oversized key":   {plant: with(map[string]any{strings.Repeat("k", maxConfigString+1): 1}), refusal: BadConfig},
+		"wrong type":      {plant: with(map[string]any{"snapshotsKeepDays": "SYNTHETIC"}), refusal: BadConfig},
+		"trailing data": {plant: func(top string) {
+			write(t, filepath.Join(top, cfg), userConfig(t, nil)+`{"unattendedInstall":true}`)
 		}, refusal: NoEvidence},
-		"username with a path": {plant: func(top string) {
-			write(t, filepath.Join(top, "@config/user.config.json"), `{"username":"../root"}`)
-		}, refusal: NoEvidence},
-		"unknown channel": {plant: func(top string) {
-			write(t, filepath.Join(top, "@config/user.config.json"), `{"username":"example","releaseChannel":"nightly"}`)
+		"over the cap": {plant: func(top string) {
+			write(t, filepath.Join(top, cfg), userConfig(t, nil))
+			if err := os.Truncate(filepath.Join(top, cfg), maxUserConfig+1); err != nil {
+				t.Fatal(err)
+			}
 		}, refusal: NoEvidence},
 		"config is a link": {plant: func(top string) {
-			p := filepath.Join(top, "@config/user.config.json")
+			p := filepath.Join(top, cfg)
 			os.Remove(p)
 			if err := os.Symlink("/etc/passwd", p); err != nil {
 				t.Fatal(err)
 			}
 		}, refusal: NoEvidence},
+		"@config is a link": {plant: func(top string) {
+			elsewhere := t.TempDir()
+			write(t, filepath.Join(elsewhere, "user.config.json"), userConfig(t, nil))
+			os.RemoveAll(filepath.Join(top, "@config"))
+			if err := os.Symlink(elsewhere, filepath.Join(top, "@config")); err != nil {
+				t.Fatal(err)
+			}
+		}, refusal: NoEvidence},
 		"config is a pipe": {plant: func(top string) {
-			p := filepath.Join(top, "@config/user.config.json")
+			p := filepath.Join(top, cfg)
 			os.Remove(p)
 			if err := unix.Mkfifo(p, 0o644); err != nil {
 				t.Fatal(err)
@@ -104,7 +128,7 @@ func TestInspectFiles(t *testing.T) {
 			top := t.TempDir()
 			write(t, filepath.Join(top, "@/etc/NIXOS"), "")
 			write(t, filepath.Join(top, "@/etc/gjallar/repository"), "/etc/gjallar/system\n")
-			write(t, filepath.Join(top, "@config/user.config.json"), `{"username":"example","management":{"enable":false}}`)
+			write(t, filepath.Join(top, cfg), userConfig(t, nil))
 			mkdir(t, filepath.Join(top, "@nix/var/nix/profiles"))
 			if err := os.Symlink("system-1-link", filepath.Join(top, "@nix/var/nix/profiles/system")); err != nil {
 				t.Fatal(err)
@@ -123,7 +147,7 @@ func TestInspectFiles(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if info.Channel != c.channel || info.LastUpdated.IsZero() || info.Username != "example" {
+			if info.Channel != c.channel || info.LastUpdated.IsZero() || info.Username != "example" || info.User.Username != "example" {
 				t.Fatalf("info %+v, want channel %s and a time", info, c.channel)
 			}
 		})
@@ -135,5 +159,61 @@ func write(t *testing.T, p, data string) {
 	mkdir(t, filepath.Dir(p))
 	if err := os.WriteFile(p, []byte(data), 0o644); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// userConfig is the default settings file with username example (SYNTHETIC)
+// and the keys in change set; a nil value removes the key.
+func userConfig(t *testing.T, change map[string]any) string {
+	t.Helper()
+	user, err := config.Defaults()
+	if err != nil {
+		t.Fatal(err)
+	}
+	user.Username = "example"
+	b, err := json.Marshal(user)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fields map[string]any
+	if err := json.Unmarshal(b, &fields); err != nil {
+		t.Fatal(err)
+	}
+	for k, v := range change {
+		if v == nil {
+			delete(fields, k)
+		} else {
+			fields[k] = v
+		}
+	}
+	if b, err = json.Marshal(fields); err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
+}
+
+// L65 and loophole 138: the old disk's file never steers the stick's
+// install run. Its installer keys are the ones of a fresh install.
+func TestUserConfigInstallerKeys(t *testing.T) {
+	top := t.TempDir()
+	write(t, filepath.Join(top, "@config/user.config.json"), userConfig(t, map[string]any{
+		"unattendedInstall": true, "autoReboot": true, "runUpdateChecks": true,
+		"writeConfig": false, "runRebuild": false, "forceRedeploy": true,
+		"hostname": "SYNTHETIC-host",
+	}))
+	d, err := safefs.OpenDir(top)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	user, err := UserConfig(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if user.UnattendedInstall || user.AutoReboot || user.RunUpdateChecks || user.ForceRedeploy || !user.WriteConfig || !user.RunRebuild {
+		t.Errorf("installer keys from the old disk: %+v", user)
+	}
+	if user.Hostname != "SYNTHETIC-host" {
+		t.Errorf("hostname %q, want the old disk's", user.Hostname)
 	}
 }

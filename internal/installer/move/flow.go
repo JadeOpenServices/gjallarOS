@@ -292,6 +292,8 @@ func markRefusal(reason oldroot.Reason) error {
 		installlog.Mark(installlog.StickMoveLayoutRefused, installlog.Choice("reason", "no-evidence"))
 	case oldroot.Managed:
 		installlog.Mark(installlog.StickMoveLayoutRefused, installlog.Choice("reason", "managed"))
+	case oldroot.BadConfig:
+		installlog.Mark(installlog.StickMoveLayoutRefused, installlog.Choice("reason", "bad-config"))
 	case oldroot.Busy:
 		installlog.Mark(installlog.StickMoveOldRefused, installlog.Choice("reason", "busy"))
 	case oldroot.OldCryptsetup:

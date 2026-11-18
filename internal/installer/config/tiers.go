@@ -106,3 +106,19 @@ func DeviceScoped(key string) (bool, error) {
 	}
 	return keys[key], nil
 }
+
+// WithInstallerKeysFrom returns user with every installer-tier key taken
+// from from. A settings file from elsewhere (the old disk of a disk move)
+// must never steer this installer run (L65): no unattended install, no
+// forced redeploy, no skipped rebuild.
+func WithInstallerKeysFrom(user, from User) User {
+	u := reflect.ValueOf(&user).Elem()
+	f := reflect.ValueOf(from)
+	t := u.Type()
+	for i := range t.NumField() {
+		if Tier(t.Field(i).Tag.Get("tier")) == TierInstaller {
+			u.Field(i).Set(f.Field(i))
+		}
+	}
+	return user
+}

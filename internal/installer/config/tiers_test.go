@@ -2,6 +2,8 @@ package config
 
 import (
 	"encoding/json"
+	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -98,5 +100,46 @@ func TestCriticalKeysAreDeviceScoped(t *testing.T) {
 		if device, err := DeviceScoped(key); err != nil || !device {
 			t.Errorf("%s is critical but not scope:\"device\"", key)
 		}
+	}
+}
+
+// Every installer-tier key is taken over, and nothing else (L65).
+func TestWithInstallerKeysFrom(t *testing.T) {
+	tiers, err := Tiers()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var from, user User
+	set := func(u *User) {
+		v := reflect.ValueOf(u).Elem()
+		for i := range v.NumField() {
+			if v.Field(i).Kind() == reflect.Bool {
+				v.Field(i).SetBool(true)
+			}
+		}
+	}
+	set(&user)
+	got := WithInstallerKeysFrom(user, from)
+	v, ut := reflect.ValueOf(got), reflect.TypeFor[User]()
+	installer := 0
+	for i := range ut.NumField() {
+		f := ut.Field(i)
+		key, _, _ := strings.Cut(f.Tag.Get("json"), ",")
+		if tiers[key] != TierInstaller {
+			if !reflect.DeepEqual(v.Field(i).Interface(), reflect.ValueOf(user).Field(i).Interface()) {
+				t.Errorf("%s changed", key)
+			}
+			continue
+		}
+		installer++
+		if f.Type.Kind() != reflect.Bool {
+			t.Fatalf("installer key %s is not a bool; extend this test", key)
+		}
+		if v.Field(i).Bool() {
+			t.Errorf("installer key %s kept", key)
+		}
+	}
+	if installer == 0 {
+		t.Error("no installer keys")
 	}
 }

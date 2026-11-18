@@ -20,6 +20,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/config"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/move/freespace"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/move/identity"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/move/oldroot"
@@ -97,7 +98,7 @@ func Run(base string, in io.Reader, out io.Writer) error {
 		result = struct{}{}
 	case "find":
 		result, err = findOp(ctx)
-	case "copy", "check", "open", "inventory", "sizes", "close", "closure", "export", "dropcache", "repo":
+	case "copy", "check", "open", "inventory", "sizes", "config", "close", "closure", "export", "dropcache", "repo":
 		var unlock func()
 		if unlock, err = lock(base); err != nil {
 			break
@@ -114,6 +115,8 @@ func Run(base string, in io.Reader, out io.Writer) error {
 			result, err = inventoryOp(ctx, base)
 		case "sizes":
 			result, err = sizesOp(base)
+		case "config":
+			result, err = configOp(base)
 		case "close":
 			if err = stopUnits(ctx); err == nil {
 				err = oldroot.Close(ctx, filepath.Join(base, Old))
@@ -519,6 +522,36 @@ func sizesOp(base string) (res SizesResult, err error) {
 	defer top.Close()
 	res.Sizes, err = freespace.Measure(top, info.Username)
 	return res, err
+}
+
+// ConfigResult is the old system's settings for the new install (step 10,
+// L65): user.config.json after the installer's schema check, with the
+// installer keys of a fresh install. It is the typed settings written out
+// again, never the old file's bytes.
+type ConfigResult struct {
+	User config.User `json:"user"`
+}
+
+// maxConfigResult stays below the installer's cap on the helper's answer.
+const maxConfigResult = 60 << 10
+
+// configOp hands the checked settings of the old disk that open left
+// mounted at Old to the installer.
+func configOp(base string) (res ConfigResult, err error) {
+	top, info, err := openedTop(base)
+	if err != nil {
+		return res, err
+	}
+	top.Close()
+	res.User = info.User
+	b, err := json.Marshal(res)
+	if err != nil {
+		return ConfigResult{}, err
+	}
+	if len(b) > maxConfigResult {
+		return ConfigResult{}, errors.New("settings of the old disk are too large")
+	}
+	return res, nil
 }
 
 // openedTop opens the top level of the old disk that open mounted at Old

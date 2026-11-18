@@ -32,6 +32,15 @@ func TestRepoNeedsBudgetAndOpenDisk(t *testing.T) {
 	}
 }
 
+// config hands out nothing while no old disk is open.
+func TestConfigNeedsOpenDisk(t *testing.T) {
+	out, err := run(t, filepath.Join(t.TempDir(), "gjallar-move"), `{"op":"config"}`)
+	var res RefusalResult
+	if err != nil || json.Unmarshal([]byte(out), &res) != nil || res.Refusal == nil || res.Refusal.Reason != "not-open" {
+		t.Errorf("config with nothing open: %q, %v", out, err)
+	}
+}
+
 func openTest(t *testing.T, dir string) *safefs.Dir {
 	t.Helper()
 	d, err := safefs.OpenDir(dir)
