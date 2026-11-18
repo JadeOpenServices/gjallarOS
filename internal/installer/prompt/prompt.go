@@ -13,6 +13,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/calmmenu"
 	"github.com/JadeOpenServices/gjallarOS/internal/tty"
 )
 
@@ -22,6 +23,9 @@ type UI struct {
 	Reader *bufio.Reader
 	Out    io.Writer
 	GTK    bool
+	// Wrap breaks long questions at the calm menu's width. The stick
+	// console sets it; desktop tools keep plain lines.
+	Wrap bool
 }
 
 func zenityCommand(ctx context.Context, args ...string) *exec.Cmd {
@@ -140,7 +144,7 @@ func New(in io.Reader, out io.Writer) UI {
 		gtk = gtkAvailable()
 	}
 
-	return UI{bufio.NewReader(in), out, gtk}
+	return UI{Reader: bufio.NewReader(in), Out: out, GTK: gtk}
 }
 
 func (u UI) secureTextDialog(
@@ -242,7 +246,11 @@ func (u UI) Confirm(ctx context.Context, message string, defaultYes bool) (bool,
 	if defaultYes {
 		suffix = " [Y/n] "
 	}
-	fmt.Fprint(u.Out, message+suffix)
+	question := message + suffix
+	if u.Wrap {
+		question = calmmenu.Wrap(strings.TrimSuffix(question, " ")) + " "
+	}
+	fmt.Fprint(u.Out, question)
 	line, err := u.readLine(ctx)
 	if err != nil {
 		return false, err

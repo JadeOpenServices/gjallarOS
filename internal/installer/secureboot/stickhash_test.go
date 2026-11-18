@@ -15,6 +15,8 @@ import (
 	"syscall"
 	"testing"
 	"unicode/utf16"
+
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/calmmenu"
 )
 
 // synthPE builds a SYNTHETIC PE32+ image with the given sections, in the
@@ -390,7 +392,8 @@ func TestQueueHashDeletes(t *testing.T) {
 			}
 		}
 		text := out.String()
-		if strings.Count(text, "PASSWORD TEXT") != 1 || strings.Count(text, againPassword) != 2 || strings.Index(text, "PASSWORD TEXT") > strings.Index(text, againPassword) {
+		again := calmmenu.Wrap(againPassword)
+		if strings.Count(text, "PASSWORD TEXT") != 1 || strings.Count(text, again) != 2 || strings.Index(text, "PASSWORD TEXT") > strings.Index(text, again) {
 			t.Fatalf("out %q", text)
 		}
 		if !strings.Contains(text, spacedHex(old1[:16])) || !strings.Contains(text, spacedHex(old2[:16])) || strings.Contains(text, spacedHex(f.sum[:16])) {

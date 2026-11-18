@@ -1,11 +1,15 @@
 # OpenJade logo
 
-`mark.svg` and `wordmark.svg` are the OpenJade logo. They are trademarks of
-OpenJade and are not covered by the AGPL that covers the rest of gjallarOS.
-You may keep them in copies of this repository and on gjallarOS installs.
-A fork or a product of your own shows its own logo: set
-`gjallar.bootSplash.mark` and `gjallar.bootSplash.wordmark` to your files
-(SVG or PNG), or set the wordmark to `null`.
+`mark.svg`, `wordmark.svg` and `lockup-leafgreen-tight.svg` are the OpenJade
+logo. They are trademarks of OpenJade and are not covered by the AGPL that
+covers the rest of gjallarOS. You may keep them in copies of this repository
+and on gjallarOS installs. A fork or a product of your own shows its own
+logo: set `gjallar.bootSplash.mark` and `gjallar.bootSplash.wordmark` to your
+files (SVG or PNG), or set the wordmark to `null`, and replace
+`lockup-leafgreen-tight.svg`, which the installer stick's menu draws.
+
+The lockup is the stone and "openJade" as one drawing, trimmed to its edges.
+Use it as it is; do not size the stone and the wordmark apart.
 
 # Jade Code
 

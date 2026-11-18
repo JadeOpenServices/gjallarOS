@@ -10,6 +10,8 @@ import (
 	"io/fs"
 	"strings"
 	"syscall"
+
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/calmmenu"
 )
 
 // The shim path (Plane 293 step 4) turns Secure Boot on without touching
@@ -46,7 +48,7 @@ func PrepareShim(ctx context.Context, out io.Writer) error {
 	if err != nil {
 		return fmt.Errorf("inspect existing Secure Boot ownership: %w", err)
 	}
-	fmt.Fprintf(out, "Secure Boot state: %s -- %s\n", inspection.State, inspection.Description)
+	fmt.Fprintf(out, "Secure Boot state: %s (%s)\n", inspection.State, inspection.Description)
 
 	switch inspection.State {
 	case StateGjallarShim:
@@ -422,8 +424,9 @@ func (v mokVisit) steps() string {
 		step("%s", password(v.delReused))
 	}
 	step("Reboot")
-	b.WriteString("If it went on without the changes, start the installer stick again and pick Queue the key again in its menu.\n")
-	return b.String()
+	step("Take the installer stick out when the screen goes dark")
+	b.WriteString("If the changes were dropped (time ran out or Continue boot was picked), start the installer stick again and pick Queue the key again in its menu.\n")
+	return calmmenu.Wrap(b.String())
 }
 
 // spacedHex groups hex digits in pairs.
@@ -480,10 +483,9 @@ func mokManagerSteps(der []byte, reused bool, again string) string {
 	if reused {
 		password = "Type the password chosen when the key was first queued"
 	}
-	return fmt.Sprintf(`
+	return calmmenu.Wrap(fmt.Sprintf(`
 At the next start a blue screen (MokManager) asks to confirm the key.
-Finish within 5 minutes: after that the computer restarts on its own and the key
-is gone. The menu starts on Continue boot, which also drops the key:
+Finish within 5 minutes: after that the computer restarts on its own and the key is gone. The menu starts on Continue boot, which also drops the key:
   1. Enroll MOK (the menu starts on Continue boot; press down, then Enter)
   2. View key 0; under [Fingerprint] it must read
 %s
@@ -494,7 +496,7 @@ is gone. The menu starts on Continue boot, which also drops the key:
   6. Reboot
 If it went on without the key, run %[3]s again.
 After the restart, run %[3]s again for the next step.
-`, sha1Fingerprint(der, stepIndent), password, again)
+`, sha1Fingerprint(der, stepIndent), password, again))
 }
 
 // stepIndent lines a fingerprint up under the text of a numbered step.
@@ -561,7 +563,7 @@ func queueMOK(ctx context.Context, der []byte, out io.Writer) error {
 		return fmt.Errorf("stage the gjallarOS key for mokutil: %w", err)
 	}
 	defer func() { _ = run(context.WithoutCancel(ctx), "sudo", "rm", "-f", "--", path) }()
-	fmt.Fprintln(out, "Choose a one-time password for MokManager. MokManager reads the keyboard as US layout; letters and digits are safe.")
+	fmt.Fprint(out, calmmenu.Wrap("Choose a one-time password for MokManager. MokManager reads the keyboard as US layout; letters and digits are safe.\n"))
 	if err := run(ctx, "sudo", privilegedTool("mokutil"), "--import", path); err != nil {
 		return fmt.Errorf("queue the gjallarOS key for MokManager: %w", err)
 	}

@@ -114,10 +114,15 @@ type Stick struct {
 	note string
 }
 
+// say prints text wrapped at the calm menu's width.
+func (s *Stick) say(text string) {
+	fmt.Fprint(s.UI.Out, calmmenu.Wrap(text+"\n"))
+}
+
 // New returns a Stick for the real stick.
 func New(mode string) *Stick {
 	return &Stick{
-		UI:          prompt.UI{Reader: bufio.NewReader(os.Stdin), Out: os.Stdout},
+		UI:          prompt.UI{Reader: bufio.NewReader(os.Stdin), Out: os.Stdout, Wrap: true},
 		Cmd:         Exec{},
 		Mode:        mode,
 		TTY:         os.Stdin,
@@ -271,7 +276,7 @@ func (s *Stick) startInstalled(ctx context.Context) {
 		return
 	}
 	installlog.Mark(installlog.StickInstalledStart, installlog.Choice("result", "set"))
-	fmt.Fprintln(s.UI.Out, "Restarting into the installed gjallarOS...")
+	s.say("Restarting into the installed gjallarOS...")
 	s.runStep(ctx, "the restart", "systemctl", "reboot")
 }
 
@@ -298,7 +303,7 @@ func (s *Stick) menu(ctx context.Context) error {
 			s.startInstalled(ctx)
 		case actInstall:
 			if s.offline {
-				fmt.Fprintln(s.UI.Out, "Installing needs a network connection.")
+				s.say("Installing needs a network connection.")
 				if err := s.networkStep(ctx); err != nil {
 					return err
 				}
@@ -335,7 +340,7 @@ func (s *Stick) menu(ctx context.Context) error {
 			}
 		case actShell:
 			installlog.Mark(installlog.StickMenuChosen, installlog.Choice("choice", "shell"))
-			fmt.Fprintln(s.UI.Out, "Type exit to come back to this menu.")
+			s.say("Type exit to come back to this menu.")
 			s.runStep(ctx, "the shell", "runuser", "-l", "nixos")
 		case actNetwork:
 			if err := s.networkStep(ctx); err != nil {
@@ -422,14 +427,14 @@ func (s *Stick) pause(ctx context.Context) error {
 // says why when it may not install. Only release names that passed the
 // strict pattern reach the screen; the network's error text does not.
 func (s *Stick) releaseAllows(ctx context.Context) bool {
-	fmt.Fprintln(s.UI.Out, "Checking that this stick is still safe to install from...")
+	s.say("Checking that this stick is still safe to install from...")
 	o := stickrelease.Outcome{Kind: stickrelease.NoKey}
 	if s.CheckRelease != nil {
 		o = s.CheckRelease(ctx)
 	}
 	refuse := func(log, text, note string) bool {
 		s.logError(log)
-		fmt.Fprintln(s.UI.Out, text, "Nothing on this computer was changed.")
+		s.say(text + " Nothing on this computer was changed.")
 		s.note = note
 		return false
 	}
@@ -438,7 +443,7 @@ func (s *Stick) releaseAllows(ctx context.Context) bool {
 		return true
 	case stickrelease.Older:
 		installlog.Mark(installlog.StickReleaseOlder)
-		fmt.Fprintf(s.UI.Out, "A newer release, %s, is out. This stick installs %s; update after the install.\n", o.Newest.Version, o.Stick)
+		s.say(fmt.Sprintf("A newer release, %s, is out. This stick installs %s; update after the install.", o.Newest.Version, o.Stick))
 		return true
 	case stickrelease.BelowFloor:
 		installlog.Mark(installlog.StickReleaseRefused, installlog.Choice("reason", "floor"))
@@ -479,7 +484,7 @@ func (s *Stick) runStep(ctx context.Context, what, name string, args ...string) 
 	s.logError(fmt.Sprintf("%s ended with exit code %d", what, code))
 	// The menu block is 66 columns: the note leaves out the last part.
 	s.note = fmt.Sprintf("%s ended with an error (exit code %d).", upperFirst(what), code)
-	fmt.Fprintln(s.UI.Out, s.note, "You are back in the stick menu.")
+	s.say(s.note + " You are back in the stick menu.")
 }
 
 func upperFirst(s string) string {
@@ -497,7 +502,7 @@ func (s *Stick) logError(line string) {
 }
 
 func (s *Stick) advanced(ctx context.Context) error {
-	fmt.Fprintln(s.UI.Out, "Pick a release channel. Stable gets tested updates. Staging and dev get them earlier and break more often.")
+	s.say("Pick a release channel. Stable gets tested updates. Staging and dev get them earlier and break more often.")
 	choice, err := s.choose(ctx, "Channel", channels)
 	if err != nil || choice == s.channel {
 		return err
@@ -529,20 +534,20 @@ func (s *Stick) keyboardStep(ctx context.Context) error {
 		}
 	}
 	s.flush()
-	fmt.Fprintln(s.UI.Out, "Type a keyboard layout such as us, gb or fr. Part of a name shows a list.")
+	s.say("Type a keyboard layout such as us, gb or fr. Part of a name shows a list.")
 	picked, err := s.UI.Pick(ctx, "Keyboard layout", current, options)
 	if err != nil {
 		return err
 	}
 	normal, err := xkb.Normalize(picked)
 	if err != nil || !stickkeyboard.Valid(normal.Name) {
-		fmt.Fprintf(s.UI.Out, "That layout cannot be used. Still using %s.\n", current)
+		s.say(fmt.Sprintf("That layout cannot be used. Still using %s.", current))
 		return nil
 	}
 	if err := s.WriteLayout(normal.Name); err != nil {
 		installlog.Mark(installlog.StickFlowFailed)
 		s.logError("could not store the keyboard layout")
-		fmt.Fprintln(s.UI.Out, "Could not store the keyboard layout. The installer will ask again.")
+		s.say("Could not store the keyboard layout. The installer will ask again.")
 		return nil
 	}
 	if normal.Name == current {
@@ -564,7 +569,7 @@ func (s *Stick) applyConsoleLayout(ctx context.Context) {
 	// ckbcomp turns the X layout into a console keymap; loadkeys reads it
 	// from its standard input.
 	if err := s.Cmd.Interactive(ctx, "sh", "-c", `ckbcomp -layout "$1" | loadkeys -q`, "sh", layout); err != nil {
-		fmt.Fprintf(s.UI.Out, "The console keeps its old layout. The installed system gets %s.\n", layout)
+		s.say(fmt.Sprintf("The console keeps its old layout. The installed system gets %s.", layout))
 	}
 }
 
@@ -579,7 +584,7 @@ func (s *Stick) choose(ctx context.Context, label string, options []string) (str
 func (s *Stick) chooseIndex(ctx context.Context, label string, options []string) (int, error) {
 	s.flush()
 	for i, v := range options {
-		fmt.Fprintf(s.UI.Out, "  %d) %s\n", i+1, v)
+		s.say(fmt.Sprintf("  %d) %s", i+1, v))
 	}
 	for {
 		value, err := s.UI.Value(ctx, label+" (number)", "")
@@ -589,7 +594,7 @@ func (s *Stick) chooseIndex(ctx context.Context, label string, options []string)
 		if n, e := strconv.Atoi(value); e == nil && n > 0 && n <= len(options) {
 			return n - 1, nil
 		}
-		fmt.Fprintln(s.UI.Out, "Type one of the numbers.")
+		s.say("Type one of the numbers.")
 	}
 }
 

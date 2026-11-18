@@ -20,7 +20,7 @@ func Prepare(ctx context.Context, out io.Writer) error {
 	if err != nil {
 		return fmt.Errorf("inspect existing Secure Boot ownership: %w", err)
 	}
-	fmt.Fprintf(out, "Secure Boot state: %s -- %s\n", inspection.State, inspection.Description)
+	fmt.Fprintf(out, "Secure Boot state: %s (%s)\n", inspection.State, inspection.Description)
 
 	switch inspection.State {
 	case StateGjallarManaged:

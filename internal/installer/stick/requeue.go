@@ -17,6 +17,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/calmmenu"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/prompt"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/secureboot"
 )
@@ -155,6 +156,7 @@ func requeueKey(ctx context.Context, in io.Reader, out io.Writer) error {
 		return errors.New("this start did not go through shim, so MokManager cannot run; start the installer stick with Secure Boot on")
 	}
 	ui := prompt.New(in, out)
+	ui.Wrap = true
 	raw, err := exec.CommandContext(ctx, "lsblk", "-J", "-l", "-p", "-o", "PATH,TYPE,FSTYPE,PARTLABEL,PKNAME,TRAN,RM").Output()
 	if err != nil {
 		return fmt.Errorf("list disks: %w", err)
@@ -193,9 +195,7 @@ func requeueKey(ctx context.Context, in io.Reader, out io.Writer) error {
 		return err
 	}
 	if !root.Encrypted {
-		fmt.Fprintln(out, "This gjallarOS is not encrypted. Anyone who had this computer for a few minutes could have")
-		fmt.Fprintln(out, "put their own key on its disk. Compare the fingerprint below with the one in the install")
-		fmt.Fprintln(out, "report or the one the installer showed at the end of the install.")
+		fmt.Fprint(out, calmmenu.Wrap("This gjallarOS is not encrypted. Anyone who had this computer for a few minutes could have put their own key on its disk. Compare the fingerprint below with the one in the install report or the one the installer showed at the end of the install.\n"))
 	}
 	_, err = secureboot.RequeueKey(ctx, ui, out, der)
 	return err
@@ -264,7 +264,7 @@ func openSubvolume(top *os.File) (*os.File, error) {
 // root read-only. It goes from systemd-ask-password to cryptsetup through a pipe, never
 // through this process or a command line.
 func openLUKS(ctx context.Context, out io.Writer, device string) error {
-	fmt.Fprintln(out, "The installed gjallarOS is encrypted. Its key is read from the encrypted disk, read-only.")
+	fmt.Fprint(out, calmmenu.Wrap("The installed gjallarOS is encrypted. Its key is read from the encrypted disk, read-only.\n"))
 	r, w, err := os.Pipe()
 	if err != nil {
 		return err

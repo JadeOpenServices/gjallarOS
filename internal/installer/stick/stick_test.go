@@ -17,6 +17,7 @@ import (
 	"golang.org/x/sys/unix"
 
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/installlog"
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/prompt"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/region"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/stickkeyboard"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/stickrelease"
@@ -374,7 +375,7 @@ func TestInstallReleaseCheck(t *testing.T) {
 		if got := len(net.ran("gjallar-recover")); got != map[bool]int{true: 1}[c.runs] {
 			t.Errorf("%s: installer ran %d times", c.name, got)
 		}
-		log, screen := h.logText(t), h.screen.String()
+		log, screen := h.logText(t), flat(h.screen.String())
 		if c.anchor != "" && !strings.Contains(log, c.anchor) {
 			t.Errorf("%s: log lacks %q:\n%s", c.name, c.anchor, log)
 		}
@@ -393,6 +394,28 @@ func TestInstallReleaseCheck(t *testing.T) {
 	}
 }
 
+// flat joins wrapped screen lines, so a check can find a sentence that
+// the calm menu width broke across lines.
+func flat(screen string) string {
+	return strings.Join(strings.Fields(screen), " ")
+}
+
+func TestSayWrapsAtMenuWidth(t *testing.T) {
+	var out strings.Builder
+	s := &Stick{UI: prompt.UI{Out: &out}}
+	text := "This network wants a sign-in page first, and the stick cannot show one. Use another network."
+	s.say(text)
+	got := out.String()
+	for _, l := range strings.Split(strings.TrimSuffix(got, "\n"), "\n") {
+		if n := len([]rune(l)); n > 66 || n == 0 {
+			t.Errorf("line of %d runes: %q", n, l)
+		}
+	}
+	if flat(got) != text || !strings.HasSuffix(got, "\n") {
+		t.Errorf("words changed: %q", got)
+	}
+}
+
 func TestFailedStepIsLoggedWithoutItsOutput(t *testing.T) {
 	exitThree := exec.Command("sh", "-c", "exit 3").Run()
 	net := &fakeNet{devices: always(cable), connectivity: "full",
@@ -403,7 +426,7 @@ func TestFailedStepIsLoggedWithoutItsOutput(t *testing.T) {
 	if !strings.Contains(log, "GJA-2098 ") || !strings.Contains(log, "ERROR: the installer ended with exit code 3") {
 		t.Errorf("failure not logged:\n%s", log)
 	}
-	if !strings.Contains(h.screen.String(), "You are back in the stick menu.") {
+	if !strings.Contains(flat(h.screen.String()), "You are back in the stick menu.") {
 		t.Error("screen does not say where the user is")
 	}
 }

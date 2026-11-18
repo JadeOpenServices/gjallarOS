@@ -17,6 +17,8 @@ import (
 	"unicode/utf16"
 
 	"golang.org/x/sys/unix"
+
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/calmmenu"
 )
 
 // The installer stick boots under Secure Boot through shim with its UKI
@@ -277,7 +279,7 @@ func queueHashDeletes(ctx context.Context, ui UI, f firmwareFiles, c stickCopy, 
 		return nil, err
 	}
 	if len(others) > 0 {
-		fmt.Fprintln(out, "Shim also trusts these boot files, most likely older gjallarOS installer sticks:")
+		fmt.Fprint(out, calmmenu.Wrap("Shim also trusts these boot files, most likely older gjallarOS installer sticks:\n"))
 		for _, sum := range others {
 			fmt.Fprintln(out, "  SHA256 "+spacedHex(sum[:16]))
 		}
@@ -312,9 +314,9 @@ func queueHashDeletes(ctx context.Context, ui UI, f firmwareFiles, c stickCopy, 
 	}
 	for i, sum := range todo {
 		if i == 0 {
-			fmt.Fprintln(out, password)
+			fmt.Fprint(out, calmmenu.Wrap(password+"\n"))
 		} else {
-			fmt.Fprintln(out, againPassword)
+			fmt.Fprint(out, calmmenu.Wrap(againPassword+"\n"))
 		}
 		if err := run(ctx, "sudo", privilegedTool("mokutil"), "--delete-hash", sum); err != nil {
 			return nil, fmt.Errorf("queue a file hash for deletion: %w", err)
@@ -356,10 +358,8 @@ func hashDeleteNotice(del *hashDelete) string {
 	for i, sum := range del.sums {
 		starts[i] = "  " + spacedHex(sum[:16])
 	}
-	return fmt.Sprintf(`The installer stick stays trusted by shim until MokManager deletes its
-entry, and so do older sticks. When shim next starts, MokManager shows a blue screen and waits
-until you choose. Choose Delete MOK, check that the hashes start with
+	return calmmenu.Wrap(fmt.Sprintf(`The installer stick stays trusted by shim until MokManager deletes its entry, and so do older sticks. When shim next starts, MokManager shows a blue screen and waits until you choose. Choose Delete MOK, check that the hashes start with
 %s
 confirm and type %s. Continue boot drops the request.
-`, strings.Join(starts, "\n"), password)
+`, strings.Join(starts, "\n"), password))
 }

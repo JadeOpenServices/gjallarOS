@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"io"
 	"strings"
+
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/calmmenu"
 )
 
 // clearForeignMokNew looks for enroll requests other than the gjallarOS key
@@ -45,7 +47,7 @@ func clearForeignMokNew(ctx context.Context, ui UI, out io.Writer, f firmwareFil
 	if len(foreign) == 0 {
 		return nil
 	}
-	fmt.Fprintln(out, "MokManager also holds requests to trust entries that gjallarOS did not ask for:")
+	fmt.Fprint(out, calmmenu.Wrap("MokManager also holds requests to trust entries that gjallarOS did not ask for:\n"))
 	for _, s := range foreign {
 		fmt.Fprintln(out, "  "+s)
 	}
@@ -184,13 +186,13 @@ func RequeueKey(ctx context.Context, ui UI, out io.Writer, der []byte) (bool, er
 	if trust.ShimValidationOff {
 		return false, errors.New("shim's own check is switched off in MokManager; turn it back on there first")
 	}
-	fmt.Fprintf(out, "The installed gjallarOS has the key %q, fingerprint\n%s\n", certName(cert), sha1Fingerprint(der, "  "))
+	fmt.Fprint(out, calmmenu.Wrap(fmt.Sprintf("The installed gjallarOS has the key %q, fingerprint\n%s\n", certName(cert), sha1Fingerprint(der, "  "))))
 	visit, err := queueVisit(ctx, ui, out, der)
 	if err != nil {
 		return false, err
 	}
 	if visit.key == nil && len(visit.del) == 0 {
-		fmt.Fprintln(out, "shim already trusts this key and nothing waits for MokManager.")
+		fmt.Fprintln(out, "The key is already trusted by shim and nothing waits for MokManager.")
 		return false, nil
 	}
 	fmt.Fprint(out, visit.steps())

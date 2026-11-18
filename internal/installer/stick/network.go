@@ -191,16 +191,16 @@ func (s *Stick) networkStep(ctx context.Context) error {
 		n := s.readNet(ctx)
 		if n.online() {
 			s.markOnline(n.via)
-			fmt.Fprintf(s.UI.Out, "Connected to the network (%s).\n", viaName(n.via))
+			s.say(fmt.Sprintf("Connected to the network (%s).", viaName(n.via)))
 			return nil
 		}
 		switch {
 		case n.via != "" && n.connectivity == "portal":
-			fmt.Fprintln(s.UI.Out, "This network wants a sign-in page first, and the stick cannot show one. Use another network.")
+			s.say("This network wants a sign-in page first, and the stick cannot show one. Use another network.")
 		case n.via != "":
-			fmt.Fprintln(s.UI.Out, "Connected, but the internet cannot be reached.")
+			s.say("Connected, but the internet cannot be reached.")
 		default:
-			fmt.Fprintln(s.UI.Out, "No network yet. Plug in a cable, or pick a Wi-Fi network.")
+			s.say("No network yet. Plug in a cable, or pick a Wi-Fi network.")
 		}
 		options := []string{}
 		if n.wifi {
@@ -223,7 +223,7 @@ func (s *Stick) networkStep(ctx context.Context) error {
 		case netAgain:
 			s.lookAgain++
 			installlog.Mark(installlog.StickNetworkLookAgain, installlog.Count("tries", s.lookAgain))
-			fmt.Fprintln(s.UI.Out, "Looking for a network...")
+			s.say("Looking for a network...")
 			for i := 0; i < lookAgainPolls && !s.readNet(ctx).online(); i++ {
 				s.Sleep()
 			}
@@ -257,15 +257,15 @@ func (s *Stick) markOnline(via string) {
 }
 
 func (s *Stick) pickWifi(ctx context.Context) error {
-	fmt.Fprintln(s.UI.Out, "Looking for Wi-Fi networks...")
+	s.say("Looking for Wi-Fi networks...")
 	out, err := s.Cmd.Output(ctx, "nmcli", "-t", "-f", "IN-USE,SSID,SIGNAL,SECURITY,BSSID", "device", "wifi", "list", "--rescan", "yes")
 	if err != nil {
-		fmt.Fprintln(s.UI.Out, "The Wi-Fi scan failed.")
+		s.say("The Wi-Fi scan failed.")
 		return nil
 	}
 	networks := parseWifi(string(out))
 	if len(networks) == 0 {
-		fmt.Fprintln(s.UI.Out, "No Wi-Fi networks found.")
+		s.say("No Wi-Fi networks found.")
 		return nil
 	}
 	options := make([]string, 0, len(networks)+1)
@@ -279,12 +279,12 @@ func (s *Stick) pickWifi(ctx context.Context) error {
 	}
 	picked := networks[choice]
 	if picked.security == "" {
-		fmt.Fprintln(s.UI.Out, "This network is open, so others nearby can read what goes over it. The installer checks everything it downloads.")
+		s.say("This network is open, so others nearby can read what goes over it. The installer checks everything it downloads.")
 	}
 	// nmcli asks for the password on the terminal itself; it never passes
 	// through this program or its log.
 	if err := s.Cmd.Interactive(ctx, "nmcli", "--ask", "device", "wifi", "connect", picked.bssid); err != nil {
-		fmt.Fprintln(s.UI.Out, "Could not connect. Check the password and try again.")
+		s.say("Could not connect. Check the password and try again.")
 	}
 	return nil
 }
@@ -296,11 +296,11 @@ func (s *Stick) hiddenWifi(ctx context.Context) error {
 		return err
 	}
 	if len(name) > 32 || strings.ContainsFunc(name, func(r rune) bool { return !unicode.IsPrint(r) }) {
-		fmt.Fprintln(s.UI.Out, "A network name has at most 32 bytes of printable text.")
+		s.say("A network name has at most 32 bytes of printable text.")
 		return nil
 	}
 	if err := s.Cmd.Interactive(ctx, "nmcli", "--ask", "device", "wifi", "connect", name, "hidden", "yes"); err != nil {
-		fmt.Fprintln(s.UI.Out, "Could not connect. Check the name and password and try again.")
+		s.say("Could not connect. Check the name and password and try again.")
 	}
 	return nil
 }

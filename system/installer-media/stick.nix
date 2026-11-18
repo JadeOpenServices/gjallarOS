@@ -113,10 +113,11 @@ let
     hide-when-typing=yes
   '';
 
-  # The menu logo (THEMEBRAIN section 18): mark, gap and wordmark on the
-  # terminal ground, as sixel at 1x and at 2x (for cells of 48 pixels
-  # and more, 4K). Built from the brand SVGs, which are paths only, so
-  # no font is needed. The menu checks both files before it draws them.
+  # The menu logo (THEMEBRAIN section 18): the OpenJade lockup (stone and
+  # "openJade" as one drawing, never sized apart) on the terminal ground,
+  # as sixel at 1x and at 2x (for cells of 48 pixels and more, 4K). The
+  # SVG is paths only, so no font is needed. The menu checks both files
+  # before it draws them.
   stickLogo =
     pkgs.runCommand "gjallar-stick-logo"
       {
@@ -128,18 +129,14 @@ let
       }
       ''
         mkdir -p $out
+        # Render big once, so the trim and the scale down stay sharp.
+        rsvg-convert -h 2048 ${../../themes/brand/openjade/lockup-leafgreen-tight.svg} | magick - -trim +repage big.png
         for s in 1 2; do
-          # The SVGs carry padding: trim it, then pad both parts to one
-          # height that is a multiple of 6. Sixel draws bands of 6 rows, and
-          # a short last band shows as a dark bar under the logo.
-          rsvg-convert -h $((128 * s)) ${../../themes/brand/openjade/mark.svg} | magick - -trim +repage mark.png
-          rsvg-convert -h $((92 * s)) ${../../themes/brand/openjade/wordmark.svg} | magick - -trim +repage word.png
-          mh=$(magick identify -format %h mark.png)
-          h=$(((mh + 5) / 6 * 6))
-          magick mark.png -background none -gravity center -extent "x$h" mark-h.png
-          magick word.png -background none -gravity center -extent "x$h" word-h.png
-          magick -size "$((20 * s))x$h" xc:none gap.png
-          magick mark-h.png gap.png word-h.png -background none +append \
+          # 126 and 252 pixels: four rows of 32 or 64 pixel cells, and a
+          # multiple of 6. Sixel draws bands of 6 rows, and a short last
+          # band shows as a dark bar under the logo.
+          h=$((128 * s / 6 * 6))
+          magick big.png -resize "x$h" \
             -background '#${hex term.background}' -alpha remove -alpha off -depth 8 +repage logo.png
           # No dithering and full colour, so the ground keeps the window's
           # background (within sixel's percent steps) and shows no box.

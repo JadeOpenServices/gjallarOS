@@ -850,7 +850,7 @@ switch ($logs) { 'created' { Stop-Gj 40 } 'layout' { Stop-Gj 41 } default { Stop
         if ($code -eq 130) {
             Write-Host $_.Exception.Message
         } else {
-            Write-Host "ERROR: $($_.Exception.Message)" -ForegroundColor Red
+            Write-Host "ERROR: $($_.Exception.Message)"
             Write-Log "ERROR: $($_.Exception.Message)"
             Write-Log 'GJA-3098 maker.run.failed'
         }
