@@ -118,13 +118,17 @@ func TestOnlyReviewedFilesStartPrograms(t *testing.T) {
 	for _, f := range files {
 		byPkg[f.pkg] = append(byPkg[f.pkg], f)
 	}
+	all := map[string]map[string]bool{} // package → every name that leads to a starter
 	var leads []string
 	for pkg, fs := range byPkg {
+		all[pkg] = leadToStarter(fs)
 		if pkg == calledStarters {
 			continue
 		}
-		for _, name := range leadToStarter(fs) {
-			leads = append(leads, pkg+"."+name)
+		for name := range all[pkg] {
+			if ast.IsExported(name) {
+				leads = append(leads, pkg+"."+name)
+			}
 		}
 	}
 	slices.Sort(leads)
@@ -134,12 +138,59 @@ func TestOnlyReviewedFilesStartPrograms(t *testing.T) {
 	}
 
 	for _, f := range files {
-		for _, use := range namesUsed(f) {
+		for _, use := range namesUsed(f.ast, f.imports) {
 			if slices.Contains(leads, use) && !strings.HasPrefix(use, f.pkg+".") {
 				t.Errorf("%s names %s, which starts a program", f.path, use)
 			}
 		}
 	}
+
+	// Go runs init functions and the values of package-level variables as
+	// soon as a package is linked, as root, with nothing in the helper
+	// naming them (baka-c7). None of that may lead to a starter, oldroot's
+	// included.
+	for _, f := range files {
+		for _, n := range startUp(f.ast) {
+			hit := count(n, f.imports, starters) > 0 || count(n, f.imports, rawCalls) > 0
+			ast.Inspect(n, func(n ast.Node) bool {
+				if id, ok := n.(*ast.Ident); ok && all[f.pkg][id.Name] {
+					hit = true
+				}
+				return !hit
+			})
+			for _, use := range namesUsed(n, f.imports) {
+				pkg, name, _ := strings.Cut(use, ".")
+				hit = hit || all[pkg][name]
+			}
+			if hit {
+				t.Errorf("%s: runs at start-up and leads to a starter", f.path)
+			}
+		}
+	}
+}
+
+// startUp returns what Go runs when the package is linked: init functions
+// and the values of package-level variables.
+func startUp(f *ast.File) []ast.Node {
+	var nodes []ast.Node
+	for _, d := range f.Decls {
+		switch d := d.(type) {
+		case *ast.FuncDecl:
+			if d.Recv == nil && d.Name.Name == "init" {
+				nodes = append(nodes, d)
+			}
+		case *ast.GenDecl:
+			if d.Tok != token.VAR {
+				continue
+			}
+			for _, s := range d.Specs {
+				for _, v := range s.(*ast.ValueSpec).Values {
+					nodes = append(nodes, v)
+				}
+			}
+		}
+	}
+	return nodes
 }
 
 // linked parses every file of the module that is built into the helper.
@@ -234,12 +285,13 @@ func count(n ast.Node, imports map[string]string, names map[string]func(string) 
 	return c
 }
 
-// leadToStarter returns the exported names of one package that lead to a
-// starter. A declaration leads to one when it names a starter or names a
-// declaration of its package that does. Methods count under their
-// receiver's type, so a value of that type leads there too. Names are
-// matched by spelling, which can only find too many.
-func leadToStarter(fs []file) []string {
+// leadToStarter returns the names of one package that lead to a starter. A
+// declaration leads to one when it names a starter or names a declaration
+// of its package that does. Methods count under their receiver's type, so
+// a value of that type leads there too. Names are matched by spelling,
+// which can only find too many. The blank name is never one: it would
+// make every declaration with a "_" in it a lead.
+func leadToStarter(fs []file) map[string]bool {
 	type decl struct {
 		names []string
 		node  ast.Node
@@ -289,19 +341,15 @@ func leadToStarter(fs []file) []string {
 			})
 			if hit {
 				for _, n := range d.names {
-					leads[n] = true
+					if n != "_" && !leads[n] {
+						leads[n] = true
+						changed = true
+					}
 				}
-				changed = true
 			}
 		}
 	}
-	var exported []string
-	for n := range leads {
-		if ast.IsExported(n) {
-			exported = append(exported, n)
-		}
-	}
-	return exported
+	return leads
 }
 
 func recvType(e ast.Expr) string {
@@ -318,16 +366,16 @@ func recvType(e ast.Expr) string {
 	return ""
 }
 
-// namesUsed lists every pkg.Name the file names from a module package.
-func namesUsed(f file) []string {
+// namesUsed lists every pkg.Name that n names from a module package.
+func namesUsed(n ast.Node, imports map[string]string) []string {
 	var used []string
-	ast.Inspect(f.ast, func(n ast.Node) bool {
+	ast.Inspect(n, func(n ast.Node) bool {
 		sel, ok := n.(*ast.SelectorExpr)
 		if !ok {
 			return true
 		}
 		if id, ok := sel.X.(*ast.Ident); ok {
-			if rel, ok := strings.CutPrefix(f.imports[id.Name], module+"/"); ok {
+			if rel, ok := strings.CutPrefix(imports[id.Name], module+"/"); ok {
 				used = append(used, rel+"."+sel.Sel.Name)
 			}
 		}
