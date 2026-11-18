@@ -47,6 +47,12 @@ const (
 
 	minUserID = 1000
 	maxUserID = 59999
+	// nixbldGID and nixbldUID+1 to nixbldUID+maxNixbld are the stick's Nix
+	// build accounts (NixOS ids.uids.nixbld, ids.gids.nixbld). They lie in
+	// the normal range, so the helper never copies to those ids (L152).
+	nixbldGID = 30000
+	nixbldUID = 30000
+	maxNixbld = 32
 	// usersGID is the "users" group, the primary group of NixOS users.
 	usersGID = 100
 
@@ -189,9 +195,15 @@ func Dirs(base string) error {
 	return nil
 }
 
+// makePrivate is privateBase. Unit tests that run as a plain user, who
+// cannot mount, swap it; the namespace test runs the real one.
+var makePrivate = privateBase
+
 // lock makes the helper folders and holds base locked, so a second helper
-// run (from another console) waits its turn instead of closing or reusing what this one opened. A held lock
-// refuses at once rather than queueing.
+// run (from another console) waits its turn instead of closing or reusing
+// what this one opened. A held lock refuses at once rather than queueing.
+// Base is then a private mount (L153): nothing mounted below it reaches
+// another namespace.
 func lock(base string) (func(), error) {
 	if err := Dirs(base); err != nil {
 		return nil, err
@@ -206,6 +218,11 @@ func lock(base string) (func(), error) {
 			return nil, errors.New("another move step is running")
 		}
 		return nil, fmt.Errorf("lock %s: %w", base, err)
+	}
+	// Locked first: two helpers must not both bind base on itself.
+	if err := makePrivate(base); err != nil {
+		unix.Close(fd)
+		return nil, err
 	}
 	return func() { unix.Close(fd) }, nil
 }
@@ -236,7 +253,12 @@ func local(what, p string) error {
 	return nil
 }
 
-func normalID(id int) bool { return id >= minUserID && id <= maxUserID }
+// normalID accepts the id of an installed system's user or group. The ids
+// the live stick gives its Nix build accounts are refused: a build runs as
+// one of them and must never own what the helper writes (L152).
+func normalID(id int) bool {
+	return id >= minUserID && id <= maxUserID && (id < nixbldUID || id > nixbldUID+maxNixbld)
+}
 
 func copyOp(base string, req Request) (safefs.Stats, error) {
 	var stats safefs.Stats
@@ -501,6 +523,9 @@ func openOp(ctx context.Context, base string, req Request) (res OpenResult, err 
 		}
 	}()
 	if err := oldroot.Mount(dev, old); err != nil {
+		return res, err
+	}
+	if err := checkPrivate(old); err != nil {
 		return res, err
 	}
 	top, err := safefs.OpenDir(old)

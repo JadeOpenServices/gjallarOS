@@ -15,8 +15,11 @@ const TargetRoot = "/mnt"
 // attachOp shows the new root, with every mount below it, at New. The
 // installer has mounted it at TargetRoot; the helper works only below its
 // own folder, so it takes a copy of that mount tree from an fd, never
-// through a path the live login could change. The copy is private (no
-// mount or unmount in it reaches /mnt or back) and nosuid, nodev.
+// through a path the live login could change. The copy is nosuid, nodev
+// and private: no mount or unmount in it reaches /mnt or back. The kernel
+// makes a tree moved below a shared mount shared again, so it is moved only
+// below base, which lock made a private mount, and checked after the move
+// (L153).
 func attachOp(base string) error { return attach(base, TargetRoot) }
 
 func attach(base, target string) error {
@@ -53,6 +56,9 @@ func attach(base, target string) error {
 	defer unix.Close(dst)
 	if err := unix.MoveMount(tree, "", dst, "", unix.MOVE_MOUNT_F_EMPTY_PATH|unix.MOVE_MOUNT_T_EMPTY_PATH); err != nil {
 		return fmt.Errorf("attach the new disk at %s: %w", newDir, err)
+	}
+	if err := checkPrivate(newDir); err != nil {
+		return errors.Join(err, detachOp(base))
 	}
 	return nil
 }
