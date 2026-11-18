@@ -40,6 +40,14 @@ in
   # Emergency mode would otherwise open a root shell with the empty password.
   users.users.root.initialHashedPassword = lib.mkForce "!";
 
+  # Q254: the live login's user id lies outside 1000-59999, the ids of the
+  # users on an installed system, so nothing the live login owns is owned
+  # by the user a move copies to. 60514-61183 is free in systemd's ranges
+  # (homed ends at 60513, dynamic users start at 61184).
+  # gjallar-move-helper refuses to run while any account has an id in
+  # 1000-59999.
+  users.users.nixos.uid = 60600;
+
   systemd.services.installer-repository = {
     description = "Prepare writable installer repository";
     wantedBy = [ "multi-user.target" ];

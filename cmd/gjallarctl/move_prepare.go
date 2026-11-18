@@ -19,9 +19,13 @@ import (
 
 const moveUsage = "usage: gjallarctl move prepare"
 
-// rootPATH is the PATH move prepare runs its lookups with as root, so a
-// findmnt or lsblk planted in the user's PATH is never run by root.
+// rootPATH is the PATH root's steps run their programs with, so a findmnt,
+// lsblk or git planted in the user's PATH is never run by root: sudo keeps
+// the caller's PATH.
 const rootPATH = "/run/wrappers/bin:/run/current-system/sw/bin"
+
+// useRootPATH sets rootPATH for every program this process starts.
+func useRootPATH() error { return os.Setenv("PATH", rootPATH) }
 
 // moveRecoveryTries is how many recovery keys move prepare takes before it
 // stops. gjallar-devproof waits after each wrong one.
@@ -45,7 +49,7 @@ func runMove(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "ERROR: sudo: %v\n", err)
 		return 1
 	}
-	if err := os.Setenv("PATH", rootPATH); err != nil {
+	if err := useRootPATH(); err != nil {
 		fmt.Fprintf(stderr, "ERROR: %v\n", err)
 		return 1
 	}

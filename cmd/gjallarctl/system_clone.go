@@ -122,6 +122,11 @@ func systemClone(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "ERROR: gjallarctl system clone runs as root; gjallarctl system move shows the step")
 		return 2
 	}
+	// root's env, git, mkdir and rm come from the system only (N1).
+	if err := useRootPATH(); err != nil {
+		fmt.Fprintf(stderr, "ERROR: %v\n", err)
+		return 1
+	}
 	from, err := installercheck.ResolveRepository(args[1])
 	if err != nil {
 		fmt.Fprintf(stderr, "ERROR: %v\n", err)

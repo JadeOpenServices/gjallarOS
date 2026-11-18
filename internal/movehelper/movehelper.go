@@ -1,7 +1,8 @@
 // Package movehelper is the root side of the disk move (345). The move runs
-// on the USB stick, where the live login on the other consoles has the same
-// user id as the user on the new disk (L58). Root work therefore never
-// happens below /mnt or any folder that user can change: the helper keeps
+// on the USB stick, whose live login on the other consoles can change /mnt
+// and its own files (L58). Its user id lies outside the ids of installed
+// users (Q254, CheckLiveUsers), and root work still never happens below a
+// folder the live login can change: the helper keeps
 // its folders under /run/gjallar-move, owned by root and closed to everyone
 // else, and takes a fixed list of operations as JSON on stdin. It never
 // takes a path outside its own folders.
@@ -99,7 +100,7 @@ func Run(base string, in io.Reader, out io.Writer) error {
 		result = struct{}{}
 	case "find":
 		result, err = findOp(ctx)
-	case "copy", "check", "open", "inventory", "sizes", "config", "close", "closure", "export", "dropcache", "repo":
+	case "copy", "check", "open", "inventory", "sizes", "config", "close", "closure", "export", "dropcache", "repo", "attach", "detach":
 		var unlock func()
 		if unlock, err = lock(base); err != nil {
 			break
@@ -132,6 +133,12 @@ func Run(base string, in io.Reader, out io.Writer) error {
 			result = struct{}{}
 		case "repo":
 			result, err = repoOp(ctx, base, req)
+		case "attach":
+			err = attachOp(base)
+			result = struct{}{}
+		case "detach":
+			err = detachOp(base)
+			result = struct{}{}
 		}
 	default:
 		return fmt.Errorf("unknown operation %q", req.Op)
@@ -183,8 +190,7 @@ func Dirs(base string) error {
 }
 
 // lock makes the helper folders and holds base locked, so a second helper
-// run (the live login on another console has the same user, L58) waits its
-// turn instead of closing or reusing what this one opened. A held lock
+// run (from another console) waits its turn instead of closing or reusing what this one opened. A held lock
 // refuses at once rather than queueing.
 func lock(base string) (func(), error) {
 	if err := Dirs(base); err != nil {

@@ -65,6 +65,7 @@ gjallarctl.overrideAttrs (old: {
       "-X github.com/JadeOpenServices/gjallarOS/internal/installer/move/storecopy.Nix=${lib.getExe' nix "nix"}"
       "-X github.com/JadeOpenServices/gjallarOS/internal/installer/move/repocopy.Git=${lib.getExe' git "git"}"
       "-X github.com/JadeOpenServices/gjallarOS/internal/installer/move/repocopy.Shell=${lib.getExe' bash "bash"}"
+      "-X github.com/JadeOpenServices/gjallarOS/internal/installer/move.HelperPath=${placeholder "out"}/bin/gjallar-move-helper"
     ]
     ++ lib.optional (
       oddc != null

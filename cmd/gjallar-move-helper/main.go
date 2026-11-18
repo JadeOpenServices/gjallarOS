@@ -27,6 +27,9 @@ func main() {
 	os.Clearenv()
 	os.Setenv("PATH", "/run/current-system/sw/bin")
 	os.Setenv("LC_ALL", "C")
+	if err := movehelper.CheckLiveUsers("/etc/passwd"); err != nil {
+		log.Fatal(err)
+	}
 	if err := movehelper.Run(movehelper.Base, os.Stdin, os.Stdout); err != nil {
 		log.Fatal(err)
 	}

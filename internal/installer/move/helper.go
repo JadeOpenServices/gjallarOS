@@ -39,6 +39,21 @@ type ExecHelper struct {
 	Argv []string
 }
 
+// HelperPath is gjallar-move-helper in the installer's own store path, set
+// at build time (pkgs/gjallar-installer). The move starts the helper only by
+// this fixed path, never through PATH and never through sudo (Q253): the
+// stick menu already runs as root.
+var HelperPath string
+
+// StoreHelper is the helper at HelperPath. It fails on a build that did not
+// set the path, or set one outside the Nix store.
+func StoreHelper() (ExecHelper, error) {
+	if !strings.HasPrefix(HelperPath, "/nix/store/") || filepath.Clean(HelperPath) != HelperPath {
+		return ExecHelper{}, fmt.Errorf("move helper path %q is not a store path: this installer was built without it", HelperPath)
+	}
+	return ExecHelper{Argv: []string{HelperPath}}, nil
+}
+
 // helperEnv is the whole environment the helper starts with. Nothing comes
 // from the caller, so no variable set in the session reaches root's
 // process (L114).

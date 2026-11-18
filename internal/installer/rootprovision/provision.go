@@ -144,6 +144,9 @@ func provision(
 		return Result{}, err
 	}
 
+	if err := checkTarget(); err != nil {
+		return Result{}, err
+	}
 	if mounted, err := exactMountExists(ctx, runner, mountPoint); err != nil {
 		return Result{}, err
 	} else if mounted {

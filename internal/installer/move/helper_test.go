@@ -164,3 +164,20 @@ func TestDecodeNilResult(t *testing.T) {
 		t.Fatalf("refusal lost with no result: %v", err)
 	}
 }
+
+// Q253: the helper starts only from the store path pinned at build time.
+func TestStoreHelper(t *testing.T) {
+	was := HelperPath
+	t.Cleanup(func() { HelperPath = was })
+	for _, p := range []string{"", "gjallar-move-helper", "/run/current-system/sw/bin/gjallar-move-helper", "/nix/store/../tmp/gjallar-move-helper", "/nix/store/x//gjallar-move-helper"} {
+		HelperPath = p
+		if _, err := StoreHelper(); err == nil {
+			t.Errorf("%q accepted", p)
+		}
+	}
+	HelperPath = "/nix/store/00000000000000000000000000000000-gjallar-installer/bin/gjallar-move-helper"
+	h, err := StoreHelper()
+	if err != nil || len(h.Argv) != 1 || h.Argv[0] != HelperPath {
+		t.Errorf("%v %v", h, err)
+	}
+}

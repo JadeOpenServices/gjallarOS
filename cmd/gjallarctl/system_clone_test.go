@@ -299,3 +299,33 @@ func TestSystemRebuildNamesMissingCheckout(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// N1: after useRootPATH, root's steps never run a git planted first on the
+// caller's PATH.
+func TestRootPATHSkipsPlantedGit(t *testing.T) {
+	plant := t.TempDir()
+	marker := filepath.Join(t.TempDir(), "ran")
+	if err := os.WriteFile(filepath.Join(plant, "git"), []byte("#!/bin/sh\ntouch "+marker+"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", plant+":"+os.Getenv("PATH"))
+	if err := useRootPATH(); err != nil {
+		t.Fatal(err)
+	}
+	if os.Getenv("PATH") != rootPATH {
+		t.Fatalf("PATH %q", os.Getenv("PATH"))
+	}
+	// The system git may be missing (build sandbox); only the plant matters.
+	_, _ = runDirect(context.Background(), "git", "--version")
+	if _, err := os.Stat(marker); err == nil {
+		t.Error("planted git ran")
+	}
+	// The plant is real: the caller's PATH would have run it.
+	cmd := exec.Command(filepath.Join(plant, "git"))
+	if err := cmd.Run(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(marker); err != nil {
+		t.Errorf("plant did not work: %v", err)
+	}
+}
