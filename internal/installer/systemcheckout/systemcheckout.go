@@ -15,7 +15,6 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -269,13 +268,7 @@ func git(ctx context.Context, dir string, args ...string) (string, error) {
 }
 
 func gitRaw(ctx context.Context, dir string, args ...string) (string, error) {
-	if dir != "" {
-		args = append([]string{"-C", dir}, args...)
-	}
-	cmd := exec.CommandContext(ctx, "git", args...)
-	// A missing commit must not be fetched on demand from the promisor:
-	// GitHub would hand out a fork commit.
-	cmd.Env = append(os.Environ(), "GIT_NO_LAZY_FETCH=1", "GIT_TERMINAL_PROMPT=0")
+	cmd := GitCommand(ctx, dir, args...)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()

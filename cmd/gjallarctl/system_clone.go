@@ -142,6 +142,9 @@ func systemClone(args []string, stdout, stderr io.Writer) int {
 	if err := systemcheckout.CheckOwnership(systemCloneDest); err != nil {
 		return cloneFailed(systemCloneDest, err, stderr)
 	}
+	if err := systemcheckout.CheckGit(systemCloneDest); err != nil {
+		return cloneFailed(systemCloneDest, err, stderr)
+	}
 	if _, err := systemcheckout.Inspect(ctx, systemCloneDest); err != nil {
 		return cloneFailed(systemCloneDest, err, stderr)
 	}

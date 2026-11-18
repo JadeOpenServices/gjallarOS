@@ -2405,25 +2405,25 @@ func pullCheckout(repo string, stdout, stderr io.Writer) int {
 	channel := user.Channel()
 	upstream := "refs/remotes/origin/" + channel
 	git := func(args ...string) int {
-		return runCommand(context.Background(), stdout, stderr, "git", systemGitArgs(repo, args...)...)
+		return runCmd(context.Background(), stdout, stderr, systemcheckout.GitCommand(context.Background(), repo, args...))
 	}
 	failed := func(what string) int {
 		fmt.Fprintf(stderr, "[gjallarOS] Error: %s in %s failed; nothing rebuilt\n", what, repo)
 		return 1
 	}
 	isAncestor := func(a, b string) bool {
-		return exec.Command("git", systemGitArgs(repo, "merge-base", "--is-ancestor", a, b)...).Run() == nil
+		return systemcheckout.GitCommand(context.Background(), repo, "merge-base", "--is-ancestor", a, b).Run() == nil
 	}
 
 	before := gitHead(repo)
 	if git("fetch", "--quiet", "--prune", "origin") != 0 {
 		return failed("git fetch origin")
 	}
-	if exec.Command("git", systemGitArgs(repo, "rev-parse", "--verify", "--quiet", upstream)...).Run() != nil {
+	if systemcheckout.GitCommand(context.Background(), repo, "rev-parse", "--verify", "--quiet", upstream).Run() != nil {
 		fmt.Fprintf(stderr, "[gjallarOS] Error: origin has no %s branch (%s) for releaseChannel %q; nothing rebuilt\n", channel, upstream, channel)
 		return 1
 	}
-	out, err := exec.Command("git", systemGitArgs(repo, "symbolic-ref", "--quiet", "--short", "HEAD")...).Output()
+	out, err := systemcheckout.GitCommand(context.Background(), repo, "symbolic-ref", "--quiet", "--short", "HEAD").Output()
 	if err != nil {
 		fmt.Fprintf(stderr, "[gjallarOS] Error: %s is not on a branch; check out %s first; nothing rebuilt\n", repo, channel)
 		return 1
@@ -2550,15 +2550,8 @@ the system checkout.
 `)
 }
 
-// systemGitArgs are root's git arguments for the system checkout. Root
-// never runs a hook or an fsmonitor program from the checkout's config, even
-// one that came in with a moved or restored .git (L146).
-func systemGitArgs(repo string, args ...string) []string {
-	return append([]string{"-C", repo, "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false"}, args...)
-}
-
 func gitHead(repo string) string {
-	out, err := exec.Command("git", systemGitArgs(repo, "rev-parse", "--short", "HEAD")...).Output()
+	out, err := systemcheckout.GitCommand(context.Background(), repo, "rev-parse", "--short", "HEAD").Output()
 	if err != nil {
 		return "unknown"
 	}
@@ -3331,7 +3324,12 @@ func reportAuthentication(tty io.Writer, status int) int {
 }
 
 func runCommand(ctx context.Context, stdout, stderr io.Writer, name string, args ...string) int {
-	cmd := exec.CommandContext(ctx, name, args...)
+	return runCmd(ctx, stdout, stderr, exec.CommandContext(ctx, name, args...))
+}
+
+// runCmd runs cmd with the terminal's stdin in its own process group; ctx
+// must be the context cmd was made with.
+func runCmd(ctx context.Context, stdout, stderr io.Writer, cmd *exec.Cmd) int {
 	cmd.Stdout, cmd.Stderr, cmd.Stdin = stdout, stderr, os.Stdin
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	err := cmd.Run()
@@ -3345,7 +3343,7 @@ func runCommand(ctx context.Context, stdout, stderr io.Writer, name string, args
 	if exit, ok := err.(*exec.ExitError); ok {
 		return exit.ExitCode()
 	}
-	fmt.Fprintf(stderr, "ERROR: %s: %v\n", name, err)
+	fmt.Fprintf(stderr, "ERROR: %s: %v\n", filepath.Base(cmd.Path), err)
 	return 1
 }
 

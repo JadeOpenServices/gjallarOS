@@ -216,6 +216,12 @@ func runSystem(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "[gjallarOS] Error: %v; nothing rebuilt\n", err)
 		return 1
 	}
+	// Root's git runs in the checkout from here on; ownership first, so
+	// that only root changes what CheckGit reads (L147).
+	if err := systemcheckout.CheckGit(systemcheckout.Path); err != nil {
+		fmt.Fprintf(stderr, "[gjallarOS] Error: %v; nothing rebuilt\n", err)
+		return 1
+	}
 	// The installed gjallarctl runs check before the checkout's own
 	// gjallarctl is built, so that one comes from a checked source too.
 	if args[0] == "check" {
