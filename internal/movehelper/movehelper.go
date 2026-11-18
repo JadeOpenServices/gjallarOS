@@ -67,9 +67,9 @@ type Request struct {
 	Key []byte `json:"key,omitempty"`
 }
 
-// refusalResult is what a refused step returns. It is an answer for the
+// RefusalResult is what a refused step returns. It is an answer for the
 // screen, not a failure of the helper.
-type refusalResult struct {
+type RefusalResult struct {
 	Refusal *oldroot.Refusal `json:"refusal"`
 }
 
@@ -110,7 +110,7 @@ func Run(base string, in io.Reader, out io.Writer) error {
 		return fmt.Errorf("unknown operation %q", req.Op)
 	}
 	if r, ok := oldroot.AsRefusal(err); ok {
-		result, err = refusalResult{r}, nil
+		result, err = RefusalResult{r}, nil
 	}
 	if err != nil {
 		return err
@@ -272,17 +272,18 @@ func (c *capped) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-type findResult struct {
+// FindResult lists the old gjallarOS disks (find).
+type FindResult struct {
 	Disks []oldroot.Part `json:"disks"`
 }
 
-func findOp(ctx context.Context) (findResult, error) {
+func findOp(ctx context.Context) (FindResult, error) {
 	raw, err := lsblk(ctx)
 	if err != nil {
-		return findResult{}, err
+		return FindResult{}, err
 	}
 	parts, err := oldroot.Find(raw)
-	return findResult{Disks: parts}, err
+	return FindResult{Disks: parts}, err
 }
 
 // oldDisk looks up disk in a fresh lsblk listing, so the helper only ever
@@ -309,7 +310,8 @@ func oldDisk(ctx context.Context, disk string) (oldroot.Part, []string, error) {
 	return oldroot.Part{}, nil, fmt.Errorf("%q is not an old gjallarOS disk on this computer", disk)
 }
 
-type checkResult struct {
+// CheckResult is what step 3 found without a key (check).
+type CheckResult struct {
 	Encrypted bool `json:"encrypted"`
 	// PINToken: the old disk also unlocks with TPM and PIN (F1 notice).
 	PINToken bool `json:"pinToken"`
@@ -317,15 +319,15 @@ type checkResult struct {
 
 // checkOp sets the old disk read-only before anything reads it and checks
 // its LUKS metadata. Step 3.
-func checkOp(ctx context.Context, req Request) (checkResult, error) {
+func checkOp(ctx context.Context, req Request) (CheckResult, error) {
 	part, all, err := oldDisk(ctx, req.Disk)
 	if err != nil {
-		return checkResult{}, err
+		return CheckResult{}, err
 	}
 	if err := oldroot.SetReadOnly(append([]string{part.Disk}, all...)...); err != nil {
-		return checkResult{}, err
+		return CheckResult{}, err
 	}
-	res := checkResult{Encrypted: part.Encrypted}
+	res := CheckResult{Encrypted: part.Encrypted}
 	if !part.Encrypted {
 		return res, nil
 	}
@@ -338,7 +340,8 @@ func checkOp(ctx context.Context, req Request) (checkResult, error) {
 	return res, err
 }
 
-type openResult struct {
+// OpenResult is what steps 4 and 5 found on the opened old disk (open).
+type OpenResult struct {
 	oldroot.Info
 	PINToken bool `json:"pinToken"`
 }
@@ -346,7 +349,7 @@ type openResult struct {
 // openOp unlocks the old disk if it is encrypted, mounts its top level
 // read-only at Old and checks that it holds a gjallarOS. Steps 4 and 5.
 // Anything that fails after the unlock closes the disk again.
-func openOp(ctx context.Context, base string, req Request) (res openResult, err error) {
+func openOp(ctx context.Context, base string, req Request) (res OpenResult, err error) {
 	if len(req.Key) > maxKey {
 		return res, fmt.Errorf("key is over %d bytes", maxKey)
 	}

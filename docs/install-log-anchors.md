@@ -44,6 +44,13 @@ yes/no or one of the words listed here, never text a user typed.
 | GJA-2041 | `stick.release.older` | A newer release is out; the stick is still safe to install from and went on. | none |
 | GJA-2050 | `stick.installed.start` | The user chose Start installed gjallarOS on the stick's menu. | `result` (one of set, none, failed): set: the stick restarts into the installed system; none: no installed system was found anymore; failed: the next start could not be set |
 | GJA-2098 | `stick.flow.failed` | A step of the stick's menu failed; the ERROR line above says why. | none |
+| GJA-2101 | `stick.move.started` | The disk move started on the stick. | `mode` (one of new-disk, bring-over): new-disk: the system moves to a new disk in this computer; bring-over: an old disk's system comes to this computer |
+| GJA-2104 | `stick.move.header-refused` | The old disk's encryption header was refused before any key was asked. Nothing was opened. | `reason` (one of reencrypt, unknown-token, kdf-memory, not-luks2, unsupported): reencrypt: a change of the encryption was not finished; unknown-token: an unlock method gjallarOS never sets up; kdf-memory: unlocking needs more memory than is free; not-luks2: no LUKS2 header or a damaged one; unsupported: encryption settings gjallarOS does not set up |
+| GJA-2105 | `stick.move.layout-refused` | The old disk opened, but its contents were refused. It was closed again. | `reason` (one of not-btrfs, no-evidence, managed): not-btrfs: no gjallarOS file system; no-evidence: not a complete gjallarOS with the current layout; managed: the organisation moves this computer |
+| GJA-2106 | `stick.move.unlock-ok` | The old disk opened with the key the user typed. | `tries` (count): how many tries it took |
+| GJA-2107 | `stick.move.unlock-failed` | No key the user typed opened the old disk; the move stopped. | `tries` (count): how many tries were made |
+| GJA-2108 | `stick.move.old-refused` | The stick could not work with the old disk. Nothing was opened. | `reason` (one of busy, old-cryptsetup): busy: an old disk is already open; old-cryptsetup: the stick's disk tools are too old to open it safely |
+| GJA-2110 | `stick.move.pin-unchecked` | The old disk also unlocks with a startup PIN that the stick cannot check; the user read the warning and went on. Identity items start as "make new". | none |
 | GJA-3001 | `maker.run.started` | The USB stick maker started. | `os` (one of linux, windows): the system the maker runs on |
 | GJA-3002 | `maker.key.confirmed` | The user typed yes: the release key fingerprint the maker showed matches the README. | none |
 | GJA-3003 | `maker.key.declined` | The user did not confirm the release key fingerprint; nothing was downloaded or written. | none |

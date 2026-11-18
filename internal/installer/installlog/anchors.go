@@ -49,6 +49,14 @@ const (
 	StickInstalledStart   ID = 2050
 	StickFlowFailed       ID = 2098
 
+	StickMoveStarted         ID = 2101
+	StickMoveHeaderRefused   ID = 2104
+	StickMoveLayoutRefused   ID = 2105
+	StickMoveUnlockOK        ID = 2106
+	StickMoveUnlockFailed    ID = 2107
+	StickMoveOldRefused      ID = 2108
+	StickMovePINUncheckedYes ID = 2110
+
 	MakerRunStarted        ID = 3001
 	MakerKeyConfirmed      ID = 3002
 	MakerKeyDeclined       ID = 3003
@@ -207,6 +215,31 @@ var Registry = []Anchor{
 			Meaning: "set: the stick restarts into the installed system; none: no installed system was found anymore; failed: the next start could not be set"}}},
 	{ID: StickFlowFailed, Name: "stick.flow.failed",
 		Meaning: "A step of the stick's menu failed; the ERROR line above says why."},
+
+	{ID: StickMoveStarted, Name: "stick.move.started",
+		Meaning: "The disk move started on the stick.",
+		Fields: []FieldSpec{{Name: "mode", Kind: KindChoice, Choices: []string{"new-disk", "bring-over"},
+			Meaning: "new-disk: the system moves to a new disk in this computer; bring-over: an old disk's system comes to this computer"}}},
+	{ID: StickMoveHeaderRefused, Name: "stick.move.header-refused",
+		Meaning: "The old disk's encryption header was refused before any key was asked. Nothing was opened.",
+		Fields: []FieldSpec{{Name: "reason", Kind: KindChoice, Choices: []string{"reencrypt", "unknown-token", "kdf-memory", "not-luks2", "unsupported"},
+			Meaning: "reencrypt: a change of the encryption was not finished; unknown-token: an unlock method gjallarOS never sets up; kdf-memory: unlocking needs more memory than is free; not-luks2: no LUKS2 header or a damaged one; unsupported: encryption settings gjallarOS does not set up"}}},
+	{ID: StickMoveLayoutRefused, Name: "stick.move.layout-refused",
+		Meaning: "The old disk opened, but its contents were refused. It was closed again.",
+		Fields: []FieldSpec{{Name: "reason", Kind: KindChoice, Choices: []string{"not-btrfs", "no-evidence", "managed"},
+			Meaning: "not-btrfs: no gjallarOS file system; no-evidence: not a complete gjallarOS with the current layout; managed: the organisation moves this computer"}}},
+	{ID: StickMoveUnlockOK, Name: "stick.move.unlock-ok",
+		Meaning: "The old disk opened with the key the user typed.",
+		Fields:  []FieldSpec{{Name: "tries", Kind: KindCount, Meaning: "how many tries it took"}}},
+	{ID: StickMoveUnlockFailed, Name: "stick.move.unlock-failed",
+		Meaning: "No key the user typed opened the old disk; the move stopped.",
+		Fields:  []FieldSpec{{Name: "tries", Kind: KindCount, Meaning: "how many tries were made"}}},
+	{ID: StickMoveOldRefused, Name: "stick.move.old-refused",
+		Meaning: "The stick could not work with the old disk. Nothing was opened.",
+		Fields: []FieldSpec{{Name: "reason", Kind: KindChoice, Choices: []string{"busy", "old-cryptsetup"},
+			Meaning: "busy: an old disk is already open; old-cryptsetup: the stick's disk tools are too old to open it safely"}}},
+	{ID: StickMovePINUncheckedYes, Name: "stick.move.pin-unchecked",
+		Meaning: "The old disk also unlocks with a startup PIN that the stick cannot check; the user read the warning and went on. Identity items start as \"make new\"."},
 
 	{ID: MakerRunStarted, Name: "maker.run.started",
 		Meaning: "The USB stick maker started.",
