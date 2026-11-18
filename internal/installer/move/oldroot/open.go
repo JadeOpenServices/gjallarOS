@@ -30,6 +30,16 @@ const headerFile = "old-header"
 // wait as the recovery console, so guessing stays slow.
 var wrongKeyWait = 5 * time.Second
 
+// openTryLimit caps one key try (R50, L118): a header made to take hours
+// to unlock, or a disk that hangs, stops the move instead of holding the
+// stick. A real try takes seconds; the KDF memory cap keeps it there.
+// killWait is how long cryptsetup gets to stop after it is told to before
+// it is killed. Tests shorten both.
+var openTryLimit, killWait = 60 * time.Second, 10 * time.Second
+
+// mapperDir is where device-mapper names show; tests point it elsewhere.
+var mapperDir = "/dev/mapper"
+
 // CheckEncrypted reads and checks the LUKS metadata of part without a key.
 func CheckEncrypted(ctx context.Context, part string, kdfCapKiB int64) (Header, error) {
 	if err := cryptsetupVersion(ctx); err != nil {
@@ -88,14 +98,46 @@ func AreaDigest(area []byte) string {
 
 // Open opens the root read-only as /dev/mapper/Mapping with the key read
 // from key, exactly the bytes given. No token plugin is loaded.
+//
+// One try gets openTryLimit. Past it, or when ctx ends, cryptsetup is told
+// to stop and then killed, and a mapping it may have made just before is
+// closed again: Free made sure none was there before the try.
 func (p *Prepared) Open(ctx context.Context, key io.Reader) error {
-	open := exec.CommandContext(ctx, "cryptsetup", "open", "--readonly", "--type", "luks2",
+	try, cancel := context.WithTimeout(ctx, openTryLimit)
+	defer cancel()
+	open := exec.CommandContext(try, "cryptsetup", "open", "--readonly", "--type", "luks2",
 		"--disable-external-tokens", "--header", p.header, "--key-file=-", "--", p.part, Mapping)
+	open.Cancel = func() error { return open.Process.Signal(unix.SIGTERM) }
+	open.WaitDelay = killWait
 	stderr := &capWriter{max: 4096}
 	open.Stdin, open.Stdout, open.Stderr = key, stderr, stderr
-	if err := open.Run(); err != nil {
+	err := open.Run()
+	if try.Err() != nil {
+		// Stopped, whatever cryptsetup managed before: nothing stays open.
+		left := closeMapping(context.WithoutCancel(ctx))
+		if ctx.Err() != nil {
+			return errors.Join(ctx.Err(), left)
+		}
+		return errors.Join(refuse(TooSlow, fmt.Sprintf("one key try ran over %s", openTryLimit)), left)
+	}
+	if err != nil {
 		time.Sleep(wrongKeyWait)
 		return cryptsetupFailure(err, stderr.buf.Bytes())
+	}
+	return nil
+}
+
+// closeMapping closes Mapping if it is there. It gets a short time of its
+// own: it runs after the try's time ran out.
+func closeMapping(ctx context.Context) error {
+	if !mapped() {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "cryptsetup", "close", "--", Mapping).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("close %s: %v: %s", Mapping, err, printable(string(out)))
 	}
 	return nil
 }
@@ -212,7 +254,7 @@ func Close(ctx context.Context, target string) error {
 			errs = append(errs, fmt.Errorf("unmount %s: %w", target, err))
 		}
 	}
-	if _, err := os.Lstat("/dev/mapper/" + Mapping); err == nil {
+	if mapped() {
 		out, err := exec.CommandContext(ctx, "cryptsetup", "close", "--", Mapping).CombinedOutput()
 		if err != nil {
 			errs = append(errs, fmt.Errorf("close %s: %v: %s", Mapping, err, printable(string(out))))
@@ -246,10 +288,29 @@ func Opened(target string) error {
 }
 
 func mapperFree() error {
-	if _, err := os.Lstat("/dev/mapper/" + Mapping); err == nil {
-		return refuse(Busy, "/dev/mapper/"+Mapping+" exists")
+	if mapped() {
+		return refuse(Busy, Mapping+" is open")
 	}
 	return nil
+}
+
+// mapped tells whether Mapping is there: as a node in mapperDir, or in the
+// kernel's list before udev made the node, as right after a stopped open.
+func mapped() bool {
+	if _, err := os.Lstat(filepath.Join(mapperDir, Mapping)); err == nil {
+		return true
+	}
+	entries, _ := os.ReadDir(sysBlock)
+	for _, e := range entries {
+		if !strings.HasPrefix(e.Name(), "dm-") {
+			continue
+		}
+		name, err := os.ReadFile(filepath.Join(sysBlock, e.Name(), "dm", "name"))
+		if err == nil && strings.TrimSpace(string(name)) == Mapping {
+			return true
+		}
+	}
+	return false
 }
 
 func mountFree(target string) error {

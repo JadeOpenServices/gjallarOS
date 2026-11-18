@@ -27,6 +27,7 @@ const (
 	OldCryptsetup Reason = "old-cryptsetup"
 	Busy          Reason = "busy"
 	NotOpen       Reason = "not-open"
+	TooSlow       Reason = "too-slow"
 )
 
 // texts are what the screen shows. They say what to do; the detail stays in
@@ -44,6 +45,7 @@ var texts = map[Reason]string{
 	OldCryptsetup: "This stick's disk tools are too old to open the old disk safely. Make a new stick.",
 	Busy:          "The old disk is already open. Restart from the stick and try again.",
 	NotOpen:       "The old disk is not open any more. Go back and open it again.",
+	TooSlow:       "The old disk took too long to open, so the move stops here. Restart from the stick and try again; if it happens again, the disk may be failing.",
 }
 
 // Refusal stops the move with a text for the user. It is not a failure of

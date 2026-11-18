@@ -244,17 +244,16 @@ func openLUKS(ctx context.Context, out io.Writer, base, device string) error {
 		return fmt.Errorf("start systemd-ask-password: %w", err)
 	}
 	w.Close()
-	openErr := prep.Open(ctx, r)
+	// The key waits in the pipe until it is typed in full, so the time limit
+	// of one try (R50) counts the open only, not the typing.
+	if err := ask.Wait(); err != nil {
+		r.Close()
+		return fmt.Errorf("read the install password or recovery key: %w", err)
+	}
+	err = prep.Open(ctx, r)
 	r.Close()
-	askErr := ask.Wait()
-	switch {
-	case askErr != nil:
-		if openErr == nil {
-			oldroot.Close(context.WithoutCancel(ctx), filepath.Join(base, "top"))
-		}
-		return fmt.Errorf("read the install password or recovery key: %w", askErr)
-	case openErr != nil:
-		return openFailure(openErr)
+	if err != nil {
+		return openFailure(err)
 	}
 	return nil
 }
@@ -266,8 +265,11 @@ func openFailure(err error) error {
 	if !ok {
 		return err
 	}
-	if r.Reason == oldroot.WrongKey {
+	switch r.Reason {
+	case oldroot.WrongKey:
 		return errors.New("that password or recovery key did not open the disk")
+	case oldroot.TooSlow:
+		return errors.New("the installed gjallarOS took too long to open, so the try was stopped; restart from the stick and try again")
 	}
 	msg := "the installed gjallarOS failed the safety check of its encryption header, so its key is not read: " + string(r.Reason)
 	if r.Detail != "" {
