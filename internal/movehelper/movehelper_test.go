@@ -147,3 +147,44 @@ func TestCopy(t *testing.T) {
 		t.Fatalf("wrote outside: %v", entries)
 	}
 }
+
+func TestOpenRefusesBeforeTouchingDisks(t *testing.T) {
+	base := filepath.Join(t.TempDir(), "gjallar-move")
+	long := strings.Repeat("A", 2*maxKey)
+	for name, req := range map[string]string{
+		"key too long":  `{"op":"open","disk":"/dev/vda","key":"` + long + `"}`,
+		"no disk":       `{"op":"open","key":"QUFB"}`,
+		"no disk check": `{"op":"check"}`,
+		"unknown field": `{"op":"open","disk":"/dev/vda","path":"/dev/vda2"}`,
+		"key not bytes": `{"op":"open","disk":"/dev/vda","key":"not base64!"}`,
+	} {
+		if out, err := run(t, base, req); err == nil {
+			t.Errorf("%s: accepted: %s", name, out)
+		}
+	}
+}
+
+// Close finds nothing open and says so without failing.
+func TestCloseNothingOpen(t *testing.T) {
+	base := filepath.Join(t.TempDir(), "gjallar-move")
+	out, err := run(t, base, `{"op":"close"}`)
+	if err != nil || strings.TrimSpace(out) != "{}" {
+		t.Fatalf("got %q, %v", out, err)
+	}
+}
+
+// L58: a second helper run while one holds the folder is turned away.
+func TestSecondRunRefused(t *testing.T) {
+	base := filepath.Join(t.TempDir(), "gjallar-move")
+	unlock, err := lock(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run(t, base, `{"op":"close"}`); err == nil || !strings.Contains(err.Error(), "another move step") {
+		t.Fatalf("second run: %v", err)
+	}
+	unlock()
+	if _, err := run(t, base, `{"op":"close"}`); err != nil {
+		t.Fatalf("after unlock: %v", err)
+	}
+}

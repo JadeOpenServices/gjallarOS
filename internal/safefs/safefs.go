@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strconv"
 
 	"golang.org/x/sys/unix"
@@ -63,6 +64,30 @@ func (d *Dir) Sub(rel string) (*Dir, error) {
 		return nil, fmt.Errorf("open folder %s below %s: %w", rel, d.name, refusal(err))
 	}
 	return &Dir{fd: fd, name: d.name + "/" + rel}, nil
+}
+
+// Lstat reports on rel below d without following a link at its end; links
+// on the way there are refused as everywhere else. rel must be a clean path
+// inside d.
+func (d *Dir) Lstat(rel string) (unix.Stat_t, error) {
+	var st unix.Stat_t
+	if !filepath.IsLocal(rel) || filepath.Clean(rel) != rel {
+		return st, fmt.Errorf("check %s below %s: %w: not a clean path inside the folder", rel, d.name, ErrNotPlain)
+	}
+	parent, base := filepath.Split(rel)
+	dirFD := d.fd
+	if parent != "" {
+		fd, err := openat2(d.fd, filepath.Clean(parent), unix.O_PATH|unix.O_DIRECTORY|unix.O_CLOEXEC)
+		if err != nil {
+			return st, fmt.Errorf("check %s below %s: %w", rel, d.name, refusal(err))
+		}
+		defer unix.Close(fd)
+		dirFD = fd
+	}
+	if err := unix.Fstatat(dirFD, base, &st, unix.AT_SYMLINK_NOFOLLOW); err != nil {
+		return st, fmt.Errorf("check %s below %s: %w", rel, d.name, err)
+	}
+	return st, nil
 }
 
 // ReadFile reads the plain file rel below d. A file over max bytes, a pipe,

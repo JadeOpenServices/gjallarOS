@@ -409,3 +409,47 @@ func TestCopyNeedsBudget(t *testing.T) {
 		t.Fatal("copy without budget ran")
 	}
 }
+
+// Lstat looks at the last part of a path without following it, and refuses
+// a path that goes through a link or out of the folder.
+func TestLstatNeverFollows(t *testing.T) {
+	old := t.TempDir()
+	write(t, filepath.Join(old, "home/x/NIXOS"), "")
+	if err := os.Symlink("home/x", filepath.Join(old, "etc")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("/etc/passwd", filepath.Join(old, "home/passwd")); err != nil {
+		t.Fatal(err)
+	}
+	if err := unix.Mkfifo(filepath.Join(old, "home/fifo"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	d := mustDir(t, old)
+
+	for _, rel := range []string{"etc/NIXOS", "../" + filepath.Base(old) + "/home", "/etc", "home/../home/x", "home/", ""} {
+		withTimeout(t, func() {
+			if _, err := d.Lstat(rel); err == nil {
+				t.Errorf("%q: accepted", rel)
+			}
+		})
+	}
+	for rel, mode := range map[string]uint32{
+		"etc":          unix.S_IFLNK,
+		"home/passwd":  unix.S_IFLNK,
+		"home/fifo":    unix.S_IFIFO,
+		"home/x":       unix.S_IFDIR,
+		"home/x/NIXOS": unix.S_IFREG,
+	} {
+		withTimeout(t, func() {
+			st, err := d.Lstat(rel)
+			if err != nil {
+				t.Errorf("%s: %v", rel, err)
+			} else if st.Mode&unix.S_IFMT != mode {
+				t.Errorf("%s: mode %o", rel, st.Mode)
+			}
+		})
+	}
+	if _, err := d.Lstat("home/missing"); !errors.Is(err, unix.ENOENT) {
+		t.Errorf("missing: %v", err)
+	}
+}
