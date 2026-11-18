@@ -890,7 +890,7 @@ func oldGitDir(top *safefs.Dir) (*safefs.Dir, string) {
 // there (homeTarget), and this holds even if something else did.
 func newGitDir(newRoot *safefs.Dir) error {
 	at := ""
-	for _, part := range strings.Split(newCheckout+"/.git", "/") {
+	for _, part := range strings.Split(newCheckout, "/") {
 		at = path.Join(at, part)
 		st, err := newRoot.Lstat(at)
 		if err != nil {
@@ -900,7 +900,33 @@ func newGitDir(newRoot *safefs.Dir) error {
 			return err
 		}
 	}
-	d, err := newRoot.Sub(newCheckout + "/.git")
+	// The checkout is the @config subvolume, mounted there by the installer:
+	// the only step that may cross into another file system.
+	co, err := newRoot.SubMount(newCheckout)
+	if err != nil {
+		return fmt.Errorf("repo: the new checkout: %w", err)
+	}
+	defer co.Close()
+	return checkoutGitDir(co)
+}
+
+// checkoutGitDir checks .git in the opened new checkout.
+func checkoutGitDir(co *safefs.Dir) error {
+	st, err := co.Lstat(".")
+	if err != nil {
+		return fmt.Errorf("repo: the new checkout: %w", err)
+	}
+	if err := rootsOnly(newCheckout, st, true); err != nil {
+		return err
+	}
+	st, err = co.Lstat(".git")
+	if err != nil {
+		return fmt.Errorf("repo: the new checkout: %w", err)
+	}
+	if err := rootsOnly(newCheckout+"/.git", st, true); err != nil {
+		return err
+	}
+	d, err := co.Sub(".git")
 	if err != nil {
 		return fmt.Errorf("repo: the new checkout: %w", err)
 	}

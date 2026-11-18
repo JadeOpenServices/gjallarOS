@@ -2,10 +2,10 @@ package movehelper
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
-	"strings"
 	"testing"
 
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/move/repocopy"
@@ -115,7 +115,9 @@ func asRoot(t *testing.T) {
 	t.Cleanup(func() { rootUID = was })
 }
 
-// Root's git only runs in a plain new checkout folder.
+// Root's git only runs in a plain new checkout folder, and only on the
+// mounted @config: a plain folder at the checkout path is refused. The
+// mounted case runs in TestNewRootMounts.
 func TestNewGitDirPlanted(t *testing.T) {
 	asRoot(t)
 	root := t.TempDir()
@@ -123,7 +125,10 @@ func TestNewGitDirPlanted(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, newCheckout, ".git/HEAD"), []byte("ref: refs/heads/dev\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := newGitDir(openTest(t, root)); err != nil {
+	if err := newGitDir(openTest(t, root)); !errors.Is(err, safefs.ErrNotMount) {
+		t.Fatalf("plain checkout folder: got %v, want ErrNotMount", err)
+	}
+	if err := checkoutGitDir(openTest(t, filepath.Join(root, newCheckout))); err != nil {
 		t.Fatal(err)
 	}
 	if err := newGitDir(openTest(t, t.TempDir())); err == nil {
@@ -131,19 +136,22 @@ func TestNewGitDirPlanted(t *testing.T) {
 	}
 	elsewhere := t.TempDir()
 	mkdirs(t, filepath.Join(elsewhere, ".git"))
-	for _, at := range []string{"etc", "etc/gjallar", newCheckout, newCheckout + "/.git"} {
+	for _, at := range []string{"etc", "etc/gjallar", newCheckout} {
 		root := t.TempDir()
 		mkdirs(t, filepath.Join(root, filepath.Dir(at)))
-		target := elsewhere
-		if strings.HasSuffix(at, ".git") {
-			target = filepath.Join(elsewhere, ".git")
-		}
-		if err := os.Symlink(target, filepath.Join(root, at)); err != nil {
+		if err := os.Symlink(elsewhere, filepath.Join(root, at)); err != nil {
 			t.Fatal(err)
 		}
-		if err := newGitDir(openTest(t, root)); err == nil {
-			t.Errorf("link at %s followed", at)
+		if err := newGitDir(openTest(t, root)); err == nil || errors.Is(err, safefs.ErrNotMount) {
+			t.Errorf("link at %s: %v", at, err)
 		}
+	}
+	co := t.TempDir()
+	if err := os.Symlink(filepath.Join(elsewhere, ".git"), filepath.Join(co, ".git")); err != nil {
+		t.Fatal(err)
+	}
+	if err := checkoutGitDir(openTest(t, co)); err == nil {
+		t.Error("link at .git followed")
 	}
 }
 
@@ -152,13 +160,13 @@ func TestNewGitDirPlanted(t *testing.T) {
 func TestNewGitDirContent(t *testing.T) {
 	asRoot(t)
 	git := func(t *testing.T) (string, string) {
-		root := t.TempDir()
-		g := filepath.Join(root, newCheckout, ".git")
+		co := filepath.Join(t.TempDir(), "system")
+		g := filepath.Join(co, ".git")
 		mkdirs(t, filepath.Join(g, "objects/info"), filepath.Join(g, "info"), filepath.Join(g, "refs/heads"))
-		return root, g
+		return co, g
 	}
 	write := func(p string) error { return os.WriteFile(p, []byte("SYNTHETIC\n"), 0o644) }
-	if root, _ := git(t); newGitDir(openTest(t, root)) != nil {
+	if root, _ := git(t); checkoutGitDir(openTest(t, root)) != nil {
 		t.Fatal("plain checkout refused")
 	}
 	for name, plant := range map[string]func(g string) error{
@@ -184,7 +192,7 @@ func TestNewGitDirContent(t *testing.T) {
 		if err := plant(g); err != nil {
 			t.Fatal(err)
 		}
-		if err := newGitDir(openTest(t, root)); err == nil {
+		if err := checkoutGitDir(openTest(t, root)); err == nil {
 			t.Errorf("%s accepted", name)
 		}
 	}
@@ -195,7 +203,7 @@ func TestNewGitDirContent(t *testing.T) {
 		t.Fatal(err)
 	}
 	rootUID = uint32(os.Getuid()) + 1
-	if err := newGitDir(openTest(t, root)); err == nil {
+	if err := checkoutGitDir(openTest(t, root)); err == nil {
 		t.Error("checkout of another user accepted")
 	}
 }

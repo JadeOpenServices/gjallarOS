@@ -31,6 +31,8 @@ var (
 	// ErrTooMany refuses a folder with more entries, or more name bytes,
 	// than the cap.
 	ErrTooMany = errors.New("folder has more names than the cap")
+	// ErrNotMount refuses a folder that SubMount needs to be a mount point.
+	ErrNotMount = errors.New("not a mount point")
 )
 
 const resolve = unix.RESOLVE_BENEATH | unix.RESOLVE_NO_SYMLINKS | unix.RESOLVE_NO_MAGICLINKS | unix.RESOLVE_NO_XDEV
@@ -74,6 +76,32 @@ func (d *Dir) Sub(rel string) (*Dir, error) {
 	fd, err := openat2(d.fd, rel, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC)
 	if err != nil {
 		return nil, fmt.Errorf("open folder %s below %s: %w", rel, d.name, refusal(err))
+	}
+	return &Dir{fd: fd, name: d.name + "/" + rel}, nil
+}
+
+// SubMount opens the folder rel below d whose last part is a mount point,
+// such as home on a new root that has @home mounted there. The parts on the
+// way are resolved as in Sub; only the last step may enter the file system
+// mounted there, and it must: a plain folder never stands in for the mount.
+func (d *Dir) SubMount(rel string) (*Dir, error) {
+	dirFD, last, done, err := d.parent(rel, "open")
+	if err != nil {
+		return nil, err
+	}
+	defer done()
+	fd, err := openat2Resolve(dirFD, last, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0, resolve&^unix.RESOLVE_NO_XDEV)
+	if err != nil {
+		return nil, fmt.Errorf("open mount %s below %s: %w", rel, d.name, refusal(err))
+	}
+	var stx unix.Statx_t
+	if err := unix.Statx(fd, "", unix.AT_EMPTY_PATH, unix.STATX_TYPE, &stx); err != nil {
+		unix.Close(fd)
+		return nil, fmt.Errorf("check mount %s below %s: %w", rel, d.name, err)
+	}
+	if stx.Attributes_mask&unix.STATX_ATTR_MOUNT_ROOT == 0 || stx.Attributes&unix.STATX_ATTR_MOUNT_ROOT == 0 {
+		unix.Close(fd)
+		return nil, fmt.Errorf("open mount %s below %s: %w", rel, d.name, ErrNotMount)
 	}
 	return &Dir{fd: fd, name: d.name + "/" + rel}, nil
 }
@@ -180,8 +208,12 @@ func openat2(dirFD int, rel string, flags uint64) (int, error) {
 }
 
 func openat2Mode(dirFD int, rel string, flags, mode uint64) (int, error) {
+	return openat2Resolve(dirFD, rel, flags, mode, resolve)
+}
+
+func openat2Resolve(dirFD int, rel string, flags, mode, how uint64) (int, error) {
 	for {
-		fd, err := unix.Openat2(dirFD, rel, &unix.OpenHow{Flags: flags, Mode: mode, Resolve: resolve})
+		fd, err := unix.Openat2(dirFD, rel, &unix.OpenHow{Flags: flags, Mode: mode, Resolve: how})
 		if err == unix.EINTR || err == unix.EAGAIN {
 			// openat2 returns EAGAIN when a rename raced the lookup.
 			continue

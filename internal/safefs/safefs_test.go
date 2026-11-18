@@ -488,3 +488,52 @@ func TestNamesRefusesPlantedAndCaps(t *testing.T) {
 		t.Errorf("missing: %v", err)
 	}
 }
+
+// SubMount opens only a real mount root at its last part: a plain folder or
+// a link planted there is refused, and the parts on the way still may not
+// cross a mount.
+func TestSubMountNeedsMountRoot(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "a", "home"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("/proc", filepath.Join(root, "a", "link")); err != nil {
+		t.Fatal(err)
+	}
+	d, err := OpenDir(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	if _, err := d.SubMount("a/home"); !errors.Is(err, ErrNotMount) {
+		t.Fatalf("plain folder: got %v, want ErrNotMount", err)
+	}
+	if _, err := d.SubMount("a/link"); !errors.Is(err, ErrNotPlain) {
+		t.Fatalf("planted link: got %v, want ErrNotPlain", err)
+	}
+	if _, err := d.SubMount("../a"); !errors.Is(err, ErrNotPlain) {
+		t.Fatalf("path out of the folder: got %v, want ErrNotPlain", err)
+	}
+
+	var stx unix.Statx_t
+	if err := unix.Statx(unix.AT_FDCWD, "/proc", unix.AT_SYMLINK_NOFOLLOW, unix.STATX_TYPE, &stx); err != nil ||
+		stx.Attributes_mask&unix.STATX_ATTR_MOUNT_ROOT == 0 || stx.Attributes&unix.STATX_ATTR_MOUNT_ROOT == 0 {
+		t.Skip("/proc is not a mount root here")
+	}
+	top, err := OpenDir("/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer top.Close()
+	if _, err := top.Sub("proc"); !errors.Is(err, ErrNotPlain) {
+		t.Fatalf("Sub across a mount: got %v, want ErrNotPlain", err)
+	}
+	p, err := top.SubMount("proc")
+	if err != nil {
+		t.Fatalf("mount root: %v", err)
+	}
+	p.Close()
+	if _, err := top.SubMount("proc/sys"); !errors.Is(err, ErrNotPlain) {
+		t.Fatalf("mount on the way: got %v, want ErrNotPlain", err)
+	}
+}
