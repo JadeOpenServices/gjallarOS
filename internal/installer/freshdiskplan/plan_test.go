@@ -122,3 +122,30 @@ func TestBuildGeneratesFreshIdentities(t *testing.T) {
 		t.Fatal("root PARTUUID was reused")
 	}
 }
+
+// The move's free-space plan sizes the new root with RootBytes; it must be
+// what Build lays out.
+func TestRootBytesMatchesBuild(t *testing.T) {
+	for _, recovery := range []bool{false, true} {
+		for _, size := range []uint64{40 << 30, 1000*1024*1024*1024 + 12345, 2000398934016} {
+			o := observed()
+			o.SizeBytes = size
+			p, err := Build(Input{Observed: o, EnableRecovery: recovery})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := RootBytes(size, recovery); got != p.Root.Partition.SizeBytes {
+				t.Errorf("size %d recovery %v: RootBytes %d, Build %d", size, recovery, got, p.Root.Partition.SizeBytes)
+			}
+		}
+	}
+	if RootBytes(ESPBytes, false) != 0 {
+		t.Error("a disk smaller than the fixed partitions has a root")
+	}
+}
+
+func TestInstallSwap(t *testing.T) {
+	if InstallSwap(SmallSwapRoot-1) != InstallSwapSmallBytes || InstallSwap(SmallSwapRoot) != InstallSwapBytes {
+		t.Fatal("swap rule")
+	}
+}

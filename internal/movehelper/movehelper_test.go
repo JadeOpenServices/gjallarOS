@@ -173,9 +173,15 @@ func TestCloseNothingOpen(t *testing.T) {
 	}
 }
 
-// Inventory reads only the old disk that open mounted: a plain folder at
-// Old, or none at all, is not looked at.
+// Inventory and sizes read only the old disk that open mounted: a plain
+// folder at Old, or none at all, is not looked at.
 func TestInventoryNeedsOpenDisk(t *testing.T) {
+	for _, op := range []string{"inventory", "sizes"} {
+		testNeedsOpenDisk(t, op)
+	}
+}
+
+func testNeedsOpenDisk(t *testing.T, op string) {
 	base := filepath.Join(t.TempDir(), "gjallar-move")
 	for name, prep := range map[string]func() error{
 		"no folders": func() error { return nil },
@@ -187,10 +193,10 @@ func TestInventoryNeedsOpenDisk(t *testing.T) {
 		if err := prep(); err != nil {
 			t.Fatal(err)
 		}
-		out, err := run(t, base, `{"op":"inventory"}`)
+		out, err := run(t, base, `{"op":"`+op+`"}`)
 		var res RefusalResult
 		if err != nil || json.Unmarshal([]byte(out), &res) != nil || res.Refusal == nil || res.Refusal.Reason != "not-open" {
-			t.Errorf("%s: got %q, %v", name, out, err)
+			t.Errorf("%s %s: got %q, %v", op, name, out, err)
 		}
 	}
 }

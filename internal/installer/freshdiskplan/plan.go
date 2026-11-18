@@ -23,6 +23,39 @@ const (
 	rootMappingName = "cryptroot"
 )
 
+// RootBytes is the size of the root partition Build lays out on a disk of
+// diskBytes, or 0 when the disk is smaller than the fixed partitions.
+func RootBytes(diskBytes uint64, recovery bool) uint64 {
+	fixed := 2*AlignmentBytes + ESPBytes
+	if recovery {
+		fixed += RecoveryBytes
+	}
+	if diskBytes <= fixed {
+		return 0
+	}
+	return alignDown(diskBytes-fixed, AlignmentBytes)
+}
+
+// Installation swap: live media have no swap, and nixos-install was
+// OOM-killed evaluating the configuration on a 12 GiB machine, so a fresh
+// install puts a temporary swap file on the new root. A root below
+// SmallSwapRoot (a disk near the 40 GiB minimum, Q227) gets the smaller
+// file, so the system and the first update still fit.
+const (
+	InstallSwapBytes      uint64 = 8 << 30
+	InstallSwapSmallBytes uint64 = 4 << 30
+	SmallSwapRoot         uint64 = 48 << 30
+)
+
+// InstallSwap is the size of the temporary swap file for a root file
+// system of rootBytes.
+func InstallSwap(rootBytes uint64) uint64 {
+	if rootBytes < SmallSwapRoot {
+		return InstallSwapSmallBytes
+	}
+	return InstallSwapBytes
+}
+
 type Input struct {
 	Observed       targetdisk.Result
 	EnableRecovery bool
@@ -81,11 +114,7 @@ func Build(input Input) (diskplan.Plan, error) {
 		)
 	}
 
-	rootBytes := observed.SizeBytes - reserved - ESPBytes
-	if input.EnableRecovery {
-		rootBytes -= RecoveryBytes
-	}
-	rootBytes = alignDown(rootBytes, AlignmentBytes)
+	rootBytes := RootBytes(observed.SizeBytes, input.EnableRecovery)
 
 	if rootBytes < minimumRootBytes {
 		return diskplan.Plan{}, fmt.Errorf(

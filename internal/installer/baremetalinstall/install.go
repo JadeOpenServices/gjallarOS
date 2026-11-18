@@ -23,6 +23,7 @@ import (
 	"github.com/JadeOpenServices/gjallarOS/internal/binarycache"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/buildlimits"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/flakesource"
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/freshdiskplan"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/installlog"
 )
 
@@ -243,15 +244,9 @@ func verifySystemProfile(root string) error {
 // evaluating the gjallarOS configuration inside nixos-install was OOM-killed
 // on a 12 GiB machine. A temporary swapfile on the target avoids that. It
 // lives on the encrypted target Btrfs, so swapped pages never reach the disk
-// in clear, and is removed after the installation. A root file system
-// below installSwapSmallRoot (a disk near the 40 GiB minimum, Q227) gets the
-// smaller file so the system and the first update still fit.
-const (
-	installSwapPath      = targetRoot + "/.gjallar-install.swap"
-	installSwapSize      = "8g"
-	installSwapSmallSize = "4g"
-	installSwapSmallRoot = uint64(48) << 30
-)
+// in clear, and is removed after the installation. Its size follows
+// freshdiskplan.InstallSwap, which the move's free-space plan counts too.
+const installSwapPath = targetRoot + "/.gjallar-install.swap"
 
 func enableInstallSwap(ctx context.Context, r runner, out io.Writer) (func(), error) {
 	noop := func() {}
@@ -275,10 +270,7 @@ func enableInstallSwap(ctx context.Context, r runner, out io.Writer) (func(), er
 	if err != nil {
 		return nil, fmt.Errorf("read target filesystem size %q: %w", fields[1], err)
 	}
-	size := installSwapSize
-	if rootBytes < installSwapSmallRoot {
-		size = installSwapSmallSize
-	}
+	size := fmt.Sprintf("%dg", freshdiskplan.InstallSwap(rootBytes)>>30)
 	// Cleanup must also run once an interrupt cancelled ctx.
 	cleanupCtx := context.WithoutCancel(ctx)
 	remove := func() {

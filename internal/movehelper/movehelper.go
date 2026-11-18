@@ -19,6 +19,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/move/freespace"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/move/identity"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/move/oldroot"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/move/prepared"
@@ -92,7 +93,7 @@ func Run(base string, in io.Reader, out io.Writer) error {
 		result = struct{}{}
 	case "find":
 		result, err = findOp(ctx)
-	case "copy", "check", "open", "inventory", "close":
+	case "copy", "check", "open", "inventory", "sizes", "close":
 		var unlock func()
 		if unlock, err = lock(base); err != nil {
 			break
@@ -107,6 +108,8 @@ func Run(base string, in io.Reader, out io.Writer) error {
 			result, err = openOp(ctx, base, req)
 		case "inventory":
 			result, err = inventoryOp(ctx, base)
+		case "sizes":
+			result, err = sizesOp(base)
 		case "close":
 			err = oldroot.Close(ctx, filepath.Join(base, Old))
 			result = struct{}{}
@@ -472,24 +475,53 @@ type InventoryResult struct {
 // Bluetooth pairings count as this computer's when the old disk's adapter
 // address is one of the USB Bluetooth adapters here.
 func inventoryOp(ctx context.Context, base string) (res InventoryResult, err error) {
-	old := filepath.Join(base, Old)
-	if err := oldroot.Opened(old); err != nil {
-		return res, err
-	}
-	top, err := safefs.OpenDir(old)
+	top, info, err := openedTop(base)
 	if err != nil {
 		return res, err
 	}
 	defer top.Close()
-	// Again, for the user name: the files below are read for that user.
-	info, err := oldroot.Inspect(top)
-	if err != nil {
-		return res, err
-	}
 	adapters := map[string]bool{}
 	for _, a := range (btaddr.Sysfs{Root: "/sys"}).Addresses(ctx) {
 		adapters[a] = true
 	}
 	res.Inventory = identity.Scan(top, info.Username, adapters)
 	return res, nil
+}
+
+// SizesResult is the size of each category on the open old disk (step 6,
+// for the free-space check of step 8). Bytes and counts only.
+type SizesResult struct {
+	freespace.Sizes
+}
+
+// sizesOp measures the old disk that open left mounted at Old. No file is
+// opened but the Nextcloud client config; links are not followed.
+func sizesOp(base string) (res SizesResult, err error) {
+	top, info, err := openedTop(base)
+	if err != nil {
+		return res, err
+	}
+	defer top.Close()
+	res.Sizes, err = freespace.Measure(top, info.Username)
+	return res, err
+}
+
+// openedTop opens the top level of the old disk that open mounted at Old
+// and inspects it again, for the user name: the files below are read for
+// that user.
+func openedTop(base string) (*safefs.Dir, oldroot.Info, error) {
+	old := filepath.Join(base, Old)
+	if err := oldroot.Opened(old); err != nil {
+		return nil, oldroot.Info{}, err
+	}
+	top, err := safefs.OpenDir(old)
+	if err != nil {
+		return nil, oldroot.Info{}, err
+	}
+	info, err := oldroot.Inspect(top)
+	if err != nil {
+		top.Close()
+		return nil, oldroot.Info{}, err
+	}
+	return top, info, nil
 }
