@@ -9,29 +9,52 @@ import (
 	"unicode/utf8"
 )
 
-var cup = regexp.MustCompile(`\x1b\[(\d+);(\d+)H`)
+var csi = regexp.MustCompile(`^\x1b\[([\d;]*)([A-Za-z])`)
 
-// screen replays the cursor moves into a grid of runes.
+// screen replays the output into a grid of runes: cursor moves (CUP and
+// CHA), carriage return and line feed, with scrolling at the bottom.
 func screen(t *testing.T, out string, cols, rows int) []string {
 	t.Helper()
+	blank := func() []rune { return []rune(strings.Repeat(" ", cols)) }
 	g := make([][]rune, rows)
 	for i := range g {
-		g[i] = []rune(strings.Repeat(" ", cols))
+		g[i] = blank()
 	}
-	out = strings.TrimPrefix(out, Clear)
-	locs := cup.FindAllStringSubmatchIndex(out, -1)
-	for i, l := range locs {
-		r, _ := strconv.Atoi(out[l[2]:l[3]])
-		c, _ := strconv.Atoi(out[l[4]:l[5]])
-		end := len(out)
-		if i+1 < len(locs) {
-			end = locs[i+1][0]
-		}
-		for j, ch := range []rune(out[l[1]:end]) {
-			if c-1+j >= cols {
-				t.Fatalf("row %d runs past column %d", r, cols)
+	r, c := 0, 0
+	for len(out) > 0 {
+		if m := csi.FindStringSubmatch(out); m != nil {
+			n := strings.Split(m[1], ";")
+			switch m[2] {
+			case "H":
+				r, c = 0, 0
+				if len(n) == 2 {
+					r, _ = strconv.Atoi(n[0])
+					c, _ = strconv.Atoi(n[1])
+					r, c = r-1, c-1
+				}
+			case "G":
+				c, _ = strconv.Atoi(n[0])
+				c--
 			}
-			g[r-1][c-1+j] = ch
+			out = out[len(m[0]):]
+			continue
+		}
+		ch, size := utf8.DecodeRuneInString(out)
+		out = out[size:]
+		switch ch {
+		case '\r':
+			c = 0
+		case '\n':
+			if r++; r == rows {
+				g = append(g[1:], blank())
+				r--
+			}
+		default:
+			if c >= cols {
+				t.Fatalf("row %d runs past column %d", r+1, cols)
+			}
+			g[r][c] = ch
+			c++
 		}
 	}
 	s := make([]string, rows)

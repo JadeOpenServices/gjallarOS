@@ -16,6 +16,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/calmmenu"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/installlog"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/prompt"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/region"
@@ -351,19 +352,25 @@ func TestInstallReleaseCheck(t *testing.T) {
 		runs    bool
 		anchor  string
 		screen  string
+		note    string
 	}{
 		{name: "current", release: stickrelease.Outcome{Kind: stickrelease.Current, Stick: "v2026.10.66"}, runs: true},
 		{name: "older", release: stickrelease.Outcome{Kind: stickrelease.Older, Stick: "v2026.11.2", Newest: newest}, runs: true,
 			anchor: "GJA-2041 stick.release.older", screen: "A newer release, v2026.11.3, is out. This stick installs v2026.11.2"},
 		{name: "floor", release: stickrelease.Outcome{Kind: stickrelease.BelowFloor, Stick: "v2026.10.66", Newest: newest},
-			anchor: "reason=floor", screen: "older than v2026.11.1, the oldest release that is still safe to install"},
+			anchor: "reason=floor", screen: "older than v2026.11.1, the oldest release that is still safe to install",
+			note: "This stick is too old to install from. Make a new stick."},
 		{name: "no key", release: stickrelease.Outcome{Kind: stickrelease.NoKey, Stick: "v2026.10.66"},
-			anchor: "reason=no-key", screen: "built without the gjallarOS release key"},
-		{name: "nil", nilFunc: true, anchor: "reason=no-key", screen: "built without the gjallarOS release key"},
+			anchor: "reason=no-key", screen: "built without the gjallarOS release key",
+			note: "This stick cannot check its release. Use a released stick."},
+		{name: "nil", nilFunc: true, anchor: "reason=no-key", screen: "built without the gjallarOS release key",
+			note: "This stick cannot check its release. Use a released stick."},
 		{name: "bad", release: stickrelease.Outcome{Kind: stickrelease.Bad, Stick: "v2026.10.66", Err: errors.New("\x1b[2Jfrom the network")},
-			anchor: "reason=bad", screen: "did not match the gjallarOS signature"},
+			anchor: "reason=bad", screen: "did not match the gjallarOS signature",
+			note: "The release check failed: the files did not match."},
 		{name: "unreachable", release: stickrelease.Outcome{Kind: stickrelease.Unreachable, Stick: "v2026.10.66", Err: errors.New("\x1b[2Jfrom the network")},
-			anchor: "reason=unreachable", screen: "Check the network and try again."},
+			anchor: "reason=unreachable", screen: "Check the network and try again.",
+			note: "Could not reach the gjallarOS releases. Check the network."},
 	} {
 		net := &fakeNet{devices: always(cable), connectivity: "full"}
 		h := newHarness(t, ModeWindow, "1\n\n", net)
@@ -388,16 +395,23 @@ func TestInstallReleaseCheck(t *testing.T) {
 		if !c.runs && !strings.Contains(screen, "Nothing on this computer was changed.") {
 			t.Errorf("%s: screen does not say nothing changed", c.name)
 		}
-		if !c.runs && (h.s.note == "" || len([]rune(h.s.note)) > 66) {
-			t.Errorf("%s: note longer than the menu block: %q", c.name, h.s.note)
+		// The refusal is a page; the menu after it keeps a short note.
+		if !c.runs && (len([]rune(c.note)) > 66 || !strings.Contains(lastScreen(h.screen.String()), c.note)) {
+			t.Errorf("%s: menu after the refusal lacks the note %q", c.name, c.note)
 		}
 	}
 }
 
 // flat joins wrapped screen lines, so a check can find a sentence that
-// the calm menu width broke across lines.
+// the calm menu width broke across lines. Escape codes, such as the one
+// that starts each line of a page in its column, count as spaces.
 func flat(screen string) string {
-	return strings.Join(strings.Fields(screen), " ")
+	return strings.Join(strings.Fields(ansi.ReplaceAllString(screen, " ")), " ")
+}
+
+// lastScreen is what the screen shows after the last clear.
+func lastScreen(screen string) string {
+	return flat(screen[strings.LastIndex(screen, calmmenu.Clear)+len(calmmenu.Clear):])
 }
 
 func TestSayWrapsAtMenuWidth(t *testing.T) {
@@ -710,5 +724,59 @@ func TestFirstStart(t *testing.T) {
 	}
 	if firstStart(dir) {
 		t.Error("a folder with a log is a first start")
+	}
+}
+
+// Loophole check: a scanned network name is drawn on the Wi-Fi page through
+// showName. A name holding a screen-clearing escape or a text-direction mark
+// must not reach the terminal raw.
+func TestWifiPageShowsHostileNamesSafely(t *testing.T) {
+	net := &fakeNet{devices: always(wifiOff), connectivity: "full",
+		wifiList: " :Evil\x1b[2J‮Net:70:WPA2:AA\\:BB\\:CC\\:DD\\:EE\\:02\n"}
+	h := newHarness(t, ModeWindow, "1\n", net) // Wi-Fi, then end of input
+	h.run(t)
+	screen := h.screen.String()
+	if got, pages := strings.Count(screen, "\x1b[2J"), strings.Count(screen, calmmenu.Clear); got != pages {
+		t.Errorf("%d screen clears for %d pages: a network name cleared the screen", got, pages)
+	}
+	if strings.Contains(screen, "‮") {
+		t.Error("text-direction mark reached the screen")
+	}
+	page := lastScreen(screen)
+	if !strings.HasPrefix(page, "Network ") || !strings.Contains(page, "1 Evil?[2J?Net (70%, WPA2) 2 Back") {
+		t.Errorf("Wi-Fi page:\n%s", page)
+	}
+}
+
+func TestOfflineInstallPageSaysWhy(t *testing.T) {
+	net := &fakeNet{devices: always(nothing)}
+	h := newHarness(t, ModeConsole, "2\n1\n", net) // go on without; Install
+	h.run(t)
+	page := lastScreen(h.screen.String())
+	if !strings.HasPrefix(page, "Network ") || !strings.Contains(page, "─ Installing needs a network connection. No network yet.") {
+		t.Errorf("network page:\n%s", page)
+	}
+}
+
+func TestKeyboardNumberPicksFromList(t *testing.T) {
+	withLayouts(t, "ba", "be", "bg", "by", "de")
+	net := &fakeNet{devices: always(cable), connectivity: "full"}
+	h := newHarness(t, ModeWindow, "5\nb\n3\n", net) // Keyboard layout, "b", third
+	h.run(t)
+	if !strings.Contains(flat(h.screen.String()), "Part of a name shows a list. 1 ba 2 be 3 bg 4 by Keyboard layout [de]:") {
+		t.Errorf("no list page:\n%s", flat(h.screen.String()))
+	}
+	if h.layout != "bg" {
+		t.Fatalf("stored %q, want bg", h.layout)
+	}
+}
+
+func TestNoteShowsOnce(t *testing.T) {
+	withLayouts(t, "us", "de")
+	net := &fakeNet{devices: always(cable), connectivity: "full"}
+	h := newHarness(t, ModeWindow, "5\nzz\nde\n", net)
+	h.run(t)
+	if n := strings.Count(flat(h.screen.String()), `Nothing matches "zz"`); n != 1 {
+		t.Errorf("note shown %d times, want once", n)
 	}
 }

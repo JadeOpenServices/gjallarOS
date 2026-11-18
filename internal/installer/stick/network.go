@@ -10,6 +10,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/calmmenu"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/installlog"
 )
 
@@ -185,8 +186,9 @@ const (
 const lookAgainPolls = 5
 
 // networkStep shows the connection and helps make one. It returns once
-// the stick is online or the user goes on without.
-func (s *Stick) networkStep(ctx context.Context) error {
+// the stick is online or the user goes on without. lead, when set, is the
+// reason the page comes up, such as an install without a network.
+func (s *Stick) networkStep(ctx context.Context, lead string) error {
 	for {
 		n := s.readNet(ctx)
 		if n.online() {
@@ -194,24 +196,28 @@ func (s *Stick) networkStep(ctx context.Context) error {
 			s.say(fmt.Sprintf("Connected to the network (%s).", viaName(n.via)))
 			return nil
 		}
+		var body []string
+		if lead != "" {
+			body = append(body, lead)
+		}
 		switch {
 		case n.via != "" && n.connectivity == "portal":
-			s.say("This network wants a sign-in page first, and the stick cannot show one. Use another network.")
+			body = append(body, "This network wants a sign-in page first, and the stick cannot show one. Use another network.")
 		case n.via != "":
-			s.say("Connected, but the internet cannot be reached.")
+			body = append(body, "Connected, but the internet cannot be reached.")
 		default:
-			s.say("No network yet. Plug in a cable, or pick a Wi-Fi network.")
+			body = append(body, "No network yet. Plug in a cable, or pick a Wi-Fi network.")
 		}
 		options := []string{}
 		if n.wifi {
 			options = append(options, netWifi, netHidden)
 		}
 		options = append(options, netAgain, netWithout)
-		choice, err := s.choose(ctx, "Network", options)
+		i, err := s.pick(ctx, "Network", body, "Network", options, true)
 		if err != nil {
 			return err
 		}
-		switch choice {
+		switch options[i] {
 		case netWifi:
 			if err := s.pickWifi(ctx); err != nil {
 				return err
@@ -260,12 +266,12 @@ func (s *Stick) pickWifi(ctx context.Context) error {
 	s.say("Looking for Wi-Fi networks...")
 	out, err := s.Cmd.Output(ctx, "nmcli", "-t", "-f", "IN-USE,SSID,SIGNAL,SECURITY,BSSID", "device", "wifi", "list", "--rescan", "yes")
 	if err != nil {
-		s.say("The Wi-Fi scan failed.")
+		s.note = "The Wi-Fi scan failed."
 		return nil
 	}
 	networks := parseWifi(string(out))
 	if len(networks) == 0 {
-		s.say("No Wi-Fi networks found.")
+		s.note = "No Wi-Fi networks found."
 		return nil
 	}
 	options := make([]string, 0, len(networks)+1)
@@ -273,7 +279,8 @@ func (s *Stick) pickWifi(ctx context.Context) error {
 		options = append(options, n.label())
 	}
 	options = append(options, netBack)
-	choice, err := s.chooseIndex(ctx, "Wi-Fi network", options)
+	// Labels went through showName: a page never shows a raw network name.
+	choice, err := s.pick(ctx, "Network", nil, "Wi-Fi network", options, false)
 	if err != nil || choice == len(networks) {
 		return err
 	}
@@ -284,23 +291,22 @@ func (s *Stick) pickWifi(ctx context.Context) error {
 	// nmcli asks for the password on the terminal itself; it never passes
 	// through this program or its log.
 	if err := s.Cmd.Interactive(ctx, "nmcli", "--ask", "device", "wifi", "connect", picked.bssid); err != nil {
-		s.say("Could not connect. Check the password and try again.")
+		s.note = "Could not connect. Check the password and try again."
 	}
 	return nil
 }
 
 func (s *Stick) hiddenWifi(ctx context.Context) error {
-	s.flush()
-	name, err := s.UI.Value(ctx, "Network name (empty to go back)", "")
+	name, err := s.ask(ctx, calmmenu.Menu{Title: "Network", Prompt: "Network name (empty to go back): "})
 	if err != nil || name == "" {
 		return err
 	}
 	if len(name) > 32 || strings.ContainsFunc(name, func(r rune) bool { return !unicode.IsPrint(r) }) {
-		s.say("A network name has at most 32 bytes of printable text.")
+		s.note = "A network name has at most 32 bytes of printable text."
 		return nil
 	}
 	if err := s.Cmd.Interactive(ctx, "nmcli", "--ask", "device", "wifi", "connect", name, "hidden", "yes"); err != nil {
-		s.say("Could not connect. Check the name and password and try again.")
+		s.note = "Could not connect. Check the name and password and try again."
 	}
 	return nil
 }

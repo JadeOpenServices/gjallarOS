@@ -109,14 +109,89 @@ type Stick struct {
 	markedVia string
 	// lookFailed is set once the look for an installed system failed.
 	lookFailed bool
-	// note is one line for the next menu screen, such as an error: the
-	// menu clears the screen, so text printed before it is gone.
+	// note is one line for the next page, such as an error: a page clears
+	// the screen, so text printed before it is gone. The next draw shows
+	// it and clears it.
 	note string
+	// col keeps running text in the block of the last page; nil before
+	// the first one.
+	col *calmmenu.Column
 }
 
-// say prints text wrapped at the calm menu's width.
+// out is where running text goes: the column of the last page.
+func (s *Stick) out() io.Writer {
+	if s.col != nil {
+		return s.col
+	}
+	return s.UI.Out
+}
+
+// say prints text wrapped at the calm menu's width, in the page's column.
 func (s *Stick) say(text string) {
-	fmt.Fprint(s.UI.Out, calmmenu.Wrap(text+"\n"))
+	fmt.Fprint(s.out(), calmmenu.Wrap(text+"\n"))
+}
+
+// size is the terminal in cells and pixels.
+func (s *Stick) size() (cols, rows, xpixel, ypixel int) {
+	if s.Size == nil {
+		return 80, 24, 0, 0
+	}
+	return s.Size()
+}
+
+// head starts a page for a step that prints as it works: the title on
+// top, then the step's output in the column below it.
+func (s *Stick) head(title string) {
+	cols, _, _, _ := s.size()
+	c, err := calmmenu.Head(s.UI.Out, title, cols, true)
+	if err == nil {
+		s.col = c
+	}
+}
+
+// ask shows m as a page and reads the answer.
+func (s *Stick) ask(ctx context.Context, m calmmenu.Menu) (string, error) {
+	s.flush()
+	if err := s.draw(m, false); err != nil {
+		return "", err
+	}
+	return s.UI.Line(ctx)
+}
+
+// pick shows options as a numbered list on a page and returns the index
+// of the one chosen. byText also takes the option's text, ignoring case;
+// otherwise only numbers count, as for names of nearby networks, which are
+// not unique once made printable.
+func (s *Stick) pick(ctx context.Context, title string, body []string, label string, options []string, byText bool) (int, error) {
+	items := make([]calmmenu.Item, len(options))
+	for i, o := range options {
+		items[i] = calmmenu.Item{Key: strconv.Itoa(i + 1), Label: o}
+	}
+	prompt, again := label+": ", "Choose one listed value."
+	if !byText {
+		prompt, again = label+" (number): ", "Type one of the numbers."
+	}
+	for {
+		value, err := s.ask(ctx, calmmenu.Menu{
+			Title:  title,
+			Body:   body,
+			Groups: [][]calmmenu.Item{items},
+			Hint:   "Type a number and press Enter.",
+			Prompt: prompt,
+		})
+		if err != nil {
+			return 0, err
+		}
+		if n, e := strconv.Atoi(value); e == nil && n > 0 && n <= len(options) {
+			return n - 1, nil
+		}
+		for i, o := range options {
+			if byText && strings.EqualFold(o, value) {
+				return i, nil
+			}
+		}
+		s.note = again
+	}
 }
 
 // New returns a Stick for the real stick.
@@ -158,7 +233,7 @@ func (s *Stick) Run(ctx context.Context) error {
 		// another tty; set it from the file each time.
 		s.applyConsoleLayout(ctx)
 	}
-	if err := s.networkStep(ctx); err != nil {
+	if err := s.networkStep(ctx, ""); err != nil {
 		return err
 	}
 	return s.menu(ctx)
@@ -276,6 +351,7 @@ func (s *Stick) startInstalled(ctx context.Context) {
 		return
 	}
 	installlog.Mark(installlog.StickInstalledStart, installlog.Choice("result", "set"))
+	s.head("Start installed gjallarOS")
 	s.say("Restarting into the installed gjallarOS...")
 	s.runStep(ctx, "the restart", "systemctl", "reboot")
 }
@@ -284,15 +360,13 @@ func (s *Stick) menu(ctx context.Context) error {
 	for {
 		s.flush()
 		groups, keys := numbered(s.installed(ctx), s.shim())
-		if err := s.draw(s.screen(groups)); err != nil {
+		if err := s.draw(s.screen(groups), true); err != nil {
 			return err
 		}
 		choice, err := s.UI.Line(ctx)
 		if err != nil {
 			return err
 		}
-		s.note = ""
-		fmt.Fprint(s.UI.Out, calmmenu.Clear)
 		act, ok := keys[choice]
 		if !ok {
 			s.note = fmt.Sprintf("Type one of the numbers 1 to %d.", len(keys))
@@ -303,8 +377,7 @@ func (s *Stick) menu(ctx context.Context) error {
 			s.startInstalled(ctx)
 		case actInstall:
 			if s.offline {
-				s.say("Installing needs a network connection.")
-				if err := s.networkStep(ctx); err != nil {
+				if err := s.networkStep(ctx, "Installing needs a network connection."); err != nil {
 					return err
 				}
 				if s.offline {
@@ -312,10 +385,11 @@ func (s *Stick) menu(ctx context.Context) error {
 				}
 			}
 			installlog.Mark(installlog.StickMenuChosen, installlog.Choice("choice", "install"))
-			if !s.releaseAllows(ctx) {
-				if err := s.pause(ctx); err != nil {
-					return err
-				}
+			allowed, err := s.releaseAllows(ctx)
+			if err != nil {
+				return err
+			}
+			if !allowed {
 				continue
 			}
 			args := []string{"guided", "fresh"}
@@ -328,22 +402,25 @@ func (s *Stick) menu(ctx context.Context) error {
 			}
 		case actRecovery:
 			installlog.Mark(installlog.StickMenuChosen, installlog.Choice("choice", "recovery"))
+			s.head("Recovery")
 			s.runStep(ctx, "the recovery console", "gjallar-recovery-console", "--from-stick")
 			if err := s.pause(ctx); err != nil {
 				return err
 			}
 		case actRequeue:
 			installlog.Mark(installlog.StickMenuChosen, installlog.Choice("choice", "requeue-key"))
+			s.head("Queue the key again")
 			s.runStep(ctx, "queueing the key", "gjallar-stick", "requeue-key")
 			if err := s.pause(ctx); err != nil {
 				return err
 			}
 		case actShell:
 			installlog.Mark(installlog.StickMenuChosen, installlog.Choice("choice", "shell"))
+			s.head("Shell")
 			s.say("Type exit to come back to this menu.")
 			s.runStep(ctx, "the shell", "runuser", "-l", "nixos")
 		case actNetwork:
-			if err := s.networkStep(ctx); err != nil {
+			if err := s.networkStep(ctx, ""); err != nil {
 				return err
 			}
 		case actKeyboard:
@@ -355,8 +432,10 @@ func (s *Stick) menu(ctx context.Context) error {
 				return err
 			}
 		case actRestart:
+			s.head("Restart")
 			s.runStep(ctx, "the restart", "systemctl", "reboot")
 		case actPowerOff:
+			s.head("Power off")
 			s.runStep(ctx, "the power off", "systemctl", "poweroff")
 		}
 	}
@@ -380,22 +459,25 @@ func (s *Stick) screen(groups [][]calmmenu.Item) calmmenu.Menu {
 			{Name: "Channel", Value: s.channel},
 		},
 		Groups: groups,
-		Note:   s.note,
 		Hint:   "Type a number and press Enter.",
 		Prompt: "Choice: ",
 	}
 }
 
-// draw shows m centred on the screen, with the logo on top in the window
-// when the terminal reports its pixel size and the logo fits.
-func (s *Stick) draw(m calmmenu.Menu) error {
-	cols, rows, xpixel, ypixel := 80, 24, 0, 0
-	if s.Size != nil {
-		cols, rows, xpixel, ypixel = s.Size()
+// draw shows m as a page centred on the screen, with the pending note,
+// and with the logo on top when withLogo is set (the main menu only) in
+// the window when the terminal reports its pixel size and the logo fits.
+// Text printed after it goes into the page's column.
+func (s *Stick) draw(m calmmenu.Menu, withLogo bool) error {
+	cols, rows, xpixel, ypixel := s.size()
+	if m.Note == "" {
+		m.Note = s.note
 	}
+	s.note = ""
+	s.col = calmmenu.NewColumn(s.UI.Out, cols)
 	var logo calmmenu.Logo
 	var picture calmmenu.Sixel
-	if s.Mode == ModeWindow && len(s.Logos) > 0 && xpixel > 0 && ypixel > 0 {
+	if withLogo && s.Mode == ModeWindow && len(s.Logos) > 0 && xpixel > 0 && ypixel > 0 {
 		cw, ch := xpixel/cols, ypixel/rows
 		picture = s.Logos[0]
 		if ch >= 48 && len(s.Logos) > 1 {
@@ -418,33 +500,39 @@ func (s *Stick) draw(m calmmenu.Menu) error {
 // read it: the menu clears the screen when it comes back.
 func (s *Stick) pause(ctx context.Context) error {
 	s.flush()
-	fmt.Fprint(s.UI.Out, "\nPress Enter to go back to the menu. ")
+	fmt.Fprint(s.out(), "\nPress Enter to go back to the menu. ")
 	_, err := s.UI.Line(ctx)
 	return err
 }
 
 // releaseAllows checks the stick against the newest signed release and
-// says why when it may not install. Only release names that passed the
-// strict pattern reach the screen; the network's error text does not.
-func (s *Stick) releaseAllows(ctx context.Context) bool {
+// shows why on a page when it may not install. Only release names that
+// passed the strict pattern reach the screen; the network's error text
+// does not.
+func (s *Stick) releaseAllows(ctx context.Context) (bool, error) {
+	s.head("Install gjallarOS")
 	s.say("Checking that this stick is still safe to install from...")
 	o := stickrelease.Outcome{Kind: stickrelease.NoKey}
 	if s.CheckRelease != nil {
 		o = s.CheckRelease(ctx)
 	}
-	refuse := func(log, text, note string) bool {
+	refuse := func(log, text, note string) (bool, error) {
 		s.logError(log)
-		s.say(text + " Nothing on this computer was changed.")
+		_, err := s.ask(ctx, calmmenu.Menu{
+			Title:  "Install gjallarOS",
+			Body:   []string{text + " Nothing on this computer was changed."},
+			Prompt: "Press Enter to go back to the menu. ",
+		})
 		s.note = note
-		return false
+		return false, err
 	}
 	switch o.Kind {
 	case stickrelease.Current:
-		return true
+		return true, nil
 	case stickrelease.Older:
 		installlog.Mark(installlog.StickReleaseOlder)
 		s.say(fmt.Sprintf("A newer release, %s, is out. This stick installs %s; update after the install.", o.Newest.Version, o.Stick))
-		return true
+		return true, nil
 	case stickrelease.BelowFloor:
 		installlog.Mark(installlog.StickReleaseRefused, installlog.Choice("reason", "floor"))
 		return refuse("the stick is below the release floor",
@@ -502,11 +590,11 @@ func (s *Stick) logError(line string) {
 }
 
 func (s *Stick) advanced(ctx context.Context) error {
-	s.say("Pick a release channel. Stable gets tested updates. Staging and dev get them earlier and break more often.")
-	choice, err := s.choose(ctx, "Channel", channels)
-	if err != nil || choice == s.channel {
+	i, err := s.pick(ctx, "Advanced", []string{"Pick a release channel. Stable gets tested updates. Staging and dev get them earlier and break more often."}, "Channel", channels, true)
+	if err != nil || channels[i] == s.channel {
 		return err
 	}
+	choice := channels[i]
 	s.channel = choice
 	switch choice {
 	case "stable":
@@ -533,21 +621,19 @@ func (s *Stick) keyboardStep(ctx context.Context) error {
 			options = append(options, layout)
 		}
 	}
-	s.flush()
-	s.say("Type a keyboard layout such as us, gb or fr. Part of a name shows a list.")
-	picked, err := s.UI.Pick(ctx, "Keyboard layout", current, options)
+	picked, err := s.pickLayout(ctx, current, options)
 	if err != nil {
 		return err
 	}
 	normal, err := xkb.Normalize(picked)
 	if err != nil || !stickkeyboard.Valid(normal.Name) {
-		s.say(fmt.Sprintf("That layout cannot be used. Still using %s.", current))
+		s.note = fmt.Sprintf("That layout cannot be used. Still using %s.", current)
 		return nil
 	}
 	if err := s.WriteLayout(normal.Name); err != nil {
 		installlog.Mark(installlog.StickFlowFailed)
 		s.logError("could not store the keyboard layout")
-		s.say("Could not store the keyboard layout. The installer will ask again.")
+		s.note = "Could not store the keyboard layout. The installer will ask again."
 		return nil
 	}
 	if normal.Name == current {
@@ -560,6 +646,50 @@ func (s *Stick) keyboardStep(ctx context.Context) error {
 	return ErrRestartDisplay
 }
 
+// pickLayout is prompt.Pick as a page: part of a name lists the matches,
+// a number picks from that list, Enter keeps current.
+func (s *Stick) pickLayout(ctx context.Context, current string, options []string) (string, error) {
+	var shown []string
+	for {
+		var groups [][]calmmenu.Item
+		if len(shown) > 0 {
+			items := make([]calmmenu.Item, len(shown))
+			for i, v := range shown {
+				items[i] = calmmenu.Item{Key: strconv.Itoa(i + 1), Label: v}
+			}
+			groups = [][]calmmenu.Item{items}
+		}
+		value, err := s.ask(ctx, calmmenu.Menu{
+			Title:  "Keyboard layout",
+			Body:   []string{"Type a keyboard layout such as us, gb or fr. Part of a name shows a list."},
+			Groups: groups,
+			Prompt: fmt.Sprintf("Keyboard layout [%s]: ", current),
+		})
+		if err != nil {
+			return "", err
+		}
+		if value == "" {
+			value = current
+		}
+		if n, e := strconv.Atoi(value); e == nil && n > 0 && n <= len(shown) {
+			return shown[n-1], nil
+		}
+		matches := prompt.Matches(options, value)
+		switch {
+		case len(matches) == 1:
+			return matches[0], nil
+		case len(matches) == 0:
+			shown = nil
+			s.note = fmt.Sprintf("Nothing matches %q. Type part of a name, such as a city or country code.", value)
+		default:
+			shown = matches[:min(len(matches), prompt.PickShown)]
+			if len(matches) > len(shown) {
+				s.note = fmt.Sprintf("... %d more; type more letters to narrow it down.", len(matches)-len(shown))
+			}
+		}
+	}
+}
+
 // applyConsoleLayout loads the stored layout into the text console.
 func (s *Stick) applyConsoleLayout(ctx context.Context) {
 	layout, err := s.ReadLayout()
@@ -569,32 +699,7 @@ func (s *Stick) applyConsoleLayout(ctx context.Context) {
 	// ckbcomp turns the X layout into a console keymap; loadkeys reads it
 	// from its standard input.
 	if err := s.Cmd.Interactive(ctx, "sh", "-c", `ckbcomp -layout "$1" | loadkeys -q`, "sh", layout); err != nil {
-		s.say(fmt.Sprintf("The console keeps its old layout. The installed system gets %s.", layout))
-	}
-}
-
-// choose asks for one of options by its number or its text.
-func (s *Stick) choose(ctx context.Context, label string, options []string) (string, error) {
-	s.flush()
-	return s.UI.Choice(ctx, label, "", options)
-}
-
-// chooseIndex asks for one of options by number only: names of nearby
-// networks are not unique once made printable.
-func (s *Stick) chooseIndex(ctx context.Context, label string, options []string) (int, error) {
-	s.flush()
-	for i, v := range options {
-		s.say(fmt.Sprintf("  %d) %s", i+1, v))
-	}
-	for {
-		value, err := s.UI.Value(ctx, label+" (number)", "")
-		if err != nil {
-			return 0, err
-		}
-		if n, e := strconv.Atoi(value); e == nil && n > 0 && n <= len(options) {
-			return n - 1, nil
-		}
-		s.say("Type one of the numbers.")
+		s.note = fmt.Sprintf("The console keeps its old layout. The installed system gets %s.", layout)
 	}
 }
 

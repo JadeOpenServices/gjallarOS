@@ -46,9 +46,10 @@ type Field struct {
 type Menu struct {
 	Title  string   // bold
 	Status []Field  // one line, separated by four spaces
+	Body   []string // plain text under the status line, wrapped at Width
 	Groups [][]Item // a blank line between groups
-	Note   string   // optional line above the hint, such as an error
-	Hint   string   // dim
+	Note   string   // optional text above the hint, such as an error
+	Hint   string   // optional, dim
 	Prompt string   // "Choice: "
 }
 
@@ -82,8 +83,14 @@ func (m Menu) lines() [][]span {
 		}
 		ls = append(ls, l)
 	}
+	if len(m.Body) > 0 {
+		ls = append(ls, nil)
+		for _, l := range strings.Split(Wrap(strings.Join(m.Body, "\n")), "\n") {
+			ls = append(ls, []span{{"", l}})
+		}
+	}
 	// Numbers are right-aligned to the widest one, so labels start in one
-	// column when the menu reaches 10.
+	// column when a list reaches 10.
 	kw := 0
 	for _, g := range m.Groups {
 		for _, it := range g {
@@ -103,9 +110,14 @@ func (m Menu) lines() [][]span {
 	}
 	ls = append(ls, nil)
 	if m.Note != "" {
-		ls = append(ls, []span{{"", m.Note}}, nil)
+		for _, l := range strings.Split(Wrap(m.Note), "\n") {
+			ls = append(ls, []span{{"", l}})
+		}
+		ls = append(ls, nil)
 	}
-	ls = append(ls, []span{{dim, m.Hint}})
+	if m.Hint != "" {
+		ls = append(ls, []span{{dim, m.Hint}})
+	}
 	ls = append(ls, []span{{"", m.Prompt}})
 	return ls
 }
@@ -136,11 +148,17 @@ func Render(w io.Writer, m Menu, logo Logo, cols, rows int, colour bool) (Place,
 		p.LogoCol = max(0, (cols-logo.Cols)/2) + 1
 	}
 	top := y0 + logo.Rows + gap
+	// Lines go out in order with a line end after each, so a page taller
+	// than the screen starts at the top and scrolls, still centred across.
+	fmt.Fprintf(&b, "\x1b[%d;1H", top)
 	for i, l := range ls {
+		if i > 0 {
+			b.WriteString("\r\n")
+		}
 		if len(l) == 0 {
 			continue
 		}
-		fmt.Fprintf(&b, "\x1b[%d;%dH", top+i, x0)
+		fmt.Fprintf(&b, "\x1b[%dG", x0)
 		used := 0
 		for _, s := range l {
 			t := clip(s.text, width-used)
@@ -152,9 +170,9 @@ func Render(w io.Writer, m Menu, logo Logo, cols, rows int, colour bool) (Place,
 			}
 		}
 	}
-	p.PromptRow = top + len(ls) - 1
+	p.PromptRow = min(top+len(ls)-1, max(rows, 1))
 	p.PromptCol = x0 + min(utf8.RuneCountInString(m.Prompt), width)
-	fmt.Fprintf(&b, "\x1b[%d;%dH", p.PromptRow, p.PromptCol)
+	fmt.Fprintf(&b, "\x1b[%dG", p.PromptCol)
 	_, err := io.WriteString(w, b.String())
 	return p, err
 }

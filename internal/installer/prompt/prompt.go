@@ -685,8 +685,24 @@ func (u UI) Choice(ctx context.Context, label, def string, options []string) (st
 	}
 }
 
-// pickShown caps how many matches Pick lists at once.
-const pickShown = 20
+// Matches is what Pick finds for value: the option equal to it, the
+// first one equal to it when case is ignored, or else every option that
+// contains it.
+func Matches(options []string, value string) []string {
+	var matches []string
+	for _, candidate := range options {
+		if candidate == value || strings.EqualFold(candidate, value) {
+			return []string{candidate}
+		}
+		if strings.Contains(strings.ToLower(candidate), strings.ToLower(value)) {
+			matches = append(matches, candidate)
+		}
+	}
+	return matches
+}
+
+// PickShown caps how many matches Pick lists at once.
+const PickShown = 20
 
 // Pick chooses one value from a long list, such as all timezones. In the
 // terminal, Enter takes def, an exact name is taken as typed, and any
@@ -708,20 +724,10 @@ func (u UI) Pick(ctx context.Context, label, def string, options []string) (stri
 		if n, e := strconv.Atoi(value); e == nil && n > 0 && n <= len(shown) {
 			return shown[n-1], nil
 		}
-		matches := []string{}
-		for _, candidate := range options {
-			if candidate == value {
-				return candidate, nil
-			}
-			if strings.EqualFold(candidate, value) {
-				matches = []string{candidate}
-				break
-			}
-			if strings.Contains(strings.ToLower(candidate), strings.ToLower(value)) {
-				matches = append(matches, candidate)
-			}
-		}
+		matches := Matches(options, value)
 		switch {
+		case len(matches) == 1 && matches[0] == value:
+			return value, nil
 		case len(matches) == 1:
 			fmt.Fprintf(u.Out, "Using %s.\n", matches[0])
 			return matches[0], nil
@@ -730,8 +736,8 @@ func (u UI) Pick(ctx context.Context, label, def string, options []string) (stri
 			fmt.Fprintf(u.Out, "Nothing matches %q. Type part of a name, such as a city or country code.\n", value)
 		default:
 			shown = matches
-			if len(shown) > pickShown {
-				shown = shown[:pickShown]
+			if len(shown) > PickShown {
+				shown = shown[:PickShown]
 			}
 			for i, v := range shown {
 				fmt.Fprintf(u.Out, "  %d) %s\n", i+1, v)
