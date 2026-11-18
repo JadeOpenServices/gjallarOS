@@ -91,6 +91,26 @@ func TestPullCheckoutFollowsOnlyItsChannel(t *testing.T) {
 	}
 }
 
+// L140: a local branch called origin/<channel>, as an old disk's move could
+// once bring, does not become the channel's upstream.
+func TestPullCheckoutUpstreamIsTheRemote(t *testing.T) {
+	upstream, checkout := channelCheckout(t, "main", "staging")
+	gitRun(t, upstream, "checkout", "-q", "staging")
+	gitRun(t, upstream, "commit", "-q", "--allow-empty", "-m", "staging two")
+	gitRun(t, checkout, "branch", "origin/staging")
+
+	var stdout, stderr bytes.Buffer
+	if code := pullCheckout(checkout, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit %d: %s", code, stderr.String())
+	}
+	if got := gitOut(t, checkout, "config", "branch.staging.remote"); got != "origin" {
+		t.Fatalf("upstream remote %q", got)
+	}
+	if got := gitOut(t, checkout, "config", "branch.staging.merge"); got != "refs/heads/staging" {
+		t.Fatalf("upstream branch %q", got)
+	}
+}
+
 func TestPullCheckoutMovesMainToChannel(t *testing.T) {
 	upstream, checkout := channelCheckout(t, "main", "staging")
 	gitRun(t, upstream, "checkout", "-q", "staging")

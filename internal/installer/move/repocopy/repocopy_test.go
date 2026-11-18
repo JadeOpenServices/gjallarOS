@@ -327,6 +327,28 @@ func TestPlace(t *testing.T) {
 	if res != (Result{Branches: 1, Moved: 5, Stashes: 1, Skipped: 3}) {
 		t.Errorf("%+v", res)
 	}
+
+	// L140: names git would read as another ref never keep their name.
+	for _, b := range []string{
+		"origin/dev", "origin", "upstream/main", "upstream",
+		"HEAD", "FETCH_HEAD", "ORIG_HEAD/x",
+		"refs/heads/x", "heads/x", "tags/v1", "remotes/origin/dev", "moved/x", "stash",
+		strings.Repeat("ab", 20), strings.Repeat("cd", 32),
+	} {
+		res := Result{}
+		got := place([]tip{{branch: b, sha: shaA}}, map[string]bool{shaA: true},
+			refs("refs/remotes/origin/dev", "refs/remotes/upstream/main", "refs/remotes/origin/HEAD"), &res)
+		if len(got) != 1 || got[0].ref != "refs/moved/heads/"+b {
+			t.Errorf("%s placed at %v", b, got)
+		}
+	}
+	for _, b := range []string{"originals", "fix/origin", "head", "HEADER", strings.Repeat("ab", 19), "feature/HEAD"} {
+		res := Result{}
+		got := place([]tip{{branch: b, sha: shaA}}, map[string]bool{shaA: true}, refs("refs/remotes/origin/dev"), &res)
+		if len(got) != 1 || got[0].ref != "refs/heads/"+b {
+			t.Errorf("%s placed at %v", b, got)
+		}
+	}
 	for _, p := range placed {
 		if strings.HasPrefix(p.ref, "refs/heads/") && slices.Contains(Channels, strings.TrimPrefix(p.ref, "refs/heads/")) {
 			t.Errorf("channel written: %s", p.ref)

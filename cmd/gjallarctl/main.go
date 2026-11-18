@@ -2440,7 +2440,9 @@ func pullCheckout(repo string, stdout, stderr io.Writer) int {
 		if git("checkout", "--quiet", "--no-track", "-B", channel) != 0 {
 			return failed("git checkout -B " + channel)
 		}
-		if git("branch", "--quiet", "--set-upstream-to=origin/"+channel, channel) != 0 {
+		// The full name: an old branch called origin/<channel> would win
+		// the short one (L140).
+		if git("branch", "--quiet", "--set-upstream-to="+upstream, channel) != 0 {
 			return failed("git branch --set-upstream-to=origin/" + channel)
 		}
 		// The old branch points at HEAD, so deleting it loses no commit,

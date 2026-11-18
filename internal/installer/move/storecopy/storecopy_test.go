@@ -257,3 +257,64 @@ func TestUnitArgsRefused(t *testing.T) {
 		}
 	}
 }
+
+// L141: root's git runs as root without capabilities, with nothing
+// writable but its git folder, and stops with the other units.
+func TestRootUnitArgs(t *testing.T) {
+	env := []string{"HOME=/var/empty", "GIT_CONFIG_NOSYSTEM=1"}
+	args, err := RootUnitArgs(GitUnit, GitLimit, "/run/gjallar-move/new/etc/gjallar/system/.git", env, "/bin/git", "fsck")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := slices.Index(args, "--")
+	if cmd < 0 || !slices.Equal(args[cmd+1:], []string{"/bin/git", "fsck"}) {
+		t.Fatalf("command %q", args)
+	}
+	props := args[:cmd]
+	for _, want := range []string{
+		"--wait", "--pipe", "--collect", "--unit=" + GitUnit,
+		"--property=ReadWritePaths=/run/gjallar-move/new/etc/gjallar/system/.git",
+		"--property=ProtectSystem=strict", "--property=ProtectHome=yes",
+		"--property=CapabilityBoundingSet=", "--property=NoNewPrivileges=yes",
+		"--property=PrivateNetwork=yes", "--property=PrivateDevices=yes",
+		"--property=MemoryMax=4G", "--property=TimeoutStopSec=10s",
+		"--property=RuntimeMaxSec=1800",
+		"--setenv=HOME=/var/empty", "--setenv=GIT_CONFIG_NOSYSTEM=1",
+	} {
+		if !slices.Contains(props, want) {
+			t.Errorf("missing %q", want)
+		}
+	}
+	for _, a := range props {
+		if strings.Contains(a, "DynamicUser") || strings.HasPrefix(a, "--property=Bind") || strings.Contains(a, "HOME=/tmp") {
+			t.Errorf("unexpected %q", a)
+		}
+	}
+	if !slices.Contains(Units, GitUnit+".service") {
+		t.Error("git unit not stopped with the others")
+	}
+	// The DynamicUser units keep their own user.
+	if !slices.Contains(unitProps, "DynamicUser=yes") {
+		t.Error("unit props lost DynamicUser")
+	}
+
+	for name, c := range map[string]struct {
+		rw  string
+		env []string
+		cmd []string
+	}{
+		"rw relative":   {"g/.git", env, []string{"/bin/git"}},
+		"rw colon":      {"/g:/etc", env, []string{"/bin/git"}},
+		"rw blank":      {"/g x", env, []string{"/bin/git"}},
+		"rw empty":      {"", env, []string{"/bin/git"}},
+		"env no equals": {"/g", []string{"HOME"}, []string{"/bin/git"}},
+		"env no key":    {"/g", []string{"=x"}, []string{"/bin/git"}},
+		"env newline":   {"/g", []string{"A=1\nB=2"}, []string{"/bin/git"}},
+		"no program":    {"/g", env, nil},
+		"relative cmd":  {"/g", env, []string{"git", "fsck"}},
+	} {
+		if _, err := RootUnitArgs(GitUnit, GitLimit, c.rw, c.env, c.cmd...); err == nil {
+			t.Errorf("%s accepted", name)
+		}
+	}
+}

@@ -102,7 +102,16 @@ var Channels = []string{"dev", "staging", "stable"}
 var (
 	shaLine   = regexp.MustCompile(`^[0-9a-f]{40}$`)
 	component = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9._+-]*$`)
+	// objectName is a full object name; git reads it as the object, not as
+	// the branch.
+	objectName = regexp.MustCompile(`^[0-9a-f]{40}([0-9a-f]{24})?$`)
+	// headName is HEAD, FETCH_HEAD, ORIG_HEAD and the like.
+	headName = regexp.MustCompile(`^[A-Z_]*HEAD$`)
 )
+
+// shortFirsts are first parts that make a branch name look like another
+// ref when git reads a short name (L140).
+var shortFirsts = []string{"refs", "heads", "tags", "remotes", "moved", "stash", "origin"}
 
 // packScript makes an empty repository in the unit's own /tmp and packs the
 // commits named on stdin, and all they reach, from the old objects alone.
@@ -351,7 +360,7 @@ func (c copier) rollback(ctx context.Context, written []tip) error {
 }
 
 // place picks each commit's ref: a branch keeps its name when the new
-// repository has nothing in the way and it is no channel, else it goes
+// repository has nothing in the way and keepsName allows it, else it goes
 // below refs/moved/heads. Anything else is skipped.
 func place(tips []tip, commits map[string]bool, existing refSet, res *Result) []tip {
 	var placed []tip
@@ -365,7 +374,7 @@ func place(tips []tip, commits map[string]bool, existing refSet, res *Result) []
 			own := "refs/heads/" + t.branch
 			moved := movedPrefix + "heads/" + t.branch
 			switch {
-			case !slices.Contains(Channels, t.branch) && existing.free(own):
+			case keepsName(t.branch, existing) && existing.free(own):
 				t.ref = own
 				res.Branches++
 			case existing.free(moved):
@@ -387,6 +396,24 @@ func place(tips []tip, commits map[string]bool, existing refSet, res *Result) []
 		placed = append(placed, t)
 	}
 	return placed
+}
+
+// keepsName says whether an old branch may keep its name. git reads a short
+// name X as refs/X, refs/tags/X, refs/heads/X, refs/remotes/X in that order,
+// so an old branch "origin/dev" would win over the remote's dev wherever a
+// tool names it short (L140). Such names, the channels and names git reads
+// as something else go below refs/moved/heads instead.
+func keepsName(branch string, existing refSet) bool {
+	first, _, _ := strings.Cut(branch, "/")
+	switch {
+	case slices.Contains(Channels, branch),
+		slices.Contains(shortFirsts, first),
+		headName.MatchString(first),
+		objectName.MatchString(branch),
+		existing.names["refs/remotes/"+first] || existing.dirs["refs/remotes/"+first]:
+		return false
+	}
+	return true
 }
 
 // refSet holds ref names and every folder they make, so a new ref that is

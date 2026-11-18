@@ -4,9 +4,12 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/move/repocopy"
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/move/storecopy"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/systemcheckout"
 	"github.com/JadeOpenServices/gjallarOS/internal/safefs"
 	"golang.org/x/sys/unix"
@@ -104,10 +107,22 @@ func TestOldGitDirPlanted(t *testing.T) {
 	}
 }
 
+// asRoot makes the test user stand in for root as the new checkout's owner.
+func asRoot(t *testing.T) {
+	t.Helper()
+	was := rootUID
+	rootUID = uint32(os.Getuid())
+	t.Cleanup(func() { rootUID = was })
+}
+
 // Root's git only runs in a plain new checkout folder.
 func TestNewGitDirPlanted(t *testing.T) {
+	asRoot(t)
 	root := t.TempDir()
-	mkdirs(t, filepath.Join(root, newCheckout, ".git"))
+	mkdirs(t, filepath.Join(root, newCheckout, ".git/objects/pack"), filepath.Join(root, newCheckout, ".git/refs/heads"))
+	if err := os.WriteFile(filepath.Join(root, newCheckout, ".git/HEAD"), []byte("ref: refs/heads/dev\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	if err := newGitDir(openTest(t, root)); err != nil {
 		t.Fatal(err)
 	}
@@ -128,6 +143,82 @@ func TestNewGitDirPlanted(t *testing.T) {
 		}
 		if err := newGitDir(openTest(t, root)); err == nil {
 			t.Errorf("link at %s followed", at)
+		}
+	}
+}
+
+// L139: anything in the new .git that is not root's plain file or folder,
+// or that sends git elsewhere, stops the copy before root's git runs.
+func TestNewGitDirContent(t *testing.T) {
+	asRoot(t)
+	git := func(t *testing.T) (string, string) {
+		root := t.TempDir()
+		g := filepath.Join(root, newCheckout, ".git")
+		mkdirs(t, filepath.Join(g, "objects/info"), filepath.Join(g, "info"), filepath.Join(g, "refs/heads"))
+		return root, g
+	}
+	write := func(p string) error { return os.WriteFile(p, []byte("SYNTHETIC\n"), 0o644) }
+	if root, _ := git(t); newGitDir(openTest(t, root)) != nil {
+		t.Fatal("plain checkout refused")
+	}
+	for name, plant := range map[string]func(g string) error{
+		"commondir":       func(g string) error { return write(filepath.Join(g, "commondir")) },
+		"alternates":      func(g string) error { return write(filepath.Join(g, "objects/info/alternates")) },
+		"http-alternates": func(g string) error { return write(filepath.Join(g, "objects/info/http-alternates")) },
+		"grafts":          func(g string) error { return write(filepath.Join(g, "info/grafts")) },
+		"alternates link": func(g string) error {
+			return os.Symlink("/nowhere", filepath.Join(g, "objects/info/alternates"))
+		},
+		"link deep":   func(g string) error { return os.Symlink("/etc", filepath.Join(g, "refs/heads/x")) },
+		"fifo":        func(g string) error { return unix.Mkfifo(filepath.Join(g, "refs/heads/x"), 0o644) },
+		"group write": func(g string) error { return os.Chmod(filepath.Join(g, "refs"), 0o775) },
+		"other write file": func(g string) error {
+			if err := write(filepath.Join(g, "packed-refs")); err != nil {
+				return err
+			}
+			return os.Chmod(filepath.Join(g, "packed-refs"), 0o646)
+		},
+		"checkout writable": func(g string) error { return os.Chmod(filepath.Dir(g), 0o777) },
+	} {
+		root, g := git(t)
+		if err := plant(g); err != nil {
+			t.Fatal(err)
+		}
+		if err := newGitDir(openTest(t, root)); err == nil {
+			t.Errorf("%s accepted", name)
+		}
+	}
+
+	// Someone else's file: the test user is not "root" here.
+	root, g := git(t)
+	if err := write(filepath.Join(g, "packed-refs")); err != nil {
+		t.Fatal(err)
+	}
+	rootUID = uint32(os.Getuid()) + 1
+	if err := newGitDir(openTest(t, root)); err == nil {
+		t.Error("checkout of another user accepted")
+	}
+}
+
+// L141: root's git steps never start git directly; each runs in the git
+// unit with only the new checkout's git folder writable.
+func TestGitUnitArgs(t *testing.T) {
+	base := "/run/gjallar-move"
+	args, err := gitUnitArgs(base, []string{"--git-dir=x", "fsck"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := slices.Index(args, "--")
+	if cmd < 0 || !slices.Equal(args[cmd+1:], []string{repocopy.Git, "--git-dir=x", "fsck"}) {
+		t.Fatalf("command %q", args)
+	}
+	if !slices.Contains(args[:cmd], "--property=ReadWritePaths="+filepath.Join(base, New, newCheckout, ".git")) ||
+		!slices.Contains(args[:cmd], "--unit="+storecopy.GitUnit) {
+		t.Errorf("%q", args)
+	}
+	for _, e := range repocopy.GitEnv {
+		if !slices.Contains(args[:cmd], "--setenv="+e) {
+			t.Errorf("missing env %q", e)
 		}
 	}
 }

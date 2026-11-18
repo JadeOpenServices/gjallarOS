@@ -59,6 +59,16 @@ func (d *Dir) Close() error { return unix.Close(d.fd) }
 // Name is the path the folder was opened with, for messages.
 func (d *Dir) Name() string { return d.name }
 
+// Stat reports on the open folder itself: the folder the handle holds, not
+// whatever its path names now.
+func (d *Dir) Stat() (unix.Stat_t, error) {
+	var st unix.Stat_t
+	if err := unix.Fstat(d.fd, &st); err != nil {
+		return st, fmt.Errorf("check %s: %w", d.name, err)
+	}
+	return st, nil
+}
+
 // Sub opens the folder rel below d.
 func (d *Dir) Sub(rel string) (*Dir, error) {
 	fd, err := openat2(d.fd, rel, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC)

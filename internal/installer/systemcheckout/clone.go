@@ -61,8 +61,10 @@ func Clone(ctx context.Context, run Runner, origin, dest, revision, channel stri
 		return err
 	}
 
-	upstream := "origin/" + channel
-	if _, err := git("rev-parse", "--verify", "--quiet", "refs/remotes/"+upstream); err != nil {
+	// Full names only: a branch called origin/<channel> would win a short
+	// name (L140).
+	upstream := "refs/remotes/origin/" + channel
+	if _, err := git("rev-parse", "--verify", "--quiet", upstream); err != nil {
 		return fail(fmt.Errorf("%s has no %s branch: %w", origin, channel, err))
 	}
 	if err := onChannel(git, "refs/remotes/origin/", origin, commit); err != nil {

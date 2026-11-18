@@ -146,6 +146,29 @@ func TestCopy(t *testing.T) {
 	if entries, _ := os.ReadDir(outside); len(entries) != 0 {
 		t.Fatalf("wrote outside: %v", entries)
 	}
+
+	// L139: only a home of the copies' owner is a target; root's places on
+	// the new disk are not.
+	mkdirs(t, filepath.Join(base, New, newCheckout, ".git"), filepath.Join(base, New, "gjallar-move-cache"), filepath.Join(base, New, "home/c"))
+	for _, c := range []struct {
+		dst string
+		uid int
+	}{
+		{newCheckout + "/.git", uid}, {"gjallar-move-cache", uid}, {"home", uid},
+		{"etc", uid}, {"home/c", uid + 1},
+	} {
+		req, _ = json.Marshal(Request{Op: "copy", Src: "home/a", Dst: c.dst, SrcUID: uid, UID: c.uid, GID: gid, Budget: 1 << 20})
+		if out, err := run(t, base, string(req)); err == nil {
+			t.Errorf("copy to %s as %d: %s", c.dst, c.uid, out)
+		}
+	}
+	if entries, _ := os.ReadDir(filepath.Join(base, New, newCheckout, ".git")); len(entries) != 0 {
+		t.Errorf("wrote into the new .git: %v", entries)
+	}
+	req, _ = json.Marshal(Request{Op: "copy", Src: "home/a", Dst: "home/c", SrcUID: uid, UID: uid, GID: gid, Budget: 1 << 20})
+	if _, err := run(t, base, string(req)); err != nil {
+		t.Errorf("copy into the owner's own home: %v", err)
+	}
 }
 
 func TestOpenRefusesBeforeTouchingDisks(t *testing.T) {

@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -253,7 +254,7 @@ func copyOp(base string, req Request) (safefs.Stats, error) {
 		return stats, err
 	}
 	defer src.Close()
-	dst, err := openBelow(filepath.Join(base, New), req.Dst)
+	dst, err := homeTarget(filepath.Join(base, New), req.Dst, req.UID)
 	if err != nil {
 		return stats, err
 	}
@@ -261,6 +262,34 @@ func copyOp(base string, req Request) (safefs.Stats, error) {
 	return safefs.Copy(src, dst, safefs.CopyOptions{
 		SourceUID: req.SrcUID, UID: req.UID, GID: req.GID, Budget: req.Budget, KeepXattr: KeepXattr,
 	})
+}
+
+// homeTarget opens the copy target dst below the new root. A copy only
+// lands in a home: dst is home/NAME or a folder below it, and home/NAME
+// must belong to uid, the owner the copies get. Root's places on the new
+// disk, the system checkout and the store cache among them, stay out of
+// reach (L139).
+func homeTarget(newRoot, dst string, uid int) (*safefs.Dir, error) {
+	parts := strings.Split(dst, "/")
+	if len(parts) < 2 || parts[0] != "home" {
+		return nil, fmt.Errorf("target %q is not in a home", dst)
+	}
+	home, err := openBelow(newRoot, "home/"+parts[1])
+	if err != nil {
+		return nil, err
+	}
+	defer home.Close()
+	st, err := home.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if int(st.Uid) != uid {
+		return nil, fmt.Errorf("home %q belongs to user %d, not %d", parts[1], st.Uid, uid)
+	}
+	if len(parts) == 2 {
+		return home.Sub(".")
+	}
+	return home.Sub(strings.Join(parts[2:], "/"))
 }
 
 func openBelow(top, rel string) (*safefs.Dir, error) {
@@ -717,6 +746,16 @@ func removeCache(ctx context.Context, newRoot *safefs.Dir) error {
 // ended (L135). A unit that is not loaded is fine. It is a plain function,
 // never a variable: a package-level value that leads to a program is what
 // the exec guard refuses (L137).
+// gitUnitArgs runs one of root's git steps in its own unit (L141): root
+// without capabilities, nothing writable but the new checkout's git folder,
+// which newGitDir found root's and plain all the way down. The unit is
+// stopped with the others by stopUnits.
+func gitUnitArgs(base string, args []string) ([]string, error) {
+	return storecopy.RootUnitArgs(storecopy.GitUnit, storecopy.GitLimit,
+		filepath.Join(base, New, newCheckout, ".git"), repocopy.GitEnv,
+		append([]string{repocopy.Git}, args...)...)
+}
+
 func stopUnits(ctx context.Context) error {
 	for _, u := range storecopy.Units {
 		var stderr bytes.Buffer
@@ -787,7 +826,11 @@ func repoOp(ctx context.Context, base string, req Request) (res repocopy.Result,
 			return runPiped(ctx, storecopy.SystemdRun, nil, args, stdin, stdout)
 		},
 		Git: func(ctx context.Context, stdin io.Reader, stdout io.Writer, args ...string) error {
-			return runPiped(ctx, repocopy.Git, repocopy.GitEnv, args, stdin, stdout)
+			unit, err := gitUnitArgs(base, args)
+			if err != nil {
+				return err
+			}
+			return runPiped(ctx, storecopy.SystemdRun, nil, unit, stdin, stdout)
 		},
 	}
 	return repocopy.Copy(ctx, host, gitDir, filepath.Join(base, Old, oldRepo, "objects"),
@@ -809,14 +852,93 @@ func oldGitDir(top *safefs.Dir) (*safefs.Dir, string) {
 	return gitDir, ""
 }
 
-// newGitDir checks that the new checkout's git folder is a plain folder:
-// root's git runs there.
+// newGitDir checks the new checkout before root's git runs in it (L139).
+// Every folder on the way from the new root and everything in the git
+// folder is root's and writable by nobody else, with no link, pipe or
+// device in it, and nothing that sends git to objects or history kept
+// somewhere else. Git reads all of these as root; a copy cannot write
+// there (homeTarget), and this holds even if something else did.
 func newGitDir(newRoot *safefs.Dir) error {
+	at := ""
+	for _, part := range strings.Split(newCheckout+"/.git", "/") {
+		at = path.Join(at, part)
+		st, err := newRoot.Lstat(at)
+		if err != nil {
+			return fmt.Errorf("repo: the new checkout: %w", err)
+		}
+		if err := rootsOnly(at, st, true); err != nil {
+			return err
+		}
+	}
 	d, err := newRoot.Sub(newCheckout + "/.git")
 	if err != nil {
 		return fmt.Errorf("repo: the new checkout: %w", err)
 	}
-	return d.Close()
+	defer d.Close()
+	for _, r := range gitRedirects {
+		if _, err := d.Lstat(r); !errors.Is(err, unix.ENOENT) {
+			return fmt.Errorf("repo: the new checkout has .git/%s", r)
+		}
+	}
+	left := maxGitEntries
+	return walkRoots(d, ".", 0, &left)
+}
+
+// gitRedirects make git read objects, refs or history from another place.
+var gitRedirects = []string{
+	"commondir", "objects/info/alternates", "objects/info/http-alternates", "info/grafts",
+}
+
+const (
+	// maxGitEntries caps the walk of the new .git: a fresh checkout has a
+	// few hundred entries.
+	maxGitEntries = 1 << 16
+	maxGitDepth   = 32
+)
+
+// rootUID owns the new checkout; tests run as their own user.
+var rootUID uint32
+
+func rootsOnly(rel string, st unix.Stat_t, dir bool) error {
+	switch {
+	case st.Uid != rootUID:
+		return fmt.Errorf("repo: %s in the new checkout belongs to user %d", rel, st.Uid)
+	case st.Mode&0o022 != 0:
+		return fmt.Errorf("repo: %s in the new checkout is writable by others", rel)
+	case dir && st.Mode&unix.S_IFMT != unix.S_IFDIR:
+		return fmt.Errorf("repo: %s in the new checkout is not a folder", rel)
+	case !dir && st.Mode&unix.S_IFMT != unix.S_IFREG:
+		return fmt.Errorf("repo: %s in the new checkout is not a plain file", rel)
+	}
+	return nil
+}
+
+func walkRoots(d *safefs.Dir, rel string, depth int, left *int) error {
+	if depth >= maxGitDepth {
+		return fmt.Errorf("repo: .git/%s is too deep", rel)
+	}
+	names, err := d.Names(rel, *left)
+	if err != nil {
+		return fmt.Errorf("repo: the new checkout: %w", err)
+	}
+	*left -= len(names)
+	for _, n := range names {
+		p := path.Join(rel, n)
+		st, err := d.Lstat(p)
+		if err != nil {
+			return fmt.Errorf("repo: the new checkout: %w", err)
+		}
+		dir := st.Mode&unix.S_IFMT == unix.S_IFDIR
+		if err := rootsOnly(".git/"+p, st, dir); err != nil {
+			return err
+		}
+		if dir {
+			if err := walkRoots(d, p, depth+1, left); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // runPiped runs one fixed program with stdin and stdout passed through and

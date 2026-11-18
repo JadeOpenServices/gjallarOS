@@ -46,6 +46,8 @@ const (
 	ClosureUnit = "gjallar-move-closure"
 	// PackUnit packs the old system checkout's commits (repocopy, L63).
 	PackUnit = "gjallar-move-pack"
+	// GitUnit runs root's git steps in the new checkout (repocopy, L141).
+	GitUnit = "gjallar-move-git"
 
 	// NotLoaded is systemctl's exit code for a unit that is not loaded:
 	// nothing of it runs.
@@ -55,6 +57,7 @@ const (
 	ExportLimit  = 2 * time.Hour
 	ClosureLimit = 5 * time.Minute
 	PackLimit    = 30 * time.Minute
+	GitLimit     = 30 * time.Minute
 
 	features = "nix-command read-only-local-store"
 )
@@ -73,13 +76,17 @@ var (
 // systemd-run waits leaves its unit running, writing into the cache and
 // holding the old disk; each one is stopped before the cache is removed or
 // the old disk closed (L135).
-var Units = []string{ExportUnit + ".service", ClosureUnit + ".service", PackUnit + ".service"}
+var Units = []string{ExportUnit + ".service", ClosureUnit + ".service", PackUnit + ".service", GitUnit + ".service"}
 
 // unitProps confine the unit. The unit's user exists only while it runs.
 // It sees the stick read-only, no home, no devices, no network, no other
 // process, and has no capabilities.
-var unitProps = []string{
-	"DynamicUser=yes",
+var unitProps = append([]string{"DynamicUser=yes", "Environment=HOME=/tmp"}, confined...)
+
+// confined is what every unit of the move gets, the root one too: no
+// network, no devices, no other process, no capabilities, the stick
+// read-only, and caps on memory, tasks and the stop.
+var confined = []string{
 	"PrivateNetwork=yes",
 	"PrivateTmp=yes",
 	"PrivateDevices=yes",
@@ -108,7 +115,6 @@ var unitProps = []string{
 	// A stop before cleanup (L135) kills a unit that does not end within
 	// this, so close and the cache removal never wait systemd's 90 s.
 	"TimeoutStopSec=10s",
-	"Environment=HOME=/tmp",
 	// nix would ask the stick's daemon for anything it cannot do alone.
 	"InaccessiblePaths=-/nix/var/nix/daemon-socket",
 }
@@ -161,6 +167,42 @@ func UnitArgs(unit string, limit time.Duration, ro, rw Bind, cmd ...string) ([]s
 	}
 	for _, p := range unitProps {
 		args = append(args, "--property="+p)
+	}
+	args = append(args, "--")
+	return append(args, cmd...), nil
+}
+
+// RootUnitArgs returns systemd-run's arguments for one run of cmd as root in
+// a confined unit: no capabilities, so root reaches only what root owns, and
+// nothing writable but rw. Root's git takes the old disk's commits through
+// index-pack and fsck; a fault in git's parsers then reaches only the new
+// checkout's git folder, with no network and capped memory (L141). env is
+// the program's whole environment, KEY=value each.
+//
+// rw is set up by path like the binds of UnitArgs: the caller checks it is
+// root's and writable by no one else all the way down first.
+func RootUnitArgs(unit string, limit time.Duration, rw string, env []string, cmd ...string) ([]string, error) {
+	if err := (Bind{rw, rw}).check(); err != nil {
+		return nil, err
+	}
+	if len(cmd) == 0 || !strings.HasPrefix(cmd[0], "/") {
+		return nil, errors.New("unit: the program is not an absolute path")
+	}
+	args := []string{
+		"--quiet", "--wait", "--collect", "--pipe",
+		"--unit=" + unit, "--service-type=exec",
+		"--property=RuntimeMaxSec=" + strconv.Itoa(int(limit.Seconds())),
+		"--property=ReadWritePaths=" + rw,
+	}
+	for _, p := range confined {
+		args = append(args, "--property="+p)
+	}
+	for _, e := range env {
+		k, _, ok := strings.Cut(e, "=")
+		if !ok || k == "" || strings.ContainsAny(e, "\x00\n\r") {
+			return nil, fmt.Errorf("unit: environment %q is not KEY=value", e)
+		}
+		args = append(args, "--setenv="+e)
 	}
 	args = append(args, "--")
 	return append(args, cmd...), nil
