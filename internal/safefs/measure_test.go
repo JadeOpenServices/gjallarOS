@@ -85,6 +85,41 @@ func TestMeasureLeavesOutSkip(t *testing.T) {
 	}
 }
 
+// Copy leaves out the same paths as Measure, and a copy within the
+// measured size fits: what stays behind is not copied and not charged.
+func TestCopyLeavesOutSkip(t *testing.T) {
+	src, dst := t.TempDir(), t.TempDir()
+	write(t, filepath.Join(src, "Nextcloud/big"), string(bytes.Repeat([]byte("n"), 1<<20)))
+	write(t, filepath.Join(src, "work/Cloud/c"), "cc")
+	write(t, filepath.Join(src, "work/keep"), "k")
+	write(t, filepath.Join(src, "work/Cloudy"), "y")
+	skip := map[string]bool{"Nextcloud": true, "work/Cloud": true}
+	size, err := measureTree(t, src, MeasureOptions{Skip: skip})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stats Stats
+	withTimeout(t, func() {
+		stats, err = Copy(mustDir(t, src), mustDir(t, dst), CopyOptions{
+			SourceUID: fixtureUID(), UID: fixtureUID(), GID: fixtureGID(), Budget: size.Used, Skip: skip,
+		})
+	})
+	if err != nil {
+		t.Fatalf("a copy within the measured size failed: %v", err)
+	}
+	if stats.Left != 2 || stats.Files != 2 || stats.Used != size.Used {
+		t.Fatalf("stats %+v, size %+v", stats, size)
+	}
+	for _, p := range []string{"Nextcloud", "work/Cloud"} {
+		if _, err := os.Lstat(filepath.Join(dst, p)); !os.IsNotExist(err) {
+			t.Errorf("%s was copied: %v", p, err)
+		}
+	}
+	if got, err := os.ReadFile(filepath.Join(dst, "work/Cloudy")); err != nil || string(got) != "y" {
+		t.Errorf("a name that only starts like a skipped one stayed behind: %q %v", got, err)
+	}
+}
+
 // A tree of many empty files stops at the cap instead of keeping root busy.
 func TestMeasureEntryCap(t *testing.T) {
 	src := t.TempDir()

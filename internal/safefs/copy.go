@@ -55,6 +55,10 @@ type CopyOptions struct {
 	// ACLs (system.posix_acl_*), security.* and trusted.* are never kept,
 	// whatever it says.
 	KeepXattr func(name string) bool
+	// Skip names paths below src, relative and without a leading or
+	// trailing slash, that stay behind with everything below them, as in
+	// MeasureOptions. Each is counted in Left.
+	Skip map[string]bool
 }
 
 // Stats counts what a copy did.
@@ -77,6 +81,8 @@ type Stats struct {
 	SetIDStripped int
 	// XattrsDropped counts extended attributes left behind.
 	XattrsDropped int
+	// Left counts the paths left out through Skip.
+	Left int
 }
 
 // Copy copies everything below src into dst. dst must exist; every name the
@@ -99,7 +105,7 @@ func Copy(src, dst *Dir, opt CopyOptions) (Stats, error) {
 		return stats, fmt.Errorf("copy %s: it belongs to user %d, not %d", src.name, top.Uid, opt.SourceUID)
 	}
 	c := &copier{opt: opt, stats: &stats, buf: make([]byte, 1<<20)}
-	err := c.tree(src.fd, dst.fd, src.name, 0)
+	err := c.tree(src.fd, dst.fd, src.name, "", 0)
 	return stats, err
 }
 
@@ -120,7 +126,7 @@ func (c *copier) charge(n int64) error {
 	return nil
 }
 
-func (c *copier) tree(srcFD, dstFD int, name string, depth int) error {
+func (c *copier) tree(srcFD, dstFD int, name, rel string, depth int) error {
 	if depth >= MaxDepth {
 		return fmt.Errorf("copy %s: %w", name, ErrTooDeep)
 	}
@@ -131,14 +137,22 @@ func (c *copier) tree(srcFD, dstFD int, name string, depth int) error {
 	c.names += cost
 	defer func() { c.names -= cost }()
 	for _, n := range names {
-		if err := c.entry(srcFD, dstFD, n, name+"/"+n, depth); err != nil {
+		r := n
+		if rel != "" {
+			r = rel + "/" + n
+		}
+		if c.opt.Skip[r] {
+			c.stats.Left++
+			continue
+		}
+		if err := c.entry(srcFD, dstFD, n, name+"/"+n, r, depth); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (c *copier) entry(srcDir, dstDir int, n, path string, depth int) error {
+func (c *copier) entry(srcDir, dstDir int, n, path, rel string, depth int) error {
 	var st unix.Stat_t
 	if err := unix.Fstatat(srcDir, n, &st, unix.AT_SYMLINK_NOFOLLOW); err != nil {
 		return fmt.Errorf("stat %s: %w", path, err)
@@ -149,7 +163,7 @@ func (c *copier) entry(srcDir, dstDir int, n, path string, depth int) error {
 	}
 	switch st.Mode & unix.S_IFMT {
 	case unix.S_IFDIR:
-		return c.folder(srcDir, dstDir, n, path, depth)
+		return c.folder(srcDir, dstDir, n, path, rel, depth)
 	case unix.S_IFREG:
 		return c.file(srcDir, dstDir, n, path, st)
 	case unix.S_IFLNK:
@@ -160,7 +174,7 @@ func (c *copier) entry(srcDir, dstDir int, n, path string, depth int) error {
 	}
 }
 
-func (c *copier) folder(srcDir, dstDir int, n, path string, depth int) error {
+func (c *copier) folder(srcDir, dstDir int, n, path, rel string, depth int) error {
 	if err := c.charge(EntryCost); err != nil {
 		return fmt.Errorf("copy %s: %w", path, err)
 	}
@@ -188,7 +202,7 @@ func (c *copier) folder(srcDir, dstDir int, n, path string, depth int) error {
 		return fmt.Errorf("own folder for %s: %w", path, err)
 	}
 	c.stats.Folders++
-	if err := c.tree(s, d, path, depth+1); err != nil {
+	if err := c.tree(s, d, path, rel, depth+1); err != nil {
 		return err
 	}
 	return c.finish(s, d, path, st)

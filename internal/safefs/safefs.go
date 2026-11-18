@@ -84,7 +84,11 @@ func (d *Dir) Sub(rel string) (*Dir, error) {
 // such as home on a new root that has @home mounted there. The parts on the
 // way are resolved as in Sub; only the last step may enter the file system
 // mounted there, and it must: a plain folder never stands in for the mount.
+// rel "." is refused: d itself is never the mount asked for.
 func (d *Dir) SubMount(rel string) (*Dir, error) {
+	if rel == "." {
+		return nil, fmt.Errorf("open mount %s below %s: %w: not a name below the folder", rel, d.name, ErrNotPlain)
+	}
 	dirFD, last, done, err := d.parent(rel, "open")
 	if err != nil {
 		return nil, err
@@ -104,6 +108,21 @@ func (d *Dir) SubMount(rel string) (*Dir, error) {
 		return nil, fmt.Errorf("open mount %s below %s: %w", rel, d.name, ErrNotMount)
 	}
 	return &Dir{fd: fd, name: d.name + "/" + rel}, nil
+}
+
+// MountID is the id of the mount the open folder is on, the first field of
+// its line in /proc/self/mountinfo. It is taken from the handle, so the
+// answer is about the folder that was checked, not whatever its path names
+// now.
+func (d *Dir) MountID() (uint64, error) {
+	var stx unix.Statx_t
+	if err := unix.Statx(d.fd, "", unix.AT_EMPTY_PATH, unix.STATX_MNT_ID, &stx); err != nil {
+		return 0, fmt.Errorf("check the mount of %s: %w", d.name, err)
+	}
+	if stx.Mask&unix.STATX_MNT_ID == 0 {
+		return 0, fmt.Errorf("check the mount of %s: the kernel does not tell", d.name)
+	}
+	return stx.Mnt_id, nil
 }
 
 // Names lists the folder rel below d ("." for d itself), sorted, without

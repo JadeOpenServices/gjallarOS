@@ -7,8 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/JadeOpenServices/gjallarOS/internal/safefs"
 )
 
 func run(t *testing.T, base, req string) (string, error) {
@@ -77,97 +75,16 @@ func TestRequestChecks(t *testing.T) {
 		`{"op":"rm"}`,
 		`{"op":"dirs","path":"/etc"}`,
 		`{"op":"dirs"}{"op":"dirs"}`,
-		`{"op":"copy","src":"/etc","dst":"home/a","uid":1000,"gid":100,"budget":1}`,
-		`{"op":"copy","src":"home/a","dst":"../x","uid":1000,"gid":1000,"budget":1}`,
-		`{"op":"copy","src":"home/a","dst":"home/a","uid":0,"gid":0,"budget":1}`,
-		`{"op":"copy","src":"home/a","dst":"home/a","srcUid":0,"uid":1000,"gid":100,"budget":1}`,
-		`{"op":"copy","src":"home/a","dst":"home/a","uid":1000,"gid":1,"budget":1}`,
-		`{"op":"copy","src":"home/a","dst":"home/a","uid":65534,"gid":100,"budget":1}`,
-		`{"op":"copy","src":"home/a","dst":"home/a","uid":1000,"gid":1000}`,
-		`{"op":"copy","src":"home/./a","dst":"home/a","uid":1000,"gid":1000,"budget":1}`,
+		`{"op":"home"}`,
+		`{"op":"home","budget":-1}`,
+		`{"op":"home","src":"home/a","budget":1}`,
+		`{"op":"home","dst":"home/a","uid":1000,"gid":100,"budget":1}`,
+		`{"op":"copy","src":"home/a","dst":"home/a","uid":1000,"gid":100,"budget":1}`,
 		`{"op":"dirs","x":"` + strings.Repeat("a", MaxRequest) + `"}`,
 	} {
 		if _, err := run(t, base, req); err == nil {
 			t.Errorf("accepted %.80s", req)
 		}
-	}
-}
-
-func TestCopy(t *testing.T) {
-	base := filepath.Join(t.TempDir(), "gjallar-move")
-	if err := Dirs(base); err != nil {
-		t.Fatal(err)
-	}
-	home := filepath.Join(base, Old, "home/a")
-	if err := os.MkdirAll(filepath.Join(home, "Documents"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(home, "Documents/n.txt"), []byte("note"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(filepath.Join(base, New, "home/a"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	uid, gid := os.Getuid(), os.Getgid()
-	if os.Geteuid() == 0 {
-		// As root (the VM run) the old home belongs to a normal user, as
-		// on a real disk.
-		uid, gid = minUserID, usersGID
-		for _, p := range []string{home, filepath.Join(home, "Documents"), filepath.Join(home, "Documents/n.txt")} {
-			if err := os.Lchown(p, uid, gid); err != nil {
-				t.Fatal(err)
-			}
-		}
-	} else if uid < minUserID {
-		t.Skip("the test user is not a normal user")
-	}
-	req, _ := json.Marshal(Request{Op: "copy", Src: "home/a", Dst: "home/a", SrcUID: uid, UID: uid, GID: gid, Budget: 1 << 20})
-	out, err := run(t, base, string(req))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var stats safefs.Stats
-	if err := json.Unmarshal([]byte(out), &stats); err != nil || stats.Files != 1 || stats.Folders != 1 {
-		t.Fatalf("%q %v", out, err)
-	}
-	if got, err := os.ReadFile(filepath.Join(base, New, "home/a/Documents/n.txt")); err != nil || string(got) != "note" {
-		t.Fatalf("%q %v", got, err)
-	}
-
-	// A link planted as the target home is refused.
-	outside := t.TempDir()
-	if err := os.Symlink(outside, filepath.Join(base, New, "home/b")); err != nil {
-		t.Fatal(err)
-	}
-	req, _ = json.Marshal(Request{Op: "copy", Src: "home/a", Dst: "home/b", SrcUID: uid, UID: uid, GID: gid, Budget: 1 << 20})
-	if _, err := run(t, base, string(req)); err == nil {
-		t.Fatal("copied through a planted link")
-	}
-	if entries, _ := os.ReadDir(outside); len(entries) != 0 {
-		t.Fatalf("wrote outside: %v", entries)
-	}
-
-	// L139: only a home of the copies' owner is a target; root's places on
-	// the new disk are not.
-	mkdirs(t, filepath.Join(base, New, newCheckout, ".git"), filepath.Join(base, New, "gjallar-move-cache"), filepath.Join(base, New, "home/c"))
-	for _, c := range []struct {
-		dst string
-		uid int
-	}{
-		{newCheckout + "/.git", uid}, {"gjallar-move-cache", uid}, {"home", uid},
-		{"etc", uid}, {"home/c", uid + 1},
-	} {
-		req, _ = json.Marshal(Request{Op: "copy", Src: "home/a", Dst: c.dst, SrcUID: uid, UID: c.uid, GID: gid, Budget: 1 << 20})
-		if out, err := run(t, base, string(req)); err == nil {
-			t.Errorf("copy to %s as %d: %s", c.dst, c.uid, out)
-		}
-	}
-	if entries, _ := os.ReadDir(filepath.Join(base, New, newCheckout, ".git")); len(entries) != 0 {
-		t.Errorf("wrote into the new .git: %v", entries)
-	}
-	req, _ = json.Marshal(Request{Op: "copy", Src: "home/a", Dst: "home/c", SrcUID: uid, UID: uid, GID: gid, Budget: 1 << 20})
-	if _, err := run(t, base, string(req)); err != nil {
-		t.Errorf("copy into the owner's own home: %v", err)
 	}
 }
 

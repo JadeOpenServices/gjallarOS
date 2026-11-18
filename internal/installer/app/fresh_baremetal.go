@@ -317,6 +317,9 @@ func runFreshBareMetal(
 	if err := mv.copyBranches(ctx); err != nil {
 		return freshBareMetalResult{}, err
 	}
+	if err := mv.copyHome(ctx); err != nil {
+		return freshBareMetalResult{}, err
+	}
 
 	result := freshBareMetalResult{
 		TargetDisk:         plan.TargetDisk.Path,

@@ -59,28 +59,81 @@ type Sizes struct {
 // ErrNoHome is returned when the old account has no home folder of its own.
 var ErrNoHome = errors.New("the old account has no home folder of its own")
 
+// OldHome is the old account's home folder, opened, with its owner and the
+// Nextcloud sync folders in it. Measure and the move helper's home copy
+// both open it this way, so the copy leaves out exactly the folders that
+// were measured on their own.
+type OldHome struct {
+	Dir   *safefs.Dir
+	Owner int
+	// Sync are the sync folders relative to the home, sorted, each a plain
+	// folder of Owner when the home was opened.
+	Sync []string
+	// Odd counts the sync folder lines that were not taken.
+	Odd int
+}
+
+// Close closes the home folder.
+func (h *OldHome) Close() error { return h.Dir.Close() }
+
+// Skip is the set of sync folders, as safefs.CopyOptions.Skip takes it.
+func (h *OldHome) Skip() map[string]bool {
+	skip := make(map[string]bool, len(h.Sync))
+	for _, rel := range h.Sync {
+		skip[rel] = true
+	}
+	return skip
+}
+
+// OpenHome opens @home/<username> below top, the old disk's btrfs top level
+// mounted read-only. It must be a plain folder of an account id, never a
+// link; username is the old account (oldroot.Info). A sync folder that is
+// missing is left out; a link, a mount point or another owner in its place
+// counts as odd and stays in the home, where a copy refuses it as it is.
+func OpenHome(top *safefs.Dir, username string) (*OldHome, error) {
+	if !config.ValidUsername(username) {
+		return nil, fmt.Errorf("%q is not a valid user name", username)
+	}
+	homeRel := homeDir + "/" + username
+	st, err := top.Lstat(homeRel)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrNoHome, err)
+	}
+	if st.Mode&unix.S_IFMT != unix.S_IFDIR || st.Uid < minUserID || st.Uid > maxUserID {
+		return nil, ErrNoHome
+	}
+	dir, err := top.Sub(homeRel)
+	if err != nil {
+		return nil, err
+	}
+	h := &OldHome{Dir: dir, Owner: int(st.Uid)}
+	folders, odd := syncFolders(dir, username)
+	h.Odd = odd
+	for _, rel := range folders {
+		st, err := dir.Lstat(rel)
+		switch {
+		case errors.Is(err, unix.ENOENT):
+		case err == nil && st.Mode&unix.S_IFMT == unix.S_IFDIR && int(st.Uid) == h.Owner:
+			h.Sync = append(h.Sync, rel)
+		default:
+			h.Odd++
+		}
+	}
+	return h, nil
+}
+
 // Measure sizes the categories of the old disk, whose btrfs top level is
 // top, mounted read-only. username is the old account (oldroot.Info). No
 // file is opened except nextcloud.cfg; links are never followed.
 func Measure(top *safefs.Dir, username string) (Sizes, error) {
 	var s Sizes
-	if !config.ValidUsername(username) {
-		return s, fmt.Errorf("measure: %q is not a valid user name", username)
-	}
-	homeRel := homeDir + "/" + username
-	st, err := top.Lstat(homeRel)
-	if err != nil {
-		return s, fmt.Errorf("measure: %w: %v", ErrNoHome, err)
-	}
-	if st.Mode&unix.S_IFMT != unix.S_IFDIR || st.Uid < minUserID || st.Uid > maxUserID {
-		return s, fmt.Errorf("measure: %w", ErrNoHome)
-	}
-	owner := int(st.Uid)
-	home, err := top.Sub(homeRel)
+	h, err := OpenHome(top, username)
 	if err != nil {
 		return s, fmt.Errorf("measure: %w", err)
 	}
-	defer home.Close()
+	defer h.Close()
+	home, owner := h.Dir, h.Owner
+	s.Odd = h.Odd
 
 	left := maxEntries
 	walk := func(d *safefs.Dir, opt safefs.MeasureOptions) (safefs.Size, error) {
@@ -92,26 +145,10 @@ func Measure(top *safefs.Dir, username string) (Sizes, error) {
 		return size, err
 	}
 
-	folders, odd := syncFolders(home, username)
-	s.Odd = odd
-	skip := map[string]bool{}
-	for _, rel := range folders {
-		st, err := home.Lstat(rel)
-		if errors.Is(err, unix.ENOENT) {
-			continue
-		}
-		var d *safefs.Dir
-		if err == nil && st.Mode&unix.S_IFMT == unix.S_IFDIR && int(st.Uid) == owner {
-			d, err = home.Sub(rel)
-		} else if err == nil {
-			err = safefs.ErrNotPlain
-		}
+	for _, rel := range h.Sync {
+		d, err := home.Sub(rel)
 		if err != nil {
-			// A link, a mount point or another owner in the way: the copy
-			// refuses it too. It stays inside the home walk, which counts it
-			// as it is.
-			s.Odd++
-			continue
+			return s, fmt.Errorf("measure the Nextcloud folders: %w", err)
 		}
 		size, err := walk(d, safefs.MeasureOptions{SourceUID: owner})
 		d.Close()
@@ -121,10 +158,9 @@ func Measure(top *safefs.Dir, username string) (Sizes, error) {
 		// The folder itself costs an entry too; the home walk leaves it out.
 		s.Nextcloud += uint64(size.Used + safefs.EntryCost)
 		s.SyncFolders++
-		skip[rel] = true
 	}
 
-	size, err := walk(home, safefs.MeasureOptions{SourceUID: owner, Skip: skip})
+	size, err := walk(home, safefs.MeasureOptions{SourceUID: owner, Skip: h.Skip()})
 	if err != nil {
 		return s, fmt.Errorf("measure the home folder: %w", err)
 	}

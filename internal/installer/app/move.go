@@ -298,6 +298,52 @@ func (m *moveRun) copyBranches(ctx context.Context) error {
 	return nil
 }
 
+// copyHome runs step 14 when the user moves the home folder (R49): the
+// helper copies the old account's home into the one nixos-install made,
+// with the Nextcloud folders when they were chosen too. A copy that failed
+// is taken back, told, and the move goes on with a fresh home; a helper
+// error stops the install, as for the branches.
+func (m *moveRun) copyHome(ctx context.Context) error {
+	if m == nil || !m.choices.Chosen(freespace.Home) {
+		return nil
+	}
+	sync := m.choices.Chosen(freespace.Nextcloud)
+	var budget uint64
+	for _, c := range m.choices.Categories {
+		if c.Name == freespace.Home || (sync && c.Name == freespace.Nextcloud) {
+			budget += c.Bytes
+		}
+	}
+	if budget == 0 {
+		return nil
+	}
+	var res movehelper.HomeResult
+	if err := m.flow.Helper.Run(ctx, movehelper.Request{Op: "home", Sync: sync, Budget: int64(budget)}, &res); err != nil {
+		return fmt.Errorf("copy your home folder: %w", err)
+	}
+	installlog.Mark(installlog.StickMoveHomeCopied,
+		installlog.Count("files", res.Files),
+		installlog.Count("folders", res.Folders),
+		installlog.Count("links", res.Links),
+		installlog.Count("left", res.Left),
+		installlog.Count("skipped", res.Skipped),
+		installlog.Count("foreign", res.Foreign),
+		installlog.Bool("sync", sync),
+		installlog.Bool("failed", res.Failed != ""))
+	if res.Failed != "" {
+		fmt.Fprintf(m.out, "Your home folder stays on the old disk; the copy was taken back: %s\n", oneLine(res.Failed))
+		return nil
+	}
+	fmt.Fprintf(m.out, "Copied your home folder: %d files, %d folders.\n", res.Files, res.Folders)
+	if res.Left > 0 {
+		fmt.Fprintln(m.out, "The Nextcloud folders stay on the old disk; they sync again from the server.")
+	}
+	if n := res.Skipped + res.Foreign; n > 0 {
+		fmt.Fprintf(m.out, "%d entries stay on the old disk: pipes, sockets, devices or files of another account.\n", n)
+	}
+	return nil
+}
+
 // end closes the old disk and takes the new one away from the helper. It
 // runs once, also after a cancelled ctx; later calls do nothing. The new
 // disk must be detached before the install closes it (L151).

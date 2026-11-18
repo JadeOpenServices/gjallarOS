@@ -19,6 +19,7 @@ import (
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/prompt"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/targetdisk"
 	"github.com/JadeOpenServices/gjallarOS/internal/movehelper"
+	"github.com/JadeOpenServices/gjallarOS/internal/safefs"
 	"golang.org/x/sys/unix"
 )
 
@@ -31,6 +32,8 @@ type fakeMoveHelper struct {
 	export  movehelper.ExportResult
 	closure movehelper.ClosureResult
 	repo    repocopy.Result
+	home    movehelper.HomeResult
+	syncs   map[string]bool
 }
 
 func (h *fakeMoveHelper) Run(ctx context.Context, req movehelper.Request, result any) error {
@@ -42,6 +45,10 @@ func (h *fakeMoveHelper) Run(ctx context.Context, req movehelper.Request, result
 		h.budgets = map[string]int64{}
 	}
 	h.budgets[req.Op] = req.Budget
+	if h.syncs == nil {
+		h.syncs = map[string]bool{}
+	}
+	h.syncs[req.Op] = req.Sync
 	if err := h.fail[req.Op]; err != nil {
 		return err
 	}
@@ -52,6 +59,8 @@ func (h *fakeMoveHelper) Run(ctx context.Context, req movehelper.Request, result
 		*r = h.closure
 	case *repocopy.Result:
 		*r = h.repo
+	case *movehelper.HomeResult:
+		*r = h.home
 	}
 	return nil
 }
@@ -293,6 +302,73 @@ func TestCopyBranches(t *testing.T) {
 	m = testMoveRun(h, &bytes.Buffer{})
 	m.choices = chosen(true, 4096)
 	if err := m.copyBranches(ctx); err == nil {
+		t.Fatal("a helper error is no hard stop")
+	}
+}
+
+// copyHome asks for the home with the Nextcloud folders only when both
+// were chosen, with a budget of what was chosen; a failed copy is told and
+// the install goes on, a helper error stops it.
+func TestCopyHome(t *testing.T) {
+	ctx := context.Background()
+	chosen := func(home, nc bool) move.Choices {
+		return move.Choices{Categories: []freespace.Category{
+			{Name: freespace.Home, Chosen: home, Bytes: 4096},
+			{Name: freespace.Nextcloud, Chosen: nc, Bytes: 1024},
+		}}
+	}
+	h := &fakeMoveHelper{}
+	m := testMoveRun(h, &bytes.Buffer{})
+	m.choices = chosen(false, true)
+	if err := m.copyHome(ctx); err != nil || len(h.ops) != 0 {
+		t.Fatalf("not chosen: err %v, ops %v", err, h.ops)
+	}
+	var nilRun *moveRun
+	if err := nilRun.copyHome(ctx); err != nil {
+		t.Fatalf("no move: %v", err)
+	}
+
+	for name, tc := range map[string]struct {
+		nc     bool
+		budget int64
+		res    movehelper.HomeResult
+		want   []string
+		absent string
+	}{
+		"with nextcloud": {nc: true, budget: 5120,
+			res:  movehelper.HomeResult{Stats: safefs.Stats{Files: 7, Folders: 2}},
+			want: []string{"Copied your home folder: 7 files, 2 folders."}, absent: "Nextcloud"},
+		"without": {budget: 4096,
+			res:  movehelper.HomeResult{Stats: safefs.Stats{Files: 1, Left: 1, Skipped: 1, Foreign: 2}},
+			want: []string{"The Nextcloud folders stay on the old disk", "3 entries stay on the old disk"}},
+		"failed": {budget: 4096,
+			res:  movehelper.HomeResult{Failed: "disk\nfull"},
+			want: []string{"stays on the old disk; the copy was taken back: disk full"}, absent: "Copied"},
+	} {
+		var out bytes.Buffer
+		h := &fakeMoveHelper{home: tc.res}
+		m := testMoveRun(h, &out)
+		m.choices = chosen(true, tc.nc)
+		if err := m.copyHome(ctx); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if !slices.Equal(h.ops, []string{"home"}) || h.budgets["home"] != tc.budget || h.syncs["home"] != tc.nc {
+			t.Errorf("%s: ops %v, budget %d, sync %v", name, h.ops, h.budgets["home"], h.syncs["home"])
+		}
+		for _, w := range tc.want {
+			if !strings.Contains(out.String(), w) {
+				t.Errorf("%s: output %q lacks %q", name, out.String(), w)
+			}
+		}
+		if tc.absent != "" && strings.Contains(out.String(), tc.absent) {
+			t.Errorf("%s: output %q has %q", name, out.String(), tc.absent)
+		}
+	}
+
+	h = &fakeMoveHelper{fail: map[string]error{"home": errors.New("helper gone")}}
+	m = testMoveRun(h, &bytes.Buffer{})
+	m.choices = chosen(true, false)
+	if err := m.copyHome(ctx); err == nil {
 		t.Fatal("a helper error is no hard stop")
 	}
 }

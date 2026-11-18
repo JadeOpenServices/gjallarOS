@@ -342,19 +342,19 @@ func TestParseMountinfo(t *testing.T) {
 		"41 40 8:1 / /run/gjallar-move/old rw,nosuid - ext4 /dev/sda1 rw",
 		"42 40 8:2 / /run/gjallar-move/new rw master:7 - ext4 /dev/sda2 rw",
 		"43 22 0:30 / /run/gjallar-move2 rw shared:9 - tmpfs tmpfs rw",
-		`44 40 0:31 / /run/gjallar-move/old/a\040b rw shared:3 master:2 - tmpfs tmpfs rw`,
+		`44 40 0:31 / /run/gjallar-move/old/a\040b rw shared:3 master:2 - tmpfs tmp\040fs rw`,
 	}, "\n") + "\n"
 	got, err := parseMountinfo([]byte(data))
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := []mountEntry{
-		{"/run", 5, false},
-		{"/run/gjallar-move", 0, false},
-		{"/run/gjallar-move/old", 0, false},
-		{"/run/gjallar-move/new", 0, true},
-		{"/run/gjallar-move2", 9, false},
-		{"/run/gjallar-move/old/a b", 3, true},
+		{id: 22, dev: "0:20", root: "/", point: "/run", group: 5, fstype: "tmpfs", source: "tmpfs"},
+		{id: 40, dev: "0:20", root: "/gjallar-move", point: "/run/gjallar-move", fstype: "tmpfs", source: "tmpfs"},
+		{id: 41, dev: "8:1", root: "/", point: "/run/gjallar-move/old", fstype: "ext4", source: "/dev/sda1"},
+		{id: 42, dev: "8:2", root: "/", point: "/run/gjallar-move/new", master: true, fstype: "ext4", source: "/dev/sda2"},
+		{id: 43, dev: "0:30", root: "/", point: "/run/gjallar-move2", group: 9, fstype: "tmpfs", source: "tmpfs"},
+		{id: 44, dev: "0:31", root: "/", point: "/run/gjallar-move/old/a b", group: 3, master: true, fstype: "tmpfs", source: "tmp fs"},
 	}
 	if len(got) != len(want) {
 		t.Fatalf("got %v", got)
@@ -370,6 +370,8 @@ func TestParseMountinfo(t *testing.T) {
 		"- 1 0:20 / /run rw\n",
 		"22 1 0:20 / /run rw shared:x - tmpfs tmpfs rw\n",
 		"22 1 0:20 / /run rw shared:0 - tmpfs tmpfs rw\n",
+		"22 1 0:20 / /run rw shared:5 - tmpfs\n",
+		"x 1 0:20 / /run rw shared:5 - tmpfs tmpfs rw\n",
 	} {
 		if _, err := parseMountinfo([]byte(bad)); err == nil {
 			t.Errorf("malformed line accepted: %q", bad)

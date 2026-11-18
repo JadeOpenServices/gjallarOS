@@ -532,7 +532,17 @@ func TestSubMountNeedsMountRoot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("mount root: %v", err)
 	}
-	p.Close()
+	defer p.Close()
+	if _, err := p.SubMount("."); !errors.Is(err, ErrNotPlain) {
+		t.Fatalf("the mount itself as \".\": got %v, want ErrNotPlain", err)
+	}
+	topID, err := top.MountID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id, err := p.MountID(); err != nil || id == topID {
+		t.Fatalf("mount ids: / %d, /proc %d %v", topID, id, err)
+	}
 	if _, err := top.SubMount("proc/sys"); !errors.Is(err, ErrNotPlain) {
 		t.Fatalf("mount on the way: got %v, want ErrNotPlain", err)
 	}

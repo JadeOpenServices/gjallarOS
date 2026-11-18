@@ -67,16 +67,11 @@ func KeepXattr(name string) bool { return strings.HasPrefix(name, "user.openvfs.
 // Request is one operation.
 type Request struct {
 	Op string `json:"op"`
-	// Src is a path below Old, Dst a path below New (copy).
-	Src string `json:"src,omitempty"`
-	Dst string `json:"dst,omitempty"`
-	// SrcUID owns the files on the old disk; files of anyone else stay
-	// behind. UID and GID own the copies (copy).
-	SrcUID int `json:"srcUid,omitempty"`
-	UID    int `json:"uid,omitempty"`
-	GID    int `json:"gid,omitempty"`
-	// Budget is the most bytes the copy or the store export may use on the
-	// new disk (copy, export).
+	// Sync copies the Nextcloud sync folders with the home (home); without
+	// it they stay on the old disk.
+	Sync bool `json:"sync,omitempty"`
+	// Budget is the most bytes a copy or the store export may use on the
+	// new disk (home, repo, export).
 	Budget int64 `json:"budget,omitempty"`
 	// Disk is the old disk as find listed it (check, open).
 	Disk string `json:"disk,omitempty"`
@@ -106,15 +101,15 @@ func Run(base string, in io.Reader, out io.Writer) error {
 		result = struct{}{}
 	case "find":
 		result, err = findOp(ctx)
-	case "copy", "check", "open", "inventory", "sizes", "config", "close", "closure", "export", "dropcache", "repo", "attach", "detach":
+	case "home", "check", "open", "inventory", "sizes", "config", "close", "closure", "export", "dropcache", "repo", "attach", "detach":
 		var unlock func()
 		if unlock, err = lock(base); err != nil {
 			break
 		}
 		defer unlock()
 		switch req.Op {
-		case "copy":
-			result, err = copyOp(base, req)
+		case "home":
+			result, err = homeOp(base, req)
 		case "check":
 			result, err = checkOp(ctx, req)
 		case "open":
@@ -243,15 +238,6 @@ func ownDir(p string) error {
 	return nil
 }
 
-// local refuses a path that is empty, absolute, climbs out or is not clean.
-// openat2 refuses those as well; this gives a clear message first.
-func local(what, p string) error {
-	if p == "" || !filepath.IsLocal(p) || filepath.Clean(p) != p {
-		return fmt.Errorf("%s %q is not a clean path inside the move folder", what, p)
-	}
-	return nil
-}
-
 // normalID accepts the id of an installed system's user or group. The ids
 // the live stick gives its Nix build accounts are refused: a build runs as
 // one of them and must never own what the helper writes (L152).
@@ -259,73 +245,121 @@ func normalID(id int) bool {
 	return id >= minUserID && id <= maxUserID && (id < nixbldUID || id > nixbldUID+maxNixbld)
 }
 
-func copyOp(base string, req Request) (safefs.Stats, error) {
-	var stats safefs.Stats
-	if err := local("source", req.Src); err != nil {
-		return stats, err
-	}
-	if err := local("target", req.Dst); err != nil {
-		return stats, err
-	}
-	if !normalID(req.SrcUID) {
-		return stats, fmt.Errorf("old owner %d is not a normal user", req.SrcUID)
-	}
-	if !normalID(req.UID) || (req.GID != usersGID && !normalID(req.GID)) {
-		return stats, fmt.Errorf("owner %d:%d is not a normal user", req.UID, req.GID)
-	}
+// HomeResult is what the home copy did. A copy that went wrong is taken
+// back and Failed says why: the move goes on without the home.
+type HomeResult struct {
+	safefs.Stats
+	Failed string `json:"failed,omitempty"`
+}
+
+// maxHomeNames caps the entries per folder when a failed copy is taken
+// back; the copy itself made every one of them.
+const maxHomeNames = 1 << 20
+
+// homeOp copies the old account's home into the new account's (R49). The
+// helper picks both ends itself: @home/<user> on the old disk, for the user
+// its settings name, and home/<user> on the new root, the home
+// nixos-install made for the same user. The caller chooses only whether the
+// Nextcloud sync folders come along and the budget.
+func homeOp(base string, req Request) (res HomeResult, err error) {
 	if req.Budget <= 0 {
-		return stats, errors.New("copy without a space budget")
+		return res, errors.New("home: no budget")
 	}
-	src, err := openBelow(filepath.Join(base, Old), req.Src)
+	top, info, err := openedTop(base)
 	if err != nil {
-		return stats, err
+		return res, err
 	}
-	defer src.Close()
-	dst, err := homeTarget(filepath.Join(base, New), req.Dst, req.UID)
+	defer top.Close()
+	old, err := freespace.OpenHome(top, info.Username)
 	if err != nil {
-		return stats, err
+		return res, err
+	}
+	defer old.Close()
+	newRoot, err := mountedNew(base)
+	if err != nil {
+		return res, err
+	}
+	defer newRoot.Close()
+	dst, uid, err := newHome(newRoot, info.Username)
+	if err != nil {
+		return res, err
 	}
 	defer dst.Close()
-	return safefs.Copy(src, dst, safefs.CopyOptions{
-		SourceUID: req.SrcUID, UID: req.UID, GID: req.GID, Budget: req.Budget, KeepXattr: KeepXattr,
-	})
+	return copyHome(old, dst, uid, usersGID, req.Sync, req.Budget)
 }
 
-// homeTarget opens the copy target dst below the new root. A copy only
-// lands in a home: dst is home/NAME or a folder below it, and home/NAME
-// must belong to uid, the owner the copies get. Root's places on the new
-// disk, the system checkout and the store cache among them, stay out of
-// reach (L139).
-func homeTarget(newRoot, dst string, uid int) (*safefs.Dir, error) {
-	parts := strings.Split(dst, "/")
-	if len(parts) < 2 || parts[0] != "home" {
-		return nil, fmt.Errorf("target %q is not in a home", dst)
+// newHome opens home/<username> on the new root. home is the @home mount,
+// entered on its own (L156) and checked to be the new disk's @home. The
+// folder must be a plain, empty folder of a normal user in the users group,
+// never a Nix build account (L152): what nixos-install made, nothing put
+// there since. The checks are made on the opened folder, so it cannot be
+// swapped after them.
+func newHome(newRoot *safefs.Dir, username string) (*safefs.Dir, int, error) {
+	if !config.ValidUsername(username) {
+		return nil, 0, fmt.Errorf("%q is not a valid user name", username)
 	}
-	home, err := openBelow(newRoot, "home/"+parts[1])
+	homes, err := newRoot.SubMount("home")
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
-	defer home.Close()
-	st, err := home.Stat()
+	defer homes.Close()
+	if err := onSubvolume(newRoot, homes, "@home"); err != nil {
+		return nil, 0, err
+	}
+	if st, err := homes.Stat(); err != nil {
+		return nil, 0, err
+	} else if st.Uid != rootUID || st.Mode&0o022 != 0 {
+		return nil, 0, errors.New("home on the new disk is not root's alone")
+	}
+	d, err := homes.Sub(username)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
-	if int(st.Uid) != uid {
-		return nil, fmt.Errorf("home %q belongs to user %d, not %d", parts[1], st.Uid, uid)
+	st, err := d.Stat()
+	switch {
+	case err != nil:
+	case !normalID(int(st.Uid)):
+		err = fmt.Errorf("the new home of %s belongs to user %d, not a normal user", username, st.Uid)
+	case st.Gid != usersGID:
+		err = fmt.Errorf("the new home of %s is in group %d, not users", username, st.Gid)
+	default:
+		if _, lerr := d.Names(".", 0); errors.Is(lerr, safefs.ErrTooMany) {
+			err = fmt.Errorf("the new home of %s is not empty", username)
+		} else {
+			err = lerr
+		}
 	}
-	if len(parts) == 2 {
-		return home.Sub(".")
+	if err != nil {
+		d.Close()
+		return nil, 0, err
 	}
-	return home.Sub(strings.Join(parts[2:], "/"))
+	return d, int(st.Uid), nil
 }
 
-func openBelow(top, rel string) (*safefs.Dir, error) {
-	d, err := safefs.OpenDir(top)
-	if err != nil {
-		return nil, err
+// copyHome copies old into dst for uid:gid; dst is empty. Without sync the
+// sync folders stay behind, the same ones the size check measured on their
+// own. A failed copy is taken back whole.
+func copyHome(old *freespace.OldHome, dst *safefs.Dir, uid, gid int, sync bool, budget int64) (HomeResult, error) {
+	opt := safefs.CopyOptions{SourceUID: old.Owner, UID: uid, GID: gid, Budget: budget, KeepXattr: KeepXattr}
+	if !sync {
+		opt.Skip = old.Skip()
 	}
-	defer d.Close()
-	return d.Sub(rel)
+	stats, err := safefs.Copy(old.Dir, dst, opt)
+	res := HomeResult{Stats: stats}
+	if err == nil {
+		return res, nil
+	}
+	res.Failed = err.Error()
+	names, lerr := dst.Names(".", -1)
+	if lerr != nil {
+		return res, fmt.Errorf("home copy failed (%v); taking it back: %w", err, lerr)
+	}
+	for _, n := range names {
+		if rerr := dst.RemoveTree(n, maxHomeNames); rerr != nil {
+			return res, fmt.Errorf("home copy failed (%v); taking it back: %w", err, rerr)
+		}
+	}
+	return res, nil
 }
 
 // lsblk runs lsblk with the arguments oldroot reads. Find refuses output
@@ -816,6 +850,52 @@ func mountedNew(base string) (*safefs.Dir, error) {
 	return safefs.OpenDir(p)
 }
 
+// newDiskFS is the file system the installer makes on the new disk
+// (rootprovision). Tests, which cannot make btrfs, set tmpfs.
+var newDiskFS = "btrfs"
+
+// onSubvolume refuses unless d, opened with SubMount, is the subvolume
+// subvol ("@home", "@config") of the file system the new root is on, and
+// the new root is that file system's @ (L156 H2). Being a mount root alone
+// lets any mount pass: a bind of another folder, of the new root's own etc,
+// or of another disk at home or at the checkout. Both ends are found in
+// the mount table by the mount id of the open handle, so a mount moved
+// after the check is not the one checked.
+func onSubvolume(newRoot, d *safefs.Dir, subvol string) error {
+	rootID, err := newRoot.MountID()
+	if err != nil {
+		return err
+	}
+	id, err := d.MountID()
+	if err != nil {
+		return err
+	}
+	mounts, err := mountTable()
+	if err != nil {
+		return err
+	}
+	var r, m *mountEntry
+	for i := range mounts {
+		switch mounts[i].id {
+		case rootID:
+			r = &mounts[i]
+		case id:
+			m = &mounts[i]
+		}
+	}
+	switch {
+	case r == nil || m == nil:
+		return fmt.Errorf("%s: the mount is not in the mount table", d.Name())
+	case r.fstype != newDiskFS || r.root != "/@":
+		return errors.New("the new disk is not mounted as the installer mounts it")
+	case m.fstype != r.fstype || m.dev != r.dev || m.source != r.source:
+		return fmt.Errorf("%s is not on the new disk", d.Name())
+	case m.root != "/"+subvol:
+		return fmt.Errorf("%s is not the %s subvolume of the new disk", d.Name(), subvol)
+	}
+	return nil
+}
+
 // oldRepo is the old system checkout's git folder below the opened top
 // level: the @config subvolume is the checkout.
 const oldRepo = "@config/.git"
@@ -907,6 +987,9 @@ func newGitDir(newRoot *safefs.Dir) error {
 		return fmt.Errorf("repo: the new checkout: %w", err)
 	}
 	defer co.Close()
+	if err := onSubvolume(newRoot, co, "@config"); err != nil {
+		return fmt.Errorf("repo: the new checkout: %w", err)
+	}
 	return checkoutGitDir(co)
 }
 

@@ -153,9 +153,14 @@ func below(point, p string) bool {
 }
 
 type mountEntry struct {
+	id     uint64 // the mount id, as statx STATX_MNT_ID reports it
+	dev    string // major:minor of the file system
+	root   string // the folder of the file system mounted here, /@home for a subvolume
 	point  string
 	group  int  // the shared:N peer group, 0 when not shared
 	master bool // a master:N tag: receives from another group
+	fstype string
+	source string
 }
 
 // mountTable lists the mounts in this namespace.
@@ -188,10 +193,21 @@ func parseMountinfo(data []byte) ([]mountEntry, error) {
 				break
 			}
 		}
-		if len(fields) < 6 || sep < 0 {
+		if len(fields) < 6 || sep < 0 || sep+2 >= len(fields) {
 			return nil, errors.New("the mount table has a line that is not a mount")
 		}
-		m := mountEntry{point: unescapeMount(fields[4])}
+		id, err := strconv.ParseUint(fields[0], 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("the mount table has a bad mount id %q", fields[0])
+		}
+		m := mountEntry{
+			id:     id,
+			dev:    fields[2],
+			root:   unescapeMount(fields[3]),
+			point:  unescapeMount(fields[4]),
+			fstype: fields[sep+1],
+			source: unescapeMount(fields[sep+2]),
+		}
 		for _, tag := range fields[6:sep] {
 			name, num, _ := strings.Cut(tag, ":")
 			switch name {
