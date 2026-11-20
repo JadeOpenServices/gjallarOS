@@ -2,6 +2,7 @@ package oddc
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 )
 
@@ -56,6 +57,13 @@ type SecureBootFirmwarePolicy struct {
 	FactoryOwnershipProof   string   `json:"factoryOwnershipProof,omitempty"`
 	Instructions            []string `json:"instructions,omitempty"`
 	UnsupportedReason       string   `json:"unsupportedReason,omitempty"`
+	// Plane 388: factory-PK facts for firmware that does not expose a
+	// PKDefault efivar (e.g. ThinkPad T480s). FactoryPKFingerprints holds
+	// lowercase hex SHA-256 sums of accepted factory PK certificates;
+	// PKDefaultAbsent says this model's firmware never exposes PKDefault,
+	// so an unconfirmed PK on it still counts as factory.
+	FactoryPKFingerprints []string `json:"factoryPKFingerprints,omitempty"`
+	PKDefaultAbsent       bool     `json:"pkDefaultAbsent,omitempty"`
 }
 
 func validateSecureBootFirmwarePolicy(policy SecureBootFirmwarePolicy) error {
@@ -78,7 +86,9 @@ func validateSecureBootFirmwarePolicy(policy SecureBootFirmwarePolicy) error {
 			len(policy.PreserveFirmwareBuiltin) != 0 ||
 			len(policy.Untouched) != 0 ||
 			strings.TrimSpace(policy.FactoryOwnershipProof) != "" ||
-			len(policy.Instructions) != 0 {
+			len(policy.Instructions) != 0 ||
+			len(policy.FactoryPKFingerprints) != 0 ||
+			policy.PKDefaultAbsent {
 			return fmt.Errorf(
 				"unsupported policy cannot contain operational Secure Boot fields",
 			)
@@ -116,6 +126,22 @@ func validateSecureBootFirmwarePolicy(policy SecureBootFirmwarePolicy) error {
 			"invalid factoryOwnershipProof %q",
 			policy.FactoryOwnershipProof,
 		)
+	}
+
+	// Plane 388: factory-PK facts must be usable — fingerprints are
+	// lowercase hex SHA-256 sums of certificates.
+	seenFingerprints := map[string]bool{}
+	for _, fp := range policy.FactoryPKFingerprints {
+		if len(fp) != 64 || strings.TrimRight(fp, "0123456789abcdef") != "" {
+			return fmt.Errorf(
+				"factoryPKFingerprints entry %q is not a lowercase hex SHA-256 sum",
+				fp,
+			)
+		}
+		if seenFingerprints[fp] {
+			return fmt.Errorf("factoryPKFingerprints contains duplicate %q", fp)
+		}
+		seenFingerprints[fp] = true
 	}
 
 	allowedVariables := map[string]bool{
@@ -182,4 +208,19 @@ func validateSecureBootFirmwarePolicy(policy SecureBootFirmwarePolicy) error {
 	}
 
 	return nil
+}
+
+// MatchesFactoryPK reports whether this model's factory-PK facts prove the
+// active PK (given as the lowercase hex SHA-256 of its certificate) is the
+// factory one even though the firmware exposes no PKDefault efivar
+// (Plane 388, e.g. ThinkPad T480s): either the fingerprint list names it, or
+// the model's firmware never exposes PKDefault.
+func (p SecureBootFirmwarePolicy) MatchesFactoryPK(pkSHA256 string, pkDefaultPresent bool) bool {
+	if !p.Supported || pkDefaultPresent {
+		return false
+	}
+	if slices.Contains(p.FactoryPKFingerprints, pkSHA256) {
+		return true
+	}
+	return p.PKDefaultAbsent
 }

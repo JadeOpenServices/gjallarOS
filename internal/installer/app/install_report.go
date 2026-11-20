@@ -15,6 +15,7 @@ import (
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/prompt"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/secureboot"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/sourcerevision"
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/targetdisk"
 	"github.com/JadeOpenServices/gjallarOS/internal/tty"
 )
 
@@ -28,6 +29,48 @@ type failureRecorder struct {
 func recordFailure(out io.Writer, err error) {
 	if recorder, ok := out.(*failureRecorder); ok {
 		recorder.err = err
+	}
+}
+
+// saveFailureToBootStick writes the error text and the redacted run log to
+// the GJLOGS partition of the stick this run booted from, without asking
+// (Plane 388 b: the T480s stick carried only the ODDC report, no error text).
+// Best effort: a warning is printed, the failure itself stands either way.
+func saveFailureToBootStick(ctx context.Context, out io.Writer, runLog *logKeeper, runErr error, targetDisk string) {
+	drives, err := listSaveDrives(ctx, targetDisk)
+	if err != nil {
+		fmt.Fprintf(out, "WARNING: failure not saved to the stick: no drive list: %v\n", err)
+		return
+	}
+	if os.Geteuid() == 0 {
+		drives = unmountedOnly(drives)
+	}
+	var stick *targetdisk.SaveDrive
+	for i, d := range drives {
+		if d.BootStick {
+			stick = &drives[i]
+			break
+		}
+	}
+	if stick == nil {
+		return
+	}
+	now := time.Now()
+	files := []savedFile{{
+		name: "gjallaros-error-" + now.UTC().Format("20060102-150405") + ".txt",
+		data: []byte("ERROR: " + runErr.Error() + "\n"),
+	}}
+	if logData, err := runLog.export(); err != nil {
+		fmt.Fprintf(out, "WARNING: install log not saved to the stick: %v\n", err)
+	} else if logData != nil {
+		files = append(files, savedFile{name: "gjallaros-" + installlog.FileName(now), data: logData})
+	}
+	names, err := writeToDrive(ctx, targetDisk, *stick, files)
+	for _, name := range names {
+		fmt.Fprintf(out, "Saved %s on the installer stick (GJLOGS).\n", name)
+	}
+	if err != nil {
+		fmt.Fprintf(out, "WARNING: failure not saved to the stick: %v\n", err)
 	}
 }
 

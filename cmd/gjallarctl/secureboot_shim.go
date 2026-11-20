@@ -100,7 +100,7 @@ func runShimSetup(ctx context.Context, repo, configPath string, user config.User
 			fmt.Fprintln(stdout, "Nothing was changed.")
 			return 0
 		}
-		if err := secureboot.PrepareShim(ctx, stdout); err != nil {
+		if err := secureboot.PrepareShim(ctx, stdout, false, false); err != nil {
 			return fail(err)
 		}
 		settings := map[string]any{"secureBootShim": true, "secureBootEnable": true}
@@ -134,7 +134,7 @@ func runShimSetup(ctx context.Context, repo, configPath string, user config.User
 				return fail(err)
 			}
 		}
-	} else if err := secureboot.PrepareShim(ctx, stdout); err != nil {
+	} else if err := secureboot.PrepareShim(ctx, stdout, false, false); err != nil {
 		return fail(err)
 	}
 
