@@ -39,6 +39,13 @@ type Inspection struct {
 	SecureBoot bool
 	Recorded   bool
 	OwnerGUID  string
+	// PKDefaultPresent says the firmware exposes the PKDefault efivar.
+	// Older firmware does not (ThinkPad T480s, Plane 388), so a factory PK
+	// cannot be confirmed by comparison there.
+	PKDefaultPresent bool
+	// PKSHA256 is the lowercase hex SHA-256 of the active PK certificate,
+	// for ODDC factory-PK fingerprint facts (Plane 388).
+	PKSHA256 string
 	// Stage is the stage of a valid ownership record ("pending-enrollment",
 	// "pending-mok", "enrolled"); empty without one.
 	Stage       string
@@ -53,7 +60,12 @@ type ownershipRecord struct {
 	PKSHA256       string `json:"pkSha256"`
 	KEKSHA256      string `json:"kekSha256"`
 	DbSHA256       string `json:"dbSha256"`
-	UpdatedAt      string `json:"updatedAt"`
+	// OwnerUnknownAccepted is set when the user accepted an unknown PK
+	// owner on the shim path (Plane 388): the firmware exposes no
+	// PKDefault, so its factory PK could not be confirmed, and shim+MOK
+	// never changes PK/KEK/db anyway.
+	OwnerUnknownAccepted bool   `json:"ownerUnknownAccepted,omitempty"`
+	UpdatedAt            string `json:"updatedAt"`
 }
 
 type localKeys struct {
@@ -140,6 +152,15 @@ func Inspect(ctx context.Context) (inspection Inspection, err error) {
 	if err != nil {
 		return Inspection{}, err
 	}
+	// The active PK certificate, hashed for ODDC factory-PK fingerprint
+	// facts; the efivar payload is a signature list, the cert is in it.
+	pkSHA := ""
+	if pkPresent {
+		if list := parseSignatureList(pk, true); !list.Malformed && len(list.Certs) > 0 {
+			sum := sha256.Sum256(list.Certs[0].der)
+			pkSHA = hex.EncodeToString(sum[:])
+		}
+	}
 	kek, _, err := efivarPayload("KEK")
 	if err != nil {
 		return Inspection{}, err
@@ -208,22 +229,42 @@ func Inspect(ctx context.Context) (inspection Inspection, err error) {
 
 		if defaultPresent && samePlatformKey(pk, pkDefault) {
 			return Inspection{
-				State:       StatePendingEnrollment,
-				SetupMode:   false,
-				SecureBoot:  secureBoot,
-				Recorded:    true,
-				OwnerGUID:   keys.ownerGUID,
-				Description: "gjallarOS keys are prepared and recorded while the firmware still uses its factory Platform Key.",
+				State:            StatePendingEnrollment,
+				SetupMode:        false,
+				SecureBoot:       secureBoot,
+				Recorded:         true,
+				OwnerGUID:        keys.ownerGUID,
+				PKDefaultPresent: true,
+				PKSHA256:         pkSHA,
+				Description:      "gjallarOS keys are prepared and recorded while the firmware still uses its factory Platform Key.",
+			}, nil
+		}
+
+		// Plane 388: firmware without a PKDefault efivar cannot confirm a
+		// factory PK by comparison; an accepted unknown owner keeps the
+		// pending record valid for the shim path.
+		if !defaultPresent && record.OwnerUnknownAccepted {
+			return Inspection{
+				State:            StatePendingEnrollment,
+				SetupMode:        false,
+				SecureBoot:       secureBoot,
+				Recorded:         true,
+				OwnerGUID:        keys.ownerGUID,
+				PKDefaultPresent: false,
+				PKSHA256:         pkSHA,
+				Description:      "gjallarOS keys are prepared and recorded; the firmware exposes no PKDefault and the unknown PK owner was accepted (Plane 388).",
 			}, nil
 		}
 
 		return Inspection{
-			State:       StateInconsistent,
-			SetupMode:   false,
-			SecureBoot:  secureBoot,
-			Recorded:    true,
-			OwnerGUID:   keys.ownerGUID,
-			Description: "gjallarOS ownership metadata is valid, but the active Platform Key is neither the current gjallarOS PK nor the firmware PKDefault.",
+			State:            StateInconsistent,
+			SetupMode:        false,
+			SecureBoot:       secureBoot,
+			Recorded:         true,
+			OwnerGUID:        keys.ownerGUID,
+			PKDefaultPresent: defaultPresent,
+			PKSHA256:         pkSHA,
+			Description:      "gjallarOS ownership metadata is valid, but the active Platform Key is neither the current gjallarOS PK nor the firmware PKDefault.",
 		}, nil
 	}
 
@@ -238,13 +279,27 @@ func Inspect(ctx context.Context) (inspection Inspection, err error) {
 		}
 		if defaultPresent && samePlatformKey(pk, pkDefault) {
 			return Inspection{
-				State:       StateOEMFactoryDerived,
-				SetupMode:   false,
-				SecureBoot:  secureBoot,
-				Recorded:    false,
-				Description: "The active Platform Key certificate matches the firmware PKDefault; KEK/db updates do not change OEM-root classification.",
+				State:            StateOEMFactoryDerived,
+				SetupMode:        false,
+				SecureBoot:       secureBoot,
+				Recorded:         false,
+				PKDefaultPresent: true,
+				PKSHA256:         pkSHA,
+				Description:      "The active Platform Key certificate matches the firmware PKDefault; KEK/db updates do not change OEM-root classification.",
 			}, nil
 		}
+		// Plane 388: no PKDefault efivar (older firmware, e.g. T480s), so the
+		// factory PK cannot be confirmed here; the caller decides between the
+		// y/N question (shim path) and ODDC factory-PK facts.
+		return Inspection{
+			State:            StateForeignManaged,
+			SetupMode:        false,
+			SecureBoot:       secureBoot,
+			Recorded:         recorded,
+			PKDefaultPresent: false,
+			PKSHA256:         pkSHA,
+			Description:      "The firmware exposes no PKDefault, so its Platform Key cannot be confirmed as the factory key; the active Secure Boot hierarchy is not the current gjallarOS key hierarchy.",
+		}, nil
 	}
 
 	return Inspection{
@@ -252,6 +307,7 @@ func Inspect(ctx context.Context) (inspection Inspection, err error) {
 		SetupMode:   false,
 		SecureBoot:  secureBoot,
 		Recorded:    recorded,
+		PKSHA256:    pkSHA,
 		Description: "The active Secure Boot hierarchy is neither the firmware default PK nor the current gjallarOS key hierarchy.",
 	}, nil
 }
@@ -358,6 +414,17 @@ func acceptBoot(inspection Inspection, viaShim bool) error {
 }
 
 func RecordOwnership(ctx context.Context, stage string) error {
+	return recordOwnership(ctx, stage, false)
+}
+
+// RecordOwnershipUnknownAccepted records a shim switch whose PK owner could
+// not be confirmed against PKDefault because the firmware does not expose it
+// and the user accepted the unknown owner (Plane 388).
+func RecordOwnershipUnknownAccepted(ctx context.Context, stage string) error {
+	return recordOwnership(ctx, stage, true)
+}
+
+func recordOwnership(ctx context.Context, stage string, unknownOwnerAccepted bool) error {
 	keys, ok, err := readLocalKeys(ctx)
 	if err != nil {
 		return err
@@ -367,14 +434,15 @@ func RecordOwnership(ctx context.Context, stage string) error {
 	}
 
 	rec := ownershipRecord{
-		Schema:         1,
-		Manager:        "gjallarOS",
-		Stage:          stage,
-		SbctlOwnerGUID: keys.ownerGUID,
-		PKSHA256:       keys.pkHash,
-		KEKSHA256:      keys.kekHash,
-		DbSHA256:       keys.dbHash,
-		UpdatedAt:      time.Now().UTC().Format(time.RFC3339),
+		Schema:               1,
+		Manager:              "gjallarOS",
+		Stage:                stage,
+		SbctlOwnerGUID:       keys.ownerGUID,
+		PKSHA256:             keys.pkHash,
+		KEKSHA256:            keys.kekHash,
+		DbSHA256:             keys.dbHash,
+		OwnerUnknownAccepted: unknownOwnerAccepted,
+		UpdatedAt:            time.Now().UTC().Format(time.RFC3339),
 	}
 
 	data, err := json.MarshalIndent(rec, "", "  ")

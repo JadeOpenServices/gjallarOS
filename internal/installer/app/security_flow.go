@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"strconv"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/config"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/diskcrypto"
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/oddc"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/prompt"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/secureboot"
 )
@@ -366,6 +368,39 @@ would not check the maker-signed shim.
   - gjallarOS's own keys need tested firmware steps for this model, which
     gjallarOS does not have yet.
 `
+
+// unknownPKOwnerQuestion is the Plane 388 question on the shim path when the
+// firmware exposes no PKDefault efivar, so its PK cannot be confirmed as the
+// factory key by comparison.
+const unknownPKOwnerQuestion = "This firmware does not say whether its Secure Boot owner key is the factory key (it exposes no PKDefault to compare against).\n" +
+	"gjallarOS would only add its own key to shim's MOK list and leave the firmware keys untouched; shim must already start this system.\n" +
+	"If this computer belongs to a company, or someone else set its keys, say no.\n" +
+	"Accept the unknown PK owner and install with Secure Boot through shim?"
+
+// plane388Classify runs the Plane 388 ownership classification on the shim
+// path before any disk work. It returns whether the ODDC model facts prove
+// the factory PK (factoryMatch) and whether the unknown PK owner was accepted
+// interactively (accepted). The answer comes only from this root-owned
+// installer flow — never from an answers file; unattended runs get no
+// answer, which is N.
+func plane388Classify(ctx context.Context, ui prompt.UI, out io.Writer, insp secureboot.Inspection, policy oddc.EffectiveSecureBootFirmwarePolicy, unattended bool) (accepted, factoryMatch bool, err error) {
+	factoryMatch = policy.Policy.MatchesFactoryPK(insp.PKSHA256, insp.PKDefaultPresent)
+	if insp.State != secureboot.StateForeignManaged || insp.PKDefaultPresent || factoryMatch {
+		return false, factoryMatch, nil
+	}
+	if unattended {
+		return false, false, errors.New("the firmware exposes no PKDefault, so its Platform Key cannot be confirmed as the factory key; the shim path needs an explicit yes to an unknown PK owner and this run is unattended; refusing before anything is written")
+	}
+	ok, err := ui.Confirm(ctx, unknownPKOwnerQuestion, false)
+	if err != nil {
+		return false, false, err
+	}
+	if !ok {
+		return false, false, errors.New("the firmware exposes no PKDefault, so its Platform Key cannot be confirmed as the factory key; refusing the shim path before anything is written")
+	}
+	fmt.Fprintln(out, "Recorded for this run: unknown PK owner accepted. The firmware keys are not touched; the gjallarOS key only goes into shim's MOK list.")
+	return true, false, nil
+}
 
 // askFirmwareLocked asks whether the firmware setup is locked, when the
 // firmware enforces Secure Boot outside Setup Mode and its setup may have a
