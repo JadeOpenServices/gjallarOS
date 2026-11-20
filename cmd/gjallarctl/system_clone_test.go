@@ -305,7 +305,10 @@ func TestSystemRebuildNamesMissingCheckout(t *testing.T) {
 func TestRootPATHSkipsPlantedGit(t *testing.T) {
 	plant := t.TempDir()
 	marker := filepath.Join(t.TempDir(), "ran")
-	if err := os.WriteFile(filepath.Join(plant, "git"), []byte("#!/bin/sh\ntouch "+marker+"\n"), 0o755); err != nil {
+	// printf is a shell builtin: the plant must not depend on PATH, which
+	// useRootPATH replaces with rootPATH — a path that does not exist inside
+	// a nix build, where touch would exit 127 and fail this test.
+	if err := os.WriteFile(filepath.Join(plant, "git"), []byte("#!/bin/sh\nprintf x > "+marker+"\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", plant+":"+os.Getenv("PATH"))
