@@ -148,7 +148,11 @@ names Hyprland, Noctalia, hyprctl, wvkbd, grim/slurp, wl-copy or monique
 | Monitor layouts (monique, submodule `pkgs/monique`, vard's repo) | `flake.nix`, `system/wm/hyprland/default.nix`, `user/wm/hyprland/default.nix` (monitors.lua), `rules.nix` (OSD rule), `.gitmodules`, `scripts/installation/install.sh`, `internal/installercheck/check.go`, installer tests (`flakesource`, `systemcheckout`), `scripts/testing/test-installer-bootstrap.py` | monique has Hyprland, niri and sway backends, no KWin. Either KDE's display settings (kscreen keeps a layout per set of connected screens) or a KWin backend in monique. Decision open. |
 | On-screen keyboard (wvkbd + our overlay: close key, swipe down, no key preview) | `pkgs/overlays/wvkbd.nix`, `user/wm/hyprland/touch.nix` (two user units, tablet mode, bezel gesture), Noctalia OSK button, greeter | KWin offers the virtual-keyboard protocol to no normal client (KDE bug 512996), so wvkbd cannot type on KWin. Plasma's own keyboard (plasma-keyboard, Plasma 6.6+) runs as KWin's input method and shows on text focus. Our overlay patches do not carry over; the no-key-preview rule (password privacy) must be checked on plasma-keyboard. |
 | Login screen OSK | `system/wm/common/wayland.nix` runs wvkbd inside noctalia-greeter on touch machines | tuigreet is a text greeter on a VT: no OSK. A touch-only device could not log in. Greeter choice is open again (see Decisions). |
-| GTK and Qt theming | `user/wm/shells/noctalia/gtk.nix` (adw-gtk3, CSS from semantic tokens), `qt.nix` (qtct + Kvantum "Noctalia", writes `Noctalia.colors`) | Lives inside the Noctalia folder, so it moves, not deleted. Qt: Plasma's own platform theme + generated colour scheme replaces qtct/Kvantum. GTK: adw-gtk3 + our CSS stays; KDE's GTK settings sync must not fight home-manager files. |
+| GTK and Qt theming | `user/wm/shells/noctalia/gtk.nix` (adw-gtk3, CSS from semantic tokens), `qt.nix` (qtct + Kvantum "Noctalia", writes `Noctalia.colors`) | Lives inside the Noctalia folder, so it moves, not deleted. Qt: Plasma's own platform theme + generated colour scheme replaces qtct/Kvantum. Stylix's NixOS Qt target already picks platform `kde` + Breeze when Plasma 6 is on; the Home Manager `qt.nix` `mkForce` of qtct/Kvantum goes, so no `QT_QPA_PLATFORMTHEME`/`QT_STYLE_OVERRIDE` session value overrides Plasma. GTK: adw-gtk3 + our CSS stays, written by Stylix at rebuild (one GTK writer, as today). KDE's GTK sync (kded `gtkconfig`) writes the same files Home Manager owns, so it is off and locked. VM: no qtct value in the session environment, Qt and GTK apps in the palette. |
+| Stylix KDE target | Not set today (`themes/lib/home.nix` turns other targets off) | Turns itself on with Plasma: puts a `kdeglobals` with an immutable colour scheme, look-and-feel and fonts into `XDG_CONFIG_DIRS` and runs `plasma-apply-lookandfeel` at every login and Home Manager switch. That would block the palette pick in System Settings and fight the colour watcher. `stylix.targets.kde.enable = false`; our own `kdeglobals` locks (guards table) are the only system copy. VM: picking a palette in System Settings sticks after logout. |
+| qt6ct stack | `pkgs/overlays/qt6ct-kde-integration.nix`, `pkgs/patches/qt6ct-kde-fixed-font-key.patch`, `tests/nix/qt6ct-kde-style.nix`, flake.nix qt6ct entries, `apps/dolphin/home.nix` (Darkly + `qt6ctSettings`), `themes/apps/dolphin/darkly.nix`, `themes/lib/semantic.nix` Kvantum roles, `pkgs/gjallar-settings` (Fusion palette from qt6ct) | All go with qtct. Dolphin and the settings app use the Plasma style and scheme. Darkly vs Breeze is one choice at CP-W5 (one style for all Qt apps, not Dolphin only). The Nextcloud palette patch (`apps/nextcloud/patches/nextcloud-palette-theme.patch`, test `nextcloud-client-patches.nix`) is re-checked: QML windows must follow the Plasma palette, no white window with light text. |
+| Ghostty overlay | `pkgs/overlays/ghostty.nix`: touch cancel from a gesture left a button held (hyprgrass sent `wl_touch.cancel`); portal dialog scope app id | Both fixes stay (the scope id is compositor-neutral). VM: KWin touch gesture over Ghostty leaves no held button. |
+| Installer stick font size | `system/installer-media/stick.nix` imports `fontSize` from `themes/noctalia.nix` | The stick (cage + foot) does not use Hyprland, but CP-W8 deletes that file. The value moves to a neutral theme file in CP-W1; the stick build runs again after CP-W8. |
 | Live app themes | Noctalia templates for Ghostty (`user/apps/ghostty.nix`), VSCodium (`user/editors/vscodium/default.nix`), btop (`apps/btop/home.nix`), hyprlock colours | The colour watcher writes all of them, not only Ghostty. hyprlock goes. |
 | Clipboard paste-once (patched wl-copy, Hyprland paste binds) | `user/wm/hyprland/settings.nix`, `wl-copy-paste-once-keep-owner.patch` | KWin has no "send shortcut" step to hand the paste over. Klipper owns the clipboard and keeps a history by default. Paste-once needs a new design or is lost; Klipper history off either way. |
 | Primary selection off | `settings.nix` | KWin setting. |
@@ -183,7 +187,9 @@ wine, fan, ...) does not touch the compositor.
   log in again" offer needs a KWin output signal instead of socket2.
 - Palette: `internal/noctalia` → `internal/palette`, env
   `GJALLAR_NOCTALIA_COLORS` renamed (`system_rebuild.go`, `main.go`,
-  `palette.go`, `cmd/gjallar-settingsd`, and the root rebuild script in
+  `palette.go`, `cmd/gjallar-settingsd` (`bus.go` writes the rebuild env),
+  `themes/lib/common.nix` (Nix reads the value with `builtins.getEnv`),
+  and the root rebuild script in
   `system/tools/commands/default.nix`, which passes only this value
   through `env -i`). Root code: the rename gets the loophole pass, and the
   root side keeps re-checking the value (16 base16 values, size cap).
@@ -341,8 +347,9 @@ On KDE:
 
 1. Each palette in `themes/palettes/` is generated as a Plasma colour scheme
    at build time. You pick it in System Settings → Colours.
-2. KWin borders, Qt apps and Dolphin follow the scheme natively; GTK apps via
-   KDE's GTK sync. A small user service sees the colour change, writes the
+2. KWin borders, Qt apps and Dolphin follow the scheme natively; GTK apps
+   follow at the next rebuild through Stylix, as today (KDE's GTK sync
+   stays off, see the theming row). A small user service sees the colour change, writes the
    Ghostty theme through the same contrast guard and reloads Ghostty.
 3. Greeter: no live root step. tuigreet takes its colours from the system
    build, so a new palette reaches it with the next `gjallarctl rebuild`.
@@ -398,8 +405,8 @@ Each checkpoint: VM proof on e2e-fw13, exec-guard probes, regression list
    `graphical-session.target`; `internal/noctalia` → `internal/palette`;
    keybinds.json to a neutral path with a generated list for Super+F1;
    installer defaults (`app.go` `profileDefault`, `render.WMs`,
-   `config.go` `Theme`). Ships alone, so the big switch has fewer moving
-   parts.
+   `config.go` `Theme`); stick `fontSize` to a neutral theme file. Ships
+   alone, so the big switch has fewer moving parts.
 3. **CP-W2 KDE base session.** Plasma 6 module, greetd → startplasma-wayland,
    portal -kde, polkit-kde-agent, kscreenlocker with our PAM, KDE services
    off, privileged-access mapping, KWallet + kwallet-pam + secret move,
@@ -410,11 +417,19 @@ Each checkpoint: VM proof on e2e-fw13, exec-guard probes, regression list
 5. **CP-W4 Shell.** Panel layout, control-centre plasmoid, the 7 plugin
    widgets, OSK, notifications/OSD, battery toast dedupe.
 6. **CP-W5 Theme.** Palettes → Plasma schemes, colour watcher (Ghostty +
-   snapshot), greeter colours at rebuild, Plymouth unchanged.
+   snapshot), greeter colours at rebuild, Plymouth unchanged. Stylix KDE
+   target off, kded `gtkconfig` off and locked, Qt platform `kde`, one
+   widget style (Darkly or Breeze) for all Qt apps.
 7. **CP-W6 gjallarctl.** `rotate`, `render-gpu`, reload watch on KWin; zsh
    completion; resource-qos active window; session diagnostics.
 8. **CP-W7 Switch.** fw13 rebuilds onto KDE (Jade runs it). Full VM pass
-   first.
+   first, on a `REGRESSION.md` rewritten for KDE: each Hyprland/Noctalia
+   check (about 175 lines name them) gets its KDE check or is retired with
+   the reason. Just before the switch merges to dev: annotated tag
+   `hyprland-final` on the last Hyprland release commit (the newest `v*`
+   tag before the merge), pushed, then a repo ruleset on
+   `refs/tags/hyprland-final` that blocks update and delete with no bypass.
+   Tag only, no branch (Jade 2026-11-23).
 9. **CP-W8 Delete.** `pkgs/overlays/{hyprland,aquamarine,xdg-desktop-portal-hyprland}.nix`,
    the 4 Hyprland + xdph patches, `user/wm/hyprland/` (incl. hyprgrass and
    wl-copy patches), `user/wm/shells/noctalia/`, `pkgs/noctalia/` (24
@@ -424,9 +439,24 @@ Each checkpoint: VM proof on e2e-fw13, exec-guard probes, regression list
    `pkgs/patches/udiskie-mount-new-media-only.patch`,
    `tests/nix/udiskie-new-media-only.nix` (its cases live on in the
    automount test), `services.udiskie`, gnome-keyring in
-   `system/security/keyring.nix`.
+   `system/security/keyring.nix`. Also `system/wm/hyprland/`; in
+   `system/wm/common/wayland.nix` the noctalia-greeter parts (the pkexec
+   appearance helper, its polkit rule, greeter wvkbd);
+   `pkgs/overlays/wvkbd.nix` and the flake wvkbd entries; the qt6ct stack
+   (theming rows); `hyprlock`/`swaylock` `fprintAuth` in
+   `system/hardware/fingerprint.nix`. Comment sweep (no stale text): every
+   code comment that names Hyprland, Noctalia, hyprctl or qtct is rewritten
+   for KDE or removed (today in `luks_remind.go`, `security_notice.go`,
+   `usb.go`, `tabletswitch.go`, `system_timewatch.go`,
+   `internal/input/xkb`, `config.go`, `themes/lib/contrast.nix`,
+   `themes/lib/openjade-shape.css`, `system/maintenance/storage.nix`,
+   Nextcloud patch and source comments). Gate: `git grep -i -E
+   'hypr|noctalia|qt6ct|kvantum|wvkbd|udiskie'` outside this page and the
+   changelog finds nothing. Installer stick and ISO build again after the
+   delete.
 10. **CP-W9 Docs.** Public stance in docs (`docs/maintainers.md`
-    patched-packages list), README mentions, wiki.
+    patched-packages list), README, ROADMAP and
+    `scripts/installation/README.md` (wallpaper and dialog notes), wiki.
 
 ## Tickets (children of Plane 390)
 
@@ -441,7 +471,7 @@ Each checkpoint: VM proof on e2e-fw13, exec-guard probes, regression list
 - W9 (Plane 404) plugin widgets: disk protection, developer mode, VPN block, time, quick keys, OSK, weather city
 - W10 (Plane 405) theme: Plasma schemes, colour watcher, greeter at rebuild
 - W11 (Plane 406) gjallarctl rotate / render-gpu / reload watch + zsh + resource-qos + diagnostics
-- W12 (Plane 407) switch fw13
+- W12 (Plane 407) switch fw13 + REGRESSION.md for KDE + `hyprland-final` tag and ruleset
 - W13 (Plane 408) delete Hyprland/Noctalia
 - W14 (Plane 409) docs + public stance
 - Later (Plane 410): niri session (logged, not planned)
