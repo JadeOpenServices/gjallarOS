@@ -96,9 +96,11 @@ replaced, and nothing from the stick stays on the machine.
    "Verification failed" box once. Press Enter on OK, then press any key
    within 10 seconds to open the key screen (MokManager). If you miss
    it, start from the stick again. Pick Enroll hash from disk, then
-   EFIBOOT, `EFI/`, `BOOT/`, `grubx64.efi`, Continue, Yes and Reboot.
+   EFIBOOT and `gjallarOS-enroll.efi`, Continue, Yes and Reboot.
    The stick starts after that. The installer removes this entry again
-   at the end (see [Secure Boot](#secure-boot))
+   at the end. The full walk-through, also for machines whose firmware
+   setup you cannot open, is under
+   [Locked BIOS? No problem](#locked-bios-no-problem)
 5. The stick asks for the keyboard layout and checks the network: a
    cable connects by itself, Wi-Fi is picked from a list
 6. Pick Install gjallarOS and answer the questions. The installer asks
@@ -109,6 +111,68 @@ replaced, and nothing from the stick stays on the machine.
    even with the stick still in; take the stick out now. With Secure
    Boot on, the blue screen comes once more: follow the steps the
    installer showed, with the one-time password you chose there
+
+#### Locked BIOS? No problem
+
+A used laptop or one from work often has a firmware setup (BIOS) password
+nobody knows, with Secure Boot on and only Microsoft's keys. You can still
+install gjallarOS with Secure Boot on. You confirm two things on a blue key
+screen (MokManager), once on the first start from the stick and once after
+the install. You never need the firmware password and never turn Secure
+Boot off.
+
+You need:
+
+- the gjallarOS stick from step 1 above
+- a boot menu that still opens (often F12, F10 or Esc). If the password
+  also locks the boot menu, the machine cannot start from a stick; ask
+  whoever set the password
+- a keyboard: MokManager has no touch or mouse support
+
+First start from the stick:
+
+1. Start the machine from the stick through the boot menu
+2. A blue box says "Verification failed". Press Enter on OK
+3. The screen says "Press any key to perform MOK management". Press a key
+   within 10 seconds. If you miss it, the machine restarts; start from the
+   stick again
+4. Pick Enroll hash from disk
+5. Pick EFIBOOT (the stick), then `gjallarOS-enroll.efi`. It is the
+   stick's own start file; you trust this one file, nothing else
+6. Pick Continue, then Yes at "Enroll the key(s)?"
+7. Pick Reboot. The stick starts and shows its menu
+
+Install:
+
+8. Pick Install gjallarOS and answer the questions as usual. When it asks
+   whether the firmware setup (BIOS) is locked with a password you do not
+   know, answer `y`; it then installs through shim
+9. Some firmware does not keep a factory copy of its owner key (the
+   ThinkPad T480s, for example). Unless ODDC knows the model's factory
+   key, the installer asks: "Continue with the gjallarOS shim now?". `y`
+   goes on. `N` stops before anything is written; run the installer again
+   once ODDC knows the model
+10. At the end the installer asks for a one-time password and lists what
+    to pick on the blue screen after the restart. Write the list down
+
+After the install:
+
+11. Restart and take the stick out. The blue key screen comes once more:
+    pick Enroll MOK, View key 0, Continue, Yes, and type the one-time
+    password. Pick Delete MOK the same way if the installer listed it;
+    that removes the stick's entry from step 5. Then Reboot
+12. gjallarOS starts with Secure Boot on. If you missed the blue screen,
+    start the stick again and pick Queue the key again in its menu
+
+What this path does not have yet:
+
+- No recovery partition: starting recovery through shim is not tested yet.
+  Repairs start from the USB stick
+- An unattended install (preset answers, nobody at the keyboard) stops at
+  step 9 on such firmware until ODDC knows the model
+- The firmware keys stay as they are. `gjallarctl secure-boot setup
+  --own-keys` needs the firmware setup and an ODDC Secure Boot setup for
+  the model
 
 #### Release key fingerprint
 

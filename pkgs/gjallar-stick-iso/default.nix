@@ -30,12 +30,18 @@
 #   Under Secure Boot with only the Microsoft keys shim cannot verify the
 #   UKI and opens MokManager (mmx64.efi), where the user enrolls this
 #   UKI's hash. The installer removes that hash again after the install.
+#   A byte-identical copy sits at the ESP root as gjallarOS-enroll.efi (Plane
+#   388 follow-up): MokManager's "Enroll hash from disk" lists it first,
+#   so the user picks it without opening EFI/ and BOOT/. Same bytes, same
+#   hash, so it trusts nothing beyond grubx64.efi. Nothing boots or reads
+#   the copy.
 #   No fbx64.efi: fallback would write a boot entry for the stick into
 #   the machine's NVRAM.
 # Fixed dates, FAT serial and file order keep the build reproducible, same
 # as upstream's efiImg and make-iso9660-image.sh.
 let
   bootFile = "BOOT${lib.toUpper efiArch}.EFI";
+  enrollFile = "gjallarOS-enroll.efi";
   placeBoot =
     if shim == null then
       ''
@@ -47,6 +53,8 @@ let
         cp ${shim}/share/shim/shimx64.efi esp/EFI/BOOT/${bootFile}
         cp ${shim}/share/shim/mmx64.efi esp/EFI/BOOT/mmx64.efi
         cp ${uki} esp/EFI/BOOT/grubx64.efi
+        cp ${uki} esp/${enrollFile}
+        cmp esp/EFI/BOOT/grubx64.efi esp/${enrollFile}
       '';
 in
 runCommand isoName
@@ -68,7 +76,7 @@ runCommand isoName
       echo "fallback loader on the stick ESP" >&2
       exit 1
     fi
-    ls -l esp/EFI/BOOT
+    ls -l esp esp/EFI/BOOT
     find esp -exec touch --date=2000-01-01 {} +
 
     # Files rounded up to whole MiB, plus 10% for FAT, in whole MiB.
@@ -82,7 +90,7 @@ runCommand isoName
       for d in $(find EFI -type d | sort); do
         faketime "2000-01-01 00:00:00" mmd -i ../efi.img "::/$d"
       done
-      for f in $(find EFI -type f | sort); do
+      for f in $(find . -type f -printf '%P\n' | sort); do
         mcopy -pm -i ../efi.img "$f" "::/$f"
       done
     )
