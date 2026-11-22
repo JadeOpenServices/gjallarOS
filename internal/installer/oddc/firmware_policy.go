@@ -50,10 +50,6 @@ func ResolveSecureBootFirmwarePolicy(
 			resolved.Canonical.Resolved,
 			base+".factoryPKFingerprints",
 		),
-		PKDefaultAbsent: boolPath(
-			resolved.Canonical.Resolved,
-			base+".pkDefaultAbsent",
-		),
 		UnsupportedReason: stringPath(
 			resolved.Canonical.Resolved,
 			base+".unsupportedReason",
@@ -149,19 +145,6 @@ func stringListPath(
 			result = append(result, s)
 		}
 	}
-	return result
-}
-
-func boolPath(
-	root map[string]any,
-	path string,
-) bool {
-	value, ok := portable.Lookup(root, path)
-	if !ok {
-		return false
-	}
-
-	result, _ := value.(bool)
 	return result
 }
 

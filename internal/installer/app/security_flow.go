@@ -378,28 +378,43 @@ const unknownPKOwnerQuestion = "This firmware does not say whether its Secure Bo
 	"Accept the unknown PK owner and install with Secure Boot through shim?"
 
 // plane388Classify runs the Plane 388 ownership classification on the shim
-// path before any disk work. It returns whether the ODDC model facts prove
-// the factory PK (factoryMatch) and whether the unknown PK owner was accepted
-// interactively (accepted). The answer comes only from this root-owned
-// installer flow — never from an answers file; unattended runs get no
-// answer, which is N.
-func plane388Classify(ctx context.Context, ui prompt.UI, out io.Writer, insp secureboot.Inspection, policy oddc.EffectiveSecureBootFirmwarePolicy, unattended bool) (accepted, factoryMatch bool, err error) {
-	factoryMatch = policy.Policy.MatchesFactoryPK(insp.PKSHA256, insp.PKDefaultPresent)
-	if insp.State != secureboot.StateForeignManaged || insp.PKDefaultPresent || factoryMatch {
-		return false, factoryMatch, nil
+// path before any disk work. On firmware without a PKDefault efivar it
+// returns the facts PrepareShim checks later: the model's ODDC factory-PK
+// fingerprints when they name the active PK, otherwise the active PK as an
+// accepted unknown owner after an interactive yes. Every refusal comes here,
+// before anything is written. The answer comes only from this root-owned
+// installer flow, never from an answers file; unattended runs get no answer,
+// which is N.
+func plane388Classify(ctx context.Context, ui prompt.UI, out io.Writer, insp secureboot.Inspection, policy oddc.EffectiveSecureBootFirmwarePolicy, shimStarted, unattended bool) (secureboot.ShimOwnerFacts, error) {
+	if insp.State != secureboot.StateForeignManaged || insp.PKDefaultPresent {
+		return secureboot.ShimOwnerFacts{}, nil
+	}
+	const noDefault = "the firmware exposes no PKDefault, so its Platform Key cannot be confirmed as the factory key"
+	if insp.PKSHA256 == "" {
+		return secureboot.ShimOwnerFacts{}, errors.New(noDefault + ", and its Platform Key could not be read; refusing the shim path before anything is written")
+	}
+	if insp.SecureBoot && !shimStarted {
+		return secureboot.ShimOwnerFacts{}, errors.New(noDefault + "; Secure Boot is on, but this system does not boot through shim; refusing the shim path before anything is written")
+	}
+	if policy.Policy.MatchesFactoryPK(insp.PKSHA256, insp.PKDefaultPresent) {
+		fmt.Fprintln(out, "ODDC facts for this model name the active Platform Key as its factory key.")
+		return secureboot.ShimOwnerFacts{FactoryPKFingerprints: policy.Policy.FactoryPKFingerprints}, nil
+	}
+	if !insp.SecureBoot {
+		return secureboot.ShimOwnerFacts{}, errors.New(noDefault + "; with Secure Boot off, shim cannot show that the firmware trusts it; turn Secure Boot on, start the stick through shim and run this again")
 	}
 	if unattended {
-		return false, false, errors.New("the firmware exposes no PKDefault, so its Platform Key cannot be confirmed as the factory key; the shim path needs an explicit yes to an unknown PK owner and this run is unattended; refusing before anything is written")
+		return secureboot.ShimOwnerFacts{}, errors.New(noDefault + "; the shim path needs an explicit yes to an unknown PK owner and this run is unattended; refusing before anything is written")
 	}
 	ok, err := ui.Confirm(ctx, unknownPKOwnerQuestion, false)
 	if err != nil {
-		return false, false, err
+		return secureboot.ShimOwnerFacts{}, err
 	}
 	if !ok {
-		return false, false, errors.New("the firmware exposes no PKDefault, so its Platform Key cannot be confirmed as the factory key; refusing the shim path before anything is written")
+		return secureboot.ShimOwnerFacts{}, errors.New(noDefault + "; refusing the shim path before anything is written")
 	}
 	fmt.Fprintln(out, "Recorded for this run: unknown PK owner accepted. The firmware keys are not touched; the gjallarOS key only goes into shim's MOK list.")
-	return true, false, nil
+	return secureboot.ShimOwnerFacts{AcceptedUnknownPKSHA256: insp.PKSHA256}, nil
 }
 
 // askFirmwareLocked asks whether the firmware setup is locked, when the

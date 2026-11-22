@@ -87,11 +87,10 @@ type state struct {
 	secureBootFirmware       oddc.EffectiveSecureBootFirmwarePolicy
 	shimFacts                *secureboot.ShimFacts
 	// Plane 388: shim path on firmware without a PKDefault efivar — the
-	// ODDC model facts match the factory PK, or the unknown PK owner was
-	// accepted in this run's question phase (root flow only).
-	shimFactoryPKMatch       bool
-	shimUnknownOwnerAccepted bool
-	deviceGate               string
+	// ODDC factory-PK facts or the unknown PK owner accepted in this run's
+	// question phase (root flow only), each bound to the PK it was for.
+	shimOwner  secureboot.ShimOwnerFacts
+	deviceGate string
 	// oddcModel is the ODDC model id once resolved, "" when none matches.
 	oddcModel string
 	// oddcChecked is true once the ODDC lookup ran, so a report about an
@@ -336,7 +335,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 			// Plane 388 b: a failed run always leaves its error text and the
 			// redacted install log on the boot stick's GJLOGS partition,
 			// even when nobody is there to answer the report question.
-			saveFailureToBootStick(context.WithoutCancel(ctx), out, runLog, recorder.err, s.targetDisk)
+			saveFailureToBootStick(context.WithoutCancel(ctx), out, runLog, recorder.err, s.targetDisk, s.user)
 		}
 		if code == 1 && recorder.err != nil && reportAllowed(in, s.user) {
 			offerInstallReport(ctx, ui, out, reportInput{
@@ -1095,15 +1094,20 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 		if inspErr != nil {
 			return fail(errOut, fmt.Errorf("read Secure Boot ownership: %w", inspErr))
 		}
-		accepted, factoryMatch, err := plane388Classify(
-			ctx, ui, out, insp, s.secureBootFirmware,
+		started := false
+		if insp.SecureBoot {
+			if started, inspErr = secureboot.ShimStarted(); inspErr != nil {
+				return fail(errOut, fmt.Errorf("check whether shim started this system: %w", inspErr))
+			}
+		}
+		owner, err := plane388Classify(
+			ctx, ui, out, insp, s.secureBootFirmware, started,
 			s.user.UnattendedInstall || s.user.Management.Enable,
 		)
 		if err != nil {
 			return fail(errOut, err)
 		}
-		s.shimUnknownOwnerAccepted = accepted
-		s.shimFactoryPKMatch = factoryMatch
+		s.shimOwner = owner
 	}
 
 	// Asked only now: the recovery partition depends on the Secure Boot
@@ -1404,7 +1408,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 		if installedRoot != "/" {
 			return fail(errOut, errors.New("Secure Boot through shim installs only on the running system"))
 		}
-		if err := secureboot.PrepareShim(ctx, out, s.shimUnknownOwnerAccepted, s.shimFactoryPKMatch); err != nil {
+		if err := secureboot.PrepareShim(ctx, out, s.shimOwner); err != nil {
 			return fail(errOut, err)
 		}
 		if s.shimFacts == nil {

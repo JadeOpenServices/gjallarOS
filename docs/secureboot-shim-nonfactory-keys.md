@@ -39,9 +39,9 @@ gjallarOS page 720 "Security review (private)" item **L161**, code in
    Unattended/answers file: no answer = N. Own-keys path keeps the strict
    check, no question.
 2. **ODDC-known models skip the question** — when ODDC recognizes the model
-   and its security facts describe the factory PK (fingerprint list, or
-   "PKDefault absent on this firmware"), a matching PK counts as factory and
-   no question is shown. ODDC owns the facts (handoff to ODDC agent: field
+   and its security facts list the factory PK fingerprint, a matching PK
+   counts as factory and no question is shown (the "PKDefault absent" flag
+   was dropped in review, see below). ODDC owns the facts (handoff to ODDC agent: field
    name, format, T480s entry from this report). Unknown or mismatch → question 1.
 
 Also in the ticket:
@@ -56,26 +56,58 @@ Also in the ticket:
 - (d) Tests: no PKDefault + y, + N, + unattended; ODDC match/mismatch;
   own-keys still refuses.
 
+## Review fixes 2026-11-22
+
+Review of the first cut (c933ec8d, 34f259e4) found gaps; fixed:
+
+- **ODDC match only by fingerprint.** `pkDefaultAbsent` is dropped. A
+  model-wide "no PKDefault" flag says nothing about who set the PK, so a
+  company- or attacker-set PK on such a model would have skipped the
+  question. Only a listed factory PK fingerprint counts now.
+- **ODDC path recorded no PK binding.** After reboot `Inspect` saw a valid
+  record, no PKDefault and no binding → `StateInconsistent`, and
+  `ContinueShim` refused. Both the ODDC path and the y path now write
+  `firmwarePKSHA256` into the record; `Inspect` keeps the record pending
+  only while the active PK hashes to that value (`shimRecordBindsPK`).
+- **Accepted answer is bound to the PK.** The y answer carries the PK hash
+  it was given for (`ShimOwnerFacts.AcceptedUnknownPKSHA256`); `PrepareShim`
+  re-inspects and proceeds only if the PK is still that one. A PK swapped
+  between question and key step, or after install, is refused or makes the
+  record inconsistent.
+- **ODDC path checks shim too.** Secure Boot on + shim not started is
+  refused on both paths.
+- **Refusals before disk work.** `plane388Classify` now gets
+  `ShimStarted()` and refuses SB off (unknown owner), shim not started and an
+  unreadable PK before anything is written. `PrepareShim` repeats the checks.
+- **Stick error file redacted.** `saveFailureToBootStick` wrote the raw
+  error; it now uses `installreport.ErrorText` with this run's known values,
+  like the report.
+
+ODDC field: `vendor.policy.secureBoot.factoryPKFingerprints`, lowercase hex
+SHA-256 of the DER certificate in the PK signature list (the first entry).
+Handoff to the ODDC agent for the T480s entry.
+
 ## Code pointers
 
-- `internal/installer/secureboot/ownership.go` — `Inspect()` now reports
-  `PKDefaultPresent`/`PKSHA256`; record gains `ownerUnknownAccepted`
-  (`RecordOwnershipUnknownAccepted`)
+- `internal/installer/secureboot/ownership.go` — `Inspect()` reports
+  `PKDefaultPresent`/`PKSHA256`; record gains `firmwarePKSHA256` (the PK the
+  shim path was settled for) and `ownerUnknownAccepted` (audit);
+  `shimRecordBindsPK`
 - `internal/installer/secureboot/shimflow.go` — `PrepareShim(ctx, out,
-  unknownOwnerAccepted, factoryPKMatch)` + `shimForeignProceed`
-- `internal/installer/oddc/` — `factoryPKFingerprints` + `pkDefaultAbsent`
-  under `vendor.policy.secureBoot`, `MatchesFactoryPK`
+  ShimOwnerFacts)` + `shimForeignProceed`
+- `internal/installer/oddc/` — `factoryPKFingerprints` under
+  `vendor.policy.secureBoot`, `MatchesFactoryPK`
 - `internal/installer/app/security_flow.go` — `plane388Classify` +
   `unknownPKOwnerQuestion`; called from `app.go` after the Secure Boot
-  decision, before disk work; `PrepareShim` call passes both flags
+  decision, before disk work; returns the `ShimOwnerFacts` that `PrepareShim`
+  gets
 - `internal/installer/app/install_report.go` — `saveFailureToBootStick`
-  writes error text + redacted log to the stick's GJLOGS on any failure
+  writes the redacted error text + redacted log to the stick's GJLOGS on any
+  failure
 
-## Implementation status (2026-11-20)
+## Implementation status (2026-11-22)
 
-- Unit tests green: `shimflow_test.go`, `oddc/manifest_internal_test.go`,
-  `app/plane388_test.go`; `go build ./...`, `go test ./cmd/... ./internal/...`
-  pass. Plane 388 comment posted.
-- Open: e2e VM rerun (`vm.sh up … --secureboot --volatile-defaults` = no
-  PKDefault, T480s-like; answer y then N to the new question); ODDC agent adds
-  the T480s entry with `pkDefaultAbsent`/fingerprints.
+- Unit tests green: `secureboot/shimflow_test.go` (incl. PK binding),
+  `oddc/manifest_internal_test.go`, `app/plane388_test.go`.
+- Open: e2e VM rerun (OVMF without PKDefault, T480s-like; answer y then N);
+  ODDC agent adds the T480s fingerprint entry.

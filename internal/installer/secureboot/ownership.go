@@ -60,10 +60,13 @@ type ownershipRecord struct {
 	PKSHA256       string `json:"pkSha256"`
 	KEKSHA256      string `json:"kekSha256"`
 	DbSHA256       string `json:"dbSha256"`
-	// OwnerUnknownAccepted is set when the user accepted an unknown PK
-	// owner on the shim path (Plane 388): the firmware exposes no
-	// PKDefault, so its factory PK could not be confirmed, and shim+MOK
-	// never changes PK/KEK/db anyway.
+	// FirmwarePKSHA256 is set when the shim path was prepared on firmware
+	// without a PKDefault efivar (Plane 388): the sum of the firmware PK
+	// certificate it was settled for. The pending record only stays valid
+	// while that exact PK is active.
+	FirmwarePKSHA256 string `json:"firmwarePKSHA256,omitempty"`
+	// OwnerUnknownAccepted says that PK was an unknown owner the user
+	// accepted, not one named by ODDC factory-PK facts.
 	OwnerUnknownAccepted bool   `json:"ownerUnknownAccepted,omitempty"`
 	UpdatedAt            string `json:"updatedAt"`
 }
@@ -241,9 +244,9 @@ func Inspect(ctx context.Context) (inspection Inspection, err error) {
 		}
 
 		// Plane 388: firmware without a PKDefault efivar cannot confirm a
-		// factory PK by comparison; an accepted unknown owner keeps the
-		// pending record valid for the shim path.
-		if !defaultPresent && record.OwnerUnknownAccepted {
+		// factory PK by comparison; the record names the PK the shim path
+		// was settled for, and only that PK keeps it pending.
+		if shimRecordBindsPK(record, defaultPresent, pkSHA) {
 			return Inspection{
 				State:            StatePendingEnrollment,
 				SetupMode:        false,
@@ -252,7 +255,7 @@ func Inspect(ctx context.Context) (inspection Inspection, err error) {
 				OwnerGUID:        keys.ownerGUID,
 				PKDefaultPresent: false,
 				PKSHA256:         pkSHA,
-				Description:      "gjallarOS keys are prepared and recorded; the firmware exposes no PKDefault and the unknown PK owner was accepted (Plane 388).",
+				Description:      "gjallarOS keys are prepared and recorded for shim; the firmware exposes no PKDefault and its Platform Key is the one the shim path was settled for.",
 			}, nil
 		}
 
@@ -414,17 +417,12 @@ func acceptBoot(inspection Inspection, viaShim bool) error {
 }
 
 func RecordOwnership(ctx context.Context, stage string) error {
-	return recordOwnership(ctx, stage, false)
+	return recordOwnership(ctx, stage, "", false)
 }
 
-// RecordOwnershipUnknownAccepted records a shim switch whose PK owner could
-// not be confirmed against PKDefault because the firmware does not expose it
-// and the user accepted the unknown owner (Plane 388).
-func RecordOwnershipUnknownAccepted(ctx context.Context, stage string) error {
-	return recordOwnership(ctx, stage, true)
-}
-
-func recordOwnership(ctx context.Context, stage string, unknownOwnerAccepted bool) error {
+// recordOwnership writes the ownership record. firmwarePKSHA256 is set only
+// by the shim path on firmware without a PKDefault efivar (Plane 388).
+func recordOwnership(ctx context.Context, stage, firmwarePKSHA256 string, unknownOwnerAccepted bool) error {
 	keys, ok, err := readLocalKeys(ctx)
 	if err != nil {
 		return err
@@ -441,6 +439,7 @@ func recordOwnership(ctx context.Context, stage string, unknownOwnerAccepted boo
 		PKSHA256:             keys.pkHash,
 		KEKSHA256:            keys.kekHash,
 		DbSHA256:             keys.dbHash,
+		FirmwarePKSHA256:     firmwarePKSHA256,
 		OwnerUnknownAccepted: unknownOwnerAccepted,
 		UpdatedAt:            time.Now().UTC().Format(time.RFC3339),
 	}
@@ -460,6 +459,14 @@ func recordOwnership(ctx context.Context, stage string, unknownOwnerAccepted boo
 	}
 
 	return nil
+}
+
+// shimRecordBindsPK reports whether a valid pending record keeps the shim
+// path pending on firmware without a PKDefault efivar (Plane 388): only the
+// exact PK the record was written for counts, so a PK changed after the
+// install question makes the record inconsistent.
+func shimRecordBindsPK(record ownershipRecord, pkDefaultPresent bool, pkSHA256 string) bool {
+	return !pkDefaultPresent && pkSHA256 != "" && record.FirmwarePKSHA256 == pkSHA256
 }
 
 func readOwnership(ctx context.Context) (ownershipRecord, bool, error) {

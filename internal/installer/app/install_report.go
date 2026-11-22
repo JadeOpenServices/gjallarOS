@@ -36,7 +36,7 @@ func recordFailure(out io.Writer, err error) {
 // the GJLOGS partition of the stick this run booted from, without asking
 // (Plane 388 b: the T480s stick carried only the ODDC report, no error text).
 // Best effort: a warning is printed, the failure itself stands either way.
-func saveFailureToBootStick(ctx context.Context, out io.Writer, runLog *logKeeper, runErr error, targetDisk string) {
+func saveFailureToBootStick(ctx context.Context, out io.Writer, runLog *logKeeper, runErr error, targetDisk string, user config.User) {
 	drives, err := listSaveDrives(ctx, targetDisk)
 	if err != nil {
 		fmt.Fprintf(out, "WARNING: failure not saved to the stick: no drive list: %v\n", err)
@@ -58,7 +58,9 @@ func saveFailureToBootStick(ctx context.Context, out io.Writer, runLog *logKeepe
 	now := time.Now()
 	files := []savedFile{{
 		name: "gjallaros-error-" + now.UTC().Format("20060102-150405") + ".txt",
-		data: []byte("ERROR: " + runErr.Error() + "\n"),
+		// Redacted like the report's error line: no user, host or other
+		// known values of this machine land on the stick.
+		data: []byte("ERROR: " + installreport.ErrorText(runErr.Error(), knownValues(user)) + "\n"),
 	}}
 	if logData, err := runLog.export(); err != nil {
 		fmt.Fprintf(out, "WARNING: install log not saved to the stick: %v\n", err)

@@ -59,11 +59,8 @@ type SecureBootFirmwarePolicy struct {
 	UnsupportedReason       string   `json:"unsupportedReason,omitempty"`
 	// Plane 388: factory-PK facts for firmware that does not expose a
 	// PKDefault efivar (e.g. ThinkPad T480s). FactoryPKFingerprints holds
-	// lowercase hex SHA-256 sums of accepted factory PK certificates;
-	// PKDefaultAbsent says this model's firmware never exposes PKDefault,
-	// so an unconfirmed PK on it still counts as factory.
+	// lowercase hex SHA-256 sums of this model's factory PK certificates.
 	FactoryPKFingerprints []string `json:"factoryPKFingerprints,omitempty"`
-	PKDefaultAbsent       bool     `json:"pkDefaultAbsent,omitempty"`
 }
 
 func validateSecureBootFirmwarePolicy(policy SecureBootFirmwarePolicy) error {
@@ -87,8 +84,7 @@ func validateSecureBootFirmwarePolicy(policy SecureBootFirmwarePolicy) error {
 			len(policy.Untouched) != 0 ||
 			strings.TrimSpace(policy.FactoryOwnershipProof) != "" ||
 			len(policy.Instructions) != 0 ||
-			len(policy.FactoryPKFingerprints) != 0 ||
-			policy.PKDefaultAbsent {
+			len(policy.FactoryPKFingerprints) != 0 {
 			return fmt.Errorf(
 				"unsupported policy cannot contain operational Secure Boot fields",
 			)
@@ -210,17 +206,12 @@ func validateSecureBootFirmwarePolicy(policy SecureBootFirmwarePolicy) error {
 	return nil
 }
 
-// MatchesFactoryPK reports whether this model's factory-PK facts prove the
-// active PK (given as the lowercase hex SHA-256 of its certificate) is the
-// factory one even though the firmware exposes no PKDefault efivar
-// (Plane 388, e.g. ThinkPad T480s): either the fingerprint list names it, or
-// the model's firmware never exposes PKDefault.
+// MatchesFactoryPK reports whether this model's ODDC facts name the active
+// PK (the lowercase hex SHA-256 of its certificate) as a factory PK, on
+// firmware that exposes no PKDefault efivar to compare against (Plane 388,
+// e.g. ThinkPad T480s). Only a listed fingerprint counts: a model flag alone
+// would pass any PK, a company-set one too.
 func (p SecureBootFirmwarePolicy) MatchesFactoryPK(pkSHA256 string, pkDefaultPresent bool) bool {
-	if !p.Supported || pkDefaultPresent {
-		return false
-	}
-	if slices.Contains(p.FactoryPKFingerprints, pkSHA256) {
-		return true
-	}
-	return p.PKDefaultAbsent
+	return p.Supported && !pkDefaultPresent && pkSHA256 != "" &&
+		slices.Contains(p.FactoryPKFingerprints, pkSHA256)
 }

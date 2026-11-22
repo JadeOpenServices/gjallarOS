@@ -2,26 +2,24 @@ package oddc
 
 import "testing"
 
-// Plane 388: factory-PK facts let a model's policy prove the active PK is
-// the factory one when the firmware exposes no PKDefault efivar.
+// Plane 388: factory-PK fingerprints let a model's policy prove the active
+// PK is the factory one when the firmware exposes no PKDefault efivar. Only
+// a listed fingerprint counts.
 func TestMatchesFactoryPK(t *testing.T) {
 	fp := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-	policy := SecureBootFirmwarePolicy{
-		Supported:             true,
-		FactoryPKFingerprints: []string{fp},
-		PKDefaultAbsent:       true,
-	}
+	policy := SecureBootFirmwarePolicy{Supported: true, FactoryPKFingerprints: []string{fp}}
 	for _, tc := range []struct {
-		name     string
-		policy   SecureBootFirmwarePolicy
-		pkSHA    string
-		pkDef    bool
-		want     bool
+		name   string
+		policy SecureBootFirmwarePolicy
+		pkSHA  string
+		pkDef  bool
+		want   bool
 	}{
 		{"fingerprint match", policy, fp, false, true},
-		{"fingerprint mismatch, pkDefaultAbsent", policy, "bb", false, true},
+		{"fingerprint mismatch", policy, "bb", false, false},
+		{"empty PK never matches", policy, "", false, false},
 		{"pkDefault present never matches", policy, fp, true, false},
-		{"unsupported policy never matches", SecureBootFirmwarePolicy{Supported: false, PKDefaultAbsent: true}, fp, false, false},
+		{"unsupported policy never matches", SecureBootFirmwarePolicy{FactoryPKFingerprints: []string{fp}}, fp, false, false},
 		{"no facts no match", SecureBootFirmwarePolicy{Supported: true}, fp, false, false},
 	} {
 		if got := tc.policy.MatchesFactoryPK(tc.pkSHA, tc.pkDef); got != tc.want {
@@ -43,7 +41,6 @@ func TestValidateSecureBootFirmwarePolicyFactoryPKFacts(t *testing.T) {
 
 	ok := base
 	ok.FactoryPKFingerprints = []string{fp}
-	ok.PKDefaultAbsent = true
 	if err := validateSecureBootFirmwarePolicy(ok); err != nil {
 		t.Errorf("valid factory-PK facts rejected: %v", err)
 	}
@@ -61,12 +58,12 @@ func TestValidateSecureBootFirmwarePolicyFactoryPKFacts(t *testing.T) {
 	}
 
 	unsup := SecureBootFirmwarePolicy{
-		Supported:         false,
-		SetupModeStrategy: "unsupported",
-		UnsupportedReason: "none",
-		PKDefaultAbsent:   true,
+		Supported:             false,
+		SetupModeStrategy:     "unsupported",
+		UnsupportedReason:     "none",
+		FactoryPKFingerprints: []string{fp},
 	}
 	if err := validateSecureBootFirmwarePolicy(unsup); err == nil {
-		t.Error("unsupported policy with pkDefaultAbsent accepted")
+		t.Error("unsupported policy with factory fingerprints accepted")
 	}
 }

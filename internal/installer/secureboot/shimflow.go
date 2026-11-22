@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"slices"
 	"strings"
 	"syscall"
 
@@ -40,22 +41,47 @@ const ContinuationReboot Continuation = "reboot"
 // both would hand out the same key set for different firmware changes.
 var errShimPending = errors.New("a switch to shim is pending; finish it with gjallarctl secure-boot setup")
 
+// ShimOwnerFacts is what the installer settled before any disk work about
+// a firmware that exposes no PKDefault efivar (Plane 388, e.g. ThinkPad
+// T480s), so its Platform Key cannot be confirmed as the factory key by
+// comparison. Both facts name the PK they were settled for; PrepareShim
+// checks them against the PK it reads itself, so a PK that changed in
+// between counts as unknown again.
+type ShimOwnerFacts struct {
+	// FactoryPKFingerprints are the ODDC factory-PK certificate sums for
+	// this model (lowercase hex SHA-256).
+	FactoryPKFingerprints []string
+	// AcceptedUnknownPKSHA256 is the PK certificate sum the user accepted
+	// as an unknown owner in this run; empty when nobody accepted one.
+	AcceptedUnknownPKSHA256 string
+}
+
 // shimForeignProceed decides whether the shim path may proceed on a
-// foreign-managed inspection (Plane 388): either the model's ODDC facts
-// match the factory PK (fingerprints, or PKDefault absent on that firmware),
-// or the user accepted the unknown PK owner and shim actually starts this
-// system with Secure Boot on — shim+MOK never changes PK/KEK/db.
-func shimForeignProceed(insp Inspection, factoryPKMatch, unknownOwnerAccepted, shimStarted bool) (bool, string) {
+// foreign-managed inspection (Plane 388). Only firmware without a PKDefault
+// efivar qualifies. The active PK must be named by the model's ODDC
+// factory-PK fingerprints, or be the exact PK the user accepted as an
+// unknown owner. With Secure Boot on, shim must already start this system,
+// as on the factory path; the unknown-owner answer also needs Secure Boot on,
+// since a running shim is what shows the firmware trusts it. shim+MOK never
+// changes PK/KEK/db. unknownAccepted says which of the two let it proceed.
+func shimForeignProceed(insp Inspection, facts ShimOwnerFacts, shimStarted bool) (proceed, unknownAccepted bool, reason string) {
+	const refused = "the firmware holds keys that are neither its factory keys nor gjallarOS keys; refusing to change Secure Boot"
 	if insp.State != StateForeignManaged {
-		return false, ""
+		return false, false, ""
 	}
-	if factoryPKMatch && !insp.PKDefaultPresent {
-		return true, "ODDC facts for this model match the factory Platform Key"
+	if insp.PKDefaultPresent || insp.PKSHA256 == "" {
+		return false, false, refused
 	}
-	if unknownOwnerAccepted && !insp.PKDefaultPresent && insp.SecureBoot && shimStarted {
-		return true, "the unknown PK owner was accepted; shim starts this system and the firmware keys are not touched"
+	if insp.SecureBoot && !shimStarted {
+		return false, false, "Secure Boot is on, but this system does not boot through shim yet; turn Secure Boot off in the firmware setup and run this again"
 	}
-	return false, "the firmware holds keys that are neither its factory keys nor gjallarOS keys; refusing to change Secure Boot"
+	if slices.Contains(facts.FactoryPKFingerprints, insp.PKSHA256) {
+		return true, false, "ODDC facts for this model name the active Platform Key as its factory key"
+	}
+	if facts.AcceptedUnknownPKSHA256 == insp.PKSHA256 && insp.SecureBoot {
+		return true, true, "the unknown PK owner was accepted; shim starts this system and the firmware keys are not touched"
+	}
+	return false, false, refused
 }
 
 // PrepareShim creates the gjallarOS keys on a machine with its factory keys
@@ -64,7 +90,7 @@ func shimForeignProceed(insp Inspection, factoryPKMatch, unknownOwnerAccepted, s
 // 388 answer (root installer flow only, never an answers file); factoryPKMatch
 // says the ODDC model facts prove the active PK is the factory one although
 // no PKDefault efivar exists.
-func PrepareShim(ctx context.Context, out io.Writer, unknownOwnerAccepted, factoryPKMatch bool) error {
+func PrepareShim(ctx context.Context, out io.Writer, owner ShimOwnerFacts) error {
 	inspection, err := Inspect(ctx)
 	if err != nil {
 		return fmt.Errorf("inspect existing Secure Boot ownership: %w", err)
@@ -116,17 +142,14 @@ func PrepareShim(ctx context.Context, out io.Writer, unknownOwnerAccepted, facto
 		return errors.New("the firmware is in Setup Mode; set up gjallarOS firmware keys with gjallarctl secure-boot setup --own-keys")
 
 	case StateForeignManaged:
-		proceed := false
-		reason := ""
+		started := false
 		if inspection.SecureBoot {
-			started, err := ShimStarted()
+			started, err = ShimStarted()
 			if err != nil {
 				return err
 			}
-			proceed, reason = shimForeignProceed(inspection, factoryPKMatch, unknownOwnerAccepted, started)
-		} else {
-			proceed, reason = shimForeignProceed(inspection, factoryPKMatch, unknownOwnerAccepted, false)
 		}
+		proceed, unknownAccepted, reason := shimForeignProceed(inspection, owner, started)
 		if !proceed {
 			return errors.New(reason)
 		}
@@ -136,10 +159,7 @@ func PrepareShim(ctx context.Context, out io.Writer, unknownOwnerAccepted, facto
 			return err
 		}
 		recovery.Passphrase = ""
-		if unknownOwnerAccepted && !factoryPKMatch {
-			return RecordOwnershipUnknownAccepted(ctx, StagePendingMOK)
-		}
-		return RecordOwnership(ctx, StagePendingMOK)
+		return recordOwnership(ctx, StagePendingMOK, inspection.PKSHA256, unknownAccepted)
 
 	case StateInconsistent:
 		return errors.New("gjallarOS Secure Boot ownership metadata does not match the current key material; refusing to continue")
