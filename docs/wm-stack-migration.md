@@ -72,6 +72,17 @@ time and shared-config needs**, not by that chain.
 11. All day-1 features block the switch (2026-11-20 answer 5 stands):
     rotation, render GPU, greeter OSK/Plymouth wiring, disk-protection
     notice, desktop OSK.
+12. **Displays: kscreen** (Jade 2026-11-22). monique goes; KDE's own
+    display settings and saved layouts replace it.
+13. **Rotation: KWin auto-rotate, ODDC decides per model** (Jade
+    2026-11-22). `gjallarctl rotate` only calls KWin's output setting.
+14. **Clipboard: Klipper off, paste-once built for KDE** (Jade 2026-11-22),
+    shipped from the store. No history, nothing on disk.
+15. **Greeter: open again.** tuigreet has no on-screen keyboard. greetd +
+    a KWin greeter vs Plasma Login Manager is compared on e2e-fw13 before
+    the build (Jade 2026-11-22): root parts each adds, whether PLM's
+    settings helper can be switched off, on-screen keyboard, Plymouth
+    handover, fingerprint. Jade picks with the results.
 
 ## What Noctalia and Hyprland do today, and where each part goes
 
