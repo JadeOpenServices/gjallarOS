@@ -140,6 +140,11 @@ The first version of this fix read the list from
 
 - Unit tests green: `secureboot/shimflow_test.go` (incl. PK binding),
   `oddc/ownership_test.go`, `app/plane388_test.go`.
-- Open: e2e VM rerun (OVMF without PKDefault, T480s-like; answer y then N);
-  ODDC data for the T480s (waits on the T480s PK read), then the ODDC pin
-  bump.
+- e2e VM run 2026-11-22 (OVMF without PKDefault, T480s-like):
+  - y: PASS. Question before disk work, shim + MOK install, Secure Boot boot
+    chain shim -> systemd-boot -> lanzastub, TPM2+PIN unlock.
+  - N: PASS. Stop with "stopped before anything was written", target disk
+    has no partition table or signature afterwards.
+- Open: failure save to GJLOGS on a maker stick (a dd'ed ISO has no GJLOGS;
+  the save returns silently when no stick drive is found); ODDC data for
+  the T480s (waits on the T480s PK read), then the ODDC pin bump.
