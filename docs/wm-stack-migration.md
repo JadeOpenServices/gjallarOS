@@ -244,12 +244,28 @@ private review page; attack detail stays there.
 | Compositor plugins only from the store (Hyprland plugin rule) | KWin loads scripts and effects from the user data dir; scripts can also be loaded over D-Bus | Research first; user-dir scripts/effects off or limited | VM probe |
 | XWayland apps see no keys of other windows | Default passes modifier combos to every X11 app; one layout bug leaked all keys ([bug 500032](https://www.mail-archive.com/kde-bugs-dist@kde.org/msg1026249.html)) | `XwaylandEavesdrops=None`, mouse off, immutable | VM: X11 key reader sees nothing |
 | Lock asks for the password at once | `LockGrace` 5 s unlock without password ([kcfg](https://github.com/KDE/kscreenlocker/blob/master/settings/kscreenlockersettings.kcfg)); grace path also breaks later locks ([bug 528681](http://www.mail-archive.com/kde-bugs-dist@kde.org/msg1231117.html)) | `LockGrace=0`, `LockOnResume=true`, autolock on, immutable | VM: lock, wait 1 s, no unlock without password |
-| Lid and `loginctl lock` lock (logind, `power-keys.nix`) | kscreenlocker follows logind Lock | keep | VM |
+| Lid, power key and clamshell follow the installer answer (`power-keys.nix` writes `/run/systemd/logind.conf.d/50-gjallar-power.conf`) | PowerDevil takes logind's lid and power-key inhibitors and applies its own per-user settings, so our logind file stops applying | PowerDevil config generated from the same answer, system-side and immutable; lock before sleep on | VM: lid close on battery, AC and docked; power key; clamshell with external screen |
+| `loginctl lock` and resume lock | kscreenlocker follows logind Lock | keep; `LockOnResume` immutable (row above) | VM |
+| Idle lock (no idle daemon today, lid and key only) | kscreenlocker autolock with user-set timeout | Autolock on, timeout and lock-on-resume immutable | VM: idle past timeout locks |
+| Security, USB, Thunderbolt and media notices always show (`internal/notice`) | Plasma "Do Not Disturb", also switched on by itself while a screen is mirrored, hides normal notices | Security notices sent with urgency critical (shown through DND); DND-on-mirror off and immutable | VM: DND on, plug USB, notice shows |
+| Lock-screen PAM: password, nullok off (`local-hardening.nix`), finger only where we allow it (`fingerprint.nix`) | nixpkgs `kde` PAM service has `allowNullPassword = true`; finger on a separate `kde-fingerprint` service | `kde.allowNullPassword = mkForce false` like greetd/login; finger moves from hyprlock/swaylock to `kde-fingerprint` only; `polkit-1`, `kde` and the greeter stay without finger | VM: empty-password user cannot unlock; `pam.d/kde` has no `nullok` |
+| Time zone change needs admin (polkit default) | nixpkgs `plasma6.nix` allows `set-timezone` for any active user when a time zone is set, and we set one | Our polkit rule ahead of it: `auth_admin` for set-timezone | VM: `timedatectl set-timezone` as user asks for admin |
+| No capability wrappers for desktop tools | nixpkgs adds wrappers: `kwin_wayland` cap_sys_nice, `ksystemstats_intel_helper` cap_perfmon, `ksgrd_network_helper` cap_net_raw | Remove the two system-monitor wrappers; KWin must drop its capability after start | VM: `/run/wrappers` list, `CapEff` of kwin_wayland is 0 |
+| pkexec refused for users (`local-hardening.nix`); root menu goes through our helper (Q253) | `kio-admin` (a required Plasma package) opens any file as root from Dolphin behind one password, the same reason pkexec is refused | polkit NO for the kio-admin action unless root | VM: Dolphin "Open as administrator" refused |
+| Removable media: udiskie mounts only what is there at plug-in (`udiskie.nix` patch), foreign file systems read-only (`foreign-media-readonly.nix`), "Allow writing" notice | KDE device automounter in kded can mount on its own | One automounter only: KDE automount off and immutable, udiskie + our patch stay; read-only defaults and the notice carry over unchanged | VM: stick writer creates a partition, nothing mounts it |
+| No Bluetooth file receive | Bluedevil ships OBEX receive (openobex, obexftp) | OBEX receive off, immutable | VM: OBEX push refused |
+| Wi-Fi/VPN secrets system-side; Noctalia's secret agent answers only NetworkManager (`network-secret-agent.patch`) | plasma-nm secret agent stores secrets per user in KWallet | Research whether the plasma-nm agent checks the caller; patch if not; secrets stay system-owned | VM: secret request from a non-NM client gets nothing |
+| Shell and lock screen run only store code (Noctalia from the store, plugin rule) | plasmashell and the lock screen load widgets, wallpaper plugins, look-and-feel packages and KRunner runners from the user data dir | Research; user-dir QML packages for shell and lock off or limited; lock screen look only from the store | VM probe (private review page) |
+| Global shortcuts only from our keybinds | kglobalacceld lets session clients register global shortcuts | Research; limit to known clients if possible | VM probe |
+| Screen share asks every time ("Allow once" does not carry over, `hyprland-permission-client-destroy.patch`) | xdg-desktop-portal-kde can keep restore tokens in the permission store | Restore tokens off; only `-kde` portal (gtk and kwallet portals decided) | VM: share, close, reopen asks again |
+| Hyprland permission rules live in the user's Home Manager config | KWin grants (row 1) | System-side seal, stronger than today | VM |
+| No background push service | `kunifiedpush` (required package) | Off, immutable; listed under network calls | VM network log |
+| Firefox native hosts are only the ones we ship | `plasma6.nix` adds `plasma-browser-integration` as a Firefox native host even when the package is excluded | `nativeMessagingHosts.packages` without it (mkForce) | VM: Firefox native host list |
+| Firmware updates only through our dbx/fwupd flow (PCR and shim aware) | Discover offers fwupd firmware updates; `services.fwupd.enable` pulls it in by itself | `environment.plasma6.excludePackages` drops Discover; fwupd polkit defaults checked (CLI path exists today too) | `which plasma-discover` empty |
 | Lock OSK only without a real keyboard, no key preview (`lock-osk.patch`, wvkbd `--no-popup`) | plasma-keyboard at the lock screen | Same rule on plasma-keyboard; key preview off | VM with and without USB keyboard |
 | Wi-Fi password and Bluetooth pairing requests never take keyboard focus (Noctalia patches) | plasma-nm and Bluedevil open dialogs | Check focus behaviour; patch or notification-only if they steal focus | VM: pairing request while typing |
 | polkit prompts from Noctalia's agent | polkit-kde-agent | Shows the requesting program and action; no auto-fill | VM |
 | No root helpers from the desktop besides our own (greeter sync goes) | Many KAuth root helpers (System Settings pages, info centre, disks, login manager, Discover). SUSE found root bugs in some ([KDE6 review](https://security.opensuse.org/2024/04/02/kde6-dbus-polkit.html), [plasma-login-manager CVE-2026-25710](https://security.opensuse.org/2026/04/27/plasma-login-manager.html), smb4k CVE-2025-66002/66003) | Only helpers we need; each gets the root loophole pass; polkit `auth_admin` for all KAuth actions; smb4k never | Inventory of `/run/current-system/sw/share/dbus-1/system-services` before/after; planted-link tests where a helper takes paths |
-| Firmware updates only through our dbx/fwupd flow (PCR and shim aware) | Discover offers fwupd firmware updates | Discover not installed | `which plasma-discover` empty |
 | Nothing runs code from an online store | Global themes, widgets and KNewStuff downloads run code ([KDE warning 2024](https://www.bleepingcomputer.com/news/linux/kde-advises-extreme-caution-after-theme-wipes-linux-users-files/)) | Kiosk `ghns=false`, "Get New" buttons gone; our look ships from the store path | VM |
 | Paste-once clipboard, no history, no primary selection | Klipper keeps history and writes it to disk; clipboard actions can run commands | Klipper off or history 0, not saved, actions off; paste-once redesign | VM: copy secret, log out, no trace in `~/.local/share` |
 | No file index | Baloo indexes names and contents; on Nextcloud online-only files a read downloads them | Baloo off | VM: no index dir, no VFS hydration |
@@ -322,9 +338,10 @@ switch.
   updates (Nix owns updates), Plasma browser integration, kwallet
   auto-unlock decision (Firefox and Passbolt use their own stores). Each one
   that stays gets a reason in this page.
-- **Lock.** kscreenlocker PAM must match today: fingerprint step, USB
-  keyboard gate, PIN rules. Test: lock cannot be bypassed by VT switch or by
-  killing plasmashell (KWin keeps the lock).
+- **Lock.** kscreenlocker PAM must match today: password on `kde` without
+  nullok, finger only on `kde-fingerprint`, USB keyboard gate, PIN rules.
+  Test: lock cannot be bypassed by VT switch or by killing plasmashell
+  (KWin keeps the lock).
 - **Polkit agent.** polkit-kde-agent replaces Noctalia's agent; root menu
   and helpers (Q253) still work without sudo.
 - **Greeter.** greetd + tuigreet keeps the uaccess, Plymouth hand-over, OSK
@@ -400,6 +417,39 @@ Each checkpoint: VM proof on e2e-fw13, exec-guard probes, regression list
   order, USB keyboard gate.
 - KWin privileged-interface grants: where they come from and that the
   user session cannot add one (private review page).
+- PowerDevil: which config keys hold lid, power key, docked and
+  lock-before-sleep; whether Kiosk `[$i]` holds them.
+- plasma-nm / NetworkManagerQt secret agent: does it check who asks.
+- plasmashell and kscreenlocker: can user-dir QML packages, KRunner D-Bus
+  runners and look-and-feel lock screens be turned off for good.
+- kglobalacceld: who may register shortcuts.
+- Capability wrappers: how to drop the two system-monitor wrappers (the
+  wrappers module has no enable switch); does KWin drop cap_sys_nice.
+- xdg-desktop-portal-kde: restore tokens, and whether the gtk FileChooser
+  portal stays.
+- KCMs that start root helpers, named one by one: date/time (set-time stays
+  `auth_admin_keep` as today), Plymouth, partition manager (kpmcore),
+  print-manager, Thunderbolt (bolt rule covers it).
+
+## Behaviour carried from our patches
+
+Each one gets a KDE check before CP-W7; where KWin or Plasma already does
+it, we note that and drop the patch.
+
+- Hyprland: focus back to the right window after unlock; floating windows
+  open on screen; touchpad axis direction; no stale cursor after hotplug;
+  shortcuts sent unshifted (paste-once).
+- Noctalia: battery notice dedupe; lock OSK only without a real keyboard;
+  settings per release (rollback must not break on newer KDE config
+  versions); notification actions stay internal; app name "GjallarOS" on
+  our notices.
+- Time bar plugin reads `/run/user/UID/gjallar/time` (`system_timewatch.go`);
+  its plasmoid reads the same file. Same for the other 6 plugin widgets (W9).
+
+## Limits on KDE
+
+- pkexec stays refused for users. KDE features that call pkexec do not
+  work, by design. README and wiki get this line when the switch ships.
 - KWin `wp_security_context_v1`: what a sandboxed client loses (Wine).
 - KWin privileged-interface restriction: how it is configured, what it
   covers compared with Hyprland's permissions.
