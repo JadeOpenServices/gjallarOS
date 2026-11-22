@@ -113,7 +113,10 @@ Both paths sit at the top level of the resolved device data
 - Catalog only: a project or host overlay can override keyed paths, so the
   installer reads the ownership entry only when every path under both
   entries comes from the ODDC catalog. An overlay that touches them makes
-  the entry count as absent (loophole 163).
+  the entry count as absent (loophole 163). The pinned ODDC does not block
+  overlay overrides of any path today, security findings included; ODDC-129
+  (under ODDC-128) plans that guard but is not built. Until it lands, this
+  catalog-only check is the only protection.
 
 The first version of this fix read the list from
 `vendor.policy.secureBoot.factoryPKFingerprints`; that reader is gone.

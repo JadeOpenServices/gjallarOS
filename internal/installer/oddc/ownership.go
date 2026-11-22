@@ -74,9 +74,10 @@ func ResolveSecureBootOwnership(resolved Resolved) SecureBootOwnership {
 		return SecureBootOwnership{Note: "ODDC Secure Boot ownership entry ignored: " + fmt.Sprintf(format, args...)}
 	}
 	// Loophole 163: a project or host overlay may override any keyed path,
-	// and the pinned ODDC guards only security findings against that. An
-	// ownership claim raises trust, so it counts only straight from the
-	// catalog.
+	// and the pinned ODDC does not stop that for any path, security findings
+	// included (ODDC-129 plans the guard; not built). An ownership claim
+	// raises trust, so it counts only straight from the catalog. This check
+	// is the only guard until ODDC-129 lands.
 	if source, ok := nonCatalogSource(resolved, ownershipPolicyPath, factoryPKFingerprintsPath); ok {
 		return absent("set by %q, not by the ODDC catalog", source)
 	}
