@@ -233,6 +233,12 @@ rotate service. About 40 patches we carry today, none planned for KDE.
 - Login screen: depends on the greeter decision.
 - Monitor tool: depends on the monique decision.
 - First login writes fresh KDE config files.
+- Workspaces: KWin's virtual desktops span every screen; today each screen
+  has its own 1-10 (decision, see Feel).
+- Animations use KWin's effects and speed setting; our own Hyprland curves
+  do not carry over.
+- Scratchpad (Super+S) needs our own KWin script; KWin has no special
+  workspace.
 
 ### Breaks unless we build it
 
@@ -259,6 +265,46 @@ rotate service. About 40 patches we carry today, none planned for KDE.
 - Fingerprint and USB keyboard gate in kscreenlocker.
 - Exec-guard probes and the regression list after the switch.
 - Any new root code gets the root loophole pass.
+
+## Feel: same look and hand, or better (pass 3, 2026-11-23)
+
+Every look and input setting gjallarOS sets today, from
+`user/wm/hyprland/settings.nix`, `keybinds.json`, `rules.nix` and
+`themes/lib/common.nix`, with its KDE home. CP-W7 compares both sessions side
+by side in the VM (screenshots, a short screen recording of window open,
+close and desktop switch, login-to-desktop time) against `hyprland-final`.
+A row that cannot match is listed under "Changes you will see" or "Limits".
+
+| Today | Value today | On KDE | Check |
+|---|---|---|---|
+| Gaps between windows / to the screen edge | 8 px / 16 px (`gaps_in`, `gaps_out`) | Krohnkite tile gap 8, screen gaps 16 | VM screenshot |
+| Window border | 2 px, palette colour (`border_size`) | Palette colour through the colour scheme; Krohnkite tiles without title bars, so the border comes from the decoration (Darkly vs Breeze at CP-W5) | VM screenshot |
+| Rounded corners, shadow | per theme (`themeDetails.rounding`, `.shadow`, range 20, offset 2,2) | Decoration rounding and shadow set from the same theme values; full-window rounding beyond the title bar needs a KWin effect built from source (research; none rather than another source build without a reason) | VM screenshot |
+| Blur behind panels and pop-ups | on, 3 passes, size 10, noise 0.02 | KWin Blur effect, strength and noise from the same values | VM screenshot |
+| Window and workspace animations | slide with our own curves; scratchpad slides vertical; border fade | KWin Slide for desktops, Scale or Glide for windows, one speed factor; own curves not possible | VM recording |
+| Scratchpad | Super+S show/hide, Super+Shift+S move; rest of the screen dimmed to 0.5 (`dim_special`) | No KWin equivalent. Our own small KWin script shipped in the store (never from the user dir, see the KWin scripts seal) plus the Dim Inactive effect (decision) | VM: keys, dim, script loads only from the store |
+| Pseudo tile | Super+P keeps the window size inside its tile | Krohnkite float-in-place or none (research) | VM |
+| Workspaces | 1-10 per screen (`focusworkspaceoncurrentmonitor`) | KWin desktops span all screens; switching changes every screen (decision) | VM with two screens |
+| Cursor hides when idle | after 5 s (`cursor.inactive_timeout`) | KWin hide-cursor effect if the pinned KWin has it (research), else a limit | VM |
+| Tearing for games | allowed when the app asks (`allow_tearing`) | KWin allows tearing for full-screen apps that ask (tearing-control); check the default in the pinned KWin | VM with a test client |
+| Resize from the window edge | on, drag threshold 10 | KWin resize area on borderless tiles, Meta+right-drag (research) | VM |
+| Focus follows mouse | on (`follow_mouse`) | kwinrc `FocusPolicy=FocusFollowsMouse`, click raises | VM |
+| Touchpad | natural scroll on | KWin libinput settings are per device in `kcminputrc`; research a default for every touchpad | VM |
+| Layout switch | Alt+Shift (`grp:alt_shift_toggle`), layout from the installer | `kxkbrc` same option, layout from the installer | VM |
+| Pen tablet | absolute (`relative_input = false`) | KWin default absolute; screen mapping through ODDC where known | ODDC device check |
+| Touchpad desktop swipe | 3 fingers sideways when `touchpadWorkspaceSwipe` is on; cancel ratio 0.15, distance 200, carries on past the last desktop | KWin built-in swipe: finger count and tuning are fixed by KWin; check whether it can be turned off for the setting | VM |
+| Window opacity | per theme (`details.opacity`); terminals opaque | KWin window rules from the same values | VM screenshot |
+| Cursor, icons, fonts | phinger-cursors-light 32 (`themes/lib/common.nix:50`), Papirus, Fira Sans/Code, emoji font | Same theme through `kcminputrc` and the colour/font settings (CP-W5); Breeze cursor only as nixpkgs fallback (`plasma6.nix:292`) | VM screenshot |
+| Sounds | none | Plasma plays event sounds (ocean theme, a required package) | Off by default, the user may turn them on (taste, not security) |
+| Splash after login | none; the bar appears | ksplash off | VM: login-to-desktop time, measured on both sessions |
+| Launcher | Noctalia launcher, apps | KRunner apps + calculator; network runners off (security table) | VM |
+| Area screenshot | Super+Shift+Z and Print | Spectacle region mode on the same keys, same save folder | VM |
+| Floating terminal, window rules | `rules.nix` | KWin window rules, generated | VM |
+
+Can be better than today (proposals, decided at CP-W3 and CP-W5):
+Overview with search (Meta+W), window thumbnails in Alt+Tab, Night Light on
+a time schedule (no location service), KWin per-screen scaling and HDR,
+screen-edge actions.
 
 ## Security on KDE: same level, sealed (Jade 2026-11-22)
 
@@ -303,7 +349,7 @@ private review page; attack detail stays there.
 | Paste-once clipboard, no history, no primary selection | Klipper keeps history and writes it to disk; clipboard actions can run commands | Klipper off or history 0, not saved, actions off; paste-once redesign | VM: copy secret, log out, no trace in `~/.local/share` |
 | No file index | Baloo indexes names and contents; on Nextcloud online-only files a read downloads them | Baloo off | VM: no index dir, no VFS hydration |
 | No "recent files" database | Activity manager records opened files | Off, immutable | VM |
-| Coredumps / crash reports stay local | DrKonqi crash reporting, KUserFeedback | Not installed / off | VM |
+| Coredumps / crash reports stay local | DrKonqi crash reporting, KUserFeedback; `plasma6.nix:288-289` also hooks DrKonqi's processor into every `systemd-coredump` run, and `excludePackages` does not remove that | Not installed / off; `drkonqi-coredump-processor@` `wantedBy = mkForce [ ]` | VM: crash a test program, no DrKonqi unit runs |
 | No phone link, no remote desktop | KDE Connect (opens LAN ports), KRdp | Not installed | port scan in VM |
 | Secrets in gnome-keyring (`system/security/keyring.nix`) | kwalletd and kwallet-pam, also a Secret Service provider | One provider only: KWallet (decision 16), gnome-keyring removed; kwallet-pam loophole pass (L178); Wi-Fi/VPN secrets stay system-side as today | VM: kwalletd owns `org.freedesktop.secrets`; `secret-tool` lookup works; nothing else claims the name; planted link in the wallet folder before login is refused |
 | Network calls only from apps the user opens | Weather, picture of the day, Welcome Center, KNewStuff fetches | Not installed or off | VM with network log |
@@ -312,6 +358,22 @@ private review page; attack detail stays there.
 | Wine sandbox: no display without security context | KWin supports `wp_security_context_v1` | keep fail-closed | VM: sandboxed app gets no capture/input/clipboard of others |
 | USB keyboard gate (usbguard, `removable-media.nix`) | compositor-independent | keep | regression list |
 | Links open only through `gjallar-open-url` (exact host routes, unknown schemes refused) | KIO falls back to kdeglobals `BrowserApplication` when no scheme handler is set; that entry may name any command | `BrowserApplication` = our handler's desktop file, immutable in `/etc/xdg/kdeglobals`; `mimeapps.list` stays a read-only link | VM: entry cannot be changed from the session, links still routed |
+| No account service as root | `plasma6.nix:268-270` turns on accounts-daemon (root) and turns its `PrivateTmp` off so it can read an account picture that System Settings puts in `/tmp` | Off unless the greeter decision needs it; if kept, `PrivateTmp` stays on and the root loophole pass runs (L180) | VM: service absent, or `PrivateTmp=yes` |
+| No location service (Firefox `geo.provider.use_geoclue` off) | `plasma6.nix:277` turns on geoclue2 | `mkForce false`; Night Light runs on times; the weather city stays our own question | VM: no geoclue on the bus, network log |
+| No accessibility bus, no speech daemon | `plasma6.nix:304` turns on Orca, which turns on at-spi2-core and speechd (`orca.nix:24-25`); the AT-SPI bus lets clients read other apps' text | `mkForce false` for all three; accessibility later as an opt-in with its own pass (decision) | VM: no `org.a11y.Bus` |
+| No mail or calendar database | `plasma6.nix:264` turns on kde-pim (Akonadi) | `mkForce false`; Thunderbird stays | VM process list |
+| SSH asks for passphrases in the terminal | `plasma6.nix:265` sets ksshaskpass as askpass; it can keep passphrases in KWallet | decision: ksshaskpass without saving, or unset as today | VM: `ssh-add` behaviour |
+| Session start: today Hyprland reads its config from the user's home (`HYPRLAND_CONFIG`, `system/wm/hyprland/default.nix:48,66`) | Plasma's session start also reads files from the home folder before KWin starts | Same class of gap on both; KDE must close it, not carry it. Research and seal on the private review page (L181) | VM probe (private) |
+| No desktop autostart (Hyprland runs none; Nextcloud's entry is removed, `apps/nextcloud/home.nix:473,632`) | Plasma starts every entry in `/etc/xdg/autostart` and `~/.config/autostart` | System entries inventoried, unwanted ones hidden system-side; user entries part of L181 | VM: started programs equal the list we ship |
+| Only our OSK gets the input-method protocol | kwinrc `[Wayland] InputMethod` names the program KWin starts as input method | Set to plasma-keyboard from the store, immutable | VM: entry cannot be changed from the session |
+| No remote control, no input capture | xdg-desktop-portal-kde offers RemoteDesktop and InputCapture (input injection through libei) | Both off for the KDE portal, or asked every time with nothing saved (research what the pinned portal allows) | VM: portal call refused |
+| Lock screen shows nothing of the session | kscreenlocker shows media controls; notifications can show on the lock screen | Media controls off, notification text hidden while locked, immutable | VM |
+| Launcher makes no network calls | KRunner runners for web shortcuts, dictionary and others go online while typing | Network runners off, immutable | VM network log while typing |
+| No previews of files on remote folders (Dolphin `EnableRemoteFolderThumbnail=false`, `MaximumRemoteSize=0`) | KDE thumbnailers treat a mounted stick as local and parse its files | Keep today's settings; previews on removable media off unless the VM shows they stay sandboxed (research) | VM: stick with test files, no thumbnailer runs |
+| No listening ports from the desktop | ksmserver, KDE Connect, KRdp, file sharing | Generalises the KDE Connect row: nothing new listens after login | VM: `ss -lntup` before and after login equal, port scan |
+| No vault tool, no online accounts | Plasma Vault (FUSE), KAccounts | Not installed | `which` empty |
+| Root from the desktop only through sudo as set (`local-hardening.nix`) | kdesu | follows the sudo policy, keeps no root session | VM |
+| USB devices pass usbguard first | `plasma6.nix:282-284` adds libmtp and media-player-info udev rules | usbguard still decides first; MTP only after allow | VM: blocked phone stays blocked |
 
 Checked in the coverage pass (2026-11-23) and needing no change: OOM
 handling (only nix-daemon and the AI service get a penalty; no session
@@ -319,6 +381,11 @@ process is protected today, so KWin and plasmashell need nothing new),
 night light, HDR, VRR and screen power-off (gjallarOS sets none of them
 today; Plasma's own defaults are new features, not a parity gap), Qt and
 GTK theming (rows above, CP-W5).
+
+Checked in pass 3 (2026-11-23), no change: pinentry-qt (`plasma6.nix:263`,
+same as today), power-profiles-daemon, udisks2 and upower (used today),
+xdg-user-dirs, kde-inotify-survey and kwrited (local only), the
+`nixos-rebuild-sycoca` user cache service.
 
 ### Root code added by the switch
 
@@ -411,21 +478,28 @@ Each checkpoint: VM proof on e2e-fw13, exec-guard probes, regression list
    portal -kde, polkit-kde-agent, kscreenlocker with our PAM, KDE services
    off, privileged-access mapping, KWallet + kwallet-pam + secret move,
    PowerDevil locked config, `gjallarctl media automount` + its VM test.
-   Loophole pass.
+   `plasma6.nix` defaults forced off (accounts-daemon, geoclue2,
+   Orca/AT-SPI/speechd, kde-pim, DrKonqi coredump hook), autostart
+   inventory, `InputMethod` lock, portal RemoteDesktop/InputCapture off,
+   L180/L181 seals. Loophole pass.
 4. **CP-W3 Keys and tiling.** keybinds.json → KWin + Krohnkite, window
-   rules, touch gestures, Super+F1.
+   rules, touch gestures, Super+F1. Input rows of the Feel table, workspace
+   model, scratchpad script from the store.
 5. **CP-W4 Shell.** Panel layout, control-centre plasmoid, the 7 plugin
    widgets, OSK, notifications/OSD, battery toast dedupe.
 6. **CP-W5 Theme.** Palettes → Plasma schemes, colour watcher (Ghostty +
    snapshot), greeter colours at rebuild, Plymouth unchanged. Stylix KDE
    target off, kded `gtkconfig` off and locked, Qt platform `kde`, one
-   widget style (Darkly or Breeze) for all Qt apps.
+   widget style (Darkly or Breeze) for all Qt apps. Look rows of the Feel
+   table (gaps, border, rounding, blur, animations, opacity, cursor,
+   sounds, splash).
 7. **CP-W6 gjallarctl.** `rotate`, `render-gpu`, reload watch on KWin; zsh
    completion; resource-qos active window; session diagnostics.
 8. **CP-W7 Switch.** fw13 rebuilds onto KDE (Jade runs it). Full VM pass
    first, on a `REGRESSION.md` rewritten for KDE: each Hyprland/Noctalia
    check (about 175 lines name them) gets its KDE check or is retired with
-   the reason. Just before the switch merges to dev: annotated tag
+   the reason. Feel comparison against `hyprland-final` (screenshots,
+   recording, login time). Just before the switch merges to dev: annotated tag
    `hyprland-final` on the last Hyprland release commit (the newest `v*`
    tag before the merge), pushed, then a repo ruleset on
    `refs/tags/hyprland-final` that blocks update and delete with no bypass.
@@ -503,6 +577,13 @@ Each checkpoint: VM proof on e2e-fw13, exec-guard probes, regression list
   runs without printing a secret. Today `passwd` re-encrypts the login
   keyring with the new password (`keyring.nix`); check whether kwallet-pam
   does the same, otherwise the wallet stays on the old password.
+- Pass 3: hide-cursor effect in the pinned KWin; Krohnkite gaps and pseudo
+  tile; tearing default; a touchpad default for every device and the
+  KWin swipe finger count; resize area on borderless tiles; whether the
+  greeter needs accounts-daemon; RemoteDesktop/InputCapture switches in
+  the pinned portal; KRunner runners that go online; lock-screen
+  notification text; thumbnailers on removable media; session start
+  files (private review page, L181).
 - KCMs that start root helpers, named one by one: date/time (set-time stays
   `auth_admin_keep` as today), Plymouth, partition manager (kpmcore),
   print-manager, Thunderbolt (bolt rule covers it).
@@ -532,6 +613,8 @@ it, we note that and drop the patch.
 - Touchscreen gestures on KWin compared with hyprgrass.
 - Writing KDE config: plasma-manager (extra flake input) vs generated files.
 - Plasma panel: floating, gap and corner settings reachable from config.
+- Own animation curves (Hyprland beziers) do not carry over.
+- Accessibility (screen reader) stays off until its opt-in is built.
 
 ## History: niri plan of 2026-11-20 (superseded)
 
