@@ -155,6 +155,10 @@ names Hyprland, Noctalia, hyprctl, wvkbd, grim/slurp, wl-copy or monique
 | Wine sandbox display | `internal/winesandbox/wayland.go` needs `wp_security_context_v1`, fails closed without it | KWin has it (6.8 tested by others). VM proof that a sandboxed Wine app gets no screen capture, input or clipboard snooping. |
 | Fingerprint at lock | `system/hardware/fingerprint.nix` (hyprlock, swaylock) | kscreenlocker PAM (`kde` service + fingerprint). |
 | Window rules by title | Nextcloud dialogs (`apps/nextcloud/home.nix` calls `hyprctl dispatch`), USB and security notices, Firefox extension pop-ups (title changes after map, Plane 188), monique OSD | KWin window rules; title-change case may need a KWin script. |
+| Nextcloud login window | `apps/nextcloud/home.nix`: `hyprctl activeworkspace` picks the workspace, `hyprctl dispatch` starts the login browser there, `window_rule` floats, centres and sizes class `gjallar-nextcloud-login` (`user/browsers/login.nix` recipe sets the class) and lets the client take focus | KWin opens new windows on the current desktop, so the workspace lookup and dispatch go; float, centre, size and focus become KWin rules on the same window class. The `HYPRLAND_INSTANCE_SIGNATURE` branches are deleted, not kept as a fallback. VM: login window opens centred on the current desktop. |
+| Links from apps (`user/url-handler.nix`) | `gjallar-open-url` routes exact https hosts to their app, other http(s) and `file://` to the browser, refuses every other scheme; `mimeapps.list` points `x-scheme-handler/http(s)` at it, `$BROWSER` too | KIO (`OpenUrlJob`, also behind `kde-open` and `xdg-open` on Plasma) asks `x-scheme-handler/https` first, so our handler keeps winning. Default Applications in System Settings writes `mimeapps.list` only when the file is writable; ours is a read-only Home Manager link, so the page cannot change it (same as today). KIO's last fallback, kdeglobals `[General] BrowserApplication`, gets our handler and is locked (guards table). VM: https link from Dolphin and from a KDE notification goes through `gjallar-open-url`, a routed host opens its app. |
+| Volume, brightness, mic and media keys | `keybinds.json` sends the XF86 keys to Noctalia IPC; volume and brightness step 5 (ODDC 26.2: held keys repeat about 7 times a second) | plasma-pa and PowerDevil own the XF86 keys on Plasma and show their own OSD. The generator leaves XF86 keys out of the KWin shortcuts, so one key press never fires twice; the Super+Alt combos map to the plasma-pa and media actions. `plasmaparc [General] VolumeStep` is set from the same step (upstream default 5). Brightness step comes from PowerDevil (config locked, decision 17). VM: one press = one step, held key behaves like today. |
+| Boot console prompts | `installer-resume.nix` and `measured-boot.nix` quit Plymouth, `chvt 1` and prompt on tty1; `console-lockdown.nix` keeps every other VT off | Unchanged with greetd on VT1. If the greeter comparison (decision 15) picks Plasma Login Manager, it must start on VT1 after these units, or the prompts end up on a VT nobody sees. VM: installer resume and TPM setup prompt visible with the chosen greeter. |
 | Settings app colours | `pkgs/gjallar-settings/gjallar_settings.py` reads `Noctalia.colors` | Reads the Plasma colour scheme, or drops its own palette code since Qt apps get it natively. |
 | Dolphin app menu fix | `apps/dolphin/home.nix` (no applications menu in a Hyprland session) | Not needed on Plasma; delete. |
 | Bar shields | `apps/tailscale/home.nix`, `system/security/disk-unlock.nix` (+ session target) | Plasmoids (W9). |
@@ -179,7 +183,10 @@ wine, fan, ...) does not touch the compositor.
   log in again" offer needs a KWin output signal instead of socket2.
 - Palette: `internal/noctalia` → `internal/palette`, env
   `GJALLAR_NOCTALIA_COLORS` renamed (`system_rebuild.go`, `main.go`,
-  `cmd/gjallar-settingsd`).
+  `palette.go`, `cmd/gjallar-settingsd`, and the root rebuild script in
+  `system/tools/commands/default.nix`, which passes only this value
+  through `env -i`). Root code: the rename gets the loophole pass, and the
+  root side keeps re-checking the value (16 base16 values, size cap).
 - zsh completion `pkgs/gjallarctl/_gjallarctl`, usage text.
 - Behaviour behind comments that must still hold: notice windows float on
   top (`usb.go`, `security_notice.go`), tablet switch reload
@@ -298,6 +305,14 @@ private review page; attack detail stays there.
 | Security notices, disk-unlock shield, build-source, VPN, USB and Thunderbolt units start with the desktop | They wait for `hyprland-session.target` (10 files) and would never start | Move to `graphical-session.target` | VM: each unit active after login |
 | Wine sandbox: no display without security context | KWin supports `wp_security_context_v1` | keep fail-closed | VM: sandboxed app gets no capture/input/clipboard of others |
 | USB keyboard gate (usbguard, `removable-media.nix`) | compositor-independent | keep | regression list |
+| Links open only through `gjallar-open-url` (exact host routes, unknown schemes refused) | KIO falls back to kdeglobals `BrowserApplication` when no scheme handler is set; that entry may name any command | `BrowserApplication` = our handler's desktop file, immutable in `/etc/xdg/kdeglobals`; `mimeapps.list` stays a read-only link | VM: entry cannot be changed from the session, links still routed |
+
+Checked in the coverage pass (2026-11-23) and needing no change: OOM
+handling (only nix-daemon and the AI service get a penalty; no session
+process is protected today, so KWin and plasmashell need nothing new),
+night light, HDR, VRR and screen power-off (gjallarOS sets none of them
+today; Plasma's own defaults are new features, not a parity gap), Qt and
+GTK theming (rows above, CP-W5).
 
 ### Root code added by the switch
 
