@@ -85,6 +85,7 @@ type state struct {
 	recoverySigningKey       string
 	recoverySigningPublicKey string
 	secureBootFirmware       oddc.EffectiveSecureBootFirmwarePolicy
+	secureBootOwnership      oddc.SecureBootOwnership
 	shimFacts                *secureboot.ShimFacts
 	// Plane 388: shim path on firmware without a PKDefault efivar — the
 	// ODDC factory-PK facts or the unknown PK owner accepted in this run's
@@ -704,6 +705,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 	}
 	s.deviceGate = deviceGate(resolvedDevice, pinnedRelease, sourceRevision)
 
+	s.secureBootOwnership = oddc.ResolveSecureBootOwnership(resolvedDevice)
 	s.secureBootFirmware, err = oddc.ResolveSecureBootFirmwarePolicy(resolvedDevice)
 	if err != nil {
 		return fail(errOut, fmt.Errorf(
@@ -1101,7 +1103,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 			}
 		}
 		owner, err := plane388Classify(
-			ctx, ui, out, insp, s.secureBootFirmware, started,
+			ctx, ui, out, insp, s.secureBootOwnership, started,
 			s.user.UnattendedInstall || s.user.Management.Enable,
 		)
 		if err != nil {

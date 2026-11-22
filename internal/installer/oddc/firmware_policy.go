@@ -46,10 +46,6 @@ func ResolveSecureBootFirmwarePolicy(
 			resolved.Canonical.Resolved,
 			base+".factoryOwnershipProof",
 		),
-		FactoryPKFingerprints: stringListPath(
-			resolved.Canonical.Resolved,
-			base+".factoryPKFingerprints",
-		),
 		UnsupportedReason: stringPath(
 			resolved.Canonical.Resolved,
 			base+".unsupportedReason",
@@ -122,29 +118,6 @@ func stringPath(
 	}
 
 	result, _ := value.(string)
-	return result
-}
-
-func stringListPath(
-	root map[string]any,
-	path string,
-) []string {
-	value, ok := portable.Lookup(root, path)
-	if !ok {
-		return nil
-	}
-
-	items, ok := value.([]any)
-	if !ok {
-		return nil
-	}
-
-	result := make([]string, 0, len(items))
-	for _, item := range items {
-		if s, ok := item.(string); ok {
-			result = append(result, s)
-		}
-	}
 	return result
 }
 

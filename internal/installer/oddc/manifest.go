@@ -2,7 +2,6 @@ package oddc
 
 import (
 	"fmt"
-	"slices"
 	"strings"
 )
 
@@ -57,10 +56,6 @@ type SecureBootFirmwarePolicy struct {
 	FactoryOwnershipProof   string   `json:"factoryOwnershipProof,omitempty"`
 	Instructions            []string `json:"instructions,omitempty"`
 	UnsupportedReason       string   `json:"unsupportedReason,omitempty"`
-	// Plane 388: factory-PK facts for firmware that does not expose a
-	// PKDefault efivar (e.g. ThinkPad T480s). FactoryPKFingerprints holds
-	// lowercase hex SHA-256 sums of this model's factory PK certificates.
-	FactoryPKFingerprints []string `json:"factoryPKFingerprints,omitempty"`
 }
 
 func validateSecureBootFirmwarePolicy(policy SecureBootFirmwarePolicy) error {
@@ -83,8 +78,7 @@ func validateSecureBootFirmwarePolicy(policy SecureBootFirmwarePolicy) error {
 			len(policy.PreserveFirmwareBuiltin) != 0 ||
 			len(policy.Untouched) != 0 ||
 			strings.TrimSpace(policy.FactoryOwnershipProof) != "" ||
-			len(policy.Instructions) != 0 ||
-			len(policy.FactoryPKFingerprints) != 0 {
+			len(policy.Instructions) != 0 {
 			return fmt.Errorf(
 				"unsupported policy cannot contain operational Secure Boot fields",
 			)
@@ -122,22 +116,6 @@ func validateSecureBootFirmwarePolicy(policy SecureBootFirmwarePolicy) error {
 			"invalid factoryOwnershipProof %q",
 			policy.FactoryOwnershipProof,
 		)
-	}
-
-	// Plane 388: factory-PK facts must be usable — fingerprints are
-	// lowercase hex SHA-256 sums of certificates.
-	seenFingerprints := map[string]bool{}
-	for _, fp := range policy.FactoryPKFingerprints {
-		if len(fp) != 64 || strings.TrimRight(fp, "0123456789abcdef") != "" {
-			return fmt.Errorf(
-				"factoryPKFingerprints entry %q is not a lowercase hex SHA-256 sum",
-				fp,
-			)
-		}
-		if seenFingerprints[fp] {
-			return fmt.Errorf("factoryPKFingerprints contains duplicate %q", fp)
-		}
-		seenFingerprints[fp] = true
 	}
 
 	allowedVariables := map[string]bool{
@@ -204,14 +182,4 @@ func validateSecureBootFirmwarePolicy(policy SecureBootFirmwarePolicy) error {
 	}
 
 	return nil
-}
-
-// MatchesFactoryPK reports whether this model's ODDC facts name the active
-// PK (the lowercase hex SHA-256 of its certificate) as a factory PK, on
-// firmware that exposes no PKDefault efivar to compare against (Plane 388,
-// e.g. ThinkPad T480s). Only a listed fingerprint counts: a model flag alone
-// would pass any PK, a company-set one too.
-func (p SecureBootFirmwarePolicy) MatchesFactoryPK(pkSHA256 string, pkDefaultPresent bool) bool {
-	return p.Supported && !pkDefaultPresent && pkSHA256 != "" &&
-		slices.Contains(p.FactoryPKFingerprints, pkSHA256)
 }

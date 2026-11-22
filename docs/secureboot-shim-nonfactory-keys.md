@@ -39,11 +39,20 @@ gjallarOS page 720 "Security review (private)" item **L161**, code in
    of the model (Jade 2026-11-22: "continue with our shim or wait for oddc").
    Unattended/answers file: no answer = N. Own-keys path keeps the strict
    check, no question.
-2. **ODDC-known models skip the question** — when ODDC recognizes the model
-   and its security facts list the factory PK fingerprint, a matching PK
-   counts as factory and no question is shown (the "PKDefault absent" flag
-   was dropped in review, see below). ODDC owns the facts (handoff to ODDC agent: field
-   name, format, T480s entry from this report). Unknown or mismatch → question 1.
+2. **ODDC-known models** (Plane 391, ODDC-128) — ODDC lists the model's
+   factory PK sums as a fact and names the proof in an ownership policy
+   (see "ODDC contract" below). Then, instead of question 1:
+   - active PK on the list, ownership `verified`: no question.
+   - active PK on the list, ownership `experimental`: one short question
+     (Jade 2026-11-22): "ODDC confirms this is the factory key, but
+     installing through the gjallarOS shim has not been tested on this model
+     yet. The firmware keys are not touched. Continue with the gjallarOS shim
+     now? [y/N]". Unattended stops.
+   - list known, active PK not on it: the same y/N as question 1 with a
+     stronger text (Jade 2026-11-22): the key is NOT one of the factory keys
+     ODDC knows for this model. Default no, Secure Boot must be on,
+     unattended stops.
+   - no usable ODDC entry: question 1.
 
 Also in the ticket:
 
@@ -84,9 +93,30 @@ Review of the first cut (c933ec8d, 34f259e4) found gaps; fixed:
   error; it now uses `installreport.ErrorText` with this run's known values,
   like the report.
 
-ODDC field: `vendor.policy.secureBoot.factoryPKFingerprints`, lowercase hex
-SHA-256 of the DER certificate in the PK signature list (the first entry).
-Handoff to the ODDC agent for the T480s entry.
+## ODDC contract (Plane 391, ODDC-128)
+
+Both paths sit at the top level of the resolved device data
+(`/etc/oddc/resolved.json`).
+
+- Fact: `hardware.firmware.secureBoot.factoryPKFingerprints`, a non-empty
+  list of lowercase hex SHA-256 sums (64 characters, no duplicates) of the
+  DER certificate in the first entry of the factory PK signature list.
+- Policy: `policy.secureBootOwnership = {"proof":
+  "pk-sha256-in-factory-list", "status": "experimental" | "verified"}`. It
+  points at the fact and never copies the list.
+- The sbctl recipe (`vendor.policy.secureBoot`) is separate; a model can
+  have the ownership proof without a recipe (T480s). Own gjallarOS keys
+  still need the recipe.
+- Fail closed: unknown proof, missing or unknown status, or a missing,
+  empty or malformed list make the whole entry count as absent. The
+  installer prints why and asks question 1.
+- Catalog only: a project or host overlay can override keyed paths, so the
+  installer reads the ownership entry only when every path under both
+  entries comes from the ODDC catalog. An overlay that touches them makes
+  the entry count as absent (loophole 163).
+
+The first version of this fix read the list from
+`vendor.policy.secureBoot.factoryPKFingerprints`; that reader is gone.
 
 ## Code pointers
 
@@ -96,10 +126,10 @@ Handoff to the ODDC agent for the T480s entry.
   `shimRecordBindsPK`
 - `internal/installer/secureboot/shimflow.go` — `PrepareShim(ctx, out,
   ShimOwnerFacts)` + `shimForeignProceed`
-- `internal/installer/oddc/` — `factoryPKFingerprints` under
-  `vendor.policy.secureBoot`, `MatchesFactoryPK`
+- `internal/installer/oddc/ownership.go` — `ResolveSecureBootOwnership`,
+  `SecureBootOwnership.MatchesFactoryPK`, `Verified`
 - `internal/installer/app/security_flow.go` — `plane388Classify` +
-  `unknownPKOwnerQuestion`; called from `app.go` after the Secure Boot
+  `unknownPKOwnerQuestion`, `notFactoryPKQuestion`, `untestedShimQuestion`; called from `app.go` after the Secure Boot
   decision, before disk work; returns the `ShimOwnerFacts` that `PrepareShim`
   gets
 - `internal/installer/app/install_report.go` — `saveFailureToBootStick`
@@ -109,6 +139,7 @@ Handoff to the ODDC agent for the T480s entry.
 ## Implementation status (2026-11-22)
 
 - Unit tests green: `secureboot/shimflow_test.go` (incl. PK binding),
-  `oddc/manifest_internal_test.go`, `app/plane388_test.go`.
+  `oddc/ownership_test.go`, `app/plane388_test.go`.
 - Open: e2e VM rerun (OVMF without PKDefault, T480s-like; answer y then N);
-  ODDC agent adds the T480s fingerprint entry.
+  ODDC data for the T480s (waits on the T480s PK read), then the ODDC pin
+  bump.

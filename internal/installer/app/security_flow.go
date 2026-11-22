@@ -371,22 +371,39 @@ would not check the maker-signed shim.
 
 // unknownPKOwnerQuestion is the Plane 388 question on the shim path when the
 // firmware exposes no PKDefault efivar, so its PK cannot be confirmed as the
-// factory key by comparison.
+// factory key by comparison, and ODDC has no factory list for the model.
 const unknownPKOwnerQuestion = "Unknown PK owner: this firmware does not say whether its Secure Boot owner key is the factory key (no PKDefault to compare against), and ODDC does not know this model yet.\n" +
 	"gjallarOS only adds its own key to shim's MOK list and leaves the firmware keys untouched.\n" +
 	"If this computer belongs to a company, or someone else set its keys, say no.\n" +
 	"Yes: install now with the gjallarOS shim. No: stop before anything is written and wait until ODDC knows this model.\n" +
 	"Continue with the gjallarOS shim now?"
 
-// plane388Classify runs the Plane 388 ownership classification on the shim
-// path before any disk work. On firmware without a PKDefault efivar it
-// returns the facts PrepareShim checks later: the model's ODDC factory-PK
-// fingerprints when they name the active PK, otherwise the active PK as an
-// accepted unknown owner after an interactive yes. Every refusal comes here,
-// before anything is written. The answer comes only from this root-owned
-// installer flow, never from an answers file; unattended runs get no answer,
-// which is N.
-func plane388Classify(ctx context.Context, ui prompt.UI, out io.Writer, insp secureboot.Inspection, policy oddc.EffectiveSecureBootFirmwarePolicy, shimStarted, unattended bool) (secureboot.ShimOwnerFacts, error) {
+// notFactoryPKQuestion (Plane 391) is asked when ODDC knows this model's
+// factory Platform Keys and the active one is not among them.
+const notFactoryPKQuestion = "Not the factory key: ODDC knows the factory Secure Boot owner keys of this model, and the key in this firmware is NOT one of them. Someone replaced it, for example a company, a previous owner or you.\n" +
+	"gjallarOS only adds its own key to shim's MOK list and leaves the firmware keys untouched.\n" +
+	"If this computer belongs to a company, or you did not set these keys yourself, say no.\n" +
+	"Yes: install now with the gjallarOS shim. No: stop before anything is written.\n" +
+	"Continue with the gjallarOS shim now?"
+
+// untestedShimQuestion (Plane 391) is asked when ODDC proves the factory
+// key but marks the shim path on this model as experimental.
+const untestedShimQuestion = "ODDC confirms this is the factory key, but installing through the gjallarOS shim has not been tested on this model yet.\n" +
+	"The firmware keys are not touched.\n" +
+	"Continue with the gjallarOS shim now?"
+
+// plane388Classify runs the ownership classification on the shim path before
+// any disk work. On firmware without a PKDefault efivar it returns the facts
+// PrepareShim checks later:
+//   - ODDC factory list names the active PK, ownership verified: no question.
+//   - same, ownership experimental: one untested-model question.
+//   - ODDC factory list known, active PK not on it: the not-factory question.
+//   - no usable ODDC entry: the unknown-owner question.
+//
+// Every refusal comes here, before anything is written. The answer comes only
+// from this root-owned installer flow, never from an answers file; unattended
+// runs get no answer, which is N.
+func plane388Classify(ctx context.Context, ui prompt.UI, out io.Writer, insp secureboot.Inspection, own oddc.SecureBootOwnership, shimStarted, unattended bool) (secureboot.ShimOwnerFacts, error) {
 	if insp.State != secureboot.StateForeignManaged || insp.PKDefaultPresent {
 		return secureboot.ShimOwnerFacts{}, nil
 	}
@@ -397,24 +414,56 @@ func plane388Classify(ctx context.Context, ui prompt.UI, out io.Writer, insp sec
 	if insp.SecureBoot && !shimStarted {
 		return secureboot.ShimOwnerFacts{}, errors.New(noDefault + "; Secure Boot is on, but this system does not boot through shim; refusing the shim path before anything is written")
 	}
-	if policy.Policy.MatchesFactoryPK(insp.PKSHA256, insp.PKDefaultPresent) {
-		fmt.Fprintln(out, "ODDC facts for this model name the active Platform Key as its factory key.")
-		return secureboot.ShimOwnerFacts{FactoryPKFingerprints: policy.Policy.FactoryPKFingerprints}, nil
+	if own.Note != "" {
+		fmt.Fprintln(out, own.Note)
+	}
+	if own.MatchesFactoryPK(insp.PKSHA256, insp.PKDefaultPresent) {
+		factory := secureboot.ShimOwnerFacts{FactoryPKFingerprints: own.FactoryPKFingerprints}
+		if own.Verified() {
+			fmt.Fprintln(out, "ODDC confirms the active Platform Key is this model's factory key, and the gjallarOS shim is tested on this model.")
+			return factory, nil
+		}
+		if unattended {
+			return secureboot.ShimOwnerFacts{}, errors.New("ODDC confirms the factory key, but the gjallarOS shim is untested on this model, which needs an explicit yes, and this run is unattended; refusing before anything is written")
+		}
+		ok, err := ui.Confirm(ctx, untestedShimQuestion, false)
+		if err != nil {
+			return secureboot.ShimOwnerFacts{}, err
+		}
+		if !ok {
+			return secureboot.ShimOwnerFacts{}, errors.New("the gjallarOS shim is untested on this model; stopped before anything was written")
+		}
+		fmt.Fprintln(out, "Recorded for this run: factory key confirmed by ODDC, untested model accepted. The firmware keys are not touched; the gjallarOS key only goes into shim's MOK list.")
+		return factory, nil
+	}
+	notFactory := own.Present()
+	reason := noDefault
+	question := unknownPKOwnerQuestion
+	if notFactory {
+		reason = "the active Platform Key is not one of the factory keys ODDC knows for this model"
+		question = notFactoryPKQuestion
 	}
 	if !insp.SecureBoot {
-		return secureboot.ShimOwnerFacts{}, errors.New(noDefault + "; with Secure Boot off, shim cannot show that the firmware trusts it; turn Secure Boot on, start the stick through shim and run this again")
+		return secureboot.ShimOwnerFacts{}, errors.New(reason + "; with Secure Boot off, shim cannot show that the firmware trusts it; turn Secure Boot on, start the stick through shim and run this again")
 	}
 	if unattended {
-		return secureboot.ShimOwnerFacts{}, errors.New(noDefault + "; the shim path needs an explicit yes to an unknown PK owner and this run is unattended; refusing before anything is written")
+		return secureboot.ShimOwnerFacts{}, errors.New(reason + "; the shim path needs an explicit yes and this run is unattended; refusing before anything is written")
 	}
-	ok, err := ui.Confirm(ctx, unknownPKOwnerQuestion, false)
+	ok, err := ui.Confirm(ctx, question, false)
 	if err != nil {
 		return secureboot.ShimOwnerFacts{}, err
 	}
 	if !ok {
-		return secureboot.ShimOwnerFacts{}, errors.New(noDefault + "; stopped before anything was written; run the installer again once ODDC knows this model's factory key")
+		if notFactory {
+			return secureboot.ShimOwnerFacts{}, errors.New(reason + "; stopped before anything was written")
+		}
+		return secureboot.ShimOwnerFacts{}, errors.New(reason + "; stopped before anything was written; run the installer again once ODDC knows this model's factory key")
 	}
-	fmt.Fprintln(out, "Recorded for this run: unknown PK owner accepted. The firmware keys are not touched; the gjallarOS key only goes into shim's MOK list.")
+	if notFactory {
+		fmt.Fprintln(out, "Recorded for this run: a Platform Key that is not the factory key accepted. The firmware keys are not touched; the gjallarOS key only goes into shim's MOK list.")
+	} else {
+		fmt.Fprintln(out, "Recorded for this run: unknown PK owner accepted. The firmware keys are not touched; the gjallarOS key only goes into shim's MOK list.")
+	}
 	return secureboot.ShimOwnerFacts{AcceptedUnknownPKSHA256: insp.PKSHA256}, nil
 }
 

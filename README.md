@@ -171,10 +171,23 @@ Install:
    whether the firmware setup (BIOS) is locked with a password you do not
    know, answer `y`; it then installs through shim
 9. Some firmware does not keep a factory copy of its owner key (the
-   ThinkPad T480s, for example). Unless ODDC knows the model's factory
-   key, the installer asks: "Continue with the gjallarOS shim now?". `y`
-   goes on. `N` stops before anything is written; run the installer again
-   once ODDC knows the model
+   ThinkPad T480s, for example). What happens then depends on what ODDC
+   knows about the model:
+   - ODDC knows its factory key, the key matches and the shim path is
+     tested on the model: no question
+   - the key matches, but the shim path is not tested on the model yet:
+     the installer says so and asks "Continue with the gjallarOS shim
+     now?"
+   - ODDC knows the factory keys and this one is not among them: the
+     installer says the key is NOT the factory key and asks the same
+     question. If the computer belongs to a company or you did not set the
+     keys yourself, say no
+   - ODDC does not know the model: the installer says the owner is
+     unknown and asks the same question
+
+   `y` goes on. `N` (the default) stops before anything is written. An
+   unattended install takes no answer, so it stops at any of these
+   questions
 10. At the end the installer asks for a one-time password and lists what
     to pick on the blue screen after the restart. Write the list down
 
