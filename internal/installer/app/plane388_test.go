@@ -42,7 +42,7 @@ func TestPlane388Classify(t *testing.T) {
 		{"oddc fingerprint match with SB off", off, matching, false, false, "", factoryFacts, "", false},
 		{"oddc match but shim not started refused early", on, matching, false, false, "", secureboot.ShimOwnerFacts{}, "does not boot through shim", false},
 		{"interactive y binds the PK", on, plain, true, false, "y\n", acceptedFacts, "", true},
-		{"interactive n refused", on, plain, true, false, "n\n", secureboot.ShimOwnerFacts{}, "refusing the shim path", true},
+		{"interactive n refused", on, plain, true, false, "n\n", secureboot.ShimOwnerFacts{}, "once ODDC knows this model", true},
 		{"unattended preset answers N", on, plain, true, true, "", secureboot.ShimOwnerFacts{}, "unattended", false},
 		{"SB off refused before asking", off, plain, false, false, "y\n", secureboot.ShimOwnerFacts{}, "Secure Boot off", false},
 		{"shim not started refused before asking", on, plain, false, false, "y\n", secureboot.ShimOwnerFacts{}, "does not boot through shim", false},
@@ -61,7 +61,7 @@ func TestPlane388Classify(t *testing.T) {
 		if !slices.Equal(got.FactoryPKFingerprints, tc.want.FactoryPKFingerprints) || got.AcceptedUnknownPKSHA256 != tc.want.AcceptedUnknownPKSHA256 {
 			t.Errorf("%s: facts %+v, want %+v", tc.name, got, tc.want)
 		}
-		asked := strings.Contains(out.String(), "unknown PK owner")
+		asked := strings.Contains(out.String(), "Continue with the gjallarOS shim now?")
 		if asked != tc.wantAsk {
 			t.Errorf("%s: asked=%v, want %v\n%s", tc.name, asked, tc.wantAsk, out)
 		}

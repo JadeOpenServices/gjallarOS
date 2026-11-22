@@ -372,10 +372,11 @@ would not check the maker-signed shim.
 // unknownPKOwnerQuestion is the Plane 388 question on the shim path when the
 // firmware exposes no PKDefault efivar, so its PK cannot be confirmed as the
 // factory key by comparison.
-const unknownPKOwnerQuestion = "This firmware does not say whether its Secure Boot owner key is the factory key (it exposes no PKDefault to compare against).\n" +
-	"gjallarOS would only add its own key to shim's MOK list and leave the firmware keys untouched; shim must already start this system.\n" +
+const unknownPKOwnerQuestion = "Unknown PK owner: this firmware does not say whether its Secure Boot owner key is the factory key (no PKDefault to compare against), and ODDC does not know this model yet.\n" +
+	"gjallarOS only adds its own key to shim's MOK list and leaves the firmware keys untouched.\n" +
 	"If this computer belongs to a company, or someone else set its keys, say no.\n" +
-	"Accept the unknown PK owner and install with Secure Boot through shim?"
+	"Yes: install now with the gjallarOS shim. No: stop before anything is written and wait until ODDC knows this model.\n" +
+	"Continue with the gjallarOS shim now?"
 
 // plane388Classify runs the Plane 388 ownership classification on the shim
 // path before any disk work. On firmware without a PKDefault efivar it
@@ -411,7 +412,7 @@ func plane388Classify(ctx context.Context, ui prompt.UI, out io.Writer, insp sec
 		return secureboot.ShimOwnerFacts{}, err
 	}
 	if !ok {
-		return secureboot.ShimOwnerFacts{}, errors.New(noDefault + "; refusing the shim path before anything is written")
+		return secureboot.ShimOwnerFacts{}, errors.New(noDefault + "; stopped before anything was written; run the installer again once ODDC knows this model's factory key")
 	}
 	fmt.Fprintln(out, "Recorded for this run: unknown PK owner accepted. The firmware keys are not touched; the gjallarOS key only goes into shim's MOK list.")
 	return secureboot.ShimOwnerFacts{AcceptedUnknownPKSHA256: insp.PKSHA256}, nil

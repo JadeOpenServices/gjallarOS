@@ -35,7 +35,8 @@ gjallarOS page 720 "Security review (private)" item **L161**, code in
    firmware keys alone; if this computer belongs to a company or someone else
    set its keys, say no. y = record answer (ownership stage `pending-MOK`,
    `owner unknown-accepted`) and proceed with MOK as on factory firmware.
-   N (default) = today's behavior (install finishes with the error).
+   N (default) = stop before the disk is touched and wait for ODDC support
+   of the model (Jade 2026-11-22: "continue with our shim or wait for oddc").
    Unattended/answers file: no answer = N. Own-keys path keeps the strict
    check, no question.
 2. **ODDC-known models skip the question** — when ODDC recognizes the model
