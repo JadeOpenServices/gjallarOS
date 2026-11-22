@@ -34,6 +34,7 @@ buildGoModule {
       ../../apps/wine/home.nix
       ../../cmd/gjallar-wine
       ../../internal/installer/config
+      ../../internal/input/xkb
       ../../internal/localchanges
       ../../internal/nettrust
       ../../internal/settings

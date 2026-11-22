@@ -23,6 +23,7 @@ buildGoModule {
       ../../cmd/gjallar-system-disk
       ../../internal/devgate
       ../../internal/installer/config
+      ../../internal/input/xkb
       ../../internal/installer/diskcrypto
       ../../internal/installer/systemcheckout
       ../../internal/installer/targetdisk
