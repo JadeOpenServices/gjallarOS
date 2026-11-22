@@ -104,6 +104,161 @@ time and shared-config needs**, not by that chain.
 | Active window for resource QoS | `user/services/resource-qos.nix` uses `hyprctl activewindow` | KWin D-Bus or KWin script |
 | Session diagnostics | `system/tools/default.nix` (hyprctl, `noctalia msg status`) | rewritten for KWin/plasmashell |
 
+## Full inventory (repo sweep 2026-11-22)
+
+The table above was the first cut. A sweep of every tracked file that still
+names Hyprland, Noctalia, hyprctl, wvkbd, grim/slurp, wl-copy or monique
+(outside the folders deleted in CP-W8) found these on top.
+
+### Not in the first cut
+
+| Part | Where | On KDE |
+|---|---|---|
+| Monitor layouts (monique, submodule `pkgs/monique`, vard's repo) | `flake.nix`, `system/wm/hyprland/default.nix`, `user/wm/hyprland/default.nix` (monitors.lua), `rules.nix` (OSD rule), `.gitmodules`, `scripts/installation/install.sh`, `internal/installercheck/check.go`, installer tests (`flakesource`, `systemcheckout`), `scripts/testing/test-installer-bootstrap.py` | monique has Hyprland, niri and sway backends, no KWin. Either KDE's display settings (kscreen keeps a layout per set of connected screens) or a KWin backend in monique. Decision open. |
+| On-screen keyboard (wvkbd + our overlay: close key, swipe down, no key preview) | `pkgs/overlays/wvkbd.nix`, `user/wm/hyprland/touch.nix` (two user units, tablet mode, bezel gesture), Noctalia OSK button, greeter | KWin offers the virtual-keyboard protocol to no normal client (KDE bug 512996), so wvkbd cannot type on KWin. Plasma's own keyboard (plasma-keyboard, Plasma 6.6+) runs as KWin's input method and shows on text focus. Our overlay patches do not carry over; the no-key-preview rule (password privacy) must be checked on plasma-keyboard. |
+| Login screen OSK | `system/wm/common/wayland.nix` runs wvkbd inside noctalia-greeter on touch machines | tuigreet is a text greeter on a VT: no OSK. A touch-only device could not log in. Greeter choice is open again (see Decisions). |
+| GTK and Qt theming | `user/wm/shells/noctalia/gtk.nix` (adw-gtk3, CSS from semantic tokens), `qt.nix` (qtct + Kvantum "Noctalia", writes `Noctalia.colors`) | Lives inside the Noctalia folder, so it moves, not deleted. Qt: Plasma's own platform theme + generated colour scheme replaces qtct/Kvantum. GTK: adw-gtk3 + our CSS stays; KDE's GTK settings sync must not fight home-manager files. |
+| Live app themes | Noctalia templates for Ghostty (`user/apps/ghostty.nix`), VSCodium (`user/editors/vscodium/default.nix`), btop (`apps/btop/home.nix`), hyprlock colours | The colour watcher writes all of them, not only Ghostty. hyprlock goes. |
+| Clipboard paste-once (patched wl-copy, Hyprland paste binds) | `user/wm/hyprland/settings.nix`, `wl-copy-paste-once-keep-owner.patch` | KWin has no "send shortcut" step to hand the paste over. Klipper owns the clipboard and keeps a history by default. Paste-once needs a new design or is lost; Klipper history off either way. |
+| Primary selection off | `settings.nix` | KWin setting. |
+| Wine sandbox display | `internal/winesandbox/wayland.go` needs `wp_security_context_v1`, fails closed without it | KWin has it (6.8 tested by others). VM proof that a sandboxed Wine app gets no screen capture, input or clipboard snooping. |
+| Fingerprint at lock | `system/hardware/fingerprint.nix` (hyprlock, swaylock) | kscreenlocker PAM (`kde` service + fingerprint). |
+| Window rules by title | Nextcloud dialogs (`apps/nextcloud/home.nix` calls `hyprctl dispatch`), USB and security notices, Firefox extension pop-ups (title changes after map, Plane 188), monique OSD | KWin window rules; title-change case may need a KWin script. |
+| Settings app colours | `pkgs/gjallar-settings/gjallar_settings.py` reads `Noctalia.colors` | Reads the Plasma colour scheme, or drops its own palette code since Qt apps get it natively. |
+| Dolphin app menu fix | `apps/dolphin/home.nix` (no applications menu in a Hyprland session) | Not needed on Plasma; delete. |
+| Bar shields | `apps/tailscale/home.nix`, `system/security/disk-unlock.nix` (+ session target) | Plasmoids (W9). |
+| Installer and config | `app.go` (`profileDefault`, `render.WMs`), `config.go` (`Theme: "noctalia"`, wallpaper note), `default.user.config.json`, many tests with `Theme: "noctalia"` | New values; Jade's own `user.config.json` gets one hand edit at the switch (no migration code). |
+| JODS desktop profile | `internal/installer/config` accepts `DesktopProfile = "hyprland"` | Contract change with the JODS agent (jods-21) before the value changes. |
+| Local AI notes | `apps/ai/nixos.nix` lists Hyprland/Noctalia as context | Text only; AI is benched. |
+| Nix tests | `tests/nix/noctalia-notification-app-name.nix`, `theme-palettes.nix` (Noctalia 4.5:1 pre-hook), `nextcloud-client-patches.nix` (Noctalia palette) | First goes, second keeps the contrast rule for Plasma schemes, third gets the new palette source. |
+
+### gjallarctl
+
+Only two commands talk to Hyprland. Everything else (usb, thunderbolt,
+luks, vpn, rebuild, secure-boot, oddc, move, apps, settings, snapshots,
+wine, fan, ...) does not touch the compositor.
+
+- `hyprland-rotate` (main.go 3516-3780: `hyprctl monitors/eval/reload`,
+  socket2 reload watch, scale fix, touch/pen mapping). KWin rotates by
+  itself from iio-sensor-proxy and maps touch and pen to the panel, in
+  tablet mode or always. Likely delete instead of rewrite; the ODDC sensor
+  proof decides whether KWin's auto-rotate is switched on.
+- `hyprland-render-gpu` (`rendergpu.go`: socket2, exit dispatch). KWin takes
+  `KWIN_DRM_DEVICES` at session start; the "new screen wants another GPU,
+  log in again" offer needs a KWin output signal instead of socket2.
+- Palette: `internal/noctalia` → `internal/palette`, env
+  `GJALLAR_NOCTALIA_COLORS` renamed (`system_rebuild.go`, `main.go`,
+  `cmd/gjallar-settingsd`).
+- zsh completion `pkgs/gjallarctl/_gjallarctl`, usage text.
+- Behaviour behind comments that must still hold: notice windows float on
+  top (`usb.go`, `security_notice.go`), tablet switch reload
+  (`tabletswitch.go`), time widget (`system_timewatch.go`), disk-protection
+  button text (`luks_remind.go`), keyboard layout reaches the compositor
+  (`internal/input/xkb`).
+
+### Patches and custom code that go
+
+Hyprland 4 patches + aquamarine overlay, xdph 1 + overlay, Noctalia 24,
+noctalia-greeter 8, hyprgrass 2, wl-copy 1, wvkbd overlay; the pkexec greeter
+sync helper and its polkit rule; the Hyprland Lua config generator and the
+hyprlang migration code; Hyprland permission bookkeeping; probably the
+rotate service. About 40 patches we carry today, none planned for KDE.
+
+## What changes, what breaks, what to watch
+
+### Better than today
+
+- Far fewer patches and source builds we own (list above). KDE packages
+  come from the nixpkgs binary cache.
+- One root path less (greeter sync via pkexec).
+- No app gets the virtual-keyboard protocol at all; input injection needs
+  the portal.
+- Rotation, touch/pen mapping, per-screen layouts and fractional scaling are
+  KWin features with years of use, not our code.
+- The lock survives a crash of the desktop shell (KWin holds it).
+- Qt and KDE apps follow the colour scheme natively; the Dolphin menu fix
+  and the settings app colour reader go away.
+
+### Changes you will see
+
+- Bar, control centre, notifications, OSD, launcher (KRunner) look like
+  Plasma styled with our palette, not Noctalia.
+- Palette is picked in System Settings → Colours; no palette made from the
+  wallpaper (accent only).
+- On-screen keyboard is Plasma's, with its own look and gestures.
+- Login screen: depends on the greeter decision.
+- Monitor tool: depends on the monique decision.
+- First login writes fresh KDE config files.
+
+### Breaks unless we build it
+
+- Touch-only login (no OSK in tuigreet).
+- Paste-once clipboard.
+- Our wvkbd fixes (close key, swipe down).
+- Bezel gestures (hyprgrass) until mapped to KWin edge swipes.
+- Firefox pop-up rule when the title changes after the window opens.
+- Hyprland dispatchers without a 1:1 KWin action in keybinds.json.
+
+### Watch out
+
+- KDE writes its own config over files we manage (plasma-manager vs
+  generated files decides how).
+- Two portals at once (keep -kde only).
+- Baloo file indexing load and what it indexes; KDE Connect, Discover,
+  browser integration, kwallet prompts.
+- Klipper keeping copied secrets in its history.
+- PowerDevil vs battery-guard and our power profiles; toasts twice.
+- Units that waited for `hyprland-session.target` must start in every
+  session (security notices).
+- RAM/VRAM use of plasmashell on small machines (4 GiB Galaxy Book class).
+- Fractional scaling and the 1/120 scale case.
+- Fingerprint and USB keyboard gate in kscreenlocker.
+- Exec-guard probes and the regression list after the switch.
+- Any new root code gets the root loophole pass.
+
+## Security on KDE: same level, sealed (Jade 2026-11-22)
+
+Rule: KDE ships only when every row below has its seal built and a VM proof.
+No row may silently become weaker than today. Where KDE is weaker by
+default, we seal it (system config marked immutable through KDE's Kiosk
+`[$i]` keys in `/etc/xdg`, package excludes, polkit rules, or our own patch
+under the upstream rules). Each finding gets a loophole number on the
+private review page; attack detail stays there.
+
+### Today's guards and what replaces them
+
+| Today | KDE default | Seal | Proof |
+|---|---|---|---|
+| Screen capture only for store-path binaries (Hyprland permissions, `permissions.nix`), unknown clients get a prompt | KWin hands its privileged protocols (screencast, fake input, window management, output management, ScreenShot2 over D-Bus) to any executable that a desktop file names, and it also reads user-writable desktop files. No prompt. ([D22571](https://phabricator.kde.org/D22571), [kwin-input](https://github.com/SamuelCGilbert/kwin-input)) | Grants only from desktop files in the system profile with an executable in `/nix/store`; our KWin patch if no setting exists. Interpreters never get a grant. | VM: a user-made desktop file grants nothing. |
+| Compositor plugins only from the store (Hyprland plugin rule) | KWin loads scripts and effects from the user data dir; scripts can also be loaded over D-Bus | Research first; user-dir scripts/effects off or limited | VM probe |
+| XWayland apps see no keys of other windows | Default passes modifier combos to every X11 app; one layout bug leaked all keys ([bug 500032](https://www.mail-archive.com/kde-bugs-dist@kde.org/msg1026249.html)) | `XwaylandEavesdrops=None`, mouse off, immutable | VM: X11 key reader sees nothing |
+| Lock asks for the password at once | `LockGrace` 5 s unlock without password ([kcfg](https://github.com/KDE/kscreenlocker/blob/master/settings/kscreenlockersettings.kcfg)); grace path also breaks later locks ([bug 528681](http://www.mail-archive.com/kde-bugs-dist@kde.org/msg1231117.html)) | `LockGrace=0`, `LockOnResume=true`, autolock on, immutable | VM: lock, wait 1 s, no unlock without password |
+| Lid and `loginctl lock` lock (logind, `power-keys.nix`) | kscreenlocker follows logind Lock | keep | VM |
+| Lock OSK only without a real keyboard, no key preview (`lock-osk.patch`, wvkbd `--no-popup`) | plasma-keyboard at the lock screen | Same rule on plasma-keyboard; key preview off | VM with and without USB keyboard |
+| Wi-Fi password and Bluetooth pairing requests never take keyboard focus (Noctalia patches) | plasma-nm and Bluedevil open dialogs | Check focus behaviour; patch or notification-only if they steal focus | VM: pairing request while typing |
+| polkit prompts from Noctalia's agent | polkit-kde-agent | Shows the requesting program and action; no auto-fill | VM |
+| No root helpers from the desktop besides our own (greeter sync goes) | Many KAuth root helpers (System Settings pages, info centre, disks, login manager, Discover). SUSE found root bugs in some ([KDE6 review](https://security.opensuse.org/2024/04/02/kde6-dbus-polkit.html), [plasma-login-manager CVE-2026-25710](https://security.opensuse.org/2026/04/27/plasma-login-manager.html), smb4k CVE-2025-66002/66003) | Only helpers we need; each gets the root loophole pass; polkit `auth_admin` for all KAuth actions; smb4k never | Inventory of `/run/current-system/sw/share/dbus-1/system-services` before/after; planted-link tests where a helper takes paths |
+| Firmware updates only through our dbx/fwupd flow (PCR and shim aware) | Discover offers fwupd firmware updates | Discover not installed | `which plasma-discover` empty |
+| Nothing runs code from an online store | Global themes, widgets and KNewStuff downloads run code ([KDE warning 2024](https://www.bleepingcomputer.com/news/linux/kde-advises-extreme-caution-after-theme-wipes-linux-users-files/)) | Kiosk `ghns=false`, "Get New" buttons gone; our look ships from the store path | VM |
+| Paste-once clipboard, no history, no primary selection | Klipper keeps history and writes it to disk; clipboard actions can run commands | Klipper off or history 0, not saved, actions off; paste-once redesign | VM: copy secret, log out, no trace in `~/.local/share` |
+| No file index | Baloo indexes names and contents; on Nextcloud online-only files a read downloads them | Baloo off | VM: no index dir, no VFS hydration |
+| No "recent files" database | Activity manager records opened files | Off, immutable | VM |
+| Coredumps / crash reports stay local | DrKonqi crash reporting, KUserFeedback | Not installed / off | VM |
+| No phone link, no remote desktop | KDE Connect (opens LAN ports), KRdp | Not installed | port scan in VM |
+| Secrets in gnome-keyring (`system/security/keyring.nix`) | kwalletd and kwallet-pam, also a Secret Service provider | One provider only: decide gnome-keyring or KWallet; Wi-Fi/VPN secrets stay system-side as today | VM: which bus name owns `org.freedesktop.secrets` |
+| Network calls only from apps the user opens | Weather, picture of the day, Welcome Center, KNewStuff fetches | Not installed or off | VM with network log |
+| Session not restored on login | Plasma restores the last session's apps | Empty session at login | VM |
+| Security notices, disk-unlock shield, build-source, VPN, USB and Thunderbolt units start with the desktop | They wait for `hyprland-session.target` (10 files) and would never start | Move to `graphical-session.target` | VM: each unit active after login |
+| Wine sandbox: no display without security context | KWin supports `wp_security_context_v1` | keep fail-closed | VM: sandboxed app gets no capture/input/clipboard of others |
+| USB keyboard gate (usbguard, `removable-media.nix`) | compositor-independent | keep | regression list |
+
+### Root code added by the switch
+
+Every KAuth helper and every root unit KDE brings is root code under the
+standing root loophole rule. Plasma Login Manager's helper had a
+service-user-to-root bug (CVE-2026-25710); if it is the greeter, our pin
+must carry the fix and the pass is done before the switch.
+
 ## Theme sync
 
 Today Noctalia does four things:
@@ -225,8 +380,16 @@ Each checkpoint: VM proof on e2e-fw13, exec-guard probes, regression list
 ## Open research (to check before the matching checkpoint)
 
 - Krohnkite: maintainer, CoC, Plasma 6 support, spiral layout behaviour.
-- OSK on KWin: Plasma's virtual keyboard vs wvkbd (KWin input-method
-  rules); greeter keeps wvkbd.
+- OSK on KWin: wvkbd cannot type there (no virtual-keyboard protocol for
+  clients, KDE bug 512996). plasma-keyboard: key preview off, tablet-mode
+  auto-show, close gesture.
+- Greeter with OSK: Plasma Login Manager (Plasma 6.6+, starts
+  plasma-keyboard) vs greetd + a graphical greeter under
+  `kwin_wayland --inputmethod`; Plymouth hand-over, measured-boot prompt
+  order, USB keyboard gate.
+- KWin privileged-interface grants: where they come from and that the
+  user session cannot add one (private review page).
+- KWin `wp_security_context_v1`: what a sandboxed client loses (Wine).
 - KWin privileged-interface restriction: how it is configured, what it
   covers compared with Hyprland's permissions.
 - Touchscreen gestures on KWin compared with hyprgrass.
