@@ -544,16 +544,42 @@ func TestDefaultDotfilesDirFollowsNewUser(t *testing.T) {
 	}
 }
 
-// Recovery through shim is not tested yet: the boot entry stays, the
-// partition is not offered (Plane 293).
+// Recovery through shim is not tested yet (Plane 293): the partition comes
+// only after an explicit yes (Jade 2026-11-22); no, or just Enter, keeps the
+// boot entry without it.
 func TestShimInstallGetsNoRecoveryPartition(t *testing.T) {
-	u := config.User{SecureBootEnable: true, SecureBootShim: true}
-	output := runRecovery(t, "\n", true, true, &u)
-	if !u.RecoveryEnable || u.RecoveryPartitionEnable {
-		t.Fatalf("recovery entry=%v partition=%v", u.RecoveryEnable, u.RecoveryPartitionEnable)
+	for _, input := range []string{"\n\n", "n\n\n"} {
+		u := config.User{SecureBootEnable: true, SecureBootShim: true}
+		output := runRecovery(t, input, true, true, &u)
+		if !u.RecoveryEnable || u.RecoveryPartitionEnable {
+			t.Fatalf("input %q: recovery entry=%v partition=%v", input, u.RecoveryEnable, u.RecoveryPartitionEnable)
+		}
+		if !strings.Contains(output, shimRecoveryPartitionQuestion) ||
+			!strings.Contains(output, shimNoRecoveryPartitionNotice) || strings.Contains(output, recoveryFull) {
+			t.Fatalf("input %q: question or shim notice missing, or partition offered:\n%s", input, output)
+		}
 	}
-	if !strings.Contains(output, shimNoRecoveryPartitionNotice) || strings.Contains(output, recoveryFull) {
-		t.Fatalf("output misses the shim notice or offers the partition:\n%s", output)
+}
+
+func TestShimInstallRecoveryPartitionAfterYes(t *testing.T) {
+	u := config.User{SecureBootEnable: true, SecureBootShim: true}
+	output := runRecovery(t, "y\n\n", true, true, &u)
+	if !u.RecoveryEnable || !u.RecoveryPartitionEnable || !freshRecoveryPartition(u) {
+		t.Fatalf("recovery entry=%v partition=%v\n%s", u.RecoveryEnable, u.RecoveryPartitionEnable, output)
+	}
+	if !strings.Contains(output, recoveryFull) || strings.Contains(output, shimNoRecoveryPartitionNotice) {
+		t.Fatalf("partition not offered after yes, or refusal still printed:\n%s", output)
+	}
+}
+
+// No question where the partition cannot exist anyway.
+func TestShimRecoveryQuestionOnlyWhenPossible(t *testing.T) {
+	for _, tc := range []struct{ partitionable, secureBoot bool }{{false, true}, {true, false}} {
+		u := config.User{SecureBootEnable: tc.secureBoot, SecureBootShim: true}
+		output := runRecovery(t, "\n", tc.partitionable, tc.secureBoot, &u)
+		if u.RecoveryPartitionEnable || strings.Contains(output, shimRecoveryPartitionQuestion) {
+			t.Fatalf("%+v: partition=%v, asked anyway:\n%s", tc, u.RecoveryPartitionEnable, output)
+		}
 	}
 }
 

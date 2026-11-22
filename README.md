@@ -202,8 +202,9 @@ After the install:
 
 What this path does not have yet:
 
-- No recovery partition: starting recovery through shim is not tested yet.
-  Repairs start from the USB stick
+- The recovery partition is not tested through shim yet. The installer
+  asks before it adds one (default no); without it, repairs start from the
+  USB stick. An unattended install or an answers file never adds it
 - An unattended install (preset answers, nobody at the keyboard) stops at
   step 9 on such firmware until ODDC knows the model
 - The firmware keys stay as they are. `gjallarctl secure-boot setup

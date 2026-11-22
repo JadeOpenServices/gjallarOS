@@ -118,6 +118,18 @@ Both paths sit at the top level of the resolved device data
 The first version of this fix read the list from
 `vendor.policy.secureBoot.factoryPKFingerprints`; that reader is gone.
 
+## Recovery partition on the shim path (Jade 2026-11-22, R51)
+
+The recovery partition is signed with the same gjallarOS db key as the
+system and is started from the systemd-boot menu, so shim+MOK check it the
+same way. Only starting it through shim is untested (Plane 293). The
+installer used to drop it on the shim path; it now asks
+`shimRecoveryPartitionQuestion` (default no) in `collectRecovery`. y offers
+the full recovery choice, no keeps the boot entry only. Managed installs,
+answers files and unattended runs are not asked and stay without it. A yes
+risks only an untested boot path, not trust: an unsigned or foreign-signed
+partition still fails the shim check.
+
 ## Code pointers
 
 - `internal/installer/secureboot/ownership.go` — `Inspect()` reports

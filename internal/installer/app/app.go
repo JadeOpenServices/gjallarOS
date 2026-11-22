@@ -2330,8 +2330,19 @@ func collectInteractive(ctx context.Context, ui prompt.UI, root string, managedB
 const noRecoveryPartitionNotice = "No recovery partition: it needs gjallarOS Secure Boot, which is off for this install. The disk is not shrunk."
 
 // shimNoRecoveryPartitionNotice: starting recovery through shim is not
-// tested yet (Plane 293).
+// tested yet (Plane 293). Said when there is nobody to ask (managed,
+// answers file) or the answer was no.
 const shimNoRecoveryPartitionNotice = "No recovery partition: starting recovery through shim is not tested yet. The disk is not shrunk."
+
+// shimRecoveryPartitionQuestion (Jade 2026-11-22) lets the user take the
+// untested recovery partition on the shim path. The recovery image is
+// signed with the same gjallarOS key that goes into shim's MOK list and
+// starts from the systemd-boot menu shim loads, so shim checks it like the
+// installed system; only that start has not been tried yet.
+const shimRecoveryPartitionQuestion = "The recovery partition has not been tested through shim yet.\n" +
+	"It is signed with the same gjallarOS key as the system and shim checks it the same way, but nobody has started it this way so far.\n" +
+	"It needs its own space on the disk. If it does not start later, the installed system still starts as usual.\n" +
+	"Add the recovery partition anyway?"
 
 // freshRecoveryPartition says whether a fresh disk gets a recovery partition. The
 // boot entry alone needs no partition; the partition comes only with
@@ -2354,11 +2365,14 @@ const (
 // not asked: it always gets the boot entry, and the partition where it can.
 func collectRecovery(ctx context.Context, ui prompt.UI, partitionable, secureBoot bool, u *config.User) error {
 	partition := secureBoot && !u.SecureBootShim && partitionable
+	// Shim path: the partition is possible but untested, so it waits for an
+	// explicit yes below. A managed machine has nobody to ask and keeps none.
+	shimAsk := secureBoot && u.SecureBootShim && partitionable && !u.Management.Enable
 	why := ""
 	switch {
 	case !secureBoot:
 		why = noRecoveryPartitionNotice
-	case u.SecureBootShim:
+	case u.SecureBootShim && !shimAsk:
 		why = shimNoRecoveryPartitionNotice
 	case !partitionable:
 		why = "No recovery partition: this root is not on encrypted Btrfs, which the recovery partition needs."
@@ -2374,6 +2388,18 @@ func collectRecovery(ctx context.Context, ui prompt.UI, partitionable, secureBoo
 	fmt.Fprintln(ui.Out, "Recovery: a trusted gjallarOS recovery/JODS boot entry, and a recovery partition that keeps working when the system does not start.")
 	if why != "" {
 		fmt.Fprintln(ui.Out, why)
+	}
+	if shimAsk {
+		yes, err := ui.Confirm(ctx, shimRecoveryPartitionQuestion, false)
+		if err != nil {
+			return err
+		}
+		if yes {
+			partition = true
+			fmt.Fprintln(ui.Out, "Recorded for this run: recovery partition through shim, untested, accepted.")
+		} else {
+			fmt.Fprintln(ui.Out, shimNoRecoveryPartitionNotice)
+		}
 	}
 	options := []string{recoveryEntryOnly, recoveryNone}
 	def := recoveryEntryOnly
