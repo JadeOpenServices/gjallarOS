@@ -723,6 +723,15 @@ starts under Secure Boot on this machine. If the visit is missed, start the
 stick again and pick Queue the key again in its menu. With own keys or Secure Boot off, the
 installer queues only the removal and says so in its summary.
 
+Some firmware does not say which Secure Boot owner key it shipped with (no
+factory copy to compare against), so the installer cannot tell the maker's
+keys from keys someone else set, such as a company. Unless ODDC knows the
+model's factory key, the installer asks once, before anything is written:
+continue with the gjallarOS shim now, or stop and wait until ODDC knows
+this model. The default is no. An unattended install has nobody to answer,
+so on such firmware it stops before the disk is touched; it goes through
+once ODDC knows the model.
+
 `gjallarctl secure-boot setup --own-keys` replaces the firmware keys with
 gjallarOS keys instead. It needs an ODDC Secure Boot setup for the model. The
 command also takes this path on its own when the firmware is already in Setup
