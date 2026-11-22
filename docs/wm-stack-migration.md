@@ -233,8 +233,8 @@ rotate service. About 40 patches we carry today, none planned for KDE.
 - Login screen: depends on the greeter decision.
 - Monitor tool: depends on the monique decision.
 - First login writes fresh KDE config files.
-- Workspaces: KWin's virtual desktops span every screen; today each screen
-  has its own 1-10 (decision, see Feel).
+- Workspaces stay per screen (Jade 2026-11-23), through our own KWin
+  script; KWin alone would switch every screen together.
 - Animations use KWin's effects and speed setting; our own Hyprland curves
   do not carry over.
 - Scratchpad (Super+S) needs our own KWin script; KWin has no special
@@ -282,9 +282,9 @@ A row that cannot match is listed under "Changes you will see" or "Limits".
 | Rounded corners, shadow | per theme (`themeDetails.rounding`, `.shadow`, range 20, offset 2,2) | Decoration rounding and shadow set from the same theme values; full-window rounding beyond the title bar needs a KWin effect built from source (research; none rather than another source build without a reason) | VM screenshot |
 | Blur behind panels and pop-ups | on, 3 passes, size 10, noise 0.02 | KWin Blur effect, strength and noise from the same values | VM screenshot |
 | Window and workspace animations | slide with our own curves; scratchpad slides vertical; border fade | KWin Slide for desktops, Scale or Glide for windows, one speed factor; own curves not possible | VM recording |
-| Scratchpad | Super+S show/hide, Super+Shift+S move; rest of the screen dimmed to 0.5 (`dim_special`) | No KWin equivalent. Our own small KWin script shipped in the store (never from the user dir, see the KWin scripts seal) plus the Dim Inactive effect (decision) | VM: keys, dim, script loads only from the store |
+| Scratchpad | Super+S show/hide, Super+Shift+S move; rest of the screen dimmed to 0.5 (`dim_special`) | No KWin equivalent. Our own small KWin script shipped in the store (never from the user dir, see the KWin scripts seal) plus the Dim Inactive effect (Jade 2026-11-23: keep it, secure). Seal: script in the store, loaded through the same locked KWin script list as every KWin script, no user copy can shadow it; it only moves and hides windows, no shell or file access; loophole pass on its build | VM: keys, dim, script loads only from the store, a planted user script of the same name does not load |
 | Pseudo tile | Super+P keeps the window size inside its tile | Krohnkite float-in-place or none (research) | VM |
-| Workspaces | 1-10 per screen (`focusworkspaceoncurrentmonitor`) | KWin desktops span all screens; switching changes every screen (decision) | VM with two screens |
+| Workspaces | 1-10 per screen (`focusworkspaceoncurrentmonitor`) | Jade 2026-11-23: per screen, like today. KWin desktops span all screens, so this needs our own KWin script from the store, sealed like the scratchpad script (research at CP-W3: how far a script can switch one screen alone in the pinned KWin; if it cannot, back to Jade before any other route) | VM with two screens: Super+2 changes only the screen under the mouse |
 | Cursor hides when idle | after 5 s (`cursor.inactive_timeout`) | KWin hide-cursor effect if the pinned KWin has it (research), else a limit | VM |
 | Tearing for games | allowed when the app asks (`allow_tearing`) | KWin allows tearing for full-screen apps that ask (tearing-control); check the default in the pinned KWin | VM with a test client |
 | Resize from the window edge | on, drag threshold 10 | KWin resize area on borderless tiles, Meta+right-drag (research) | VM |
@@ -360,9 +360,9 @@ private review page; attack detail stays there.
 | Links open only through `gjallar-open-url` (exact host routes, unknown schemes refused) | KIO falls back to kdeglobals `BrowserApplication` when no scheme handler is set; that entry may name any command | `BrowserApplication` = our handler's desktop file, immutable in `/etc/xdg/kdeglobals`; `mimeapps.list` stays a read-only link | VM: entry cannot be changed from the session, links still routed |
 | No account service as root | `plasma6.nix:268-270` turns on accounts-daemon (root) and turns its `PrivateTmp` off so it can read an account picture that System Settings puts in `/tmp` | Off unless the greeter decision needs it; if kept, `PrivateTmp` stays on and the root loophole pass runs (L180) | VM: service absent, or `PrivateTmp=yes` |
 | No location service (Firefox `geo.provider.use_geoclue` off) | `plasma6.nix:277` turns on geoclue2 | `mkForce false`; Night Light runs on times; the weather city stays our own question | VM: no geoclue on the bus, network log |
-| No accessibility bus, no speech daemon | `plasma6.nix:304` turns on Orca, which turns on at-spi2-core and speechd (`orca.nix:24-25`); the AT-SPI bus lets clients read other apps' text | `mkForce false` for all three; accessibility later as an opt-in with its own pass (decision) | VM: no `org.a11y.Bus` |
+| No accessibility bus, no speech daemon | `plasma6.nix:304` turns on Orca, which turns on at-spi2-core and speechd (`orca.nix:24-25`); the AT-SPI bus lets clients read other apps' text | `mkForce false` for all three (Jade 2026-11-23); accessibility later as an opt-in with its own security pass | VM: no `org.a11y.Bus` |
 | No mail or calendar database | `plasma6.nix:264` turns on kde-pim (Akonadi) | `mkForce false`; Thunderbird stays | VM process list |
-| SSH asks for passphrases in the terminal | `plasma6.nix:265` sets ksshaskpass as askpass; it can keep passphrases in KWallet | decision: ksshaskpass without saving, or unset as today | VM: `ssh-add` behaviour |
+| SSH asks for passphrases in the terminal | `plasma6.nix:265` sets ksshaskpass as askpass; it can keep passphrases in KWallet | Jade 2026-11-23: keep ksshaskpass only if its save-to-KWallet choice can be locked off; otherwise `askPassword` unset and the terminal asks as today (research CP-W2) | VM: `ssh-add` behaviour |
 | Session start: today Hyprland reads its config from the user's home (`HYPRLAND_CONFIG`, `system/wm/hyprland/default.nix:48,66`) | Plasma's session start also reads files from the home folder before KWin starts | Same class of gap on both; KDE must close it, not carry it. Research and seal on the private review page (L181) | VM probe (private) |
 | No desktop autostart (Hyprland runs none; Nextcloud's entry is removed, `apps/nextcloud/home.nix:473,632`) | Plasma starts every entry in `/etc/xdg/autostart` and `~/.config/autostart` | System entries inventoried, unwanted ones hidden system-side; user entries part of L181 | VM: started programs equal the list we ship |
 | Only our OSK gets the input-method protocol | kwinrc `[Wayland] InputMethod` names the program KWin starts as input method | Set to plasma-keyboard from the store, immutable | VM: entry cannot be changed from the session |
@@ -577,7 +577,9 @@ Each checkpoint: VM proof on e2e-fw13, exec-guard probes, regression list
   runs without printing a secret. Today `passwd` re-encrypts the login
   keyring with the new password (`keyring.nix`); check whether kwallet-pam
   does the same, otherwise the wallet stays on the old password.
-- Pass 3: hide-cursor effect in the pinned KWin; Krohnkite gaps and pseudo
+- Pass 3: per-screen workspaces and the scratchpad as store KWin scripts
+  (what the pinned KWin script API allows, how the script list stays
+  locked); hide-cursor effect in the pinned KWin; Krohnkite gaps and pseudo
   tile; tearing default; a touchpad default for every device and the
   KWin swipe finger count; resize area on borderless tiles; whether the
   greeter needs accounts-daemon; RemoteDesktop/InputCapture switches in
