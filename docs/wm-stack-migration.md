@@ -64,7 +64,8 @@ time and shared-config needs**, not by that chain.
    greeter takes new colours **at rebuild only**: the live pkexec greeter
    sync is removed (fewer root paths; Jade: "whatever is securer and
    cleaner").
-8. **Portal: xdg-desktop-portal-kde only** (never mixed, fdo#969).
+8. **Portal: xdg-desktop-portal-kde only** (never mixed, fdo#969). The gtk
+   portal and its file dialog go too: KDE file dialog only (Jade 2026-11-22).
 9. **No rollback, no migration prompt.** fw13 is the only install (Jade
    2026-11-22); Hyprland/Noctalia are deleted once KDE works on e2e-fw13.
 10. **gjallarctl stays the one control tool.** `hyprland-rotate` → `rotate`,
@@ -83,6 +84,25 @@ time and shared-config needs**, not by that chain.
     the build (Jade 2026-11-22): root parts each adds, whether PLM's
     settings helper can be switched off, on-screen keyboard, Plymouth
     handover, fingerprint. Jade picks with the results.
+16. **Secrets: KWallet replaces gnome-keyring** (Jade 2026-11-22: the
+    native choice). kwalletd answers `org.freedesktop.secrets`, so
+    `secret-tool` callers keep working. One-off move of the user's secrets
+    from gnome-keyring; gnome-keyring goes. kwallet-pam gets a loophole pass
+    first (it runs in the root PAM stack and works in the user's folders,
+    L178). Wi-Fi/VPN secrets stay system-side.
+17. **Lid and power keys: PowerDevil config, locked** (Jade 2026-11-22).
+    Generated from the installer answer, Kiosk `[$i]`, so the user session
+    cannot change it.
+18. **Automount: `gjallarctl media automount`** (Jade 2026-11-22). Own user
+    unit, same binary as `media notice`. Mounts only media detected less
+    than 5 s ago (the rule of our udiskie patch, like GNOME); unlocked LUKS
+    and drive-less devices always mount; only on usbguard installs, as
+    today; only signals from the real udisks count. KDE's automounter is
+    locked off (Kiosk) and its settings page hidden: it matches "known"
+    devices by device name (`block_devices/sdb1`, not the stick), mounts
+    them again at login and has no new-media check (plasma-desktop 6.6.6
+    `solid-device-automounter`). udiskie, its overlay and patch go at the
+    switch. The new-media rule is proposed to KDE (book 753).
 
 ## What Noctalia and Hyprland do today, and where each part goes
 
@@ -244,7 +264,7 @@ private review page; attack detail stays there.
 | Compositor plugins only from the store (Hyprland plugin rule) | KWin loads scripts and effects from the user data dir; scripts can also be loaded over D-Bus | Research first; user-dir scripts/effects off or limited | VM probe |
 | XWayland apps see no keys of other windows | Default passes modifier combos to every X11 app; one layout bug leaked all keys ([bug 500032](https://www.mail-archive.com/kde-bugs-dist@kde.org/msg1026249.html)) | `XwaylandEavesdrops=None`, mouse off, immutable | VM: X11 key reader sees nothing |
 | Lock asks for the password at once | `LockGrace` 5 s unlock without password ([kcfg](https://github.com/KDE/kscreenlocker/blob/master/settings/kscreenlockersettings.kcfg)); grace path also breaks later locks ([bug 528681](http://www.mail-archive.com/kde-bugs-dist@kde.org/msg1231117.html)) | `LockGrace=0`, `LockOnResume=true`, autolock on, immutable | VM: lock, wait 1 s, no unlock without password |
-| Lid, power key and clamshell follow the installer answer (`power-keys.nix` writes `/run/systemd/logind.conf.d/50-gjallar-power.conf`) | PowerDevil takes logind's lid and power-key inhibitors and applies its own per-user settings, so our logind file stops applying | PowerDevil config generated from the same answer, system-side and immutable; lock before sleep on | VM: lid close on battery, AC and docked; power key; clamshell with external screen |
+| Lid, power key and clamshell follow the installer answer (`power-keys.nix` writes `/run/systemd/logind.conf.d/50-gjallar-power.conf`) | PowerDevil takes logind's lid and power-key inhibitors and applies its own per-user settings, so our logind file stops applying | PowerDevil config generated from the same answer, system-side and locked with Kiosk `[$i]` (decision 17); lock before sleep on | VM: lid close on battery, AC and docked; power key; clamshell with external screen |
 | `loginctl lock` and resume lock | kscreenlocker follows logind Lock | keep; `LockOnResume` immutable (row above) | VM |
 | Idle lock (no idle daemon today, lid and key only) | kscreenlocker autolock with user-set timeout | Autolock on, timeout and lock-on-resume immutable | VM: idle past timeout locks |
 | Security, USB, Thunderbolt and media notices always show (`internal/notice`) | Plasma "Do Not Disturb", also switched on by itself while a screen is mirrored, hides normal notices | Security notices sent with urgency critical (shown through DND); DND-on-mirror off and immutable | VM: DND on, plug USB, notice shows |
@@ -252,12 +272,12 @@ private review page; attack detail stays there.
 | Time zone change needs admin (polkit default) | nixpkgs `plasma6.nix` allows `set-timezone` for any active user when a time zone is set, and we set one | Our polkit rule ahead of it: `auth_admin` for set-timezone | VM: `timedatectl set-timezone` as user asks for admin |
 | No capability wrappers for desktop tools | nixpkgs adds wrappers: `kwin_wayland` cap_sys_nice, `ksystemstats_intel_helper` cap_perfmon, `ksgrd_network_helper` cap_net_raw | Remove the two system-monitor wrappers; KWin must drop its capability after start | VM: `/run/wrappers` list, `CapEff` of kwin_wayland is 0 |
 | pkexec refused for users (`local-hardening.nix`); root menu goes through our helper (Q253) | `kio-admin` (a required Plasma package) opens any file as root from Dolphin behind one password, the same reason pkexec is refused | polkit NO for the kio-admin action unless root | VM: Dolphin "Open as administrator" refused |
-| Removable media: udiskie mounts only what is there at plug-in (`udiskie.nix` patch), foreign file systems read-only (`foreign-media-readonly.nix`), "Allow writing" notice | KDE device automounter in kded can mount on its own | One automounter only: KDE automount off and immutable, udiskie + our patch stay; read-only defaults and the notice carry over unchanged | VM: stick writer creates a partition, nothing mounts it |
+| Removable media: udiskie mounts only what is there at plug-in (`udiskie.nix` patch), foreign file systems read-only (`foreign-media-readonly.nix`), "Allow writing" notice | KDE device automounter in kded can mount on its own | One automounter only: `gjallarctl media automount` (decision 18) with the same new-media rule; KDE automount off and immutable, its KCM hidden; read-only defaults and the notice carry over unchanged | VM (ported udiskie test + new cases): stick writer writes an image or makes a file system, nothing mounts it; partition made later on an internal disk is not mounted; stick plugged in at login is not mounted; unlocked LUKS stick mounts; forged udisks signal is ignored |
 | No Bluetooth file receive | Bluedevil ships OBEX receive (openobex, obexftp) | OBEX receive off, immutable | VM: OBEX push refused |
 | Wi-Fi/VPN secrets system-side; Noctalia's secret agent answers only NetworkManager (`network-secret-agent.patch`) | plasma-nm secret agent stores secrets per user in KWallet | Research whether the plasma-nm agent checks the caller; patch if not; secrets stay system-owned | VM: secret request from a non-NM client gets nothing |
 | Shell and lock screen run only store code (Noctalia from the store, plugin rule) | plasmashell and the lock screen load widgets, wallpaper plugins, look-and-feel packages and KRunner runners from the user data dir | Research; user-dir QML packages for shell and lock off or limited; lock screen look only from the store | VM probe (private review page) |
 | Global shortcuts only from our keybinds | kglobalacceld lets session clients register global shortcuts | Research; limit to known clients if possible | VM probe |
-| Screen share asks every time ("Allow once" does not carry over, `hyprland-permission-client-destroy.patch`) | xdg-desktop-portal-kde can keep restore tokens in the permission store | Restore tokens off; only `-kde` portal (gtk and kwallet portals decided) | VM: share, close, reopen asks again |
+| Screen share asks every time ("Allow once" does not carry over, `hyprland-permission-client-destroy.patch`) | xdg-desktop-portal-kde can keep restore tokens in the permission store | Restore tokens off; only `-kde` portal, gtk portal dropped (decision 8) | VM: share, close, reopen asks again |
 | Hyprland permission rules live in the user's Home Manager config | KWin grants (row 1) | System-side seal, stronger than today | VM |
 | No background push service | `kunifiedpush` (required package) | Off, immutable; listed under network calls | VM network log |
 | Firefox native hosts are only the ones we ship | `plasma6.nix` adds `plasma-browser-integration` as a Firefox native host even when the package is excluded | `nativeMessagingHosts.packages` without it (mkForce) | VM: Firefox native host list |
@@ -272,7 +292,7 @@ private review page; attack detail stays there.
 | No "recent files" database | Activity manager records opened files | Off, immutable | VM |
 | Coredumps / crash reports stay local | DrKonqi crash reporting, KUserFeedback | Not installed / off | VM |
 | No phone link, no remote desktop | KDE Connect (opens LAN ports), KRdp | Not installed | port scan in VM |
-| Secrets in gnome-keyring (`system/security/keyring.nix`) | kwalletd and kwallet-pam, also a Secret Service provider | One provider only: decide gnome-keyring or KWallet; Wi-Fi/VPN secrets stay system-side as today | VM: which bus name owns `org.freedesktop.secrets` |
+| Secrets in gnome-keyring (`system/security/keyring.nix`) | kwalletd and kwallet-pam, also a Secret Service provider | One provider only: KWallet (decision 16), gnome-keyring removed; kwallet-pam loophole pass (L178); Wi-Fi/VPN secrets stay system-side as today | VM: kwalletd owns `org.freedesktop.secrets`; `secret-tool` lookup works; nothing else claims the name; planted link in the wallet folder before login is refused |
 | Network calls only from apps the user opens | Weather, picture of the day, Welcome Center, KNewStuff fetches | Not installed or off | VM with network log |
 | Session not restored on login | Plasma restores the last session's apps | Empty session at login | VM |
 | Security notices, disk-unlock shield, build-source, VPN, USB and Thunderbolt units start with the desktop | They wait for `hyprland-session.target` (10 files) and would never start | Move to `graphical-session.target` | VM: each unit active after login |
@@ -335,8 +355,8 @@ switch.
   equivalent must allow the same set and nothing more; test that a plain
   client cannot screencopy or inject input.
 - **KDE services off unless chosen:** KDE Connect, Discover/PackageKit
-  updates (Nix owns updates), Plasma browser integration, kwallet
-  auto-unlock decision (Firefox and Passbolt use their own stores). Each one
+  updates (Nix owns updates), Plasma browser integration (Firefox and
+  Passbolt use their own stores). KWallet stays as the one secret store. Each one
   that stays gets a reason in this page.
 - **Lock.** kscreenlocker PAM must match today: password on `kde` without
   nullok, finger only on `kde-fingerprint`, USB keyboard gate, PIN rules.
@@ -367,7 +387,9 @@ Each checkpoint: VM proof on e2e-fw13, exec-guard probes, regression list
    parts.
 3. **CP-W2 KDE base session.** Plasma 6 module, greetd → startplasma-wayland,
    portal -kde, polkit-kde-agent, kscreenlocker with our PAM, KDE services
-   off, privileged-access mapping. Loophole pass.
+   off, privileged-access mapping, KWallet + kwallet-pam + secret move,
+   PowerDevil locked config, `gjallarctl media automount` + its VM test.
+   Loophole pass.
 4. **CP-W3 Keys and tiling.** keybinds.json → KWin + Krohnkite, window
    rules, touch gestures, Super+F1.
 5. **CP-W4 Shell.** Panel layout, control-centre plasmoid, the 7 plugin
@@ -383,7 +405,11 @@ Each checkpoint: VM proof on e2e-fw13, exec-guard probes, regression list
    wl-copy patches), `user/wm/shells/noctalia/`, `pkgs/noctalia/` (24
    patches), `pkgs/noctalia-greeter/` (8), flake inputs, `themes/noctalia.nix`,
    `tests/nix/noctalia-notification-app-name.nix`, hyprland/noctalia refs
-   in themes, apps and docs.
+   in themes, apps and docs. `pkgs/overlays/udiskie.nix`,
+   `pkgs/patches/udiskie-mount-new-media-only.patch`,
+   `tests/nix/udiskie-new-media-only.nix` (its cases live on in the
+   automount test), `services.udiskie`, gnome-keyring in
+   `system/security/keyring.nix`.
 10. **CP-W9 Docs.** Public stance in docs (`docs/maintainers.md`
     patched-packages list), README mentions, wiki.
 
@@ -425,8 +451,13 @@ Each checkpoint: VM proof on e2e-fw13, exec-guard probes, regression list
 - kglobalacceld: who may register shortcuts.
 - Capability wrappers: how to drop the two system-monitor wrappers (the
   wrappers module has no enable switch); does KWin drop cap_sys_nice.
-- xdg-desktop-portal-kde: restore tokens, and whether the gtk FileChooser
-  portal stays.
+- xdg-desktop-portal-kde: restore tokens.
+- KWallet: which daemon owns `org.freedesktop.secrets` in the pinned KF6,
+  the wallet cipher, kwallet-pam with greetd and with a fingerprint login
+  (no password to unlock with), how the one-off move from gnome-keyring
+  runs without printing a secret. Today `passwd` re-encrypts the login
+  keyring with the new password (`keyring.nix`); check whether kwallet-pam
+  does the same, otherwise the wallet stays on the old password.
 - KCMs that start root helpers, named one by one: date/time (set-time stays
   `auth_admin_keep` as today), Plymouth, partition manager (kpmcore),
   print-manager, Thunderbolt (bolt rule covers it).
