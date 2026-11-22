@@ -31,8 +31,9 @@
 #   UKI and opens MokManager (mmx64.efi), where the user enrolls this
 #   UKI's hash. The installer removes that hash again after the install.
 #   A byte-identical copy sits at the ESP root as gjallarOS-enroll.efi (Plane
-#   388 follow-up): MokManager's "Enroll hash from disk" lists it first,
-#   so the user picks it without opening EFI/ and BOOT/. Same bytes, same
+#   388 follow-up): MokManager's "Enroll hash from disk" lists it at the
+#   EFIBOOT top level, right below EFI/, so the user picks it without
+#   opening EFI/ and BOOT/. Same bytes, same
 #   hash, so it trusts nothing beyond grubx64.efi. Nothing boots or reads
 #   the copy.
 #   No fbx64.efi: fallback would write a boot entry for the stick into

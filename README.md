@@ -133,14 +133,37 @@ First start from the stick:
 
 1. Start the machine from the stick through the boot menu
 2. A blue box says "Verification failed". Press Enter on OK
+
+   <img src="docs/screenshots/mok-1-verification-failed.webp" alt="MokManager: Verification failed, OK button" width="480">
+
 3. The screen says "Press any key to perform MOK management". Press a key
    within 10 seconds. If you miss it, the machine restarts; start from the
    stick again
+
+   <img src="docs/screenshots/mok-2-press-any-key.webp" alt="MokManager: Press any key to perform MOK management, booting in 9 seconds" width="480">
+
 4. Pick Enroll hash from disk
-5. Pick EFIBOOT (the stick), then `gjallarOS-enroll.efi`. It is the
-   stick's own start file; you trust this one file, nothing else
-6. Pick Continue, then Yes at "Enroll the key(s)?"
-7. Pick Reboot. The stick starts and shows its menu
+
+   <img src="docs/screenshots/mok-3-enroll-hash.webp" alt="MokManager menu with Enroll hash from disk selected" width="480">
+
+5. Pick EFIBOOT (the stick), then `gjallarOS-enroll.efi` (the line below
+   `EFI/`). It is the stick's own start file; you trust this one file,
+   nothing else
+
+   <img src="docs/screenshots/mok-4-efiboot.webp" alt="Select Binary: EFIBOOT" width="480">
+
+   <img src="docs/screenshots/mok-5-enroll-file.webp" alt="Select Binary: gjallarOS-enroll.efi selected below EFI/" width="480">
+
+6. Pick Continue (below View key 0), then Yes at "Enroll the key(s)?"
+
+   <img src="docs/screenshots/mok-6-continue.webp" alt="Enroll MOK: Continue selected" width="480">
+
+   <img src="docs/screenshots/mok-7-yes.webp" alt="Enroll the key(s)? Yes selected" width="480">
+
+7. Pick Reboot. The stick now starts without the blue box and asks for
+   the keyboard layout
+
+   <img src="docs/screenshots/mok-8-reboot.webp" alt="MokManager menu with Reboot selected" width="480">
 
 Install:
 
