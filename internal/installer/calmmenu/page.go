@@ -43,12 +43,15 @@ func Head(w io.Writer, title string, sz Size, colour bool) (*Column, error) {
 // bare carriage return (a progress bar), the rows of the old line are
 // cleared first. After a line end the cursor waits at the frame's first
 // column, so a program that writes to the terminal itself, such as a
-// password prompt, starts there too. Characters count one column each.
+// password prompt, starts there too; the next line the Column writes sets
+// the column again, as such a program, or the terminal echoing the end of
+// a typed answer, leaves the cursor in the first column. Characters count
+// one column each.
 type Column struct {
 	W      io.Writer
 	Col    int
 	width  int  // the frame's width on this terminal
-	mid    bool // inside a line, the column is set
+	mid    bool // inside a line the Column started, the column is set
 	cells  int  // columns used in the row
 	rows   int  // rows the line broke into below its first
 	cr     bool // the last byte was a carriage return
@@ -117,7 +120,7 @@ func (c *Column) byte(b *strings.Builder, ch byte) {
 	case ch == '\n':
 		c.flushWord(b)
 		fmt.Fprintf(b, "\n\x1b[%dG", c.Col)
-		c.mid, c.cells, c.rows, c.cr = true, 0, 0, false
+		c.mid, c.cells, c.rows, c.cr = false, 0, 0, false
 		c.newLine()
 	case ch == '\r':
 		c.flushWord(b)

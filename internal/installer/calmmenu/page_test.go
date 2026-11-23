@@ -56,10 +56,19 @@ func TestColumnSetsColumnAfterEachLineEnd(t *testing.T) {
 	c := NewColumn(&b, Size{Cols: 76, Rows: 24})
 	io.WriteString(c, "one\ntwo\r50%\rdone\n")
 	// The cursor goes to the column right after a line end, so a prompt
-	// written by another program under the Column starts there too.
-	want := "\x1b[3Gone\n\x1b[3Gtwo\r\x1b[3G50%\r\x1b[3Gdone\n\x1b[3G"
+	// written by another program under the Column starts there too. The
+	// next text places it again: something else may have moved it since.
+	want := "\x1b[3Gone\n\x1b[3G\x1b[3Gtwo\r\x1b[3G50%\r\x1b[3Gdone\n\x1b[3G"
 	if b.String() != want {
 		t.Fatalf("got %q", b.String())
+	}
+	// A program run on the terminal in between, and the line end the
+	// terminal echoes when a typed answer ends, leave the cursor in the
+	// first column: the Column's next line must not start there.
+	b.Reset()
+	io.WriteString(c, "after")
+	if b.String() != "\x1b[3Gafter" {
+		t.Fatalf("text after a line end and another program: %q", b.String())
 	}
 	if c.Terminal() != io.Writer(&b) {
 		t.Fatal("Terminal must return the writer under the Column")
