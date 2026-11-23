@@ -58,8 +58,8 @@ time and shared-config needs**, not by that chain.
    keys, disk protection). Notifications, OSD, launcher (KRunner) and
    screenshots (Spectacle) are Plasma's own.
 5. **Lock: kscreenlocker.**
-6. **Greeter: greetd + tuigreet** (decision 7 of 2026-11-20 stands). greetd
-   starts `startplasma-wayland`.
+6. **Greeter: replaced by decision 15.** tuigreet was the first pick, but it
+   has no on-screen keyboard.
 7. **Theme: Plasma colour schemes** generated from our palettes. The
    greeter takes new colours **at rebuild only**: the live pkexec greeter
    sync is removed (fewer root paths; Jade: "whatever is securer and
@@ -142,7 +142,7 @@ time and shared-config needs**, not by that chain.
 | Plugin: OSK | show/hide keyboard, visible in tablet mode | Plasma virtual keyboard or wvkbd (research) + plasmoid toggle |
 | Plugin: weather city | asks once whether the city is right | plasmoid or Plasma weather widget |
 | Theme sync | see next section | see next section |
-| Greeter | noctalia-greeter (8 patches), live look sync via pkexec | tuigreet, colours at rebuild |
+| Greeter | noctalia-greeter (8 patches), live look sync via pkexec | greeter of decision 15, colours at rebuild |
 | Session target | `hyprland-session.target` | `graphical-session.target` |
 | gjallarctl rotate / render GPU / reload watch | `hyprctl`, socket2 | KWin output config (kscreen-doctor / D-Bus), `KWIN_DRM_DEVICES` |
 | Active window for resource QoS | `user/services/resource-qos.nix` uses `hyprctl activewindow` | KWin D-Bus or KWin script |
@@ -158,9 +158,9 @@ names Hyprland, Noctalia, hyprctl, wvkbd, grim/slurp, wl-copy or monique
 
 | Part | Where | On KDE |
 |---|---|---|
-| Monitor layouts (monique, submodule `pkgs/monique`, vard's repo) | `flake.nix`, `system/wm/hyprland/default.nix`, `user/wm/hyprland/default.nix` (monitors.lua), `rules.nix` (OSD rule), `.gitmodules`, `scripts/installation/install.sh`, `internal/installercheck/check.go`, installer tests (`flakesource`, `systemcheckout`), `scripts/testing/test-installer-bootstrap.py` | monique has Hyprland, niri and sway backends, no KWin. Either KDE's display settings (kscreen keeps a layout per set of connected screens) or a KWin backend in monique. Decision open. |
+| Monitor layouts (monique, submodule `pkgs/monique`, vard's repo) | `flake.nix`, `system/wm/hyprland/default.nix`, `user/wm/hyprland/default.nix` (monitors.lua), `rules.nix` (OSD rule), `.gitmodules`, `scripts/installation/install.sh`, `internal/installercheck/check.go`, installer tests (`flakesource`, `systemcheckout`), `scripts/testing/test-installer-bootstrap.py` | monique has Hyprland, niri and sway backends, no KWin. KDE's display settings (kscreen keeps a layout per set of connected screens), decision 12. monique goes. |
 | On-screen keyboard (wvkbd + our overlay: close key, swipe down, no key preview) | `pkgs/overlays/wvkbd.nix`, `user/wm/hyprland/touch.nix` (two user units, tablet mode, bezel gesture), Noctalia OSK button, greeter | KWin offers the virtual-keyboard protocol to no normal client (KDE bug 512996), so wvkbd cannot type on KWin. Plasma's own keyboard (plasma-keyboard, Plasma 6.6+) runs as KWin's input method and shows on text focus. Our overlay patches do not carry over; the no-key-preview rule (password privacy) must be checked on plasma-keyboard. |
-| Login screen OSK | `system/wm/common/wayland.nix` runs wvkbd inside noctalia-greeter on touch machines | tuigreet is a text greeter on a VT: no OSK. A touch-only device could not log in. Greeter choice is open again (see Decisions). |
+| Login screen OSK | `system/wm/common/wayland.nix` runs wvkbd inside noctalia-greeter on touch machines | The greeter of decision 15 must show plasma-keyboard; the VM comparison checks it. Until then a touch-only device cannot log in. |
 | GTK and Qt theming | `user/wm/shells/noctalia/gtk.nix` (adw-gtk3, CSS from semantic tokens), `qt.nix` (qtct + Kvantum "Noctalia", writes `Noctalia.colors`) | Lives inside the Noctalia folder, so it moves, not deleted. Qt: Plasma's own platform theme + generated colour scheme replaces qtct/Kvantum. Stylix's NixOS Qt target already picks platform `kde` + Breeze when Plasma 6 is on; the Home Manager `qt.nix` `mkForce` of qtct/Kvantum goes, so no `QT_QPA_PLATFORMTHEME`/`QT_STYLE_OVERRIDE` session value overrides Plasma. GTK: adw-gtk3 + our CSS stays, written by Stylix at rebuild (one GTK writer, as today). KDE's GTK sync (kded `gtkconfig`) writes the same files Home Manager owns, so it is off and locked. VM: no qtct value in the session environment, Qt and GTK apps in the palette. |
 | Stylix KDE target | Not set today (`themes/lib/home.nix` turns other targets off) | Turns itself on with Plasma: puts a `kdeglobals` with an immutable colour scheme, look-and-feel and fonts into `XDG_CONFIG_DIRS` and runs `plasma-apply-lookandfeel` at every login and Home Manager switch. That would block the palette pick in System Settings and fight the colour watcher. `stylix.targets.kde.enable = false`; our own `kdeglobals` locks (guards table) are the only system copy. VM: picking a palette in System Settings sticks after logout. |
 | qt6ct stack | `pkgs/overlays/qt6ct-kde-integration.nix`, `pkgs/patches/qt6ct-kde-fixed-font-key.patch`, `tests/nix/qt6ct-kde-style.nix`, flake.nix qt6ct entries, `apps/dolphin/home.nix` (Darkly + `qt6ctSettings`), `themes/apps/dolphin/darkly.nix`, `themes/lib/semantic.nix` Kvantum roles, `pkgs/gjallar-settings` (Fusion palette from qt6ct) | All go with qtct. Dolphin and the settings app use the Plasma style and scheme. Darkly vs Breeze is one choice at CP-W5 (one style for all Qt apps, not Dolphin only). The Nextcloud palette patch (`apps/nextcloud/patches/nextcloud-palette-theme.patch`, test `nextcloud-client-patches.nix`) is re-checked: QML windows must follow the Plasma palette, no white window with light text. |
@@ -255,7 +255,7 @@ rotate service. About 40 patches we carry today, none planned for KDE.
 
 ### Breaks unless we build it
 
-- Touch-only login (no OSK in tuigreet).
+- Touch-only login needs the greeter's on-screen keyboard (decision 15).
 - Paste-once clipboard.
 - Our wvkbd fixes (close key, swipe down).
 - Bezel gestures (hyprgrass) until mapped to KWin edge swipes.
@@ -431,7 +431,7 @@ On KDE:
    follow at the next rebuild through Stylix, as today (KDE's GTK sync
    stays off, see the theming row). A small user service sees the colour change, writes the
    Ghostty theme through the same contrast guard and reloads Ghostty.
-3. Greeter: no live root step. tuigreet takes its colours from the system
+3. Greeter: no live root step. The greeter takes its colours from the system
    build, so a new palette reaches it with the next `gjallarctl rebuild`.
    `gjallar-greeter-sync-privilege` and its pkexec rule are deleted.
 4. The same user service writes the 16 colours to a gjallar state file.
@@ -466,7 +466,7 @@ switch.
   (KWin keeps the lock).
 - **Polkit agent.** polkit-kde-agent replaces Noctalia's agent; root menu
   and helpers (Q253) still work without sudo.
-- **Greeter.** greetd + tuigreet keeps the uaccess, Plymouth hand-over, OSK
+- **Greeter.** The greeter of decision 15 keeps the uaccess, Plymouth hand-over, OSK
   auto-show and measured-boot prompt order from
   `system/wm/common/wayland.nix`. The pkexec greeter-sync path goes away.
 - **Portal.** Only -kde. Screen sharing asks every time.
@@ -551,7 +551,7 @@ Each checkpoint: VM proof on e2e-fw13, exec-guard probes, regression list
 - W2 (Plane 397) groundwork: internal/noctalia → internal/palette, settingsd + settings app
 - W3 (Plane 398) groundwork: keybinds.json neutral + generated Super+F1 list
 - W4 (Plane 399) installer defaults: profile, WMs, theme
-- W5 (Plane 400) KDE base session + greetd/tuigreet start + portal -kde
+- W5 (Plane 400) KDE base session + greeter start (decision 15) + portal -kde
 - W6 (Plane 401) KDE hardening: privileged access, KDE services off, polkit agent, kscreenlocker PAM
 - W7 (Plane 402) keys + Krohnkite + window rules + touch gestures
 - W8 (Plane 403) Plasma panel + control-centre plasmoid
