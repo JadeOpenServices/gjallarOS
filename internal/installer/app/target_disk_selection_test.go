@@ -77,12 +77,22 @@ func TestValidateTargetDiskContext(t *testing.T) {
 }
 
 func TestRootPasswordArgsApplyAccountOnlyOnInstalledHost(t *testing.T) {
-	installed := strings.Join(rootPasswordArgs(true), " ")
+	installed := strings.Join(localPasswordArgs("root", true, false), " ")
 	if !strings.HasSuffix(installed, "--apply --apply-account") {
 		t.Fatalf("installed host must apply the hash to root: %q", installed)
 	}
-	if fresh := strings.Join(rootPasswordArgs(false), " "); strings.Contains(fresh, "--apply-account") {
+	if fresh := strings.Join(localPasswordArgs("root", false, false), " "); strings.Contains(fresh, "--apply-account") {
 		t.Fatalf("live/fresh path must not change the running system's root: %q", fresh)
+	}
+}
+
+// In page mode the password prompts go in the page column.
+func TestLocalPasswordArgsPageColumn(t *testing.T) {
+	if args := strings.Join(localPasswordArgs("alice", false, true), " "); !strings.HasSuffix(args, "--apply --page-column") {
+		t.Fatalf("page mode args: %q", args)
+	}
+	if args := strings.Join(localPasswordArgs("alice", false, false), " "); strings.Contains(args, "--page-column") {
+		t.Fatalf("plain console args: %q", args)
 	}
 }
 

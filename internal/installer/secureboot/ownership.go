@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/termout"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -691,9 +692,7 @@ func sudoReadFile(ctx context.Context, path string) ([]byte, error) {
 func command(ctx context.Context, name string, args ...string) error {
 	cmd := commandContext(ctx, name, args...)
 	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
+	return termout.Attach(cmd)
 }
 
 // shimTrustsKey tells whether the shim that started this boot checks loaders

@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/termout"
 	"io"
 	"io/fs"
 	"os"
@@ -305,7 +306,7 @@ func (f firmwareFiles) rootEfivar(name, guid string) ([]byte, bool, error) {
 func sudoRead(path string) ([]byte, error) {
 	cmd := commandContext(context.Background(), "sudo", privilegedTool("cat"), "--", path)
 	cmd.Stdin = os.Stdin
-	cmd.Stderr = os.Stderr
+	_, cmd.Stderr = termout.Output()
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return nil, err

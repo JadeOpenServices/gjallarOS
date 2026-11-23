@@ -342,7 +342,8 @@ Do not continue until you have saved both.
 // stdout to the journal, which kept the Secure Boot recovery passphrase
 // (e2e-full, 2026-10-05). The secret then goes to the controlling terminal
 // only, or nowhere. A writer that logs (the install log) is skipped: the
-// secret goes to the terminal behind it and never into the log.
+// secret goes to the terminal behind it and never into the log. In page
+// mode it goes in the page column, written straight to that terminal.
 func (u UI) secretOut() (io.Writer, func(), error) {
 	out := terminal(u.Out)
 	file, ok := out.(*os.File)
@@ -350,6 +351,9 @@ func (u UI) secretOut() (io.Writer, func(), error) {
 		return out, func() {}, nil
 	}
 	if tty.Is(file) {
+		if pagerOf(u.Out) != nil {
+			return calmmenu.NewColumn(file, tty.Cols(file)), func() {}, nil
+		}
 		return out, func() {}, nil
 	}
 	tty, err := os.OpenFile("/dev/tty", os.O_WRONLY, 0)

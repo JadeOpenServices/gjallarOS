@@ -12,6 +12,7 @@ import (
 
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/installlog"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/rootfile"
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/termout"
 )
 
 type Plan struct {
@@ -184,7 +185,8 @@ var writeRootFile = func(ctx context.Context, data []byte, dst string) error {
 // rebuild switches to configPath. Its output goes into the install log
 // like every other Nix build of the run. Tests replace it.
 var rebuild = func(ctx context.Context, configPath string) error {
-	return installlog.Run(ctx, os.Stdin, os.Stdout, os.Stderr, "sudo", "nixos-rebuild", "switch", "-I", "nixos-config="+configPath)
+	stdout, stderr := termout.Output()
+	return installlog.Run(ctx, os.Stdin, stdout, stderr, "sudo", "nixos-rebuild", "switch", "-I", "nixos-config="+configPath)
 }
 
 func lastBrace(lines []string) int {
@@ -217,7 +219,5 @@ func insertAfterOpening(text, value string) string {
 var run = func(ctx context.Context, name string, args ...string) error {
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
+	return termout.Attach(cmd)
 }

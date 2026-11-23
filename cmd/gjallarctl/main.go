@@ -40,6 +40,7 @@ import (
 	"github.com/JadeOpenServices/gjallarOS/internal/ai/research"
 	"github.com/JadeOpenServices/gjallarOS/internal/input/xkb"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/bootstrap"
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/calmmenu"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/checkoutowner"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/config"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/credential"
@@ -390,6 +391,7 @@ func runLocalPassword(args []string, stdout, stderr io.Writer) int {
 	username := f.String("username", "", "local username")
 	apply := f.Bool("apply", false, "prompt and store a missing password hash")
 	applyAccount := f.Bool("apply-account", false, "also set a newly stored hash on the existing account")
+	pageColumn := f.Bool("page-column", false, "write the prompts in the installer's page column (stick console)")
 	if err := f.Parse(args); err != nil || f.NArg() != 0 {
 		return 2
 	}
@@ -398,8 +400,8 @@ func runLocalPassword(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "ERROR: %v\n", err)
 		return 2
 	}
-	fmt.Fprintf(stdout, "PLAN: reuse %s when present; otherwise prompt on /dev/tty, hash, and install mode 0600\n", target)
 	if !*apply {
+		fmt.Fprintf(stdout, "PLAN: reuse %s when present; otherwise prompt on /dev/tty, hash, and install mode 0600\n", target)
 		return 0
 	}
 	if credential.Exists(context.Background(), target) {
@@ -415,14 +417,20 @@ func runLocalPassword(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stdout, target)
 		return 0
 	}
-	tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
+	term, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
 	if err != nil {
 		fmt.Fprintf(stderr, "ERROR: local password requires a terminal: %v\n", err)
 		return 1
 	}
-	defer tty.Close()
-	fmt.Fprintf(tty, "Set a password for %s (terminal only).\n", *username)
-	password, err := credential.ReadConfirmedPassword(tty, tty, *username)
+	defer term.Close()
+	// The prompts are not secret; the password is read from the terminal
+	// with echo off either way.
+	var prompts io.Writer = term
+	if *pageColumn {
+		prompts = calmmenu.NewColumn(term, tty.Cols(term))
+	}
+	fmt.Fprintf(prompts, "Set a password for %s (terminal only).\n", *username)
+	password, err := credential.ReadConfirmedPassword(term, prompts, *username)
 	if err != nil {
 		fmt.Fprintf(stderr, "ERROR: %v\n", err)
 		return 1

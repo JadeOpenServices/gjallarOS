@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/termout"
 	"io"
 	"io/fs"
 	"os"
@@ -190,10 +191,11 @@ func generate(
 		args...,
 	)
 
+	_, stderr := termout.Output()
 	if err := runner.Run(
 		ctx,
 		tmp,
-		os.Stderr,
+		stderr,
 		"sudo",
 		commandArgs...,
 	); err != nil {

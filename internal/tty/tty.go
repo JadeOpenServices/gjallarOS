@@ -20,3 +20,13 @@ func Is(file *os.File) bool {
 	_, err := unix.IoctlGetTermios(int(file.Fd()), unix.TCGETS)
 	return err == nil
 }
+
+// Cols is file's width in columns, or 80 when file is not a terminal or
+// does not say.
+func Cols(file *os.File) int {
+	ws, err := unix.IoctlGetWinsize(int(file.Fd()), unix.TIOCGWINSZ)
+	if err != nil || ws.Col == 0 {
+		return 80
+	}
+	return int(ws.Col)
+}

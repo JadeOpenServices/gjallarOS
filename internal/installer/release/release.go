@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/installlog"
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/termout"
 )
 
 type Policy struct {
@@ -132,8 +133,9 @@ func Align(ctx context.Context, repo, expected, nixosConfig string) error {
 	if err := json.Unmarshal(out, &tree); err != nil || !strings.HasPrefix(tree, "/nix/store/") {
 		return fmt.Errorf("fetch pinned nixpkgs %s: unexpected result %q", src.URL, strings.TrimSpace(string(out)))
 	}
+	stdout, stderr := termout.Output()
 	for _, args := range Commands(src, tree, nixosConfig) {
-		if err := installlog.Run(ctx, os.Stdin, os.Stdout, os.Stderr, "sudo", args...); err != nil {
+		if err := installlog.Run(ctx, os.Stdin, stdout, stderr, "sudo", args...); err != nil {
 			return fmt.Errorf("sudo %s: %w", strings.Join(args, " "), err)
 		}
 	}

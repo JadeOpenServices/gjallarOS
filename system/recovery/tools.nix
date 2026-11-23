@@ -69,12 +69,38 @@ let
         fi
       }
 
+      # In page mode (the installer stick, GJALLAR_PAGES=1) text goes in the
+      # 66-column block in the middle of the screen, where the installer's
+      # own text is (calmmenu.Width and calmmenu.NewColumn).
+      page_width=0
+      page_col=1
+      if [ "''${GJALLAR_PAGES:-}" = 1 ] && size=$(stty size 2>/dev/null); then
+        cols=''${size#* }
+        if [ "$cols" -gt 0 ] 2>/dev/null; then
+          page_width=$((cols < 66 ? cols : 66))
+          page_col=$(((cols - page_width) / 2 + 1))
+        fi
+      fi
+
+      say() {
+        if [ "$page_width" -eq 0 ]; then
+          printf '%s\n' "$@"
+          return
+        fi
+        printf '%s\n' "$@" | fold -s -w "$page_width" | while IFS= read -r part; do
+          printf '\033[%dG%s\n' "$page_col" "$part"
+        done
+      }
+
       confirm_phrase() {
         expected="$1"
+        if [ "$page_width" -gt 0 ]; then
+          printf '\n\033[%dG' "$page_col"
+        fi
         printf 'Type %s to continue: ' "$expected"
         read -r answer
         [ "$answer" = "$expected" ] || {
-          printf '%s\n' 'Cancelled.' >&2
+          say 'Cancelled.' >&2
           exit 1
         }
       }
@@ -556,12 +582,12 @@ let
           mode="''${2:-}"
           case "$mode" in
             repair)
-              printf '%s\n' \
+              say \
                 'Guided mode: REPAIR EXISTING INSTALLATION' \
                 'Disk formatting is forbidden. Unlock with a human recovery credential, then use repair-boot or rebuild.'
               ;;
             reinstall)
-              printf '%s\n' \
+              say \
                 'Guided mode: REINSTALL EXISTING INSTALLATION' \
                 'Existing partitions and encrypted data must be detected before any installer runs.'
               confirm_phrase REINSTALL-EXISTING
@@ -580,7 +606,7 @@ let
                 printf '%s\n' 'Usage: gjallar-recover guided fresh [--channel stable|staging|dev]' >&2
                 exit 2
               fi
-              printf '%s\n' \
+              say \
                 'DANGER: GUIDED FRESH INSTALL MODE' \
                 'Select the target disk in the installer and confirm its destructive plan.'
               confirm_phrase ERASE-FOR-FRESH-INSTALL
@@ -601,7 +627,7 @@ let
                 exit 2
               fi
               require_root
-              printf '%s\n' \
+              say \
                 'DANGER: GUIDED MOVE TO A NEW DISK' \
                 'The old disk is only read. The new disk you select in the installer is erased.'
               confirm_phrase ERASE-FOR-MOVE

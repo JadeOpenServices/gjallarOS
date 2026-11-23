@@ -55,6 +55,7 @@ import (
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/sourcerevision"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/systemcheckout"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/targetdisk"
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/termout"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/zonecity"
 	"github.com/JadeOpenServices/gjallarOS/internal/installercheck"
 )
@@ -297,6 +298,10 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 	// page column sits under the log's writer, so the log never gets the
 	// escape codes that place the text.
 	out, errOut = prompt.Pages(out, errOut)
+	// Programs the installer starts (sbctl, age-keygen, sudo and the like)
+	// write into the same column; their output stays out of the log.
+	termout.SetOutput(out, errOut)
+	defer termout.SetOutput(nil, nil)
 	runLog, out, errOut := startInstallLog(out, errOut)
 	defer func() { runLog.finish(ctx, errOut, code) }()
 	root, err := installercheck.ResolveRepository(opt.repo)
@@ -1278,7 +1283,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 		// Root recovery is intentionally local even on JODS-managed endpoints.
 		// Management must never remove wheel/Polkit administration before a
 		// verified local recovery credential exists.
-		path, err := controlOutput(ctx, s.control, errOut, rootPasswordArgs(persistentInstalledHost)...)
+		path, err := controlOutput(ctx, s.control, errOut, localPasswordArgs("root", persistentInstalledHost, prompt.Paged(out))...)
 		if err != nil {
 			return fail(errOut, err)
 		}
@@ -3316,13 +3321,13 @@ func buildShimFacts(ctx context.Context, root string) (secureboot.ShimFacts, err
 // through every compile and ran a 4 GiB machine out of memory.
 func buildStaged(ctx context.Context, source flakesource.Source, attr string) (string, error) {
 	eval := exec.CommandContext(ctx, "nix", "eval", "--raw", source.Ref(attr)+".drvPath")
-	eval.Stderr = os.Stderr
+	_, eval.Stderr = termout.Output()
 	drv, err := eval.Output()
 	if err != nil {
 		return "", err
 	}
 	cmd := exec.CommandContext(ctx, "nix", "build", strings.TrimSpace(string(drv))+"^*", "--no-link", "--print-out-paths")
-	cmd.Stderr = os.Stderr
+	_, cmd.Stderr = termout.Output()
 	output, err := cmd.Output()
 	if err != nil {
 		return "", err
@@ -3438,22 +3443,10 @@ func controlAttached(ctx context.Context, binary string, args ...string) error {
 func attached(ctx context.Context, name string, args ...string) error {
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
+	return termout.Attach(cmd)
 }
 func privilegedFileExists(ctx context.Context, path string) bool {
 	return exec.CommandContext(ctx, "sudo", "test", "-s", path).Run() == nil
-}
-
-// rootPasswordArgs applies a new root hash to the live account on an installed
-// host: root already exists there, and mutable NixOS users keep their old hash.
-func rootPasswordArgs(persistentInstalledHost bool) []string {
-	args := []string{"installer", "local-password", "--username", "root", "--apply"}
-	if persistentInstalledHost {
-		args = append(args, "--apply-account")
-	}
-	return args
 }
 
 // ensureUserPassword gives the desktop account a password: the greeter, sudo
@@ -3478,7 +3471,7 @@ func (s *state) ensureUserPassword(ctx context.Context, persistentInstalledHost 
 		fmt.Fprintf(out, "Existing password for %s retained.\n", username)
 		return nil
 	}
-	path, err := controlOutput(ctx, s.control, errOut, userPasswordArgs(username, persistentInstalledHost && exists)...)
+	path, err := controlOutput(ctx, s.control, errOut, localPasswordArgs(username, persistentInstalledHost && exists, prompt.Paged(out))...)
 	if err != nil {
 		return err
 	}
@@ -3490,10 +3483,17 @@ func (s *state) ensureUserPassword(ctx context.Context, persistentInstalledHost 
 	return nil
 }
 
-func userPasswordArgs(username string, applyAccount bool) []string {
+// localPasswordArgs asks gjallarctl for a password hash. applyAccount also
+// sets a new hash on the live account: on an installed host the account
+// already exists, and mutable NixOS users keep their old hash. In page mode
+// the prompts go in the page column, as the installer's own text does.
+func localPasswordArgs(username string, applyAccount, paged bool) []string {
 	args := []string{"installer", "local-password", "--username", username, "--apply"}
 	if applyAccount {
 		args = append(args, "--apply-account")
+	}
+	if paged {
+		args = append(args, "--page-column")
 	}
 	return args
 }

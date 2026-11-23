@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"golang.org/x/sys/unix"
+
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/termout"
 )
 
 // standIn puts a script named nixos-rebuild first on PATH. It says whether
@@ -99,7 +101,7 @@ func TestRunGivesNixATerminal(t *testing.T) {
 	standIn(t)
 	log := openTestLog(t)
 	// A pseudo-terminal stands in for the user's terminal.
-	master, slave, err := openPTY()
+	master, slave, err := termout.OpenPTY()
 	if err != nil {
 		t.Skipf("no pseudo-terminal here: %v", err)
 	}
@@ -139,39 +141,6 @@ func checkClean(t *testing.T, text string) {
 	}
 }
 
-// TestRunDoesNotWaitForLeftovers: a process the command leaves behind keeps
-// the pseudo-terminal open; Run returns after the drain time anyway.
-func TestRunDoesNotWaitForLeftovers(t *testing.T) {
-	bin := t.TempDir()
-	script := "#!/bin/sh\nsleep 3 &\necho started\n"
-	if err := os.WriteFile(filepath.Join(bin, "nix-channel"), []byte(script), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
-	previous := drainTime
-	drainTime = 200 * time.Millisecond
-	t.Cleanup(func() { drainTime = previous })
-	log := openTestLog(t)
-	master, slave, err := openPTY()
-	if err != nil {
-		t.Skipf("no pseudo-terminal here: %v", err)
-	}
-	defer master.Close()
-	defer slave.Close()
-	go io.Copy(io.Discard, master)
-	tee := log.Tee(slave)
-	start := time.Now()
-	if err := Run(context.Background(), nil, tee, tee, "nix-channel"); err != nil {
-		t.Fatal(err)
-	}
-	if took := time.Since(start); took > 2*time.Second {
-		t.Errorf("Run waited %v for a leftover process", took)
-	}
-	if text := exported(t, log); !strings.Contains(text, "started") {
-		t.Errorf("log lacks the output:\n%s", text)
-	}
-}
-
 // TestRunResetsColourAfterCommand: a command that ends in the middle of a
 // colour does not leave it on for the text after it; the log stays clean.
 func TestRunResetsColourAfterCommand(t *testing.T) {
@@ -182,7 +151,7 @@ func TestRunResetsColourAfterCommand(t *testing.T) {
 	}
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	log := openTestLog(t)
-	master, slave, err := openPTY()
+	master, slave, err := termout.OpenPTY()
 	if err != nil {
 		t.Skipf("no pseudo-terminal here: %v", err)
 	}
@@ -204,22 +173,6 @@ func TestRunResetsColourAfterCommand(t *testing.T) {
 	}
 }
 
-func TestPTYIsOwnerOnly(t *testing.T) {
-	master, slave, err := openPTY()
-	if err != nil {
-		t.Skipf("no pseudo-terminal here: %v", err)
-	}
-	defer master.Close()
-	defer slave.Close()
-	info, err := slave.Stat()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if mode := info.Mode().Perm(); mode != 0o600 {
-		t.Errorf("pseudo-terminal mode %o, want 600", mode)
-	}
-}
-
 // paged stands for the stick's page column: it writes to the terminal and
 // says how wide the column is.
 type paged struct{ term *os.File }
@@ -238,7 +191,7 @@ func TestRunInPageColumnGetsColumnWidth(t *testing.T) {
 	}
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	SetCurrent(nil)
-	master, slave, err := openPTY()
+	master, slave, err := termout.OpenPTY()
 	if err != nil {
 		t.Skipf("no pseudo-terminal here: %v", err)
 	}

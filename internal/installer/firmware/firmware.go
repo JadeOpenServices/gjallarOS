@@ -3,6 +3,7 @@ package firmware
 import (
 	"context"
 	"fmt"
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/termout"
 	"os"
 	"os/exec"
 	"strings"
@@ -16,9 +17,7 @@ func EnsureService(ctx context.Context) error {
 	}
 	cmd := exec.CommandContext(ctx, "sudo", "systemctl", "start", "fwupd.service")
 	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
+	if err := termout.Attach(cmd); err != nil {
 		return fmt.Errorf("start fwupd.service: %w", err)
 	}
 	// fwupd is commonly socket-activated/static, so enable failure is non-fatal.
@@ -33,7 +32,8 @@ func Update(ctx context.Context) (string, error) {
 	cmd := exec.CommandContext(ctx, "sudo", "fwupdmgr", "update")
 	cmd.Stdin = os.Stdin
 	out, err := cmd.CombinedOutput()
-	os.Stdout.Write(out)
+	stdout, _ := termout.Output()
+	_, _ = stdout.Write(out)
 	if err != nil {
 		return string(out), fmt.Errorf("apply firmware updates: %w", err)
 	}
@@ -49,7 +49,5 @@ func Update(ctx context.Context) (string, error) {
 func attached(ctx context.Context, name string, args ...string) error {
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
+	return termout.Attach(cmd)
 }

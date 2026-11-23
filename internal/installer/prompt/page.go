@@ -93,7 +93,7 @@ func Pages(out, errOut io.Writer) (io.Writer, io.Writer) {
 }
 
 func newPager(file *os.File, title string) *Pager {
-	return &Pager{file: file, title: title, col: calmmenu.NewColumn(file, termCols(file))}
+	return &Pager{file: file, title: title, col: calmmenu.NewColumn(file, tty.Cols(file))}
 }
 
 // pageTitle makes the title printable and fits it in the block.
@@ -133,7 +133,7 @@ func (p *Pager) Terminal() io.Writer { return p.file }
 func (p *Pager) page() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	cols := termCols(p.file)
+	cols := tty.Cols(p.file)
 	if p.secret {
 		p.secret = false
 		p.col = calmmenu.NewColumn(p.file, cols)
@@ -197,14 +197,6 @@ func (u *UI) UsePages(in io.Reader) {
 			}
 		}
 	}
-}
-
-func termCols(f *os.File) int {
-	ws, err := unix.IoctlGetWinsize(int(f.Fd()), unix.TIOCGWINSZ)
-	if err != nil || ws.Col == 0 {
-		return 80
-	}
-	return int(ws.Col)
 }
 
 func sameFile(a, b *os.File) bool {

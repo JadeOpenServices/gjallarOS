@@ -1,8 +1,12 @@
 package credential
 
 import (
+	"bytes"
 	"reflect"
+	"strings"
 	"testing"
+
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/termout"
 )
 
 func TestChpasswdLine(t *testing.T) {
@@ -53,5 +57,29 @@ func TestPasswordUsable(t *testing.T) {
 		if got := passwordUsable(status); got != want {
 			t.Fatalf("passwordUsable(%q) = %v, want %v", status, got, want)
 		}
+	}
+}
+
+// An empty password is turned down before the confirm prompt, not after.
+func TestReadConfirmedPasswordEmptyBeforeConfirm(t *testing.T) {
+	master, slave, err := termout.OpenPTY()
+	if err != nil {
+		t.Skipf("no pty: %v", err)
+	}
+	defer master.Close()
+	defer slave.Close()
+	if _, err := master.WriteString("\nexample-pass\nexample-pass\n"); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	got, err := ReadConfirmedPassword(slave, &out, "alice")
+	if err != nil || got != "example-pass" {
+		t.Fatalf("got %q %v", got, err)
+	}
+	text := out.String()
+	empty := strings.Index(text, "Password must not be empty.")
+	confirm := strings.Index(text, "Confirm password: ")
+	if empty < 0 || confirm < empty || strings.Count(text, "Confirm password: ") != 1 {
+		t.Fatalf("prompt order: %q", text)
 	}
 }

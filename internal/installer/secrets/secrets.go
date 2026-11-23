@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/termout"
 	"os"
 	"os/exec"
 	"os/user"
@@ -44,9 +45,7 @@ func EnsureAgeKey(ctx context.Context, username string) (keyPath, recipient stri
 		os.Remove(tmpPath)
 		defer os.Remove(tmpPath)
 		cmd := exec.CommandContext(ctx, "age-keygen", "-o", tmpPath)
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		if err := cmd.Run(); err != nil {
+		if err := termout.Attach(cmd); err != nil {
 			return "", "", fmt.Errorf("generate age key: %w", err)
 		}
 		if err := os.Chmod(tmpPath, 0600); err != nil {

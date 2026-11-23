@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/termout"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -434,7 +435,8 @@ func verifyBootArtifacts(ctx context.Context) error {
 	out, err := cmd.CombinedOutput()
 
 	if len(out) > 0 {
-		_, _ = os.Stdout.Write(out)
+		stdout, _ := termout.Output()
+		_, _ = stdout.Write(out)
 	}
 
 	if err == nil {
@@ -507,17 +509,13 @@ var writeRootFile = rootfile.Write
 var runWithInput = func(ctx context.Context, input []byte, name string, args ...string) error {
 	cmd := commandContext(ctx, name, args...)
 	cmd.Stdin = bytes.NewReader(input)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
+	return termout.Attach(cmd)
 }
 
 var run = func(ctx context.Context, name string, args ...string) error {
 	cmd := commandContext(ctx, name, args...)
 	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
+	return termout.Attach(cmd)
 }
 
 var geteuid = os.Geteuid

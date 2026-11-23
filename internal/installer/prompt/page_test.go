@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/calmmenu"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/installlog"
+	"github.com/JadeOpenServices/gjallarOS/internal/tty"
 )
 
 // SYNTHETIC recovery material.
@@ -129,7 +131,11 @@ func TestPagedRecoveryStaysOnScreen(t *testing.T) {
 	if _, err := u.Value(ctx, "Next page", ""); err != nil {
 		t.Fatal(err)
 	}
+	col := calmmenu.NewColumn(io.Discard, tty.Cols(term)).Col
 	out := screen()
+	if at := fmt.Sprintf("\x1b[%dG%s", col, testSecret); !strings.Contains(out, at) {
+		t.Fatalf("secret not in the page column (want %q):\n%q", at, out)
+	}
 	secret := strings.Index(out, testSecret)
 	second := strings.Index(out, "Absolutely sure?")
 	next := strings.Index(out, "Next page")

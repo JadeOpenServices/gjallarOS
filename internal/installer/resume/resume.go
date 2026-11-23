@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/termout"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -386,7 +387,7 @@ func arm(ctx context.Context, executable string, tx Transaction) error {
 	if store := storeRoot(executable); store != "" {
 		cmd := exec.CommandContext(ctx, "sudo", "nix-store", "--add-root", GCRootPath, "--realise", store)
 		cmd.Stdin = os.Stdin
-		cmd.Stderr = os.Stderr
+		_, cmd.Stderr = termout.Output()
 		if err := cmd.Run(); err != nil {
 			return fmt.Errorf("keep installer store paths for the resume: %w", err)
 		}
@@ -415,10 +416,7 @@ var sudoWrite = rootfile.Write
 func sudo(ctx context.Context, args ...string) error {
 	cmd := exec.CommandContext(ctx, "sudo", args...)
 	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-
-	if err := cmd.Run(); err != nil {
+	if err := termout.Attach(cmd); err != nil {
 		return fmt.Errorf(
 			"sudo %s: %w",
 			strings.Join(args, " "),

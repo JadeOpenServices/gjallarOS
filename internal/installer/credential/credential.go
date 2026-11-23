@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/termout"
 	"io"
 	"os"
 	"os/exec"
@@ -68,13 +69,13 @@ func ReadConfirmedPassword(tty *os.File, out io.Writer, username string) (string
 		if err != nil {
 			return "", err
 		}
-		second, err := ReadSecret(tty, reader, out, "Confirm password: ")
-		if err != nil {
-			return "", err
-		}
 		if first == "" {
 			fmt.Fprintln(out, "Password must not be empty.")
 			continue
+		}
+		second, err := ReadSecret(tty, reader, out, "Confirm password: ")
+		if err != nil {
+			return "", err
 		}
 		if first != second {
 			fmt.Fprintln(out, "Passwords do not match.")
@@ -146,7 +147,7 @@ func Apply(ctx context.Context, username, hash string) error {
 	}
 	cmd := exec.CommandContext(ctx, "sudo", "chpasswd", "--encrypted")
 	cmd.Stdin = strings.NewReader(line)
-	cmd.Stderr = os.Stderr
+	_, cmd.Stderr = termout.Output()
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("apply password hash for %s: %w", username, err)
 	}
@@ -166,9 +167,7 @@ func chpasswdLine(username, hash string) (string, error) {
 func Store(ctx context.Context, target, hash string) error {
 	cmd := exec.CommandContext(ctx, "sudo", storeDirCommand(target)...)
 	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
+	if err := termout.Attach(cmd); err != nil {
 		return fmt.Errorf("store password hash: %w", err)
 	}
 	// The hash goes to root through a pipe, never through a file (L54).
