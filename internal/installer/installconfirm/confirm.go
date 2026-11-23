@@ -86,12 +86,7 @@ func Confirm(
 		return fmt.Errorf("destructive installation was not authorized")
 	}
 
-	fmt.Fprintln(
-		out,
-		"WARNING: continuing past this gate authorizes destructive provisioning of the target disk.",
-	)
-
-	fmt.Fprintln(out, "Destructive installation explicitly authorized.")
+	fmt.Fprintf(out, "Confirmed: everything on %s will be erased.\n", plan.TargetDisk.Path)
 	return nil
 }
 

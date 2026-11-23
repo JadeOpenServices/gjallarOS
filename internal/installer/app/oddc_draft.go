@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -18,7 +19,11 @@ import (
 // draft only warns: the install itself does not depend on it.
 func stageODDCDraft(ctx context.Context, profileDestination string, out io.Writer) {
 	destination := filepath.Join(filepath.Dir(profileDestination), "oddc-draft")
-	if err := writeODDCDraft(ctx, destination, out); err != nil {
+	err := writeODDCDraft(ctx, destination, out)
+	switch {
+	case errors.Is(err, oddcdraft.ErrNoCatalog):
+		fmt.Fprintln(out, "No ODDC draft for this machine: this installer has no ODDC catalog.")
+	case err != nil:
 		fmt.Fprintf(out, "WARNING: no ODDC draft for this machine: %v\n", err)
 	}
 }
@@ -55,6 +60,10 @@ func reportBestEffort(out io.Writer) {
 	)
 	if err != nil {
 		fmt.Fprintln(out, "Machine support: best effort. No ODDC model matches this machine; nothing optional is switched on.")
+		if errors.Is(err, oddcdraft.ErrNoCatalog) {
+			fmt.Fprintln(out, "This installer has no ODDC catalog, so it cannot list the parts ODDC knows.")
+			return
+		}
 		fmt.Fprintf(out, "WARNING: no ODDC parts list for this machine: %v\n", err)
 		return
 	}

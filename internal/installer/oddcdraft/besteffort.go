@@ -1,7 +1,6 @@
 package oddcdraft
 
 import (
-	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -18,7 +17,7 @@ import (
 // machine and nothing in it is applied.
 func BestEffort(catalog string, facts portable.Facts, bound map[string]map[string][]string) ([]portable.PresentPart, error) {
 	if catalog == "" {
-		return nil, errors.New("installer was built without the ODDC catalog")
+		return nil, ErrNoCatalog
 	}
 
 	registry, err := portable.LoadRegistry(catalog)

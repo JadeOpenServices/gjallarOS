@@ -18,8 +18,8 @@
 # confined pack unit's script.
 #
 # oddc is the full ODDC source (the flake's oddc input). With it the
-# installer drafts a model for machines ODDC does not match; without it
-# (recovery tools) it skips the draft.
+# installer drafts a model for machines ODDC does not match and lists the
+# parts ODDC knows; without it (recovery tools) it says it has no catalog.
 {
   callPackage,
   lib,

@@ -199,6 +199,9 @@ func runInPTY(cmd *exec.Cmd, term *os.File, out io.Writer) error {
 	err = cmd.Wait()
 	_ = master.SetReadDeadline(time.Now().Add(drainTime))
 	<-copied
+	// A program that stopped in the middle of a colour would leave it on
+	// for the text after it.
+	_, _ = io.WriteString(term, "\x1b[0m")
 	return err
 }
 

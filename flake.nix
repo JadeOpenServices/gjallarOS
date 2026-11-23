@@ -210,6 +210,9 @@
               "the installer stick needs the Monique submodule: build '.?submodules=1#gjallar-stick-iso'";
             recoverySource;
           inherit sourceRevision;
+          # The stick drafts ODDC models and lists known parts for machines
+          # ODDC does not match, so its installer needs the catalog.
+          oddcSource = inputs.oddc;
         };
       };
 

@@ -39,12 +39,16 @@ To refine and contribute it:
     oddc contribute
 `
 
+// ErrNoCatalog says this installer was built without the ODDC catalog
+// (the recovery tools): it can neither draft a model nor list known parts.
+var ErrNoCatalog = errors.New("this installer has no ODDC catalog")
+
 // Write drafts a model from facts (portable.ReadFacts("/sys") on the
 // machine) and writes model.json, facts.json, notes.txt and README.txt
 // into dir. It returns the drafted model ID.
 func Write(catalog string, facts portable.Facts, dir string) (string, error) {
 	if catalog == "" {
-		return "", errors.New("installer was built without the ODDC catalog")
+		return "", ErrNoCatalog
 	}
 
 	registry, err := portable.LoadRegistry(catalog)

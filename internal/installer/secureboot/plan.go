@@ -114,9 +114,6 @@ What you need:
   the recovery key once
 `)
 	}
-	b.WriteString(`
-No recovery partition is set up on this path yet.
-`)
 	return b.String()
 }
 

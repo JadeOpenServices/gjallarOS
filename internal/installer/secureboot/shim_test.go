@@ -342,13 +342,18 @@ func TestShimStarted(t *testing.T) {
 
 func TestLockedShimPlan(t *testing.T) {
 	plan := LockedShimPlan(false)
-	for _, want := range []string{"not changed", "MokManager", "Secure Boot stays on", "keeps your answers", "No recovery partition"} {
+	for _, want := range []string{"not changed", "MokManager", "Secure Boot stays on", "keeps your answers"} {
 		if !strings.Contains(plan, want) {
 			t.Errorf("plan misses %q:\n%s", want, plan)
 		}
 	}
 	if strings.Contains(plan, "disk recovery key") {
 		t.Errorf("plan without TPM unlock names the disk recovery key:\n%s", plan)
+	}
+	// The recovery partition is its own question on this path (R51), so the
+	// plan must not say there is none.
+	if strings.Contains(plan, "recovery partition") {
+		t.Errorf("plan speaks for the recovery question:\n%s", plan)
 	}
 	if !strings.Contains(LockedShimPlan(true), "disk recovery key") {
 		t.Error("plan with TPM unlock misses the disk recovery key")

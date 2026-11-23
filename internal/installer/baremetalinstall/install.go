@@ -141,12 +141,7 @@ func install(
 	defer cleanup()
 	target = "path:" + staged + "#" + input.Hostname
 
-	fmt.Fprintf(
-		input.Out,
-		"STAGE: installing target=%s root=%s\n",
-		target,
-		targetRoot,
-	)
+	fmt.Fprintf(input.Out, "STAGE: installing gjallarOS into %s\n", targetRoot)
 
 	// --no-root-passwd ensures nixos-install never opens a password prompt or
 	// tries to move a secret through this stage. gjallarOS owns its configured

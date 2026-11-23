@@ -172,6 +172,38 @@ func TestRunDoesNotWaitForLeftovers(t *testing.T) {
 	}
 }
 
+// TestRunResetsColourAfterCommand: a command that ends in the middle of a
+// colour does not leave it on for the text after it; the log stays clean.
+func TestRunResetsColourAfterCommand(t *testing.T) {
+	bin := t.TempDir()
+	script := "#!/bin/sh\nprintf '\\033[31mred'\n"
+	if err := os.WriteFile(filepath.Join(bin, "nix-channel"), []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	log := openTestLog(t)
+	master, slave, err := openPTY()
+	if err != nil {
+		t.Skipf("no pseudo-terminal here: %v", err)
+	}
+	defer master.Close()
+	var screen strings.Builder
+	done := make(chan struct{})
+	go func() { io.Copy(&screen, master); close(done) }()
+	tee := log.Tee(slave)
+	if err := Run(context.Background(), nil, tee, tee, "nix-channel"); err != nil {
+		t.Fatal(err)
+	}
+	slave.Close()
+	<-done
+	if got := screen.String(); !strings.HasSuffix(got, "red\x1b[0m") {
+		t.Errorf("terminal got %q", got)
+	}
+	if text := exported(t, log); strings.Contains(text, "\x1b") || !strings.Contains(text, "red") {
+		t.Errorf("log:\n%q", text)
+	}
+}
+
 func TestPTYIsOwnerOnly(t *testing.T) {
 	master, slave, err := openPTY()
 	if err != nil {

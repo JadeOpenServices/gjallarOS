@@ -133,7 +133,7 @@ func TestConfirmRequiresTwoExplicitConfirmations(t *testing.T) {
 		"Root encryption: luks2",
 		"Have you checked the target disk name thoroughly",
 		"Are you absolutely sure you want to permanently erase /dev/nvme1n1?",
-		"Destructive installation explicitly authorized.",
+		"Confirmed: everything on /dev/nvme1n1 will be erased.",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("confirmation output missing %q:\n%s", want, text)

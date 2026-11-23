@@ -35,6 +35,20 @@ func screen(t *testing.T, out string, cols, rows int) []string {
 			case "G":
 				c, _ = strconv.Atoi(n[0])
 				c--
+			case "A":
+				k, _ := strconv.Atoi(n[0])
+				r = max(0, r-max(1, k))
+			case "J":
+				for i := c; i < cols; i++ {
+					g[r][i] = ' '
+				}
+				for i := r + 1; i < rows; i++ {
+					g[i] = blank()
+				}
+			case "K":
+				for i := c; i < cols; i++ {
+					g[r][i] = ' '
+				}
 			}
 			out = out[len(m[0]):]
 			continue

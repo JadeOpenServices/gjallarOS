@@ -3,6 +3,7 @@
   lib,
   pkgs,
   utils,
+  oddcSource,
   ...
 }:
 # The installer stick (Plane 344/350). The same image for everyone: built
@@ -21,7 +22,7 @@ let
     cmdline = "";
   };
 
-  installer = pkgs.callPackage ../../pkgs/gjallar-installer { };
+  installer = pkgs.callPackage ../../pkgs/gjallar-installer { oddc = oddcSource; };
 
   # Before it installs, the menu checks the stick against the newest signed
   # release (Q233): below the release floor it refuses. The stick's release
