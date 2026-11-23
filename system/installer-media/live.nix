@@ -6,13 +6,19 @@
   releaseVersion,
   repoSource,
   sourceRevision,
+  oddcSource,
   ...
 }:
 # What every gjallarOS live medium shares: the recovery ISO, the recovery
 # partition and the installer stick. Each image sets its own volume label,
 # host name and keyboard on top.
 let
-  tools = import ../recovery/tools.nix { inherit config pkgs sourceRevision; };
+  # gjallar-recover starts the installer from its own PATH, so the catalog
+  # has to reach this copy, not only the stick menu's (Plane 416).
+  tools = import ../recovery/tools.nix {
+    inherit config pkgs sourceRevision;
+    oddc = oddcSource;
+  };
 in
 {
   imports = [

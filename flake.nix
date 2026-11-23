@@ -183,6 +183,8 @@
             releaseVersion = releasePolicy.release;
             repoSource = recoverySource;
             inherit recoveryKeyboard sourceRevision;
+            # live.nix takes it; only the stick carries the ODDC catalog.
+            oddcSource = null;
           };
         };
 

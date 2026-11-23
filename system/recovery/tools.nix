@@ -2,10 +2,12 @@
   config,
   pkgs,
   sourceRevision,
+  # ODDC catalog for the installer; only the stick has one (Plane 416).
+  oddc ? null,
 }:
 let
   gjallarctl = pkgs.callPackage ../../pkgs/gjallarctl { };
-  installer = pkgs.callPackage ../../pkgs/gjallar-installer { };
+  installer = pkgs.callPackage ../../pkgs/gjallar-installer { inherit oddc; };
   recoveryInstall = pkgs.callPackage ../../pkgs/gjallar-recovery-install { };
   recoveryExecutor = pkgs.writeShellApplication {
     name = "gjallar-recovery-execute";
