@@ -103,6 +103,19 @@ time and shared-config needs**, not by that chain.
     them again at login and has no new-media check (plasma-desktop 6.6.6
     `solid-device-automounter`). udiskie, its overlay and patch go at the
     switch. The new-media rule is proposed to KDE (book 753).
+19. **Noctalia does not stay on KDE** (Jade 2026-11-23). Noctalia 5.6
+    (C++, no Quickshell) runs on KWin only as a second shell on top of
+    plasmashell: it uses Plasma's notification server and OSD. On KWin its
+    lock does not work (no ext-session-lock; lock through kscreenlocker is
+    still an open pull request, #5296), and clipboard history, paste,
+    screenshots, night light and the keyboard-layout widget have no
+    protocol to use. Its taskbar writes `kwin-active-window.js` into the
+    user's state folder and loads it into KWin, which breaks the sealed
+    KWin scripts (L166). Plugins are unsandboxed and update themselves
+    from git every 6 hours by default. The only saving would be the
+    rewrite of our 7 plugins, so decision 4 stands: Plasma's own panel,
+    and Noctalia with its 23 patches (and the 8 greeter patches) goes at
+    the switch.
 
 ## What Noctalia and Hyprland do today, and where each part goes
 
