@@ -1,8 +1,9 @@
 // Package calmmenu draws the calm text menu from THEMEBRAIN section 18:
-// a page in a frame with the same margin on every side of the terminal
-// (see FrameFor), grown evenly around a short menu (see Render), with an
-// optional logo on top. Colours come from the 16 colour slots only, so the same output
-// works in foot and on the Linux console.
+// a page in a frame with the same margin on every side of the terminal,
+// at most FrameWidth wide (see FrameFor), grown evenly around a short
+// menu (see Render), with an optional logo on top. Colours come from the
+// 16 colour slots only, so the same output works in foot and on the
+// Linux console.
 package calmmenu
 
 import (

@@ -293,8 +293,8 @@ func TestPageEnviron(t *testing.T) {
 		t.Fatalf("plain ctx: %q", got)
 	}
 	got = PageEnviron(WithPage(context.Background(), "Install gjallarOS"), env, sz)
-	// The frame of 120x33 (see TestFrameFor): column 5, 112 wide.
-	want := "PATH=/bin LANG=C " + PageEnv + "=1 " + PageTitleEnv + "=Install gjallarOS " + PageFrameEnv + "=5 112"
+	// The frame of 120x33: cut to calmmenu.FrameWidth, column 25, 72 wide.
+	want := "PATH=/bin LANG=C " + PageEnv + "=1 " + PageTitleEnv + "=Install gjallarOS " + PageFrameEnv + "=25 72"
 	if strings.Join(got, " ") != want {
 		t.Fatalf("page ctx: %q", got)
 	}

@@ -34,6 +34,7 @@ const usage = `usage:
   gjallar-stick menu --mode window|console --release FILE
   gjallar-stick menu --mode window --release FILE --logo DIR
   gjallar-stick layout
+  gjallar-stick font --mode window|console
   gjallar-stick text-console
   gjallar-stick requeue-key
 `
@@ -47,6 +48,23 @@ func Main(args []string, stdout, stderr io.Writer) int {
 			layout = region.DefaultKeyboard
 		}
 		fmt.Fprintln(stdout, layout)
+		return 0
+	}
+	if len(args) == 3 && args[0] == "font" && args[1] == "--mode" && (args[2] == ModeWindow || args[2] == ModeConsole) {
+		// The display host sizes the window's font, or the console's,
+		// from here: see screenCols.
+		width, height, ok := screenPixels(fbSize)
+		if !ok {
+			return 1
+		}
+		n := windowPixelSize(width, height)
+		if args[2] == ModeConsole {
+			n = consoleCellWidth(width, height)
+		}
+		if n <= 0 {
+			return 1
+		}
+		fmt.Fprintln(stdout, n)
 		return 0
 	}
 	if len(args) == 1 && args[0] == "text-console" {

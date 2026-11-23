@@ -53,9 +53,44 @@ let
   # The desktop's font size.
   inherit (import ../../themes/noctalia.nix { inherit pkgs; }) fontSize;
 
-  # The text console's font for the menu when no window could start: larger
-  # on screens wide enough to keep at least 100 columns. Store files only.
-  consoleFonts = "${pkgs.terminus_font}/share/consolefonts";
+  # The text console's font for the menu when no window could start:
+  # Jade Code as bitmaps, one file per cell width (THEMEBRAIN section 18).
+  # The host takes the widest that still gives 88 by 29 cells (gjallar-stick
+  # font --mode console). Terminus is the fallback when none fits or setfont
+  # refuses. Store files only.
+  consoleWidths = [
+    10
+    11
+    12
+    14
+    16
+    18
+    20
+    22
+    24
+    26
+    29
+    32
+    36
+    40
+    44
+    48
+  ];
+  consoleFont =
+    pkgs.runCommand "jade-code-console"
+      {
+        nativeBuildInputs = [
+          (pkgs.python3.withPackages (p: [
+            p.pillow
+            p.fonttools
+          ]))
+        ];
+      }
+      ''
+        python3 -I ${./consolefont/make-psf.py} ${jadeCode}/share/fonts/truetype/JadeCode-VF.ttf $out \
+          --widths ${lib.concatMapStringsSep "," toString consoleWidths}
+      '';
+  terminus = "${pkgs.terminus_font}/share/consolefonts";
 
   # The brand's terminal colours (Obsidian, dark), as the installed
   # desktop's terminal has them. foot and the console take them without '#'.
@@ -216,39 +251,37 @@ let
           pkgs.coreutils
         ]
       }:/run/wrappers/bin:/run/current-system/sw/bin
-      # screen sets width and height from the framebuffer; false when it
-      # reports nothing usable.
-      screen() {
-        local size
-        size=$(cat /sys/class/graphics/fb0/virtual_size 2> /dev/null) || return 1
-        [[ $size =~ ^([0-9]{1,5}),([0-9]{1,5})$ ]] || return 1
-        width=''${BASH_REMATCH[1]}
-        height=''${BASH_REMATCH[2]}
-      }
+      # The widest Jade Code console font no wider than gjallar-stick font
+      # asks for. When none is that narrow, or setfont refuses it, Terminus
+      # by the same rule: cells 12 or 16 wide, or 16 doubled to 32.
       console_font() {
-        local width height font=
-        local -a double=()
-        screen || return 0
-        if [ "$width" -ge 3840 ] && [ "$height" -ge 2160 ]; then
-          font=ter-v32n
-          double=(-d)
-        elif [ "$width" -ge 1920 ] && [ "$height" -ge 1080 ]; then
-          font=ter-v32n
-        elif [ "$width" -ge 1280 ] && [ "$height" -ge 720 ]; then
-          font=ter-v24n
+        local cell w
+        cell=$(gjallar-stick font --mode console) || return 0
+        for w in ${lib.concatMapStringsSep " " toString (lib.reverseList consoleWidths)}; do
+          if [ "$w" -le "$cell" ]; then
+            setfont ${consoleFont}/JadeCode-''${w}x$((2 * w)).psfu && return 0
+            break
+          fi
+        done
+        if [ "$cell" -ge 32 ]; then
+          setfont -d ${terminus}/ter-v32n.psf.gz || true
+        elif [ "$cell" -ge 16 ]; then
+          setfont ${terminus}/ter-v32n.psf.gz || true
+        elif [ "$cell" -ge 12 ]; then
+          setfont ${terminus}/ter-v24n.psf.gz || true
         fi
-        [ -z "$font" ] || setfont "''${double[@]}" ${consoleFonts}/$font.psf.gz || true
       }
       window=true
       while true; do
         if [ "$window" = true ]; then
           layout=$(gjallar-stick layout)
-          # The window font scales with the screen height in pixels: 19 at
-          # 1080 gives about 120 by 33 cells, like Terminus on the console.
-          # dpi-aware=no above, so a wrong EDID cannot change it.
+          # The window font is the largest that still gives 88 by 29 cells
+          # (gjallar-stick font --mode window), in pixels, so a wrong EDID
+          # cannot change it. On a screen too small for that, or one that
+          # reports no size, foot keeps the desktop's size above.
           font=()
-          if screen && [ "$height" -ge 600 ]; then
-            font=(-o "main.font=Jade Code:style=Regular:size=$((19 * height / 1080))")
+          if px=$(gjallar-stick font --mode window); then
+            font=(-o "main.font=Jade Code:style=Regular:pixelsize=$px")
           fi
           rc=0
           # -d tells foot to draw no title bar (cage draws none either).

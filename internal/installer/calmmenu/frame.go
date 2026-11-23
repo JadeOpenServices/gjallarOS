@@ -37,23 +37,33 @@ func (s Size) down(n int) int {
 	return n * den / num
 }
 
-// Frame is the part of the screen a page uses: the whole screen less the
-// same margin on every side. Pages are drawn in it, running output wraps
-// at its width, and the terminal scrolls only inside it, so text never
-// runs into the margin at the bottom either.
+// Frame is the part of the screen a page uses: the whole screen less a
+// margin at every side, at most FrameWidth wide and centred (see
+// FrameFor). Pages are drawn in it, running output wraps at its width,
+// and the terminal scrolls only inside it, so text never runs into the
+// margin at the bottom either.
 type Frame struct {
 	Col, Row      int // first column and row, from 1
 	Width, Height int // in cells
 }
 
+// FrameWidth is the widest a page's frame gets, in columns: text on a
+// page wraps at 72, or at the frame's width when the screen leaves less.
+const FrameWidth = 72
+
 // FrameFor is the frame of a terminal of size s. The margin is a
 // sixteenth of the rows, at least one; the sides get as many columns as
 // are as wide as that margin is tall (see Size.ratio), so the margin
-// looks the same on all four sides. A terminal too small for a margin
-// gets none.
+// looks the same on all four sides. A frame wider than FrameWidth is cut
+// to FrameWidth and centred, so the page is never wider than its text; it
+// keeps its full height. A terminal too small for a margin gets none.
 func FrameFor(s Size) Frame {
 	m := max(1, s.Rows/16)
 	f := withMargin(s, m, s.across(m))
+	if f.Width > FrameWidth {
+		f.Col += (f.Width - FrameWidth) / 2
+		f.Width = FrameWidth
+	}
 	if f.Width < 20 {
 		f.Col, f.Width = 1, max(s.Cols, 0)
 	}
@@ -70,9 +80,10 @@ func withMargin(s Size, m, side int) Frame {
 }
 
 // fitFrame is the frame for a page whose whole size is known, such as a
-// menu: FrameFor's frame, with the side margin grown a column at a time
-// (and the top and bottom margin with it, as tall as the sides are wide)
-// for as long as fits says the page still fits. A short page then has
+// menu: FrameFor's frame (at most FrameWidth wide), with the side margin
+// grown a column at a time (and the top and bottom margin with it, as
+// tall as the sides are wide) for as long as fits says the page still
+// fits. A short page then has
 // even space around it on every side of any screen, not FrameFor's
 // margin with all the rest above and below it.
 func fitFrame(s Size, fits func(Frame) bool) Frame {

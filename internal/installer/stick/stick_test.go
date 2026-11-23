@@ -463,7 +463,7 @@ func TestOtherEntries(t *testing.T) {
 	h.run(t)
 	want := []string{
 		"gjallar-recovery-console --from-stick",
-		"runuser -l nixos -c exec gjallar-stick-shell 3 2 76 22",
+		"runuser -l nixos -c exec gjallar-stick-shell 5 2 72 22",
 		"systemctl reboot",
 		"systemctl poweroff",
 	}
@@ -624,7 +624,7 @@ func TestKeyboardUnknownNameKeepsCurrent(t *testing.T) {
 }
 
 func TestMainArgs(t *testing.T) {
-	for _, args := range [][]string{nil, {"menu"}, {"menu", "--mode", "x11"}, {"layout", "extra"}, {"text-console", "x"}, {"menu", "--mode", "window", "x"}, {"menu", "--mode", "console", "--logo", "/x"}, {"menu", "--mode", "window", "--logo"}, {"menu", "--mode", "window", "--icon", "/x"}, {"menu", "--mode", "window", "--logo", "/x"}, {"menu", "--mode", "console", "--release", "/r", "--logo", "/x"}, {"menu", "--mode", "window", "--release", "/r", "--release", "/r"}, {"menu", "--mode", "window", "--release", ""}, {"menu", "--mode", "window", "--release"}} {
+	for _, args := range [][]string{nil, {"menu"}, {"menu", "--mode", "x11"}, {"layout", "extra"}, {"font"}, {"font", "--mode"}, {"font", "--mode", "x11"}, {"font", "--mode", "window", "x"}, {"text-console", "x"}, {"menu", "--mode", "window", "x"}, {"menu", "--mode", "console", "--logo", "/x"}, {"menu", "--mode", "window", "--logo"}, {"menu", "--mode", "window", "--icon", "/x"}, {"menu", "--mode", "window", "--logo", "/x"}, {"menu", "--mode", "console", "--release", "/r", "--logo", "/x"}, {"menu", "--mode", "window", "--release", "/r", "--release", "/r"}, {"menu", "--mode", "window", "--release", ""}, {"menu", "--mode", "window", "--release"}} {
 		var out, errOut bytes.Buffer
 		if code := Main(args, &out, &errOut); code != 2 || !strings.Contains(errOut.String(), "usage") {
 			t.Errorf("Main(%q) = %d, %q", args, code, errOut.String())

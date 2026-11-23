@@ -113,23 +113,24 @@ func TestCentredOn120x33(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := screen(t, b.String(), 120, 33)
-	// 4 logo rows, 1 gap, 21 menu lines = 26, leaving 7 rows. The sides
-	// grow from 4 columns to 7 (a console cell is twice as tall as wide,
-	// so 7 columns are as wide as 3.5 rows are tall), the top and bottom
-	// to 3 rows: rows 4-30 and columns 8-113. y0 = 4 + (27-26)/2 = 4.
-	if p.Frame != (Frame{Col: 8, Row: 4, Width: 106, Height: 27}) {
+	// The frame is cut to FrameWidth and centred: columns 25-96, rows
+	// 3-31. 4 logo rows, 1 gap and 21 menu lines are 26 of its 29 rows; a
+	// side margin one column wider would need 12 rows above and below (a
+	// console cell is twice as tall as wide), so the frame stays.
+	// y0 = 3 + (29-26)/2 = 4.
+	if p.Frame != (Frame{Col: 25, Row: 3, Width: 72, Height: 29}) {
 		t.Errorf("frame %+v", p.Frame)
 	}
 	if p.LogoRow != 4 || p.LogoCol != 50 {
 		t.Errorf("logo at %d,%d, want 4,50", p.LogoRow, p.LogoCol)
 	}
-	if got := s[8]; got != strings.Repeat(" ", 7)+"gjallarOS installer" {
+	if got := s[8]; got != strings.Repeat(" ", 24)+"gjallarOS installer" {
 		t.Errorf("title row %q", got)
 	}
-	if got := s[9]; got != strings.Repeat(" ", 7)+strings.Repeat("─", 106) {
+	if got := s[9]; got != strings.Repeat(" ", 24)+strings.Repeat("─", 72) {
 		t.Errorf("rule does not fill the frame: %q", got)
 	}
-	if p.PromptRow != 29 || p.PromptCol != 8+len("Choice: ") {
+	if p.PromptRow != 29 || p.PromptCol != 25+len("Choice: ") {
 		t.Errorf("prompt at %d,%d", p.PromptRow, p.PromptCol)
 	}
 	if !strings.Contains(s[12], " 1  Install gjallarOS") {
@@ -139,13 +140,15 @@ func TestCentredOn120x33(t *testing.T) {
 
 // A short menu gets the same space on every side (on the console two
 // columns for each row), on wide screens and on 4:3 ones: 640x480 and 800x600 on the
-// console (8x16 cells), 1024x768 in foot (about 11x24).
+// console (8x16 cells), 1024x768 in foot (about 11x24). On a screen so
+// wide that the frame is cut to FrameWidth (116x33), the menu sits in
+// the middle of the cut frame.
 func TestShortMenuHasEvenSpace(t *testing.T) {
 	for _, c := range []struct {
 		cols, rows int
 		want       Frame
 	}{
-		{116, 33, Frame{Col: 13, Row: 7, Width: 92, Height: 21}},
+		{116, 33, Frame{Col: 23, Row: 3, Width: 72, Height: 29}},
 		{80, 30, Frame{Col: 10, Row: 5, Width: 62, Height: 22}},
 		{100, 37, Frame{Col: 17, Row: 9, Width: 68, Height: 21}},
 		{93, 32, Frame{Col: 12, Row: 6, Width: 71, Height: 22}},
@@ -180,7 +183,7 @@ func TestShortMenuHasEvenSpace(t *testing.T) {
 // label and line is shown whole.
 func TestFitCutsNothing(t *testing.T) {
 	m := example("The network did not answer. Check the cable or pick a wireless network, then try again from this menu.")
-	m.Groups = append(m.Groups, []Item{{"9", "A rather long label that is wider than the rest of the menu put together", ""}})
+	m.Groups = append(m.Groups, []Item{{"9", "A long label, wider than the rest of the menu put together", ""}})
 	for _, size := range [][2]int{{80, 30}, {100, 37}, {116, 33}, {160, 50}} {
 		cols, rows := size[0], size[1]
 		var b strings.Builder

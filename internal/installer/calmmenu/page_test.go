@@ -37,12 +37,12 @@ func TestTallPageScrollsFromTop(t *testing.T) {
 		body[i] = "line"
 	}
 	var b bytes.Buffer
-	p, err := Render(&b, Menu{Title: "Steps", Body: body, Prompt: "> "}, Logo{}, Size{Cols: 80, Rows: 24}, false)
+	p, err := Render(&b, Menu{Title: "Steps", Body: body, Prompt: "> "}, Logo{}, Size{Cols: 76, Rows: 24}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := screen(t, b.String(), 80, 24)
-	f := FrameFor(Size{Cols: 80, Rows: 24})
+	s := screen(t, b.String(), 76, 24)
+	f := FrameFor(Size{Cols: 76, Rows: 24})
 	if !strings.Contains(b.String(), "\x1b[2;1H") || p.PromptRow != f.bottom() {
 		t.Fatalf("tall page: row %d\n%q", p.PromptRow, b.String()[:60])
 	}
@@ -53,7 +53,7 @@ func TestTallPageScrollsFromTop(t *testing.T) {
 
 func TestColumnSetsColumnAfterEachLineEnd(t *testing.T) {
 	var b bytes.Buffer
-	c := NewColumn(&b, Size{Cols: 80, Rows: 24})
+	c := NewColumn(&b, Size{Cols: 76, Rows: 24})
 	io.WriteString(c, "one\ntwo\r50%\rdone\n")
 	// The cursor goes to the column right after a line end, so a prompt
 	// written by another program under the Column starts there too.
@@ -68,7 +68,7 @@ func TestColumnSetsColumnAfterEachLineEnd(t *testing.T) {
 
 func TestHeadDrawsTitleAndRule(t *testing.T) {
 	var b bytes.Buffer
-	if _, err := Head(&b, "Installing", Size{Cols: 80, Rows: 24}, false); err != nil {
+	if _, err := Head(&b, "Installing", Size{Cols: 76, Rows: 24}, false); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(b.String(), "\x1b[2;3HInstalling\r\n\x1b[3G─") {
@@ -80,14 +80,14 @@ func TestHeadDrawsTitleAndRule(t *testing.T) {
 // it as text and keeps it on its row.
 func TestHeadTitleIsPlainText(t *testing.T) {
 	var b bytes.Buffer
-	if _, err := Head(&b, "Ins\x1b[2Jtall"+strings.Repeat("x", 200), Size{Cols: 80, Rows: 24}, false); err != nil {
+	if _, err := Head(&b, "Ins\x1b[2Jtall"+strings.Repeat("x", 200), Size{Cols: 76, Rows: 24}, false); err != nil {
 		t.Fatal(err)
 	}
 	if strings.Count(b.String(), "\x1b[2J") != strings.Count(Clear, "\x1b[2J") {
 		t.Fatalf("escape in the title reached the terminal: %q", b.String())
 	}
-	s := screen(t, b.String(), 80, 24)
-	inBlock(t, s, 3, 76)
+	s := screen(t, b.String(), 76, 24)
+	inBlock(t, s, 3, 72)
 	if !strings.HasPrefix(s[1], "  Ins") {
 		t.Fatalf("title row %q", s[1])
 	}
@@ -154,7 +154,7 @@ func TestColumnNarrowTerminal(t *testing.T) {
 
 func TestColumnEscapesTakeNoRoom(t *testing.T) {
 	var b bytes.Buffer
-	c := NewColumn(&b, Size{Cols: 80, Rows: 24})
+	c := NewColumn(&b, Size{Cols: 76, Rows: 24})
 	// A colour code split over two writes, as a pipe may deliver it.
 	io.WriteString(c, "\x1b[32")
 	io.WriteString(c, ";1m"+strings.Repeat("x", c.PageWidth())+"\x1b[0m\n")
@@ -162,7 +162,7 @@ func TestColumnEscapesTakeNoRoom(t *testing.T) {
 	if strings.Contains(b.String(), "\x1b[32\x1b[") || strings.Count(b.String(), "\r\n") != 0 {
 		t.Fatalf("got %q", b.String())
 	}
-	s := screen(t, b.String(), 80, 4)
+	s := screen(t, b.String(), 76, 4)
 	if s[0] != "  "+strings.Repeat("x", c.PageWidth()) {
 		t.Errorf("escapes counted as text:\n%s", strings.Join(s, "\n"))
 	}
@@ -170,13 +170,13 @@ func TestColumnEscapesTakeNoRoom(t *testing.T) {
 
 func TestColumnRewritesBrokenProgressLine(t *testing.T) {
 	var b bytes.Buffer
-	c := NewColumn(&b, Size{Cols: 80, Rows: 24})
+	c := NewColumn(&b, Size{Cols: 76, Rows: 24})
 	w := c.PageWidth()
 	io.WriteString(c, "first\r\n")
 	io.WriteString(c, "\r"+strings.Repeat("y", w+10))
 	io.WriteString(c, "\r\x1b[Kdone\r\n")
 	io.WriteString(c, strings.Repeat("z", w+5)+"\r\nnext\r\n")
-	s := screen(t, b.String(), 80, 8)
+	s := screen(t, b.String(), 76, 8)
 	want := []string{"first", "done", strings.Repeat("z", w), "zzzzz", "next"}
 	for i, l := range want {
 		if s[i] != "  "+l {
@@ -191,18 +191,21 @@ func TestFrameMarginIsEvenOnAllSides(t *testing.T) {
 		sz   Size
 		want Frame
 	}{
-		{Size{Cols: 116, Rows: 33}, Frame{Col: 5, Row: 3, Width: 108, Height: 29}},
-		{Size{Cols: 80, Rows: 24}, Frame{Col: 3, Row: 2, Width: 76, Height: 22}},
+		{Size{Cols: 76, Rows: 24}, Frame{Col: 3, Row: 2, Width: 72, Height: 22}},
 		{Size{Cols: 18, Rows: 4}, Frame{Col: 1, Row: 1, Width: 18, Height: 4}},
 		// No pixel size, as on the console: a cell twice as tall as wide.
-		{Size{Cols: 120, Rows: 40}, Frame{Col: 5, Row: 3, Width: 112, Height: 36}},
+		{Size{Cols: 76, Rows: 40}, Frame{Col: 5, Row: 3, Width: 68, Height: 36}},
 		// Cells of 10x30 pixels: three columns for each margin row.
-		{Size{Cols: 120, Rows: 40, XPixel: 1200, YPixel: 1200}, Frame{Col: 7, Row: 3, Width: 108, Height: 36}},
+		{Size{Cols: 76, Rows: 40, XPixel: 760, YPixel: 1200}, Frame{Col: 7, Row: 3, Width: 64, Height: 36}},
 		// A cell lower than wide, or more than four times as tall as wide,
 		// is a wrong report: 2:1 again.
-		{Size{Cols: 120, Rows: 40, XPixel: 1200, YPixel: 200}, Frame{Col: 5, Row: 3, Width: 112, Height: 36}},
-		{Size{Cols: 120, Rows: 40, XPixel: 1200, YPixel: 2000}, Frame{Col: 5, Row: 3, Width: 112, Height: 36}},
-		{Size{Cols: 120, Rows: 40, XPixel: -1200, YPixel: 1200}, Frame{Col: 5, Row: 3, Width: 112, Height: 36}},
+		{Size{Cols: 76, Rows: 40, XPixel: 760, YPixel: 200}, Frame{Col: 5, Row: 3, Width: 68, Height: 36}},
+		{Size{Cols: 76, Rows: 40, XPixel: 760, YPixel: 4000}, Frame{Col: 5, Row: 3, Width: 68, Height: 36}},
+		{Size{Cols: 76, Rows: 40, XPixel: -760, YPixel: 1200}, Frame{Col: 5, Row: 3, Width: 68, Height: 36}},
+		// Wider than FrameWidth: cut to it and centred, full height kept.
+		{Size{Cols: 80, Rows: 24}, Frame{Col: 5, Row: 2, Width: 72, Height: 22}},
+		{Size{Cols: 120, Rows: 40}, Frame{Col: 25, Row: 3, Width: 72, Height: 36}},
+		{Size{Cols: 117, Rows: 33}, Frame{Col: 23, Row: 3, Width: 72, Height: 29}},
 	} {
 		if got := FrameFor(c.sz); got != c.want {
 			t.Errorf("FrameFor(%+v) = %+v, want %+v", c.sz, got, c.want)
