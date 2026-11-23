@@ -9,9 +9,11 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
+	"syscall"
 	"time"
 
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/diskcrypto"
@@ -33,17 +35,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		log.Fatal(err)
-	}
-	tmp := path + ".tmp"
-	if err := os.Remove(tmp); err != nil && !os.IsNotExist(err) {
-		log.Fatal(err)
-	}
-	if err := os.WriteFile(tmp, append(data, '\n'), 0o644); err != nil {
-		log.Fatal(err)
-	}
-	if err := os.Rename(tmp, path); err != nil {
+	if err := writeFact(path, append(data, '\n'), 0); err != nil {
 		log.Fatal(err)
 	}
 	if reason != "" {
@@ -51,6 +43,44 @@ func main() {
 	} else {
 		log.Print("the security chip supports the startup policy")
 	}
+}
+
+// writeFact replaces path with data as root. /run/gjallar is 0755 root
+// (tmpfiles), so no user can plant there today; the checks keep it that way
+// if a later rule loosens the folder: the folder must be a real directory
+// owned by ownerUID and not writable by group or others, and the temporary
+// file is created fresh (O_EXCL) without following a link. A planted link or
+// file at the temporary name makes the check fail, so no answer is written
+// and readers keep chip unlock off. Rename replaces a link at path itself
+// instead of writing through it.
+func writeFact(path string, data []byte, ownerUID int) error {
+	dir := filepath.Dir(path)
+	fi, err := os.Lstat(dir)
+	if err != nil {
+		return err
+	}
+	st, ok := fi.Sys().(*syscall.Stat_t)
+	if !fi.IsDir() || !ok || int(st.Uid) != ownerUID || fi.Mode().Perm()&0o022 != 0 {
+		return fmt.Errorf("%s is not a directory that only its owner can change", dir)
+	}
+	tmp := path + ".tmp"
+	if err := os.Remove(tmp); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL|syscall.O_NOFOLLOW, 0o644)
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(data); err != nil {
+		f.Close()
+		os.Remove(tmp)
+		return err
+	}
+	if err := f.Close(); err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	return os.Rename(tmp, path)
 }
 
 // chipReason is empty when the chip supports the startup policy. An answer
