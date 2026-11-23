@@ -341,7 +341,7 @@ func size(bytes int64) string {
 
 func (f Flow) say(text string) {
 	if f.UI.Wrap {
-		text = calmmenu.Wrap(text)
+		text = calmmenu.WrapFor(f.UI.Out, text)
 	}
 	fmt.Fprintln(f.UI.Out, text)
 }

@@ -131,7 +131,8 @@ func TestPagedRecoveryStaysOnScreen(t *testing.T) {
 	if _, err := u.Value(ctx, "Next page", ""); err != nil {
 		t.Fatal(err)
 	}
-	col := calmmenu.NewColumn(io.Discard, tty.Cols(term)).Col
+	cols, rows := tty.Size(term)
+	col := calmmenu.NewColumn(io.Discard, cols, rows).Col
 	out := screen()
 	if at := fmt.Sprintf("\x1b[%dG%s", col, testSecret); !strings.Contains(out, at) {
 		t.Fatalf("secret not in the page column (want %q):\n%q", at, out)
@@ -194,7 +195,7 @@ func TestPagedFlushBeforeEveryQuestion(t *testing.T) {
 	master, term, _ := testPTY(t)
 	u := New(term, &logged{term: newPager(term, "Install gjallarOS")})
 	u.UsePages(term)
-	if u.Flush == nil || !u.Wrap {
+	if u.Flush == nil {
 		t.Fatal("UsePages did not set up page mode")
 	}
 	flush := u.Flush
@@ -297,15 +298,9 @@ func TestPageEnviron(t *testing.T) {
 	}
 }
 
-func TestPageTitlePrintable(t *testing.T) {
-	if got := pageTitle("Ins\x1b[2Jtall"); got != "Ins?[2Jtall" {
-		t.Fatalf("pageTitle = %q", got)
-	}
+func TestPageTitleNamesAPageWithoutOne(t *testing.T) {
 	if got := pageTitle(""); got != "gjallarOS" {
 		t.Fatalf("empty title = %q", got)
-	}
-	if got := pageTitle(strings.Repeat("x", 200)); len(got) != calmmenu.Width {
-		t.Fatalf("long title kept %d characters", len(got))
 	}
 }
 

@@ -23,10 +23,12 @@ func TestScreensWrapKeepFingerprints(t *testing.T) {
 	lists = append(lists,
 		SignatureList{Present: true, Hashes: 1, FileSums: sums[:1]},
 		SignatureList{Present: true, Hashes: 2, FileSums: sums})
+	// The walks are written through calmmenu.WrapFor; a terminal without
+	// pages gets them wrapped as here.
 	screens := map[string]string{
-		"steps":          mokVisit{key: f.current, del: lists}.steps(),
-		"mokManager":     mokManagerSteps(f.current, true, "gjallarctl secureboot continue"),
-		"hashDelete":     hashDeleteNotice(&hashDelete{sums: sums}),
+		"steps":          calmmenu.Wrap(mokVisit{key: f.current, del: lists}.steps()),
+		"mokManager":     calmmenu.Wrap(mokManagerSteps(f.current, true, "gjallarctl secureboot continue")),
+		"hashDelete":     calmmenu.Wrap(hashDeleteNotice(&hashDelete{sums: sums})),
 		"requeueSummary": calmmenu.Wrap("The installed gjallarOS has the key \"EXAMPLE a rather long key name for this check\", fingerprint\n" + sha1Fingerprint(f.current, "  ") + "\n"),
 	}
 	exact := [][]string{

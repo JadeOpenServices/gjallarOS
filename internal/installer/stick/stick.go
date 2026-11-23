@@ -129,9 +129,9 @@ func (s *Stick) out() io.Writer {
 	return s.UI.Out
 }
 
-// say prints text wrapped at the calm menu's width, in the page's column.
+// say prints text in the page's column, which wraps it.
 func (s *Stick) say(text string) {
-	fmt.Fprint(s.out(), calmmenu.Wrap(text+"\n"))
+	fmt.Fprint(s.out(), calmmenu.WrapFor(s.out(), text+"\n"))
 }
 
 // size is the terminal in cells and pixels.
@@ -145,8 +145,8 @@ func (s *Stick) size() (cols, rows, xpixel, ypixel int) {
 // head starts a page for a step that prints as it works: the title on
 // top, then the step's output in the column below it.
 func (s *Stick) head(title string) {
-	cols, _, _, _ := s.size()
-	c, err := calmmenu.Head(s.UI.Out, title, cols, true)
+	cols, rows, _, _ := s.size()
+	c, err := calmmenu.Head(s.UI.Out, title, cols, rows, true)
 	if err == nil {
 		s.col = c
 	}
@@ -469,7 +469,8 @@ func (s *Stick) screen(groups [][]calmmenu.Item) calmmenu.Menu {
 
 // draw shows m as a page centred on the screen, with the pending note,
 // and with the logo on top when withLogo is set (the main menu only) in
-// the window when the terminal reports its pixel size and the logo fits.
+// the window when the terminal reports its pixel size and Render finds
+// room for it.
 // Text printed after it goes into the page's column.
 func (s *Stick) draw(m calmmenu.Menu, withLogo bool) error {
 	cols, rows, xpixel, ypixel := s.size()
@@ -477,7 +478,7 @@ func (s *Stick) draw(m calmmenu.Menu, withLogo bool) error {
 		m.Note = s.note
 	}
 	s.note = ""
-	s.col = calmmenu.NewColumn(s.UI.Out, cols)
+	s.col = calmmenu.NewColumn(s.UI.Out, cols, rows)
 	var logo calmmenu.Logo
 	var picture calmmenu.Sixel
 	if withLogo && s.Mode == ModeWindow && len(s.Logos) > 0 && xpixel > 0 && ypixel > 0 {
@@ -488,12 +489,9 @@ func (s *Stick) draw(m calmmenu.Menu, withLogo bool) error {
 			picture = s.Logos[1]
 		}
 		logo = picture.Cells(cw, ch)
-		if logo.Cols > cols || logo.Rows+1+m.Height() > rows {
-			logo = calmmenu.Logo{}
-		}
 	}
 	p, err := calmmenu.Render(s.UI.Out, m, logo, cols, rows, true)
-	if err != nil || logo.Rows == 0 {
+	if err != nil || p.LogoRow == 0 {
 		return err
 	}
 	return picture.Draw(s.UI.Out, p)

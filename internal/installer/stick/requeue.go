@@ -146,7 +146,7 @@ func requeueKey(ctx context.Context, in io.Reader, out io.Writer) error {
 		return err
 	}
 	if !root.Encrypted {
-		fmt.Fprint(out, calmmenu.Wrap("This gjallarOS is not encrypted. Anyone who had this computer for a few minutes could have put their own key on its disk. Compare the fingerprint below with the one in the install report or the one the installer showed at the end of the install.\n"))
+		fmt.Fprint(out, calmmenu.WrapFor(out, "This gjallarOS is not encrypted. Anyone who had this computer for a few minutes could have put their own key on its disk. Compare the fingerprint below with the one in the install report or the one the installer showed at the end of the install.\n"))
 	}
 	_, err = secureboot.RequeueKey(ctx, ui, out, der)
 	return err
@@ -230,7 +230,7 @@ func openLUKS(ctx context.Context, out io.Writer, base, device string) error {
 		return openFailure(err)
 	}
 	defer prep.Remove()
-	fmt.Fprint(out, calmmenu.Wrap("The installed gjallarOS is encrypted. Its key is read from the encrypted disk, read-only.\n"))
+	fmt.Fprint(out, calmmenu.WrapFor(out, "The installed gjallarOS is encrypted. Its key is read from the encrypted disk, read-only.\n"))
 	r, w, err := os.Pipe()
 	if err != nil {
 		return err

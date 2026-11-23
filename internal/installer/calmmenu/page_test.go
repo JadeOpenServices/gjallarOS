@@ -14,24 +14,18 @@ func TestPageBodyWrapsInBlock(t *testing.T) {
 		Groups: [][]Item{{{"1", "stable", ""}, {"2", "staging", ""}, {"3", "dev", ""}}},
 		Prompt: "Channel: ",
 	}
-	for _, l := range m.lines() {
-		n := 0
-		for _, s := range l {
-			n += len([]rune(s.text))
-		}
-		if n > Width {
-			t.Fatalf("line over %d: %v", Width, l)
-		}
-	}
 	var b bytes.Buffer
-	p, err := Render(&b, m, Logo{}, 120, 40, false)
+	p, err := Render(&b, m, Logo{}, 60, 24, false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(b.String(), "\x1b[28Gdev get them earlier and break more often.") {
-		t.Fatalf("body not in the block:\n%q", b.String())
+	s := screen(t, b.String(), 60, 24)
+	f := FrameFor(60, 24)
+	inBlock(t, s, f.Col, f.Width)
+	if !strings.Contains(strings.Join(s, "\n"), "\n  Staging and dev get them earlier and break more often.") {
+		t.Fatalf("body not wrapped in the frame:\n%s", strings.Join(s, "\n"))
 	}
-	if p.PromptCol != 28+len("Channel: ") {
+	if p.PromptCol != f.Col+len("Channel: ") {
 		t.Fatalf("prompt column %d", p.PromptCol)
 	}
 }
@@ -46,16 +40,23 @@ func TestTallPageScrollsFromTop(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(b.String(), "\x1b[1;1H") || p.PromptRow != 24 {
+	s := screen(t, b.String(), 80, 24)
+	f := FrameFor(80, 24)
+	if !strings.Contains(b.String(), "\x1b[2;1H") || p.PromptRow != f.bottom() {
 		t.Fatalf("tall page: row %d\n%q", p.PromptRow, b.String()[:60])
+	}
+	if s[0] != "" || s[23] != "" || s[p.PromptRow-1] != "  > " && s[p.PromptRow-1] != "  >" {
+		t.Fatalf("tall page scrolled into the margin:\n%s", strings.Join(s, "\n"))
 	}
 }
 
 func TestColumnSetsColumnAfterEachLineEnd(t *testing.T) {
 	var b bytes.Buffer
-	c := NewColumn(&b, 80)
+	c := NewColumn(&b, 80, 24)
 	io.WriteString(c, "one\ntwo\r50%\rdone\n")
-	want := "\x1b[8Gone\n\x1b[8Gtwo\r\x1b[8G50%\r\x1b[8Gdone\n"
+	// The cursor goes to the column right after a line end, so a prompt
+	// written by another program under the Column starts there too.
+	want := "\x1b[3Gone\n\x1b[3Gtwo\r\x1b[3G50%\r\x1b[3Gdone\n\x1b[3G"
 	if b.String() != want {
 		t.Fatalf("got %q", b.String())
 	}
@@ -66,11 +67,28 @@ func TestColumnSetsColumnAfterEachLineEnd(t *testing.T) {
 
 func TestHeadDrawsTitleAndRule(t *testing.T) {
 	var b bytes.Buffer
-	if _, err := Head(&b, "Installing", 80, false); err != nil {
+	if _, err := Head(&b, "Installing", 80, 24, false); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(b.String(), "\x1b[8GInstalling\r\n\x1b[8G─") {
+	if !strings.Contains(b.String(), "\x1b[2;3HInstalling\r\n\x1b[3G─") {
 		t.Fatalf("got %q", b.String())
+	}
+}
+
+// The title comes from the environment of a child program; Head shows
+// it as text and keeps it on its row.
+func TestHeadTitleIsPlainText(t *testing.T) {
+	var b bytes.Buffer
+	if _, err := Head(&b, "Ins\x1b[2Jtall"+strings.Repeat("x", 200), 80, 24, false); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(b.String(), "\x1b[2J") != strings.Count(Clear, "\x1b[2J") {
+		t.Fatalf("escape in the title reached the terminal: %q", b.String())
+	}
+	s := screen(t, b.String(), 80, 24)
+	inBlock(t, s, 3, 76)
+	if !strings.HasPrefix(s[1], "  Ins") {
+		t.Fatalf("title row %q", s[1])
 	}
 }
 
@@ -87,7 +105,8 @@ func TestPageOnConsole(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := screen(t, b.String(), 80, 25)
-	if s[6] != strings.Repeat(" ", 7)+"Release channel" || !strings.HasPrefix(s[10], strings.Repeat(" ", 7)+"dev get") {
+	inBlock(t, s, 3, 76)
+	if !strings.Contains(strings.Join(s, "\n"), "\n  Release channel\n  ─") {
 		t.Errorf("page:\n%s", strings.Join(s, "\n"))
 	}
 }
@@ -108,57 +127,105 @@ func inBlock(t *testing.T, s []string, col, width int) {
 
 func TestColumnBreaksLongLinesInBlock(t *testing.T) {
 	var b bytes.Buffer
-	c := NewColumn(&b, 100)
+	c := NewColumn(&b, 60, 16)
 	io.WriteString(c, "Machine support: best effort. No ODDC model matches this machine; nothing optional is switched on.\n")
 	io.WriteString(c, "building '/nix/store/00000000000000000000000000000000-nixos-system-example-26.05.drv'...\n")
-	s := screen(t, b.String(), 100, 8)
-	inBlock(t, s, c.Col, Width)
-	if s[0] != strings.Repeat(" ", 17)+"Machine support: best effort. No ODDC model matches this machine;" ||
-		s[1] != strings.Repeat(" ", 17)+"nothing optional is switched on." {
+	s := screen(t, b.String(), 60, 16)
+	inBlock(t, s, c.Col, c.PageWidth())
+	if s[0] != "  Machine support: best effort. No ODDC model matches this" ||
+		s[1] != "  machine; nothing optional is switched on." {
 		t.Errorf("no break at a space:\n%s", strings.Join(s, "\n"))
 	}
-	if s[3] != strings.Repeat(" ", 17)+"-example-26.05.drv'..." {
+	if s[3] != "  xos-system-example-26.05.drv'..." {
 		t.Errorf("long word:\n%s", strings.Join(s, "\n"))
 	}
 }
 
 func TestColumnNarrowTerminal(t *testing.T) {
 	var b bytes.Buffer
-	c := NewColumn(&b, 30)
+	c := NewColumn(&b, 18, 10)
 	io.WriteString(c, strings.Repeat("word ", 20)+"\n")
-	s := screen(t, b.String(), 30, 10)
-	inBlock(t, s, 1, 30)
+	s := screen(t, b.String(), 18, 10)
+	inBlock(t, s, 1, 18)
 }
 
 func TestColumnEscapesTakeNoRoom(t *testing.T) {
 	var b bytes.Buffer
-	c := NewColumn(&b, 80)
+	c := NewColumn(&b, 80, 24)
 	// A colour code split over two writes, as a pipe may deliver it.
 	io.WriteString(c, "\x1b[32")
-	io.WriteString(c, ";1m"+strings.Repeat("x", Width)+"\x1b[0m\n")
+	io.WriteString(c, ";1m"+strings.Repeat("x", c.PageWidth())+"\x1b[0m\n")
 	io.WriteString(c, "\x1b]0;title\x07ok\n")
 	if strings.Contains(b.String(), "\x1b[32\x1b[") || strings.Count(b.String(), "\r\n") != 0 {
 		t.Fatalf("got %q", b.String())
 	}
 	s := screen(t, b.String(), 80, 4)
-	if s[0] != strings.Repeat(" ", 7)+strings.Repeat("x", Width) {
+	if s[0] != "  "+strings.Repeat("x", c.PageWidth()) {
 		t.Errorf("escapes counted as text:\n%s", strings.Join(s, "\n"))
 	}
 }
 
 func TestColumnRewritesBrokenProgressLine(t *testing.T) {
 	var b bytes.Buffer
-	c := NewColumn(&b, 80)
+	c := NewColumn(&b, 80, 24)
+	w := c.PageWidth()
 	io.WriteString(c, "first\r\n")
-	io.WriteString(c, "\r"+strings.Repeat("y", Width+10))
+	io.WriteString(c, "\r"+strings.Repeat("y", w+10))
 	io.WriteString(c, "\r\x1b[Kdone\r\n")
-	io.WriteString(c, strings.Repeat("z", Width+5)+"\r\nnext\r\n")
+	io.WriteString(c, strings.Repeat("z", w+5)+"\r\nnext\r\n")
 	s := screen(t, b.String(), 80, 8)
-	want := []string{"first", "done", strings.Repeat("z", Width), "zzzzz", "next"}
-	for i, w := range want {
-		if s[i] != strings.Repeat(" ", 7)+w {
+	want := []string{"first", "done", strings.Repeat("z", w), "zzzzz", "next"}
+	for i, l := range want {
+		if s[i] != "  "+l {
 			t.Fatalf("row %d:\n%s", i+1, strings.Join(s, "\n"))
 		}
 	}
-	inBlock(t, s, 8, Width)
+	inBlock(t, s, 3, w)
 }
+
+func TestFrameMarginIsEvenOnAllSides(t *testing.T) {
+	for _, c := range []struct {
+		cols, rows int
+		want       Frame
+	}{
+		{116, 33, Frame{Col: 5, Row: 3, Width: 108, Height: 29}},
+		{80, 24, Frame{Col: 3, Row: 2, Width: 76, Height: 22}},
+		{18, 4, Frame{Col: 1, Row: 1, Width: 18, Height: 4}},
+	} {
+		if got := FrameFor(c.cols, c.rows); got != c.want {
+			t.Errorf("FrameFor(%d, %d) = %+v, want %+v", c.cols, c.rows, got, c.want)
+		}
+	}
+}
+
+func TestColumnHangsListItems(t *testing.T) {
+	var b bytes.Buffer
+	c := NewColumn(&b, 44, 16)
+	io.WriteString(c, "  3. Pick Yes (the screen starts on No; press down, then Enter)\n")
+	io.WriteString(c, "- a bullet that runs on past the edge of this narrow frame\n")
+	s := screen(t, b.String(), 44, 16)
+	inBlock(t, s, c.Col, c.PageWidth())
+	if s[1] != "       press down, then Enter)" || s[3] != "    this narrow frame" {
+		t.Errorf("continuation rows do not hang under the text:\n%s", strings.Join(s, "\n"))
+	}
+}
+
+func TestWrapForLeavesPagesToTheColumn(t *testing.T) {
+	long := strings.Repeat("word ", 30)
+	c := NewColumn(io.Discard, 120, 33)
+	if got := WrapFor(c, long); got != long {
+		t.Errorf("text for a Column was wrapped: %q", got)
+	}
+	if got := WrapFor(logger{c}, long); got != long {
+		t.Errorf("text for a writer over a Column was wrapped: %q", got)
+	}
+	if got := WrapFor(io.Discard, long); got != Wrap(long) {
+		t.Errorf("text for a plain terminal was not wrapped: %q", got)
+	}
+}
+
+// logger stands for a writer that logs and writes on to a terminal.
+type logger struct{ term io.Writer }
+
+func (l logger) Write(p []byte) (int, error) { return l.term.Write(p) }
+func (l logger) Terminal() io.Writer         { return l.term }

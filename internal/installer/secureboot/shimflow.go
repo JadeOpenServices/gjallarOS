@@ -263,7 +263,7 @@ func ContinueShim(
 	if err := holdMokManager(ctx, liveFirmware); err != nil {
 		return "", err
 	}
-	fmt.Fprint(out, mokManagerSteps(keys.dbDER, queued, "gjallarctl secure-boot setup"))
+	fmt.Fprint(out, calmmenu.WrapFor(out, mokManagerSteps(keys.dbDER, queued, "gjallarctl secure-boot setup")))
 	return ContinuationReboot, nil
 }
 
@@ -314,7 +314,7 @@ func QueueShimKey(ctx context.Context, ui UI, out io.Writer, facts ShimFacts, ag
 	if err := holdMokManager(ctx, liveFirmware); err != nil {
 		return false, err
 	}
-	fmt.Fprint(out, mokManagerSteps(keys.dbDER, queued, again))
+	fmt.Fprint(out, calmmenu.WrapFor(out, mokManagerSteps(keys.dbDER, queued, again)))
 	return false, nil
 }
 
@@ -404,7 +404,7 @@ func FinishFreshShim(ctx context.Context, ui UI, out io.Writer, facts ShimFacts,
 	if err := run(ctx, "sudo", "install", "-m", "0600", "/dev/null", FinalMarkerPath); err != nil {
 		return "", fmt.Errorf("arm final Secure Boot verification: %w", err)
 	}
-	fmt.Fprint(out, visit.steps())
+	fmt.Fprint(out, calmmenu.WrapFor(out, visit.steps()))
 	return ContinuationReboot, nil
 }
 
@@ -490,7 +490,7 @@ func (v mokVisit) steps() string {
 	step("Reboot")
 	step("Take the installer stick out when the screen goes dark")
 	b.WriteString("If the changes were dropped (time ran out or Continue boot was picked), start the installer stick again and pick Queue the key again in its menu.\n")
-	return calmmenu.Wrap(b.String())
+	return b.String()
 }
 
 // spacedHex groups hex digits in pairs.
@@ -547,7 +547,7 @@ func mokManagerSteps(der []byte, reused bool, again string) string {
 	if reused {
 		password = "Type the password chosen when the key was first queued"
 	}
-	return calmmenu.Wrap(fmt.Sprintf(`
+	return fmt.Sprintf(`
 At the next start a blue screen (MokManager) asks to confirm the key.
 Finish within 5 minutes: after that the computer restarts on its own and the key is gone. The menu starts on Continue boot, which also drops the key:
   1. Enroll MOK (the menu starts on Continue boot; press down, then Enter)
@@ -560,7 +560,7 @@ Finish within 5 minutes: after that the computer restarts on its own and the key
   6. Reboot
 If it went on without the key, run %[3]s again.
 After the restart, run %[3]s again for the next step.
-`, sha1Fingerprint(der, stepIndent), password, again))
+`, sha1Fingerprint(der, stepIndent), password, again)
 }
 
 // stepIndent lines a fingerprint up under the text of a numbered step.
@@ -627,7 +627,7 @@ func queueMOK(ctx context.Context, der []byte, out io.Writer) error {
 		return fmt.Errorf("stage the gjallarOS key for mokutil: %w", err)
 	}
 	defer func() { _ = run(context.WithoutCancel(ctx), "sudo", "rm", "-f", "--", path) }()
-	fmt.Fprint(out, calmmenu.Wrap("Choose a one-time password for MokManager. MokManager reads the keyboard as US layout; letters and digits are safe.\n"))
+	fmt.Fprint(out, calmmenu.WrapFor(out, "Choose a one-time password for MokManager. MokManager reads the keyboard as US layout; letters and digits are safe.\n"))
 	if err := run(ctx, "sudo", privilegedTool("mokutil"), "--import", path); err != nil {
 		return fmt.Errorf("queue the gjallarOS key for MokManager: %w", err)
 	}

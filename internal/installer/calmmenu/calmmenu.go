@@ -1,5 +1,6 @@
 // Package calmmenu draws the calm text menu from THEMEBRAIN section 18:
-// a 66 column block, centred in the terminal, with an optional logo on
+// a page in a frame with the same margin on every side of the terminal
+// (see FrameFor), centred from top to bottom, with an optional logo on
 // top. Colours come from the 16 colour slots only, so the same output
 // works in foot and on the Linux console.
 package calmmenu
@@ -15,7 +16,8 @@ import (
 	"unicode/utf8"
 )
 
-// Width is the block width in columns.
+// Width is where text wraps on a terminal that shows no page, such as
+// the installed system's text between menus (see Wrap).
 const Width = 66
 
 // ANSI codes. Dim uses slot 8 (bright black), not faint, so it shows the
@@ -27,10 +29,11 @@ const (
 	reset  = "\x1b[0m"
 )
 
-// Clear resets the colours, clears the screen and its scrollback and puts
-// the cursor home. A page that showed recovery material must not stay
-// in the scrollback of a terminal emulator or ssh client.
-const Clear = "\x1b[0m\x1b[2J\x1b[3J\x1b[H"
+// Clear resets the colours and the scroll region, clears the screen and
+// its scrollback and puts the cursor home. A page that showed recovery
+// material must not stay in the scrollback of a terminal emulator or ssh
+// client.
+const Clear = "\x1b[0m\x1b[r\x1b[2J\x1b[3J\x1b[H"
 
 // Item is one numbered choice.
 type Item struct {
@@ -49,7 +52,7 @@ type Field struct {
 type Menu struct {
 	Title  string   // bold
 	Status []Field  // one line, separated by four spaces
-	Body   []string // plain text under the status line, wrapped at Width
+	Body   []string // plain text under the status line, wrapped to the page
 	Groups [][]Item // a blank line between groups
 	Note   string   // optional text above the hint, such as an error
 	Hint   string   // optional, dim
@@ -71,10 +74,11 @@ type Place struct {
 
 type span struct{ style, text string }
 
-func (m Menu) lines() [][]span {
+// lines are the menu's rows for a page width cells wide.
+func (m Menu) lines(width int) [][]span {
 	var ls [][]span
 	ls = append(ls, []span{{bold, m.Title}})
-	ls = append(ls, []span{{dim, strings.Repeat("─", Width)}})
+	ls = append(ls, []span{{dim, strings.Repeat("─", width)}})
 	if len(m.Status) > 0 {
 		var l []span
 		for i, f := range m.Status {
@@ -88,7 +92,7 @@ func (m Menu) lines() [][]span {
 	}
 	if len(m.Body) > 0 {
 		ls = append(ls, nil)
-		for _, l := range strings.Split(Wrap(strings.Join(m.Body, "\n")), "\n") {
+		for _, l := range strings.Split(wrapAt(strings.Join(m.Body, "\n"), width), "\n") {
 			ls = append(ls, []span{{"", l}})
 		}
 	}
@@ -113,7 +117,7 @@ func (m Menu) lines() [][]span {
 	}
 	ls = append(ls, nil)
 	if m.Note != "" {
-		for _, l := range strings.Split(Wrap(m.Note), "\n") {
+		for _, l := range strings.Split(wrapAt(m.Note, width), "\n") {
 			ls = append(ls, []span{{"", l}})
 		}
 		ls = append(ls, nil)
@@ -125,28 +129,33 @@ func (m Menu) lines() [][]span {
 	return ls
 }
 
-// Height is how many rows the menu takes without a logo.
-func (m Menu) Height() int { return len(m.lines()) }
-
 // Render clears the screen and draws the menu for a terminal of cols by
-// rows cells. With colour false it writes plain text (for logs and tests)
-// but still positions every line. Text from outside, such as a network
-// name, should be made printable before it reaches the menu; Render turns
-// any control character that still gets here into '?' as well, so no
-// field can send the terminal a control sequence.
+// rows cells: the page in the terminal's frame (see FrameFor), centred
+// from top to bottom, the logo above it centred across the screen. The
+// logo is left out when it does not fit beside the page; then
+// Place.LogoRow is 0. A page taller than the frame starts at its top and
+// scrolls inside it. With colour false Render writes plain text (for logs
+// and tests) but still positions every line. Text from outside, such as a
+// network name, should be made printable before it reaches the menu;
+// Render turns any control character that still gets here into '?' as
+// well, so no field can send the terminal a control sequence.
 func Render(w io.Writer, m Menu, logo Logo, cols, rows int, colour bool) (Place, error) {
-	ls := m.lines()
-	width := min(Width, cols)
+	f := FrameFor(cols, rows)
+	ls := m.lines(f.Width)
+	if logo.Cols > cols || logo.Rows+1+len(ls) > f.Height {
+		logo = Logo{}
+	}
 	gap := 0
 	if logo.Rows > 0 {
 		gap = 1 // one empty row between logo and title
 	}
 	height := logo.Rows + gap + len(ls)
-	x0 := max(0, (cols-width)/2) + 1
-	y0 := max(0, (rows-height)/2) + 1
+	x0 := f.Col
+	y0 := f.Row + max(0, (f.Height-height)/2)
 
 	var b strings.Builder
 	b.WriteString(Clear)
+	b.WriteString(f.scroll())
 	p := Place{}
 	if logo.Rows > 0 {
 		p.LogoRow = y0
@@ -154,7 +163,7 @@ func Render(w io.Writer, m Menu, logo Logo, cols, rows int, colour bool) (Place,
 	}
 	top := y0 + logo.Rows + gap
 	// Lines go out in order with a line end after each, so a page taller
-	// than the screen starts at the top and scrolls, still centred across.
+	// than the frame starts at its top and scrolls inside it.
 	fmt.Fprintf(&b, "\x1b[%d;1H", top)
 	for i, l := range ls {
 		if i > 0 {
@@ -166,7 +175,7 @@ func Render(w io.Writer, m Menu, logo Logo, cols, rows int, colour bool) (Place,
 		fmt.Fprintf(&b, "\x1b[%dG", x0)
 		used := 0
 		for _, s := range l {
-			t := clip(printable(s.text), width-used)
+			t := clip(printable(s.text), f.Width-used)
 			used += utf8.RuneCountInString(t)
 			if colour && s.style != "" {
 				b.WriteString(s.style + t + reset)
@@ -175,8 +184,8 @@ func Render(w io.Writer, m Menu, logo Logo, cols, rows int, colour bool) (Place,
 			}
 		}
 	}
-	p.PromptRow = min(top+len(ls)-1, max(rows, 1))
-	p.PromptCol = x0 + min(utf8.RuneCountInString(m.Prompt), width)
+	p.PromptRow = min(top+len(ls)-1, f.bottom())
+	p.PromptCol = x0 + min(utf8.RuneCountInString(m.Prompt), f.Width)
 	fmt.Fprintf(&b, "\x1b[%dG", p.PromptCol)
 	_, err := io.WriteString(w, b.String())
 	return p, err

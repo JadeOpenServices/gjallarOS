@@ -21,6 +21,7 @@ func screen(t *testing.T, out string, cols, rows int) []string {
 		g[i] = blank()
 	}
 	r, c := 0, 0
+	top, bot := 0, rows-1 // scroll region
 	for len(out) > 0 {
 		if m := csi.FindStringSubmatch(out); m != nil {
 			n := strings.Split(m[1], ";")
@@ -49,6 +50,14 @@ func screen(t *testing.T, out string, cols, rows int) []string {
 				for i := c; i < cols; i++ {
 					g[r][i] = ' '
 				}
+			case "r":
+				top, bot = 0, rows-1
+				if len(n) == 2 {
+					top, _ = strconv.Atoi(n[0])
+					bot, _ = strconv.Atoi(n[1])
+					top, bot = top-1, bot-1
+				}
+				r, c = 0, 0
 			}
 			out = out[len(m[0]):]
 			continue
@@ -59,9 +68,11 @@ func screen(t *testing.T, out string, cols, rows int) []string {
 		case '\r':
 			c = 0
 		case '\n':
-			if r++; r == rows {
-				g = append(g[1:], blank())
-				r--
+			if r == bot {
+				copy(g[top:bot], g[top+1:bot+1])
+				g[bot] = blank()
+			} else if r < rows-1 {
+				r++
 			}
 		default:
 			if c >= cols {
@@ -102,17 +113,18 @@ func TestCentredOn120x33(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := screen(t, b.String(), 120, 33)
-	// 4 logo rows, 1 gap, 21 menu lines = 26, so y0 = (33-26)/2 = 3.
+	// Frame: margin 2 rows and 4 columns, so rows 3-31 and columns 5-116.
+	// 4 logo rows, 1 gap, 21 menu lines = 26, so y0 = 3 + (29-26)/2 = 4.
 	if p.LogoRow != 4 || p.LogoCol != 50 {
 		t.Errorf("logo at %d,%d, want 4,50", p.LogoRow, p.LogoCol)
 	}
-	if got := s[8]; got != strings.Repeat(" ", 27)+"gjallarOS installer" {
+	if got := s[8]; got != strings.Repeat(" ", 4)+"gjallarOS installer" {
 		t.Errorf("title row %q", got)
 	}
-	if got := s[9]; utf8.RuneCountInString(strings.TrimLeft(got, " ")) != Width {
-		t.Errorf("rule is not %d wide: %q", Width, got)
+	if got := s[9]; got != strings.Repeat(" ", 4)+strings.Repeat("─", 112) {
+		t.Errorf("rule does not fill the frame: %q", got)
 	}
-	if p.PromptRow != 29 || p.PromptCol != 28+len("Choice: ") {
+	if p.PromptRow != 29 || p.PromptCol != 5+len("Choice: ") {
 		t.Errorf("prompt at %d,%d", p.PromptRow, p.PromptCol)
 	}
 	if !strings.Contains(s[12], " 1  Install gjallarOS") {
@@ -122,8 +134,8 @@ func TestCentredOn120x33(t *testing.T) {
 
 func TestNoteSitsAboveTheHint(t *testing.T) {
 	m := example("Type one of the numbers 1 to 8.")
-	if m.Height() != example("").Height()+2 {
-		t.Fatalf("note adds %d rows, want 2", m.Height()-example("").Height())
+	if n := len(m.lines(Width)) - len(example("").lines(Width)); n != 2 {
+		t.Fatalf("note adds %d rows, want 2", n)
 	}
 	var b strings.Builder
 	p, err := Render(&b, m, Logo{}, 80, 30, false)

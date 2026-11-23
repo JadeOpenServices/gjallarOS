@@ -24,8 +24,9 @@ type UI struct {
 	Reader *bufio.Reader
 	Out    io.Writer
 	GTK    bool
-	// Wrap breaks long questions at the calm menu's width. The stick
-	// console sets it; desktop tools keep plain lines.
+	// Wrap breaks long questions at the calm menu's width, unless Out
+	// wraps them itself (calmmenu.WrapFor). The stick console sets it;
+	// desktop tools keep plain lines.
 	Wrap bool
 	// Flush, when set, runs before each answer is read: page mode drops
 	// keys typed while no question was up (UsePages). reset also starts
@@ -254,7 +255,7 @@ func (u UI) Confirm(ctx context.Context, message string, defaultYes bool) (bool,
 	}
 	question := message + suffix
 	if u.Wrap {
-		question = calmmenu.Wrap(strings.TrimSuffix(question, " ")) + " "
+		question = calmmenu.WrapFor(u.Out, strings.TrimSuffix(question, " ")) + " "
 	}
 	fmt.Fprint(u.Out, question)
 	line, err := u.readLine(ctx)
@@ -352,7 +353,8 @@ func (u UI) secretOut() (io.Writer, func(), error) {
 	}
 	if tty.Is(file) {
 		if pagerOf(u.Out) != nil {
-			return calmmenu.NewColumn(file, tty.Cols(file)), func() {}, nil
+			cols, rows := tty.Size(file)
+			return calmmenu.NewColumn(file, cols, rows), func() {}, nil
 		}
 		return out, func() {}, nil
 	}

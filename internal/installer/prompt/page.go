@@ -6,8 +6,6 @@ import (
 	"os"
 	"strings"
 	"sync"
-	"unicode"
-	"unicode/utf8"
 
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/calmmenu"
 	"github.com/JadeOpenServices/gjallarOS/internal/tty"
@@ -93,30 +91,26 @@ func Pages(out, errOut io.Writer) (io.Writer, io.Writer) {
 }
 
 func newPager(file *os.File, title string) *Pager {
-	return &Pager{file: file, title: title, col: calmmenu.NewColumn(file, tty.Cols(file))}
+	cols, rows := tty.Size(file)
+	return &Pager{file: file, title: title, col: calmmenu.NewColumn(file, cols, rows)}
 }
 
-// pageTitle makes the title printable and fits it in the block.
+// pageTitle is the title the pages show. Head makes it printable and
+// fits it on the page.
 func pageTitle(s string) string {
-	var b strings.Builder
-	n := 0
-	for i := 0; i < len(s) && n < calmmenu.Width; n++ {
-		r, size := utf8.DecodeRuneInString(s[i:])
-		i += size
-		if r == utf8.RuneError || !unicode.IsPrint(r) {
-			r = '?'
-		}
-		b.WriteRune(r)
-	}
-	if b.Len() == 0 {
+	if s == "" {
 		return "gjallarOS"
 	}
-	return b.String()
+	return s
 }
 
 // PageWidth is the width of the page column. Programs the installer runs
 // on a pseudo-terminal get it as their terminal width (installlog.Run).
-func (p *Pager) PageWidth() int { return calmmenu.Width }
+func (p *Pager) PageWidth() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.col.PageWidth()
+}
 
 func (p *Pager) Write(b []byte) (int, error) {
 	p.mu.Lock()
@@ -133,13 +127,13 @@ func (p *Pager) Terminal() io.Writer { return p.file }
 func (p *Pager) page() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	cols := tty.Cols(p.file)
+	cols, rows := tty.Size(p.file)
 	if p.secret {
 		p.secret = false
-		p.col = calmmenu.NewColumn(p.file, cols)
+		p.col = calmmenu.NewColumn(p.file, cols, rows)
 		return
 	}
-	if c, err := calmmenu.Head(p.file, p.title, cols, true); err == nil {
+	if c, err := calmmenu.Head(p.file, p.title, cols, rows, true); err == nil {
 		p.col = c
 	}
 }
@@ -180,15 +174,14 @@ func pagerOf(out io.Writer) *Pager {
 // Paged reports whether out draws pages.
 func Paged(out io.Writer) bool { return pagerOf(out) != nil }
 
-// UsePages sets u up for page mode when its output draws pages: text
-// wraps in the block, and keys typed while no question was up are dropped
-// before each question, as the stick menu does. A key pressed during a
-// long step must not answer the next question.
+// UsePages sets u up for page mode when its output draws pages: keys
+// typed while no question was up are dropped before each question, as
+// the stick menu does. A key pressed during a long step must not answer
+// the next question. Text wraps in the page column on its own.
 func (u *UI) UsePages(in io.Reader) {
 	if !Paged(u.Out) {
 		return
 	}
-	u.Wrap = true
 	if file, ok := in.(*os.File); ok && tty.Is(file) {
 		u.Flush = func(reset bool) {
 			_ = unix.IoctlSetInt(int(file.Fd()), unix.TCFLSH, unix.TCIFLUSH)

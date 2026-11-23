@@ -47,7 +47,7 @@ func clearForeignMokNew(ctx context.Context, ui UI, out io.Writer, f firmwareFil
 	if len(foreign) == 0 {
 		return nil
 	}
-	fmt.Fprint(out, calmmenu.Wrap("MokManager also holds requests to trust entries that gjallarOS did not ask for:\n"))
+	fmt.Fprint(out, calmmenu.WrapFor(out, "MokManager also holds requests to trust entries that gjallarOS did not ask for:\n"))
 	for _, s := range foreign {
 		fmt.Fprintln(out, "  "+s)
 	}
@@ -186,7 +186,7 @@ func RequeueKey(ctx context.Context, ui UI, out io.Writer, der []byte) (bool, er
 	if trust.ShimValidationOff {
 		return false, errors.New("shim's own check is switched off in MokManager; turn it back on there first")
 	}
-	fmt.Fprint(out, calmmenu.Wrap(fmt.Sprintf("The installed gjallarOS has the key %q, fingerprint\n%s\n", certName(cert), sha1Fingerprint(der, "  "))))
+	fmt.Fprint(out, calmmenu.WrapFor(out, fmt.Sprintf("The installed gjallarOS has the key %q, fingerprint\n%s\n", certName(cert), sha1Fingerprint(der, "  "))))
 	visit, err := queueVisit(ctx, ui, out, der)
 	if err != nil {
 		return false, err
@@ -195,6 +195,6 @@ func RequeueKey(ctx context.Context, ui UI, out io.Writer, der []byte) (bool, er
 		fmt.Fprintln(out, "The key is already trusted by shim and nothing waits for MokManager.")
 		return false, nil
 	}
-	fmt.Fprint(out, visit.steps())
+	fmt.Fprint(out, calmmenu.WrapFor(out, visit.steps()))
 	return true, nil
 }

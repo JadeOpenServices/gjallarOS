@@ -25,6 +25,7 @@ import (
 	"github.com/JadeOpenServices/gjallarOS/internal/input/xkb"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/baremetalinstall"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/bootstrap"
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/calmmenu"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/checkoutowner"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/config"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/credential"
@@ -1889,7 +1890,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 		if err != nil {
 			return fail(errOut, err)
 		}
-		fmt.Fprint(out, notice)
+		fmt.Fprint(out, calmmenu.WrapFor(out, notice))
 	}
 	if shimSBOff {
 		installlog.Mark(installlog.SecureBootContinue, installlog.Choice("path", "shim-sb-off"))

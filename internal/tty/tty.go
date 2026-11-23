@@ -21,12 +21,19 @@ func Is(file *os.File) bool {
 	return err == nil
 }
 
-// Cols is file's width in columns, or 80 when file is not a terminal or
-// does not say.
-func Cols(file *os.File) int {
+// Size is file's size in cells: 80 by 24 when file is not a terminal,
+// and 80 or 24 for a side the terminal does not say.
+func Size(file *os.File) (cols, rows int) {
 	ws, err := unix.IoctlGetWinsize(int(file.Fd()), unix.TIOCGWINSZ)
-	if err != nil || ws.Col == 0 {
-		return 80
+	if err != nil {
+		return 80, 24
 	}
-	return int(ws.Col)
+	cols, rows = int(ws.Col), int(ws.Row)
+	if cols == 0 {
+		cols = 80
+	}
+	if rows == 0 {
+		rows = 24
+	}
+	return cols, rows
 }
