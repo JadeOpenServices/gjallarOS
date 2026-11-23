@@ -419,9 +419,7 @@ func (s *Stick) menu(ctx context.Context) error {
 			}
 		case actShell:
 			installlog.Mark(installlog.StickMenuChosen, installlog.Choice("choice", "shell"))
-			s.head("Shell")
-			s.say("Type exit to come back to this menu.")
-			s.runStep(ctx, "the shell", "runuser", "-l", "nixos")
+			s.runStep(ctx, "the shell", "runuser", "-l", "nixos", "-c", shellCommand(s.size()))
 		case actNetwork:
 			if err := s.networkStep(ctx, ""); err != nil {
 				return err
@@ -571,9 +569,18 @@ func (s *Stick) runStep(ctx context.Context, what, name string, args ...string) 
 	}
 	installlog.Mark(installlog.StickFlowFailed)
 	s.logError(fmt.Sprintf("%s ended with exit code %d", what, code))
-	// The menu block is 66 columns: the note leaves out the last part.
+	// The note stays on the menu page: it leaves out the last part, to keep it short.
 	s.note = fmt.Sprintf("%s ended with an error (exit code %d).", upperFirst(what), code)
 	s.say(s.note + " You are back in the stick menu.")
+}
+
+// shellCommand starts the nixos user's login shell on a screen of cols
+// by rows cells, in the page frame like every other page:
+// gjallar-stick-shell (system/installer-media/stick.nix) takes the frame's
+// first column, first row, width and height.
+func shellCommand(cols, rows, _, _ int) string {
+	f := calmmenu.FrameFor(cols, rows)
+	return fmt.Sprintf("exec gjallar-stick-shell %d %d %d %d", f.Col, f.Row, f.Width, f.Height)
 }
 
 func upperFirst(s string) string {

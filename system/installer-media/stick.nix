@@ -114,6 +114,58 @@ let
     hide-when-typing=yes
   '';
 
+  # The menu's Shell entry (shellCommand in internal/installer/stick): the
+  # nixos user's login shell in the page frame (calmmenu.FrameFor), so it
+  # keeps the same margin as the menu pages. The Linux console has no left
+  # and right margins of its own; a tmux popup on the frame gives them.
+  # tmux is only the frame: no status line, no keys or mouse of its own,
+  # and it ends when the shell ends. Takes the frame's first column and
+  # row (from 1), then its width and height in cells.
+  shellTmuxConf = pkgs.writeText "gjallar-stick-shell.tmux.conf" ''
+    set -g status off
+    set -g mouse off
+    set -g prefix None
+    set -g prefix2 None
+    unbind -a -T prefix
+    unbind -a -T root
+    set -sg escape-time 0
+  '';
+  # display-popup returns the status of the command in it. The shell's own
+  # status (the last command before exit) is not a frame failure, so the
+  # frame ends with 0 and only tmux itself can report one.
+  shellInFrame = pkgs.writeShellScript "gjallar-stick-shell-frame" ''
+    printf '%s\n\n' 'Type exit to come back to the stick menu.'
+    "$SHELL" -l
+    exit 0
+  '';
+  # The blank window behind the frame. It opens the popup and waits for it,
+  # so the tmux session ends with the shell. tmux counts columns from 0 and
+  # takes -y as the row under the popup.
+  shellWindow = pkgs.writeShellScript "gjallar-stick-shell-window" ''
+    if ! ${pkgs.tmux}/bin/tmux display-popup -B -E \
+      -x "$(($1 - 1))" -y "$(($2 - 1 + $4))" -w "$3" -h "$4" ${shellInFrame}; then
+      printf '%s' 'The shell frame did not open. Press Enter to go back to the stick menu.'
+      read -r _
+    fi
+  '';
+  stickShell = pkgs.writeShellApplication {
+    name = "gjallar-stick-shell";
+    text = ''
+      usage() {
+        echo "usage: gjallar-stick-shell COLUMN ROW WIDTH HEIGHT" >&2
+        exit 2
+      }
+      [ "$#" -eq 4 ] || usage
+      for n in "$@"; do
+        case "$n" in
+          "" | *[!0-9]*) usage ;;
+        esac
+      done
+      exec ${pkgs.tmux}/bin/tmux -L stick-shell -f ${shellTmuxConf} \
+        new-session "${shellWindow} $1 $2 $3 $4"
+    '';
+  };
+
   # The menu logo (THEMEBRAIN section 18): the OpenJade lockup (stone and
   # "openJade" as one drawing, never sized apart) on the terminal ground,
   # as sixel at 1x and at 2x (for cells of 48 pixels and more, 4K). The
@@ -279,7 +331,10 @@ in
 
   # The installer queues the removal of the stick's hash from shim's list
   # (QueueStickHashDelete); mokutil does that.
-  environment.systemPackages = lib.optional pkgs.stdenv.hostPlatform.isx86_64 pkgs.mokutil;
+  environment.systemPackages = [
+    stickShell
+  ]
+  ++ lib.optional pkgs.stdenv.hostPlatform.isx86_64 pkgs.mokutil;
 
   # tty1 is the stick menu, not a login. The other consoles keep the live
   # login of every NixOS installer; the menu's Shell entry gives the same.

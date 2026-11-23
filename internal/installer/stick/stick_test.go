@@ -463,7 +463,7 @@ func TestOtherEntries(t *testing.T) {
 	h.run(t)
 	want := []string{
 		"gjallar-recovery-console --from-stick",
-		"runuser -l nixos",
+		"runuser -l nixos -c exec gjallar-stick-shell 3 2 76 22",
 		"systemctl reboot",
 		"systemctl poweroff",
 	}
