@@ -133,9 +133,10 @@ func (m Menu) lines(width int) [][]span {
 // Render clears the screen and draws the menu for a terminal of cols by
 // rows cells: the page in the terminal's frame (see FrameFor), centred
 // from top to bottom, the logo above it centred across the screen. A
-// page shorter and narrower than the frame gets a smaller frame, the
-// margin grown evenly on all four sides for as long as no row of the
-// page wraps or is cut (see fitFrame); Place.Frame is the frame used. The
+// page smaller than the frame gets a smaller frame, its margin grown
+// until the space at the sides is as wide as the space above and below
+// the page, which is wrapped again at the new width (see fitFrame);
+// Place.Frame is the frame used. The
 // logo is left out when it does not fit beside the page; then
 // Place.LogoRow is 0. A page taller than the frame starts at its top and
 // scrolls inside it. With colour false Render writes plain text (for logs
@@ -153,11 +154,16 @@ func Render(w io.Writer, m Menu, logo Logo, cols, rows int, colour bool) (Place,
 	if logo.Rows > 0 {
 		gap = 1 // one empty row between logo and title
 	}
-	// The frame shrinks while the page keeps the same rows, none of them
-	// cut, and still fits from top to bottom.
+	// The frame shrinks while the space at its sides is still no wider
+	// than the space above and below the page, the page wrapped again at
+	// each width. A cell is twice as tall as it is wide (see FrameFor), so
+	// the space above and below together, in rows, is the space at one
+	// side in columns. No word may be cut, the page must still fit from
+	// top to bottom, and the logo must not stick out past the frame.
 	f = fitFrame(cols, rows, func(n Frame) bool {
 		nl := m.lines(n.Width)
-		return len(nl) == len(ls) && widest(nl) <= n.Width && logo.Rows+gap+len(nl) <= n.Height
+		h := logo.Rows + gap + len(nl)
+		return widest(nl) <= n.Width && logo.Cols <= n.Width && h <= n.Height && n.Col-1 <= rows-h
 	})
 	ls = m.lines(f.Width)
 	height := logo.Rows + gap + len(ls)

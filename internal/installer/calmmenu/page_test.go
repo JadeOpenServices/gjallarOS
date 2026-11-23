@@ -20,9 +20,10 @@ func TestPageBodyWrapsInBlock(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := screen(t, b.String(), 60, 24)
-	f := FrameFor(60, 24)
+	f := p.Frame
 	inBlock(t, s, f.Col, f.Width)
-	if !strings.Contains(strings.Join(s, "\n"), "\n  Staging and dev get them earlier and break more often.") {
+	// Every word of the body is there, in order, on rows of the frame.
+	if !strings.Contains(strings.Join(strings.Fields(strings.Join(s, " ")), " "), m.Body[0]) {
 		t.Fatalf("body not wrapped in the frame:\n%s", strings.Join(s, "\n"))
 	}
 	if p.PromptCol != f.Col+len("Channel: ") {

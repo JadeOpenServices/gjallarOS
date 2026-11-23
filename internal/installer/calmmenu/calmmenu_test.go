@@ -175,9 +175,9 @@ func TestShortMenuHasEvenSpace(t *testing.T) {
 	}
 }
 
-// The frame never gets so narrow that a row of the page wraps once more
-// or is cut: every row the base frame shows is shown whole.
-func TestFitKeepsEveryRow(t *testing.T) {
+// A smaller frame wraps the page again but never cuts a word: every
+// label and line is shown whole.
+func TestFitCutsNothing(t *testing.T) {
 	m := example("The network did not answer. Check the cable or pick a wireless network, then try again from this menu.")
 	m.Groups = append(m.Groups, []Item{{"9", "A rather long label that is wider than the rest of the menu put together", ""}})
 	for _, size := range [][2]int{{80, 30}, {100, 37}, {116, 33}, {160, 50}} {
@@ -189,26 +189,11 @@ func TestFitKeepsEveryRow(t *testing.T) {
 		}
 		s := screen(t, b.String(), cols, rows)
 		inBlock(t, s, p.Frame.Col, p.Frame.Width)
-		page := strings.Join(s, "\n")
-		for _, want := range []string{" 9  " + m.Groups[4][0].Label, "    " + m.Groups[1][0].Desc} {
-			if !strings.Contains(page, want) {
-				t.Errorf("%dx%d: %q cut:\n%s", cols, rows, want, page)
+		words := strings.Join(strings.Fields(strings.Join(s, " ")), " ")
+		for _, want := range []string{m.Groups[4][0].Label, m.Note} {
+			if !strings.Contains(words, want) {
+				t.Errorf("%dx%d: %q cut:\n%s", cols, rows, want, strings.Join(s, "\n"))
 			}
-		}
-		shown := 0
-		for _, l := range s {
-			if strings.TrimSpace(l) != "" {
-				shown++
-			}
-		}
-		base := 0
-		for _, l := range m.lines(FrameFor(cols, rows).Width) {
-			if len(l) > 0 {
-				base++
-			}
-		}
-		if shown != base {
-			t.Errorf("%dx%d: %d rows shown, %d in the base frame", cols, rows, shown, base)
 		}
 	}
 }
@@ -374,27 +359,47 @@ func TestRenderEscapesOutsideText(t *testing.T) {
 }
 
 // On every screen size, not a list of known ones, the menu's frame has
-// the same margin on all four sides and shows the same rows as the base
-// frame, none cut.
+// the same margin on all four sides, cuts no word, and the space at the
+// sides (in columns) is as wide as the space above and below the page
+// together (in rows, a cell being twice as tall as wide), to within the
+// step the margin grows by, unless the frame is as narrow as the page's
+// longest word allows. Two pages: a tall menu and a short wide one, like
+// the stick's keyboard page.
 func TestFitOnEverySize(t *testing.T) {
-	m := example("")
-	for cols := 40; cols <= 240; cols++ {
-		for rows := 15; rows <= 80; rows++ {
-			var b strings.Builder
-			p, err := Render(&b, m, Logo{}, cols, rows, false)
-			if err != nil {
-				t.Fatal(err)
-			}
-			f, base := p.Frame, FrameFor(cols, rows)
-			if f != base && f != withMargin(cols, rows, f.Row-1) {
-				t.Fatalf("%dx%d: frame %+v has uneven margins", cols, rows, f)
-			}
-			if f.Width < 20 || f.Height < 5 || f.Row < base.Row || f.Col < base.Col {
-				t.Fatalf("%dx%d: frame %+v smaller than allowed (base %+v)", cols, rows, f, base)
-			}
-			want, got := m.lines(base.Width), m.lines(f.Width)
-			if len(got) != len(want) || widest(got) > f.Width && widest(want) <= base.Width {
-				t.Fatalf("%dx%d: frame %+v wraps or cuts the page", cols, rows, f)
+	short := Menu{
+		Title:  "Keyboard layout",
+		Body:   []string{"Type a keyboard layout such as us, gb or fr. Part of a name shows a list."},
+		Prompt: "Keyboard layout [us]: ",
+	}
+	for _, m := range []Menu{example(""), short} {
+		for cols := 40; cols <= 240; cols++ {
+			for rows := 15; rows <= 80; rows++ {
+				var b strings.Builder
+				p, err := Render(&b, m, Logo{}, cols, rows, false)
+				if err != nil {
+					t.Fatal(err)
+				}
+				f, base := p.Frame, FrameFor(cols, rows)
+				if f != base && f != withMargin(cols, rows, f.Row-1) {
+					t.Fatalf("%dx%d: frame %+v has uneven margins", cols, rows, f)
+				}
+				if f.Width < 20 || f.Height < 5 || f.Row < base.Row || f.Col < base.Col {
+					t.Fatalf("%dx%d: frame %+v smaller than allowed (base %+v)", cols, rows, f, base)
+				}
+				ls := m.lines(f.Width)
+				if widest(ls) > f.Width && widest(m.lines(base.Width)) <= base.Width {
+					t.Fatalf("%dx%d: frame %+v cuts the page", cols, rows, f)
+				}
+				if f == base || len(ls) > f.Height {
+					continue // no room to grow, or a page that scrolls
+				}
+				side, vert := f.Col-1, rows-len(ls)
+				next := withMargin(cols, rows, f.Row)
+				nl := m.lines(next.Width)
+				blocked := next.Width < 20 || widest(nl) > next.Width || len(nl) > next.Height
+				if side > vert || !blocked && vert-side > 2+len(nl)-len(ls) {
+					t.Fatalf("%dx%d: %d columns at the sides, %d rows above and below (frame %+v)", cols, rows, side, vert, f)
+				}
 			}
 		}
 	}
