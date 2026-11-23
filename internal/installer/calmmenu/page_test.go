@@ -101,12 +101,14 @@ func TestPageOnConsole(t *testing.T) {
 		Prompt: "Channel [stable]: ",
 	}
 	var b strings.Builder
-	if _, err := Render(&b, m, Logo{}, 80, 25, false); err != nil {
+	p, err := Render(&b, m, Logo{}, 80, 25, false)
+	if err != nil {
 		t.Fatal(err)
 	}
 	s := screen(t, b.String(), 80, 25)
-	inBlock(t, s, 3, 76)
-	if !strings.Contains(strings.Join(s, "\n"), "\n  Release channel\n  ─") {
+	inBlock(t, s, p.Frame.Col, p.Frame.Width)
+	pad := strings.Repeat(" ", p.Frame.Col-1)
+	if !strings.Contains(strings.Join(s, "\n"), "\n"+pad+"Release channel\n"+pad+"─") {
 		t.Errorf("page:\n%s", strings.Join(s, "\n"))
 	}
 }

@@ -1,7 +1,7 @@
 // Package calmmenu draws the calm text menu from THEMEBRAIN section 18:
 // a page in a frame with the same margin on every side of the terminal
-// (see FrameFor), centred from top to bottom, with an optional logo on
-// top. Colours come from the 16 colour slots only, so the same output
+// (see FrameFor), grown evenly around a short menu (see Render), with an
+// optional logo on top. Colours come from the 16 colour slots only, so the same output
 // works in foot and on the Linux console.
 package calmmenu
 
@@ -70,6 +70,7 @@ type Logo struct {
 type Place struct {
 	LogoRow, LogoCol     int
 	PromptRow, PromptCol int
+	Frame                Frame // the page's frame, for text written after it (see ColumnIn)
 }
 
 type span struct{ style, text string }
@@ -131,7 +132,10 @@ func (m Menu) lines(width int) [][]span {
 
 // Render clears the screen and draws the menu for a terminal of cols by
 // rows cells: the page in the terminal's frame (see FrameFor), centred
-// from top to bottom, the logo above it centred across the screen. The
+// from top to bottom, the logo above it centred across the screen. A
+// page shorter and narrower than the frame gets a smaller frame, the
+// margin grown evenly on all four sides for as long as no row of the
+// page wraps or is cut (see fitFrame); Place.Frame is the frame used. The
 // logo is left out when it does not fit beside the page; then
 // Place.LogoRow is 0. A page taller than the frame starts at its top and
 // scrolls inside it. With colour false Render writes plain text (for logs
@@ -149,6 +153,13 @@ func Render(w io.Writer, m Menu, logo Logo, cols, rows int, colour bool) (Place,
 	if logo.Rows > 0 {
 		gap = 1 // one empty row between logo and title
 	}
+	// The frame shrinks while the page keeps the same rows, none of them
+	// cut, and still fits from top to bottom.
+	f = fitFrame(cols, rows, func(n Frame) bool {
+		nl := m.lines(n.Width)
+		return len(nl) == len(ls) && widest(nl) <= n.Width && logo.Rows+gap+len(nl) <= n.Height
+	})
+	ls = m.lines(f.Width)
 	height := logo.Rows + gap + len(ls)
 	x0 := f.Col
 	y0 := f.Row + max(0, (f.Height-height)/2)
@@ -156,7 +167,7 @@ func Render(w io.Writer, m Menu, logo Logo, cols, rows int, colour bool) (Place,
 	var b strings.Builder
 	b.WriteString(Clear)
 	b.WriteString(f.scroll())
-	p := Place{}
+	p := Place{Frame: f}
 	if logo.Rows > 0 {
 		p.LogoRow = y0
 		p.LogoCol = max(0, (cols-logo.Cols)/2) + 1
@@ -189,6 +200,19 @@ func Render(w io.Writer, m Menu, logo Logo, cols, rows int, colour bool) (Place,
 	fmt.Fprintf(&b, "\x1b[%dG", p.PromptCol)
 	_, err := io.WriteString(w, b.String())
 	return p, err
+}
+
+// widest is the width of the widest of ls in cells.
+func widest(ls [][]span) int {
+	w := 0
+	for _, l := range ls {
+		n := 0
+		for _, s := range l {
+			n += utf8.RuneCountInString(printable(s.text))
+		}
+		w = max(w, n)
+	}
+	return w
 }
 
 // printable turns control characters, text-direction marks and broken

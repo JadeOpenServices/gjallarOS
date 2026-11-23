@@ -134,7 +134,7 @@ let
   # status (the last command before exit) is not a frame failure, so the
   # frame ends with 0 and only tmux itself can report one.
   shellInFrame = pkgs.writeShellScript "gjallar-stick-shell-frame" ''
-    printf '%s\n\n' 'Type exit to come back to the stick menu.'
+    printf '%s\n' 'Type exit to come back to the stick menu.'
     "$SHELL" -l
     exit 0
   '';

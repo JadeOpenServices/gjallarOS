@@ -476,7 +476,6 @@ func (s *Stick) draw(m calmmenu.Menu, withLogo bool) error {
 		m.Note = s.note
 	}
 	s.note = ""
-	s.col = calmmenu.NewColumn(s.UI.Out, cols, rows)
 	var logo calmmenu.Logo
 	var picture calmmenu.Sixel
 	if withLogo && s.Mode == ModeWindow && len(s.Logos) > 0 && xpixel > 0 && ypixel > 0 {
@@ -489,6 +488,7 @@ func (s *Stick) draw(m calmmenu.Menu, withLogo bool) error {
 		logo = picture.Cells(cw, ch)
 	}
 	p, err := calmmenu.Render(s.UI.Out, m, logo, cols, rows, true)
+	s.col = calmmenu.ColumnIn(s.UI.Out, p.Frame)
 	if err != nil || p.LogoRow == 0 {
 		return err
 	}

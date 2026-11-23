@@ -82,7 +82,12 @@ const (
 
 // NewColumn is a Column in the frame of a terminal cols by rows cells.
 func NewColumn(w io.Writer, cols, rows int) *Column {
-	f := FrameFor(cols, rows)
+	return ColumnIn(w, FrameFor(cols, rows))
+}
+
+// ColumnIn is a Column in frame f, such as the frame a menu was drawn in
+// (Place.Frame), for text written under the menu.
+func ColumnIn(w io.Writer, f Frame) *Column {
 	return &Column{W: w, Col: f.Col, width: f.Width}
 }
 

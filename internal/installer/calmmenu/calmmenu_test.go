@@ -113,22 +113,103 @@ func TestCentredOn120x33(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := screen(t, b.String(), 120, 33)
-	// Frame: margin 2 rows and 4 columns, so rows 3-31 and columns 5-116.
-	// 4 logo rows, 1 gap, 21 menu lines = 26, so y0 = 3 + (29-26)/2 = 4.
+	// 4 logo rows, 1 gap, 21 menu lines = 26. The margin grows from 2 rows
+	// to 3 (27 rows high) and 6 columns, so rows 4-30 and columns 7-114.
+	// y0 = 4 + (27-26)/2 = 4.
+	if p.Frame != (Frame{Col: 7, Row: 4, Width: 108, Height: 27}) {
+		t.Errorf("frame %+v", p.Frame)
+	}
 	if p.LogoRow != 4 || p.LogoCol != 50 {
 		t.Errorf("logo at %d,%d, want 4,50", p.LogoRow, p.LogoCol)
 	}
-	if got := s[8]; got != strings.Repeat(" ", 4)+"gjallarOS installer" {
+	if got := s[8]; got != strings.Repeat(" ", 6)+"gjallarOS installer" {
 		t.Errorf("title row %q", got)
 	}
-	if got := s[9]; got != strings.Repeat(" ", 4)+strings.Repeat("─", 112) {
+	if got := s[9]; got != strings.Repeat(" ", 6)+strings.Repeat("─", 108) {
 		t.Errorf("rule does not fill the frame: %q", got)
 	}
-	if p.PromptRow != 29 || p.PromptCol != 5+len("Choice: ") {
+	if p.PromptRow != 29 || p.PromptCol != 7+len("Choice: ") {
 		t.Errorf("prompt at %d,%d", p.PromptRow, p.PromptCol)
 	}
 	if !strings.Contains(s[12], " 1  Install gjallarOS") {
 		t.Errorf("item row %q", s[12])
+	}
+}
+
+// A short menu gets the same space on every side (two columns for each
+// row), on wide screens and on 4:3 ones: 640x480 and 800x600 on the
+// console (8x16 cells), 1024x768 in foot (about 11x24).
+func TestShortMenuHasEvenSpace(t *testing.T) {
+	for _, c := range []struct {
+		cols, rows int
+		want       Frame
+	}{
+		{116, 33, Frame{Col: 13, Row: 7, Width: 92, Height: 21}},
+		{80, 30, Frame{Col: 9, Row: 5, Width: 64, Height: 22}},
+		{100, 37, Frame{Col: 17, Row: 9, Width: 68, Height: 21}},
+		{93, 32, Frame{Col: 11, Row: 6, Width: 73, Height: 22}},
+	} {
+		var b strings.Builder
+		p, err := Render(&b, example(""), Logo{}, c.cols, c.rows, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if p.Frame != c.want {
+			t.Errorf("%dx%d: frame %+v, want %+v", c.cols, c.rows, p.Frame, c.want)
+		}
+		s := screen(t, b.String(), c.cols, c.rows)
+		inBlock(t, s, p.Frame.Col, p.Frame.Width)
+		first, last := -1, -1
+		for i, l := range s {
+			if strings.TrimSpace(l) != "" {
+				last = i
+				if first < 0 {
+					first = i
+				}
+			}
+		}
+		above, below := first, c.rows-1-last
+		if above < p.Frame.Row-1 || below < p.Frame.Row-1 || above-below > 1 || below-above > 1 {
+			t.Errorf("%dx%d: %d rows above the page, %d below, margin %d", c.cols, c.rows, above, below, p.Frame.Row-1)
+		}
+	}
+}
+
+// The frame never gets so narrow that a row of the page wraps once more
+// or is cut: every row the base frame shows is shown whole.
+func TestFitKeepsEveryRow(t *testing.T) {
+	m := example("The network did not answer. Check the cable or pick a wireless network, then try again from this menu.")
+	m.Groups = append(m.Groups, []Item{{"9", "A rather long label that is wider than the rest of the menu put together", ""}})
+	for _, size := range [][2]int{{80, 30}, {100, 37}, {116, 33}, {160, 50}} {
+		cols, rows := size[0], size[1]
+		var b strings.Builder
+		p, err := Render(&b, m, Logo{}, cols, rows, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		s := screen(t, b.String(), cols, rows)
+		inBlock(t, s, p.Frame.Col, p.Frame.Width)
+		page := strings.Join(s, "\n")
+		for _, want := range []string{" 9  " + m.Groups[4][0].Label, "    " + m.Groups[1][0].Desc} {
+			if !strings.Contains(page, want) {
+				t.Errorf("%dx%d: %q cut:\n%s", cols, rows, want, page)
+			}
+		}
+		shown := 0
+		for _, l := range s {
+			if strings.TrimSpace(l) != "" {
+				shown++
+			}
+		}
+		base := 0
+		for _, l := range m.lines(FrameFor(cols, rows).Width) {
+			if len(l) > 0 {
+				base++
+			}
+		}
+		if shown != base {
+			t.Errorf("%dx%d: %d rows shown, %d in the base frame", cols, rows, shown, base)
+		}
 	}
 }
 
@@ -289,5 +370,32 @@ func TestRenderEscapesOutsideText(t *testing.T) {
 	}
 	if !strings.Contains(out, "Cafe?[2J??") {
 		t.Fatalf("label not shown escaped:\n%q", out)
+	}
+}
+
+// On every screen size, not a list of known ones, the menu's frame has
+// the same margin on all four sides and shows the same rows as the base
+// frame, none cut.
+func TestFitOnEverySize(t *testing.T) {
+	m := example("")
+	for cols := 40; cols <= 240; cols++ {
+		for rows := 15; rows <= 80; rows++ {
+			var b strings.Builder
+			p, err := Render(&b, m, Logo{}, cols, rows, false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			f, base := p.Frame, FrameFor(cols, rows)
+			if f != base && f != withMargin(cols, rows, f.Row-1) {
+				t.Fatalf("%dx%d: frame %+v has uneven margins", cols, rows, f)
+			}
+			if f.Width < 20 || f.Height < 5 || f.Row < base.Row || f.Col < base.Col {
+				t.Fatalf("%dx%d: frame %+v smaller than allowed (base %+v)", cols, rows, f, base)
+			}
+			want, got := m.lines(base.Width), m.lines(f.Width)
+			if len(got) != len(want) || widest(got) > f.Width && widest(want) <= base.Width {
+				t.Fatalf("%dx%d: frame %+v wraps or cuts the page", cols, rows, f)
+			}
+		}
 	}
 }
