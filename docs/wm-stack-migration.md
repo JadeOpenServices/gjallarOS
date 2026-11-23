@@ -116,6 +116,49 @@ time and shared-config needs**, not by that chain.
     rewrite of our 7 plugins, so decision 4 stands: Plasma's own panel,
     and Noctalia with its 23 patches (and the 8 greeter patches) goes at
     the switch.
+20. **Base and versions** (Jade 2026-11-23). Build the switch now on
+    nixos-26.05 (Plasma 6.6.6, KF 6.26.0) with our patches; move to
+    nixos-26.11 once it is out (nixos-unstable has Plasma 6.8.3 / KF 6.32
+    today) and re-check every patch and finding against the new versions.
+    Patches upstream has fixed by then are dropped, not kept.
+21. **Per-screen workspaces** come native with KWin 6.7 or later, so at
+    the 26.11 move. Until then one shared set of workspaces on all
+    screens; no interim script (no throwaway code). Logged as a known
+    limit until 26.11.
+22. **On-screen keyboard.** KWin patch: show the keyboard on text focus
+    when no hardware keyboard is attached. Key preview through a patch to
+    plasma-keyboard's style; the same patch reads layouts only from the
+    store (L189).
+23. **KWin realtime capability.** Patch KWin to drop `cap_sys_nice` after
+    its realtime thread is set up (L172).
+24. **Remote input dropped for now** (L186). Portals RemoteDesktop and
+    InputCapture set to `none`, the dialog skip patched out, KWin's
+    remote-input interface closed. An allow-list by program path is not a
+    boundary against code in the user's session, so it is not used. Later
+    review after the move: remote session for IT on Genbu-joined machines
+    (needs grants only to programs that root or KWin start).
+25. **Clipboard and config.** Primary selection (middle-click paste) off.
+    KConfig patch: locks count only from `/etc/xdg` and the store (L188);
+    user nix profiles keep working.
+26. **Removed or locked.** kio-admin removed (module change). KRunner
+    D-Bus runners only from a store list (L169). Dictionary and unit
+    converter runners off and locked (L191). Lock screen media controls
+    off.
+27. **Screen share asks every time** (L177): patch the portal so the
+    restore box is gone and saved restore data is ignored.
+28. **No previews on removable media** (L191): KIO patch makes removable
+    media count as slow, so Dolphin builds no previews there. The USB
+    guard gates devices, not the files on them.
+29. **Wallet re-key.** A password change through gjallarctl also re-keys
+    the KWallet (old and new password asked, nothing printed).
+30. **Tiling.** Krohnkite 0.9.11.0 as our own store package (reviewed
+    diff), dropped when nixpkgs catches up. Super+P toggles floating
+    (Krohnkite has no pseudo-tile).
+31. **Every patch gets an upstream write-up** (Jade 2026-11-23): one page
+    on the private upstream book (753) per patch with the full diff, the
+    problem, why upstream's behaviour falls short, how the patch fixes it,
+    the VM proof and notes on fitting it upstream, written in the same
+    step as the patch. The patch file links its page.
 
 ## What Noctalia and Hyprland do today, and where each part goes
 
