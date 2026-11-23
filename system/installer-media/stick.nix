@@ -275,7 +275,7 @@ let
       while true; do
         if [ "$window" = true ]; then
           layout=$(gjallar-stick layout)
-          # The window font is the largest that still gives 88 by 29 cells
+          # The window font is the largest that still gives 88 by 35 cells
           # (gjallar-stick font --mode window), in pixels, so a wrong EDID
           # cannot change it. On a screen too small for that, or one that
           # reports no size, foot keeps the desktop's size above.

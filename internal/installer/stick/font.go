@@ -8,14 +8,17 @@ import (
 )
 
 // The stick's terminal is sized for a page FrameWidth (72) columns wide
-// with a margin at each side, and for the main menu with the logo above it
-// (about 20 rows, logo 6, one empty row, a margin above and below). Its
-// font is the largest that still gives screenCols by screenRows cells, in
-// the window and on the text console alike (Jade 2026-11-23, "88 cols,
-// rows floor" and "same floor, both").
+// with a margin at each side, and for the main menu at its longest (25
+// rows) with a margin above and below; in the window also the logo above
+// it (up to 6 rows and one empty row). Its font is the largest that still
+// gives screenCols by windowRows cells in the window and screenCols by
+// consoleRows on the text console (Jade 2026-11-23, "88 cols, rows floor"
+// and "same floor, both"; 35 rows in the window so the logo shows, "floor
+// 35 rows"). TestMainMenuFitsTheFloor draws the menu to check.
 const (
-	screenCols = 88
-	screenRows = 29
+	screenCols  = 88
+	windowRows  = 35
+	consoleRows = 29
 )
 
 // Jade Code's metrics, in font units (THEMEBRAIN section 18): every cell
@@ -55,7 +58,7 @@ func screenPixels(path string) (width, height int, ok bool) {
 }
 
 // windowPixelSize is the largest Jade Code size in pixels at which foot
-// still shows screenCols by screenRows cells on a screen width by height
+// still shows screenCols by windowRows cells on a screen width by height
 // pixels; 0 when none from 8 up does. foot rounds the cell's width and
 // each half of its height to whole pixels, so the cell is taken one pixel
 // wider and two pixels taller than the font's own size, to be safe.
@@ -63,7 +66,7 @@ func windowPixelSize(width, height int) int {
 	for px := 128; px >= 8; px-- {
 		cw := (jadeAdvance*px + jadeUnitsPerEm - 1) / jadeUnitsPerEm
 		ch := (jadeAscent+jadeDescent)*px/jadeUnitsPerEm + 2
-		if width/cw >= screenCols && height/ch >= screenRows {
+		if width/cw >= screenCols && height/ch >= windowRows {
 			return px
 		}
 	}
@@ -71,8 +74,8 @@ func windowPixelSize(width, height int) int {
 }
 
 // consoleCellWidth is the widest console cell, in pixels, that still gives
-// screenCols by screenRows cells on a screen width by height pixels. The
+// screenCols by consoleRows cells on a screen width by height pixels. The
 // console font's cells are twice as tall as they are wide.
 func consoleCellWidth(width, height int) int {
-	return min(width/screenCols, height/(2*screenRows))
+	return min(width/screenCols, height/(2*consoleRows))
 }

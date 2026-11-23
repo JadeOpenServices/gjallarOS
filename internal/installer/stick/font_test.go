@@ -1,20 +1,24 @@
 package stick
 
 import (
+	"bytes"
 	"encoding/binary"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/calmmenu"
 )
 
 func TestWindowPixelSize(t *testing.T) {
 	for _, c := range []struct{ w, h, px int }{
-		{1280, 800, 21},  // cells 13x27, 98x29
-		{1920, 1080, 29}, // cells 18x36, 106x30
-		{3840, 2160, 59},
-		{2880, 1920, 52}, // 3:2
-		{1024, 768, 17},
-		{500, 300, 0}, // too small for 88x29 at any size from 8
+		{1280, 800, 17},  // cells 10x22, 128x36
+		{1920, 1080, 23}, // cells 14x30, 137x36
+		{3840, 2160, 48},
+		{2880, 1920, 43}, // 3:2
+		{1024, 768, 16},
+		{500, 300, 0}, // too small for 88x35 at any size from 8
 	} {
 		if got := windowPixelSize(c.w, c.h); got != c.px {
 			t.Errorf("%dx%d: pixel size %d, want %d", c.w, c.h, got, c.px)
@@ -22,14 +26,14 @@ func TestWindowPixelSize(t *testing.T) {
 	}
 }
 
-// The cell foot draws at the chosen size must leave 88x29. foot rounds the
+// The cell foot draws at the chosen size must leave 88x35. foot rounds the
 // advance to the nearest pixel and the ascent and descent up.
 func TestWindowCellsFit(t *testing.T) {
 	for _, s := range [][2]int{{1280, 800}, {1366, 768}, {1920, 1080}, {1920, 1200}, {2560, 1440}, {2880, 1920}, {3840, 2160}} {
 		px := windowPixelSize(s[0], s[1])
 		cw := (2*jadeAdvance*px + jadeUnitsPerEm) / (2 * jadeUnitsPerEm)
 		ch := (jadeAscent*px+jadeUnitsPerEm-1)/jadeUnitsPerEm + (jadeDescent*px+jadeUnitsPerEm-1)/jadeUnitsPerEm
-		if s[0]/cw < screenCols || s[1]/ch < screenRows {
+		if s[0]/cw < screenCols || s[1]/ch < windowRows {
 			t.Errorf("%dx%d at %d px: %dx%d cells", s[0], s[1], px, s[0]/cw, s[1]/ch)
 		}
 	}
@@ -102,5 +106,43 @@ func TestJadeCodeMetrics(t *testing.T) {
 	want := [5]int{jadeUnitsPerEm, jadeAscent, jadeDescent, 0, jadeAdvance}
 	if got != want {
 		t.Errorf("units per em, ascent, descent, line gap, widest advance: %v, want %v", got, want)
+	}
+}
+
+// The main menu at its longest (Start installed gjallarOS and Queue the
+// key again shown) fits from top to bottom with the logo on top in the
+// window, and without scrolling on the console, at the size each picks.
+func TestMainMenuFitsTheFloor(t *testing.T) {
+	logos := []calmmenu.Sixel{
+		{Data: []byte("\x1bPq\"1;1;633;126LOGO1X\x1b\\"), Width: 633, Height: 126},
+		{Data: []byte("\x1bPq\"1;1;1265;252LOGO2X\x1b\\"), Width: 1265, Height: 252},
+	}
+	groups, _ := numbered(true, true)
+	for _, s := range [][2]int{{1024, 768}, {1280, 800}, {1366, 768}, {1920, 1080}, {1920, 1200}, {2560, 1440}, {2880, 1920}, {3840, 2160}} {
+		px := windowPixelSize(s[0], s[1])
+		cw := (2*jadeAdvance*px + jadeUnitsPerEm) / (2 * jadeUnitsPerEm)
+		ch := (jadeAscent*px+jadeUnitsPerEm-1)/jadeUnitsPerEm + (jadeDescent*px+jadeUnitsPerEm-1)/jadeUnitsPerEm
+		sz := calmmenu.Size{Cols: s[0] / cw, Rows: s[1] / ch}
+		sz.XPixel, sz.YPixel = sz.Cols*cw, sz.Rows*ch
+		var out bytes.Buffer
+		st := &Stick{Mode: ModeWindow, Logos: logos, Size: func() calmmenu.Size { return sz }, ReadLayout: func() (string, error) { return "us", nil }, channel: "stable"}
+		st.UI.Out = &out
+		if err := st.draw(st.screen(groups), true); err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Contains(out.Bytes(), []byte("LOGO")) {
+			t.Errorf("window %dx%d at %d px (%dx%d cells): no logo", s[0], s[1], px, sz.Cols, sz.Rows)
+		}
+
+		cell := consoleCellWidth(s[0], s[1])
+		con := calmmenu.Size{Cols: s[0] / cell, Rows: s[1] / (2 * cell)}
+		out.Reset()
+		p, err := calmmenu.Render(&out, st.screen(groups), calmmenu.Logo{}, con, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n := strings.Count(out.String(), "\r\n") + 1; n > p.Frame.Height {
+			t.Errorf("console %dx%d (%dx%d cells): %d lines in a frame %d high", s[0], s[1], con.Cols, con.Rows, n, p.Frame.Height)
+		}
 	}
 }
