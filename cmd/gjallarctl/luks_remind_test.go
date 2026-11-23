@@ -89,6 +89,54 @@ func TestDiskProtectionState(t *testing.T) {
 	}
 }
 
+func TestDiskChipPathFollowsRootCheck(t *testing.T) {
+	blocked := func() string {
+		return "the security chip lacks the PolicyAuthorizeNV command that the startup policy needs"
+	}
+	open := func() string { return "" }
+	notAsked := func() string { t.Fatal("chip check read although nothing is offered"); return "" }
+	cases := []struct {
+		name   string
+		path   chipPath
+		reason func() string
+		want   chipPath
+	}{
+		{"switched off, chip blocked", chipSwitchedOff, blocked, chipNone},
+		{"Secure Boot offer, chip blocked", chipNeedsSecureBoot, blocked, chipNone},
+		{"switched off, chip fine", chipSwitchedOff, open, chipSwitchedOff},
+		{"Secure Boot offer, chip fine", chipNeedsSecureBoot, open, chipNeedsSecureBoot},
+		{"next start stays", chipNextStart, notAsked, chipNextStart},
+		{"nothing offered", chipNone, notAsked, chipNone},
+	}
+	for _, c := range cases {
+		if got := diskChipPath(c.path, c.reason); got != c.want {
+			t.Errorf("%s: %d, want %d", c.name, got, c.want)
+		}
+	}
+	// The T480s after a passphrase-only install: Secure Boot on, chip
+	// unlock off in the config, root's check refuses the chip. The notice
+	// asks for a recovery key, never to turn on chip unlock.
+	passphraseOnly := luksRecord{Encrypted: true, Passphrase: 1}
+	got := diskProtectionState(passphraseOnly, diskcrypto.TPMSeparate, func() chipPath { return diskChipPath(chipSwitchedOff, blocked) })
+	if got != diskProtectionRecoveryKey {
+		t.Errorf("blocked chip, passphrase only: %s, want %s", got, diskProtectionRecoveryKey)
+	}
+}
+
+func TestPrintLUKSStatusBlockedChip(t *testing.T) {
+	reason := "the security chip lacks the PolicyAuthorizeNV command that the startup policy needs"
+	var out strings.Builder
+	printLUKSStatus(&out, "/dev/vda2", diskcrypto.Keyslots{Passphrase: []int{0}}, diskcrypto.TPMSeparate, reason)
+	if got := out.String(); !strings.Contains(got, "Security chip: off") || !strings.Contains(got, "cannot be switched on: "+reason+".") {
+		t.Errorf("blocked chip without reason:\n%s", got)
+	}
+	out.Reset()
+	printLUKSStatus(&out, "/dev/vda2", diskcrypto.Keyslots{TPM2: []int{0}, Recovery: []int{1}}, diskcrypto.TPMFirmware, reason)
+	if strings.Contains(out.String(), "cannot be switched on") {
+		t.Errorf("chip unlocks but status says blocked:\n%s", out.String())
+	}
+}
+
 func TestDiskProtectionStateSuggestsPIN(t *testing.T) {
 	chip := func() chipPath { t.Fatal("chip check asked although the chip unlocks"); return chipNone }
 	noPIN := luksRecord{Encrypted: true, TPM2: 1, Recovery: 1, PINKnown: true}
@@ -164,7 +212,7 @@ func TestPrintLUKSStatusTPMHints(t *testing.T) {
 	}
 	for _, c := range cases {
 		var out strings.Builder
-		printLUKSStatus(&out, "/dev/vda2", c.slots, c.kind)
+		printLUKSStatus(&out, "/dev/vda2", c.slots, c.kind, "")
 		got := out.String()
 		if !strings.Contains(got, "Chip type:     ") || !strings.Contains(got, c.chipTypeWords) {
 			t.Errorf("%s: chip type missing:\n%s", c.name, got)

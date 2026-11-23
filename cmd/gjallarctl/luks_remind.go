@@ -266,6 +266,26 @@ func diskProtectionState(r luksRecord, kind diskcrypto.TPMKind, chip func() chip
 	return diskProtectionRecoveryKey
 }
 
+// chipCheckReason is root's boot answer on the chip (gjallar-chip-check):
+// empty when chip unlock can be switched on; tests replace it.
+var chipCheckReason = func() string { return diskcrypto.ReadChipCheck(diskcrypto.ChipCheckPath) }
+
+// diskChipPath keeps the disk notice from offering chip unlock that root's
+// boot check refuses (T480s without PolicyAuthorizeNV): gjallarctl luks chip
+// and the settings service refuse the same switch-on. The notice then falls
+// through to the recovery key. Only the disk notice uses this; the Secure
+// Boot check keeps its own offer, since Secure Boot guards the startup files
+// with or without chip unlock. The reason is read only for an offer.
+func diskChipPath(p chipPath, reason func() string) chipPath {
+	switch p {
+	case chipSwitchedOff, chipNeedsSecureBoot:
+		if reason() != "" {
+			return chipNone
+		}
+	}
+	return p
+}
+
 // chipUnlockPath: the chip unlocks the disk only with Secure Boot on.
 // With Secure Boot on and a TPM 2.0, chip unlock is either switched off
 // or waits for the next start. With it off, chip unlock is possible where
@@ -391,8 +411,8 @@ func diskProtectionTexts(state string, r luksRecord) diskProtectionText {
 	case diskProtectionChipOff:
 		return diskProtectionText{
 			summary: "Security chip unlock is off",
-			body:    "Every start asks for your recovery key. Turn on chip unlock to stop that.",
-			risk:    "you type your recovery key at every start, where someone can watch or record it",
+			body:    "Every start asks you to type a key. Turn on chip unlock to stop that.",
+			risk:    "you type your passphrase or recovery key at every start, where someone can watch or record it",
 			command: []string{"luks", "chip"},
 		}
 	case diskProtectionChipNextStart:
@@ -445,7 +465,9 @@ func runLUKSRemind(args []string, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "ERROR: %v\n", err)
 		return 1
 	}
-	state := diskProtectionState(record, diskcrypto.ModelTPMKind(), chipUnlockPath)
+	state := diskProtectionState(record, diskcrypto.ModelTPMKind(), func() chipPath {
+		return diskChipPath(chipUnlockPath(), chipCheckReason)
+	})
 	if err := writeDiskProtectionState(state); err != nil {
 		fmt.Fprintf(stderr, "ERROR: %v\n", err)
 		return 1

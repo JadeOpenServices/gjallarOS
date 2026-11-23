@@ -84,7 +84,7 @@ func runLUKSLifecycle(args []string, stdout, stderr io.Writer) int {
 	var code int
 	switch args[0] {
 	case "status":
-		printLUKSStatus(stdout, device, slots, diskcrypto.ModelTPMKind())
+		printLUKSStatus(stdout, device, slots, diskcrypto.ModelTPMKind(), chipCheckReason())
 		return 0
 	case "record":
 		r := newLUKSRecord(slots)
@@ -183,7 +183,9 @@ func recordOrFail(r luksRecord, stderr io.Writer) int {
 	return 0
 }
 
-func printLUKSStatus(out io.Writer, device string, slots diskcrypto.Keyslots, kind diskcrypto.TPMKind) {
+// blocked is root's boot answer on the chip (gjallar-chip-check): empty when
+// chip unlock can be switched on, otherwise why it stays off.
+func printLUKSStatus(out io.Writer, device string, slots diskcrypto.Keyslots, kind diskcrypto.TPMKind, blocked string) {
 	chip := "off"
 	if len(slots.TPM2) > 0 {
 		chip = "on"
@@ -200,6 +202,9 @@ func printLUKSStatus(out io.Writer, device string, slots diskcrypto.Keyslots, ki
 	fmt.Fprintf(out, "Chip type:     %s\n", kind.Describe())
 	fmt.Fprintf(out, "Recovery key:  %s\n", recovery)
 	fmt.Fprintf(out, "Passphrases:   %d\n", len(slots.Passphrase))
+	if len(slots.TPM2) == 0 && blocked != "" {
+		fmt.Fprintf(out, "\nChip unlock cannot be switched on: %s.\n", blocked)
+	}
 	switch {
 	case len(slots.Recovery) == 0:
 		fmt.Fprintln(out, "\nCreate a recovery key: gjallarctl luks recovery-key")

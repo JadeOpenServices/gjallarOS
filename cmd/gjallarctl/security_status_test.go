@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"io/fs"
+	"strings"
 	"testing"
 	"time"
 
@@ -294,5 +295,28 @@ func TestUSBRearm(t *testing.T) {
 	armedErr = errors.New("no socket")
 	if code := usbRearmIfDisarmed(&errOut); code != 1 || arms != 2 {
 		t.Errorf("unknown state: exit %d, arm runs %d, want 1 and 2", code, arms)
+	}
+}
+
+func TestSecurityChecksBlockedChip(t *testing.T) {
+	saved := chipCheckReason
+	defer func() { chipCheckReason = saved }()
+	chipCheckReason = func() string {
+		return "the security chip lacks the PolicyAuthorizeNV command that the startup policy needs"
+	}
+	f := goodSecurityFacts()
+	f.luks = luksRecord{Encrypted: true, Passphrase: 1}
+	f.secureBoot = false
+	f.chip = chipNeedsSecureBoot
+	if c := checkByID(t, securityChecks(f), "disk"); c.Fix != "Set up" || !strings.Contains(c.Detail, "No recovery key") {
+		t.Errorf("blocked chip disk = %s %q fix %q, want the recovery key offer", c.State, c.Detail, c.Fix)
+	}
+	if c := checkByID(t, securityChecks(f), "secure-boot"); c.Fix != "Turn on" {
+		t.Errorf("blocked chip secure boot fix %q, want Turn on: Secure Boot guards startup without the chip", c.Fix)
+	}
+	f.secureBoot = true
+	f.chip = chipSwitchedOff
+	if c := checkByID(t, securityChecks(f), "disk"); c.Fix == "Turn on" {
+		t.Errorf("blocked chip offered chip unlock: %q", c.Detail)
 	}
 }

@@ -215,7 +215,7 @@ func diskCheck(f securityFacts) securityCheck {
 		c.State, c.Detail = checkUnknown, "The disk protection record cannot be read."
 		return c
 	}
-	state := diskProtectionState(f.luks, f.diskKind, func() chipPath { return f.chip })
+	state := diskProtectionState(f.luks, f.diskKind, func() chipPath { return diskChipPath(f.chip, chipCheckReason) })
 	text := diskProtectionTexts(state, f.luks)
 	switch state {
 	case diskProtectionDone:
