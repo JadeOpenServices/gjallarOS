@@ -10,6 +10,8 @@ import (
 	"os"
 
 	"golang.org/x/sys/unix"
+
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/calmmenu"
 )
 
 // Is reports whether file is a terminal.
@@ -21,19 +23,21 @@ func Is(file *os.File) bool {
 	return err == nil
 }
 
-// Size is file's size in cells: 80 by 24 when file is not a terminal,
-// and 80 or 24 for a side the terminal does not say.
-func Size(file *os.File) (cols, rows int) {
+// Size is file's size in cells and pixels: 80 by 24 cells and no pixel
+// size when file is not a terminal, and 80 or 24 for a side the terminal
+// does not say. The pixel size is what the terminal reports, 0 on the
+// Linux console; the page frame uses it for the shape of a cell.
+func Size(file *os.File) calmmenu.Size {
 	ws, err := unix.IoctlGetWinsize(int(file.Fd()), unix.TIOCGWINSZ)
 	if err != nil {
-		return 80, 24
+		return calmmenu.Size{Cols: 80, Rows: 24}
 	}
-	cols, rows = int(ws.Col), int(ws.Row)
-	if cols == 0 {
-		cols = 80
+	s := calmmenu.Size{Cols: int(ws.Col), Rows: int(ws.Row), XPixel: int(ws.Xpixel), YPixel: int(ws.Ypixel)}
+	if s.Cols == 0 {
+		s.Cols = 80
 	}
-	if rows == 0 {
-		rows = 24
+	if s.Rows == 0 {
+		s.Rows = 24
 	}
-	return cols, rows
+	return s
 }

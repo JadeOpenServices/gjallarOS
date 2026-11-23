@@ -427,8 +427,7 @@ func runLocalPassword(args []string, stdout, stderr io.Writer) int {
 	// with echo off either way.
 	var prompts io.Writer = term
 	if *pageColumn {
-		cols, rows := tty.Size(term)
-		prompts = calmmenu.NewColumn(term, cols, rows)
+		prompts = calmmenu.NewColumn(term, tty.Size(term))
 	}
 	fmt.Fprintf(prompts, "Set a password for %s (terminal only).\n", *username)
 	password, err := credential.ReadConfirmedPassword(term, prompts, *username)

@@ -131,8 +131,7 @@ func TestPagedRecoveryStaysOnScreen(t *testing.T) {
 	if _, err := u.Value(ctx, "Next page", ""); err != nil {
 		t.Fatal(err)
 	}
-	cols, rows := tty.Size(term)
-	col := calmmenu.NewColumn(io.Discard, cols, rows).Col
+	col := calmmenu.NewColumn(io.Discard, tty.Size(term)).Col
 	out := screen()
 	if at := fmt.Sprintf("\x1b[%dG%s", col, testSecret); !strings.Contains(out, at) {
 		t.Fatalf("secret not in the page column (want %q):\n%q", at, out)

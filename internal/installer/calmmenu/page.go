@@ -13,14 +13,14 @@ import (
 // a list to pick from is its Groups, and the question is its Prompt.
 
 // Head starts a page for running output, such as a step that prints as
-// it works, on a terminal cols by rows cells: it clears the screen, draws
+// it works, on a terminal of size sz: it clears the screen, draws
 // the title and rule at the top of the page's frame (see FrameFor) and
 // lets the terminal scroll only inside the frame. Output then goes
 // through the Column it returns. The next question is a new page drawn
 // with Render.
-func Head(w io.Writer, title string, cols, rows int, colour bool) (*Column, error) {
-	f := FrameFor(cols, rows)
-	c := NewColumn(w, cols, rows)
+func Head(w io.Writer, title string, sz Size, colour bool) (*Column, error) {
+	f := FrameFor(sz)
+	c := ColumnIn(w, f)
 	var b strings.Builder
 	b.WriteString(Clear)
 	b.WriteString(f.scroll())
@@ -80,9 +80,9 @@ const (
 	escStringEnd
 )
 
-// NewColumn is a Column in the frame of a terminal cols by rows cells.
-func NewColumn(w io.Writer, cols, rows int) *Column {
-	return ColumnIn(w, FrameFor(cols, rows))
+// NewColumn is a Column in the frame of a terminal of size sz.
+func NewColumn(w io.Writer, sz Size) *Column {
+	return ColumnIn(w, FrameFor(sz))
 }
 
 // ColumnIn is a Column in frame f, such as the frame a menu was drawn in

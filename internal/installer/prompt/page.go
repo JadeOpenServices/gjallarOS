@@ -91,8 +91,7 @@ func Pages(out, errOut io.Writer) (io.Writer, io.Writer) {
 }
 
 func newPager(file *os.File, title string) *Pager {
-	cols, rows := tty.Size(file)
-	return &Pager{file: file, title: title, col: calmmenu.NewColumn(file, cols, rows)}
+	return &Pager{file: file, title: title, col: calmmenu.NewColumn(file, tty.Size(file))}
 }
 
 // pageTitle is the title the pages show. Head makes it printable and
@@ -127,13 +126,13 @@ func (p *Pager) Terminal() io.Writer { return p.file }
 func (p *Pager) page() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	cols, rows := tty.Size(p.file)
+	sz := tty.Size(p.file)
 	if p.secret {
 		p.secret = false
-		p.col = calmmenu.NewColumn(p.file, cols, rows)
+		p.col = calmmenu.NewColumn(p.file, sz)
 		return
 	}
-	if c, err := calmmenu.Head(p.file, p.title, cols, rows, true); err == nil {
+	if c, err := calmmenu.Head(p.file, p.title, sz, true); err == nil {
 		p.col = c
 	}
 }

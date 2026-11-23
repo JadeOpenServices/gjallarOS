@@ -353,8 +353,7 @@ func (u UI) secretOut() (io.Writer, func(), error) {
 	}
 	if tty.Is(file) {
 		if pagerOf(u.Out) != nil {
-			cols, rows := tty.Size(file)
-			return calmmenu.NewColumn(file, cols, rows), func() {}, nil
+			return calmmenu.NewColumn(file, tty.Size(file)), func() {}, nil
 		}
 		return out, func() {}, nil
 	}

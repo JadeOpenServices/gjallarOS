@@ -99,7 +99,7 @@ func TestLogoOnlyInWindowAndWhenItFits(t *testing.T) {
 		net := &fakeNet{devices: always(cable), connectivity: "full"}
 		h := newHarness(t, c.mode, "", net)
 		h.s.Logos = []calmmenu.Sixel{logo, logo}
-		h.s.Size = func() (int, int, int, int) { return c.cols, c.rows, c.x, c.y }
+		h.s.Size = func() calmmenu.Size { return calmmenu.Size{Cols: c.cols, Rows: c.rows, XPixel: c.x, YPixel: c.y} }
 		h.run(t)
 		if got := strings.Contains(h.screen.String(), tinySixel); got != c.want {
 			t.Errorf("%+v: logo drawn %v", c, got)

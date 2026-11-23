@@ -108,27 +108,28 @@ func example(note string) Menu {
 
 func TestCentredOn120x33(t *testing.T) {
 	var b strings.Builder
-	p, err := Render(&b, example(""), Logo{Cols: 21, Rows: 4}, 120, 33, false)
+	p, err := Render(&b, example(""), Logo{Cols: 21, Rows: 4}, Size{Cols: 120, Rows: 33}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
 	s := screen(t, b.String(), 120, 33)
-	// 4 logo rows, 1 gap, 21 menu lines = 26. The margin grows from 2 rows
-	// to 3 (27 rows high) and 6 columns, so rows 4-30 and columns 7-114.
-	// y0 = 4 + (27-26)/2 = 4.
-	if p.Frame != (Frame{Col: 7, Row: 4, Width: 108, Height: 27}) {
+	// 4 logo rows, 1 gap, 21 menu lines = 26, leaving 7 rows. The sides
+	// grow from 4 columns to 7 (a console cell is twice as tall as wide,
+	// so 7 columns are as wide as 3.5 rows are tall), the top and bottom
+	// to 3 rows: rows 4-30 and columns 8-113. y0 = 4 + (27-26)/2 = 4.
+	if p.Frame != (Frame{Col: 8, Row: 4, Width: 106, Height: 27}) {
 		t.Errorf("frame %+v", p.Frame)
 	}
 	if p.LogoRow != 4 || p.LogoCol != 50 {
 		t.Errorf("logo at %d,%d, want 4,50", p.LogoRow, p.LogoCol)
 	}
-	if got := s[8]; got != strings.Repeat(" ", 6)+"gjallarOS installer" {
+	if got := s[8]; got != strings.Repeat(" ", 7)+"gjallarOS installer" {
 		t.Errorf("title row %q", got)
 	}
-	if got := s[9]; got != strings.Repeat(" ", 6)+strings.Repeat("─", 108) {
+	if got := s[9]; got != strings.Repeat(" ", 7)+strings.Repeat("─", 106) {
 		t.Errorf("rule does not fill the frame: %q", got)
 	}
-	if p.PromptRow != 29 || p.PromptCol != 7+len("Choice: ") {
+	if p.PromptRow != 29 || p.PromptCol != 8+len("Choice: ") {
 		t.Errorf("prompt at %d,%d", p.PromptRow, p.PromptCol)
 	}
 	if !strings.Contains(s[12], " 1  Install gjallarOS") {
@@ -136,8 +137,8 @@ func TestCentredOn120x33(t *testing.T) {
 	}
 }
 
-// A short menu gets the same space on every side (two columns for each
-// row), on wide screens and on 4:3 ones: 640x480 and 800x600 on the
+// A short menu gets the same space on every side (on the console two
+// columns for each row), on wide screens and on 4:3 ones: 640x480 and 800x600 on the
 // console (8x16 cells), 1024x768 in foot (about 11x24).
 func TestShortMenuHasEvenSpace(t *testing.T) {
 	for _, c := range []struct {
@@ -145,12 +146,12 @@ func TestShortMenuHasEvenSpace(t *testing.T) {
 		want       Frame
 	}{
 		{116, 33, Frame{Col: 13, Row: 7, Width: 92, Height: 21}},
-		{80, 30, Frame{Col: 9, Row: 5, Width: 64, Height: 22}},
+		{80, 30, Frame{Col: 10, Row: 5, Width: 62, Height: 22}},
 		{100, 37, Frame{Col: 17, Row: 9, Width: 68, Height: 21}},
-		{93, 32, Frame{Col: 11, Row: 6, Width: 73, Height: 22}},
+		{93, 32, Frame{Col: 12, Row: 6, Width: 71, Height: 22}},
 	} {
 		var b strings.Builder
-		p, err := Render(&b, example(""), Logo{}, c.cols, c.rows, false)
+		p, err := Render(&b, example(""), Logo{}, Size{Cols: c.cols, Rows: c.rows}, false)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -183,7 +184,7 @@ func TestFitCutsNothing(t *testing.T) {
 	for _, size := range [][2]int{{80, 30}, {100, 37}, {116, 33}, {160, 50}} {
 		cols, rows := size[0], size[1]
 		var b strings.Builder
-		p, err := Render(&b, m, Logo{}, cols, rows, false)
+		p, err := Render(&b, m, Logo{}, Size{Cols: cols, Rows: rows}, false)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -204,7 +205,7 @@ func TestNoteSitsAboveTheHint(t *testing.T) {
 		t.Fatalf("note adds %d rows, want 2", n)
 	}
 	var b strings.Builder
-	p, err := Render(&b, m, Logo{}, 80, 30, false)
+	p, err := Render(&b, m, Logo{}, Size{Cols: 80, Rows: 30}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -216,7 +217,7 @@ func TestNoteSitsAboveTheHint(t *testing.T) {
 
 func TestNarrowTerminalClips(t *testing.T) {
 	var b strings.Builder
-	if _, err := Render(&b, example("a note that is longer than forty columns for sure"), Logo{}, 40, 25, false); err != nil {
+	if _, err := Render(&b, example("a note that is longer than forty columns for sure"), Logo{}, Size{Cols: 40, Rows: 25}, false); err != nil {
 		t.Fatal(err)
 	}
 	screen(t, b.String(), 40, 25) // fails if any line runs past column 40
@@ -224,7 +225,7 @@ func TestNarrowTerminalClips(t *testing.T) {
 
 func TestColourCodes(t *testing.T) {
 	var b strings.Builder
-	Render(&b, example("x"), Logo{}, 120, 33, true)
+	Render(&b, example("x"), Logo{}, Size{Cols: 120, Rows: 33}, true)
 	out := b.String()
 	for _, c := range []string{bold + "gjallarOS installer" + reset, accent + " 1  " + reset, dim + "Type a number"} {
 		if !strings.Contains(out, c) {
@@ -306,7 +307,7 @@ func TestTwoDigitKeysAlign(t *testing.T) {
 	m := example("")
 	m.Groups = append(m.Groups[:3:3], []Item{{"9", "Queue the key again", "When the blue screen was missed"}, {"10", "Power off", ""}})
 	var b strings.Builder
-	if _, err := Render(&b, m, Logo{}, 120, 33, false); err != nil {
+	if _, err := Render(&b, m, Logo{}, Size{Cols: 120, Rows: 33}, false); err != nil {
 		t.Fatal(err)
 	}
 	labels := map[int]bool{}
@@ -341,7 +342,7 @@ func TestRenderEscapesOutsideText(t *testing.T) {
 		Groups: [][]Item{{{Key: "1", Label: "Cafe\x1b[2J‮\x07", Desc: "dim\x1b]0;x\x07"}}},
 		Prompt: "Choice: ",
 	}
-	if _, err := Render(&b, m, Logo{}, 80, 24, true); err != nil {
+	if _, err := Render(&b, m, Logo{}, Size{Cols: 80, Rows: 24}, true); err != nil {
 		t.Fatal(err)
 	}
 	out := b.String()
@@ -358,47 +359,76 @@ func TestRenderEscapesOutsideText(t *testing.T) {
 	}
 }
 
-// On every screen size, not a list of known ones, the menu's frame has
-// the same margin on all four sides, cuts no word, and the space at the
-// sides (in columns) is as wide as the space above and below the page
-// together (in rows, a cell being twice as tall as wide), to within the
-// step the margin grows by, unless the frame is as narrow as the page's
-// longest word allows. Two pages: a tall menu and a short wide one, like
-// the stick's keyboard page.
+// In a terminal that reports its pixel size, the space at the sides of a
+// short page is as wide in pixels as the space above and below it is
+// tall, to within a column: the stick's keyboard page in foot at 1280x800
+// (116x33 cells of about 11x24 pixels).
+func TestEvenSpaceInPixels(t *testing.T) {
+	sz := Size{Cols: 116, Rows: 33, XPixel: 1280, YPixel: 800}
+	m := Menu{
+		Title:  "Keyboard layout",
+		Body:   []string{"Type a keyboard layout such as us, gb or fr. Part of a name shows a list."},
+		Prompt: "Keyboard layout [us]: ",
+	}
+	var b strings.Builder
+	p, err := Render(&b, m, Logo{}, sz, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	side := float64(p.Frame.Col-1) * float64(sz.XPixel) / float64(sz.Cols)
+	above := float64(sz.Rows-len(m.lines(p.Frame.Width))) / 2 * float64(sz.YPixel) / float64(sz.Rows)
+	if cw := float64(sz.XPixel) / float64(sz.Cols); side > above || above-side > cw {
+		t.Errorf("frame %+v: %.0f pixels at the sides, %.0f above and below", p.Frame, side, above)
+	}
+}
+
+// On every screen size, not a list of known ones, and for a console
+// (no pixel size) and a terminal whose cell is 10 by 22 pixels, the
+// menu's frame has the same margin on all four sides, cuts no word, and
+// the space at one side is no wider than the space above or below the
+// page is tall (see Size.across), and could not grow by one more column
+// unless the frame is as narrow as the page's longest word allows. Two
+// pages: a tall menu and a short wide one, like the stick's keyboard page.
 func TestFitOnEverySize(t *testing.T) {
 	short := Menu{
 		Title:  "Keyboard layout",
 		Body:   []string{"Type a keyboard layout such as us, gb or fr. Part of a name shows a list."},
 		Prompt: "Keyboard layout [us]: ",
 	}
-	for _, m := range []Menu{example(""), short} {
-		for cols := 40; cols <= 240; cols++ {
-			for rows := 15; rows <= 80; rows++ {
-				var b strings.Builder
-				p, err := Render(&b, m, Logo{}, cols, rows, false)
-				if err != nil {
-					t.Fatal(err)
-				}
-				f, base := p.Frame, FrameFor(cols, rows)
-				if f != base && f != withMargin(cols, rows, f.Row-1) {
-					t.Fatalf("%dx%d: frame %+v has uneven margins", cols, rows, f)
-				}
-				if f.Width < 20 || f.Height < 5 || f.Row < base.Row || f.Col < base.Col {
-					t.Fatalf("%dx%d: frame %+v smaller than allowed (base %+v)", cols, rows, f, base)
-				}
-				ls := m.lines(f.Width)
-				if widest(ls) > f.Width && widest(m.lines(base.Width)) <= base.Width {
-					t.Fatalf("%dx%d: frame %+v cuts the page", cols, rows, f)
-				}
-				if f == base || len(ls) > f.Height {
-					continue // no room to grow, or a page that scrolls
-				}
-				side, vert := f.Col-1, rows-len(ls)
-				next := withMargin(cols, rows, f.Row)
-				nl := m.lines(next.Width)
-				blocked := next.Width < 20 || widest(nl) > next.Width || len(nl) > next.Height
-				if side > vert || !blocked && vert-side > 2+len(nl)-len(ls) {
-					t.Fatalf("%dx%d: %d columns at the sides, %d rows above and below (frame %+v)", cols, rows, side, vert, f)
+	for _, cell := range [][2]int{{0, 0}, {10, 22}} {
+		for _, m := range []Menu{example(""), short} {
+			for cols := 40; cols <= 240; cols++ {
+				for rows := 15; rows <= 80; rows++ {
+					sz := Size{Cols: cols, Rows: rows, XPixel: cols * cell[0], YPixel: rows * cell[1]}
+					var b strings.Builder
+					p, err := Render(&b, m, Logo{}, sz, false)
+					if err != nil {
+						t.Fatal(err)
+					}
+					f, base := p.Frame, FrameFor(sz)
+					if f != base && f != withMargin(sz, max(base.Row-1, sz.down(f.Col-1)), f.Col-1) {
+						t.Fatalf("%+v: frame %+v has uneven margins", sz, f)
+					}
+					if f.Width < 20 || f.Height < 5 || f.Row < base.Row || f.Col < base.Col {
+						t.Fatalf("%+v: frame %+v smaller than allowed (base %+v)", sz, f, base)
+					}
+					ls := m.lines(f.Width)
+					if widest(ls) > f.Width && widest(m.lines(base.Width)) <= base.Width {
+						t.Fatalf("%+v: frame %+v cuts the page", sz, f)
+					}
+					if base.Col == 1 || base.Row == 1 || len(ls) > f.Height {
+						continue // no room for a margin, or a page that scrolls
+					}
+					side, free := f.Col-1, rows-len(ls)
+					if f != base && side > sz.across(free)/2 {
+						t.Fatalf("%+v: %d columns at the sides, %d rows above and below together (frame %+v)", sz, side, free, f)
+					}
+					next := withMargin(sz, max(base.Row-1, sz.down(side+1)), side+1)
+					nl := m.lines(next.Width)
+					blocked := next.Width < 20 || next.Height < 5 || widest(nl) > next.Width || len(nl) > next.Height
+					if !blocked && side+1 <= sz.across(rows-len(nl))/2 {
+						t.Fatalf("%+v: frame %+v could grow one more column", sz, f)
+					}
 				}
 			}
 		}

@@ -15,7 +15,7 @@ func TestPageBodyWrapsInBlock(t *testing.T) {
 		Prompt: "Channel: ",
 	}
 	var b bytes.Buffer
-	p, err := Render(&b, m, Logo{}, 60, 24, false)
+	p, err := Render(&b, m, Logo{}, Size{Cols: 60, Rows: 24}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -37,12 +37,12 @@ func TestTallPageScrollsFromTop(t *testing.T) {
 		body[i] = "line"
 	}
 	var b bytes.Buffer
-	p, err := Render(&b, Menu{Title: "Steps", Body: body, Prompt: "> "}, Logo{}, 80, 24, false)
+	p, err := Render(&b, Menu{Title: "Steps", Body: body, Prompt: "> "}, Logo{}, Size{Cols: 80, Rows: 24}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
 	s := screen(t, b.String(), 80, 24)
-	f := FrameFor(80, 24)
+	f := FrameFor(Size{Cols: 80, Rows: 24})
 	if !strings.Contains(b.String(), "\x1b[2;1H") || p.PromptRow != f.bottom() {
 		t.Fatalf("tall page: row %d\n%q", p.PromptRow, b.String()[:60])
 	}
@@ -53,7 +53,7 @@ func TestTallPageScrollsFromTop(t *testing.T) {
 
 func TestColumnSetsColumnAfterEachLineEnd(t *testing.T) {
 	var b bytes.Buffer
-	c := NewColumn(&b, 80, 24)
+	c := NewColumn(&b, Size{Cols: 80, Rows: 24})
 	io.WriteString(c, "one\ntwo\r50%\rdone\n")
 	// The cursor goes to the column right after a line end, so a prompt
 	// written by another program under the Column starts there too.
@@ -68,7 +68,7 @@ func TestColumnSetsColumnAfterEachLineEnd(t *testing.T) {
 
 func TestHeadDrawsTitleAndRule(t *testing.T) {
 	var b bytes.Buffer
-	if _, err := Head(&b, "Installing", 80, 24, false); err != nil {
+	if _, err := Head(&b, "Installing", Size{Cols: 80, Rows: 24}, false); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(b.String(), "\x1b[2;3HInstalling\r\n\x1b[3G─") {
@@ -80,7 +80,7 @@ func TestHeadDrawsTitleAndRule(t *testing.T) {
 // it as text and keeps it on its row.
 func TestHeadTitleIsPlainText(t *testing.T) {
 	var b bytes.Buffer
-	if _, err := Head(&b, "Ins\x1b[2Jtall"+strings.Repeat("x", 200), 80, 24, false); err != nil {
+	if _, err := Head(&b, "Ins\x1b[2Jtall"+strings.Repeat("x", 200), Size{Cols: 80, Rows: 24}, false); err != nil {
 		t.Fatal(err)
 	}
 	if strings.Count(b.String(), "\x1b[2J") != strings.Count(Clear, "\x1b[2J") {
@@ -102,7 +102,7 @@ func TestPageOnConsole(t *testing.T) {
 		Prompt: "Channel [stable]: ",
 	}
 	var b strings.Builder
-	p, err := Render(&b, m, Logo{}, 80, 25, false)
+	p, err := Render(&b, m, Logo{}, Size{Cols: 80, Rows: 25}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -130,7 +130,7 @@ func inBlock(t *testing.T, s []string, col, width int) {
 
 func TestColumnBreaksLongLinesInBlock(t *testing.T) {
 	var b bytes.Buffer
-	c := NewColumn(&b, 60, 16)
+	c := NewColumn(&b, Size{Cols: 60, Rows: 16})
 	io.WriteString(c, "Machine support: best effort. No ODDC model matches this machine; nothing optional is switched on.\n")
 	io.WriteString(c, "building '/nix/store/00000000000000000000000000000000-nixos-system-example-26.05.drv'...\n")
 	s := screen(t, b.String(), 60, 16)
@@ -146,7 +146,7 @@ func TestColumnBreaksLongLinesInBlock(t *testing.T) {
 
 func TestColumnNarrowTerminal(t *testing.T) {
 	var b bytes.Buffer
-	c := NewColumn(&b, 18, 10)
+	c := NewColumn(&b, Size{Cols: 18, Rows: 10})
 	io.WriteString(c, strings.Repeat("word ", 20)+"\n")
 	s := screen(t, b.String(), 18, 10)
 	inBlock(t, s, 1, 18)
@@ -154,7 +154,7 @@ func TestColumnNarrowTerminal(t *testing.T) {
 
 func TestColumnEscapesTakeNoRoom(t *testing.T) {
 	var b bytes.Buffer
-	c := NewColumn(&b, 80, 24)
+	c := NewColumn(&b, Size{Cols: 80, Rows: 24})
 	// A colour code split over two writes, as a pipe may deliver it.
 	io.WriteString(c, "\x1b[32")
 	io.WriteString(c, ";1m"+strings.Repeat("x", c.PageWidth())+"\x1b[0m\n")
@@ -170,7 +170,7 @@ func TestColumnEscapesTakeNoRoom(t *testing.T) {
 
 func TestColumnRewritesBrokenProgressLine(t *testing.T) {
 	var b bytes.Buffer
-	c := NewColumn(&b, 80, 24)
+	c := NewColumn(&b, Size{Cols: 80, Rows: 24})
 	w := c.PageWidth()
 	io.WriteString(c, "first\r\n")
 	io.WriteString(c, "\r"+strings.Repeat("y", w+10))
@@ -188,22 +188,31 @@ func TestColumnRewritesBrokenProgressLine(t *testing.T) {
 
 func TestFrameMarginIsEvenOnAllSides(t *testing.T) {
 	for _, c := range []struct {
-		cols, rows int
-		want       Frame
+		sz   Size
+		want Frame
 	}{
-		{116, 33, Frame{Col: 5, Row: 3, Width: 108, Height: 29}},
-		{80, 24, Frame{Col: 3, Row: 2, Width: 76, Height: 22}},
-		{18, 4, Frame{Col: 1, Row: 1, Width: 18, Height: 4}},
+		{Size{Cols: 116, Rows: 33}, Frame{Col: 5, Row: 3, Width: 108, Height: 29}},
+		{Size{Cols: 80, Rows: 24}, Frame{Col: 3, Row: 2, Width: 76, Height: 22}},
+		{Size{Cols: 18, Rows: 4}, Frame{Col: 1, Row: 1, Width: 18, Height: 4}},
+		// No pixel size, as on the console: a cell twice as tall as wide.
+		{Size{Cols: 120, Rows: 40}, Frame{Col: 5, Row: 3, Width: 112, Height: 36}},
+		// Cells of 10x30 pixels: three columns for each margin row.
+		{Size{Cols: 120, Rows: 40, XPixel: 1200, YPixel: 1200}, Frame{Col: 7, Row: 3, Width: 108, Height: 36}},
+		// A cell lower than wide, or more than four times as tall as wide,
+		// is a wrong report: 2:1 again.
+		{Size{Cols: 120, Rows: 40, XPixel: 1200, YPixel: 200}, Frame{Col: 5, Row: 3, Width: 112, Height: 36}},
+		{Size{Cols: 120, Rows: 40, XPixel: 1200, YPixel: 2000}, Frame{Col: 5, Row: 3, Width: 112, Height: 36}},
+		{Size{Cols: 120, Rows: 40, XPixel: -1200, YPixel: 1200}, Frame{Col: 5, Row: 3, Width: 112, Height: 36}},
 	} {
-		if got := FrameFor(c.cols, c.rows); got != c.want {
-			t.Errorf("FrameFor(%d, %d) = %+v, want %+v", c.cols, c.rows, got, c.want)
+		if got := FrameFor(c.sz); got != c.want {
+			t.Errorf("FrameFor(%+v) = %+v, want %+v", c.sz, got, c.want)
 		}
 	}
 }
 
 func TestColumnHangsListItems(t *testing.T) {
 	var b bytes.Buffer
-	c := NewColumn(&b, 44, 16)
+	c := NewColumn(&b, Size{Cols: 44, Rows: 16})
 	io.WriteString(c, "  3. Pick Yes (the screen starts on No; press down, then Enter)\n")
 	io.WriteString(c, "- a bullet that runs on past the edge of this narrow frame\n")
 	s := screen(t, b.String(), 44, 16)
@@ -215,7 +224,7 @@ func TestColumnHangsListItems(t *testing.T) {
 
 func TestWrapForLeavesPagesToTheColumn(t *testing.T) {
 	long := strings.Repeat("word ", 30)
-	c := NewColumn(io.Discard, 120, 33)
+	c := NewColumn(io.Discard, Size{Cols: 120, Rows: 33})
 	if got := WrapFor(c, long); got != long {
 		t.Errorf("text for a Column was wrapped: %q", got)
 	}

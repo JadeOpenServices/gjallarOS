@@ -31,6 +31,7 @@ import (
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/secureboot"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/stickkeyboard"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/stickrelease"
+	"github.com/JadeOpenServices/gjallarOS/internal/tty"
 )
 
 // Runner runs the programs the menu needs. Tests use a fake.
@@ -93,7 +94,7 @@ type Stick struct {
 	ErrorLog io.Writer
 	// Size reports the terminal in cells and pixels; nil means 80 by 24
 	// with no pixel size (no logo).
-	Size func() (cols, rows, xpixel, ypixel int)
+	Size func() calmmenu.Size
 	// Logos are the logo in sixel for 32 and 64 pixel cells, shown in
 	// the window only; empty for none.
 	Logos []calmmenu.Sixel
@@ -135,9 +136,9 @@ func (s *Stick) say(text string) {
 }
 
 // size is the terminal in cells and pixels.
-func (s *Stick) size() (cols, rows, xpixel, ypixel int) {
+func (s *Stick) size() calmmenu.Size {
 	if s.Size == nil {
-		return 80, 24, 0, 0
+		return calmmenu.Size{Cols: 80, Rows: 24}
 	}
 	return s.Size()
 }
@@ -145,8 +146,7 @@ func (s *Stick) size() (cols, rows, xpixel, ypixel int) {
 // head starts a page for a step that prints as it works: the title on
 // top, then the step's output in the column below it.
 func (s *Stick) head(title string) {
-	cols, rows, _, _ := s.size()
-	c, err := calmmenu.Head(s.UI.Out, title, cols, rows, true)
+	c, err := calmmenu.Head(s.UI.Out, title, s.size(), true)
 	if err == nil {
 		s.col = c
 	}
@@ -207,17 +207,9 @@ func New(mode string) *Stick {
 		Sleep:       func() { time.Sleep(time.Second) },
 		ReadLayout:  stickkeyboard.Read,
 		WriteLayout: stickkeyboard.Write,
-		Size:        termSize,
+		Size:        func() calmmenu.Size { return tty.Size(os.Stdout) },
 		ShimStarted: secureboot.ShimStarted,
 	}
-}
-
-func termSize() (cols, rows, xpixel, ypixel int) {
-	ws, err := unix.IoctlGetWinsize(int(os.Stdout.Fd()), unix.TIOCGWINSZ)
-	if err != nil || ws.Col == 0 || ws.Row == 0 {
-		return 80, 24, 0, 0
-	}
-	return int(ws.Col), int(ws.Row), int(ws.Xpixel), int(ws.Ypixel)
 }
 
 // Run shows the menu until the user restarts or powers off, or a new
@@ -471,15 +463,15 @@ func (s *Stick) screen(groups [][]calmmenu.Item) calmmenu.Menu {
 // room for it.
 // Text printed after it goes into the page's column.
 func (s *Stick) draw(m calmmenu.Menu, withLogo bool) error {
-	cols, rows, xpixel, ypixel := s.size()
+	sz := s.size()
 	if m.Note == "" {
 		m.Note = s.note
 	}
 	s.note = ""
 	var logo calmmenu.Logo
 	var picture calmmenu.Sixel
-	if withLogo && s.Mode == ModeWindow && len(s.Logos) > 0 && xpixel > 0 && ypixel > 0 {
-		cw, ch := xpixel/cols, ypixel/rows
+	if withLogo && s.Mode == ModeWindow && len(s.Logos) > 0 && sz.XPixel > 0 && sz.YPixel > 0 {
+		cw, ch := sz.XPixel/sz.Cols, sz.YPixel/sz.Rows
 		picture = s.Logos[0]
 		if ch >= 48 && len(s.Logos) > 1 {
 			// 4K cells are about 62 pixels high: the 64 pixel logo.
@@ -487,7 +479,7 @@ func (s *Stick) draw(m calmmenu.Menu, withLogo bool) error {
 		}
 		logo = picture.Cells(cw, ch)
 	}
-	p, err := calmmenu.Render(s.UI.Out, m, logo, cols, rows, true)
+	p, err := calmmenu.Render(s.UI.Out, m, logo, sz, true)
 	s.col = calmmenu.ColumnIn(s.UI.Out, p.Frame)
 	if err != nil || p.LogoRow == 0 {
 		return err
@@ -574,12 +566,12 @@ func (s *Stick) runStep(ctx context.Context, what, name string, args ...string) 
 	s.say(s.note + " You are back in the stick menu.")
 }
 
-// shellCommand starts the nixos user's login shell on a screen of cols
-// by rows cells, in the page frame like every other page:
+// shellCommand starts the nixos user's login shell on a screen of size
+// sz, in the page frame like every other page:
 // gjallar-stick-shell (system/installer-media/stick.nix) takes the frame's
 // first column, first row, width and height.
-func shellCommand(cols, rows, _, _ int) string {
-	f := calmmenu.FrameFor(cols, rows)
+func shellCommand(sz calmmenu.Size) string {
+	f := calmmenu.FrameFor(sz)
 	return fmt.Sprintf("exec gjallar-stick-shell %d %d %d %d", f.Col, f.Row, f.Width, f.Height)
 }
 
