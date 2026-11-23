@@ -85,7 +85,7 @@ time and shared-config needs**, not by that chain.
     settings helper can be switched off, on-screen keyboard, Plymouth
     handover, fingerprint. Jade picks with the results.
 16. **Secrets: KWallet replaces gnome-keyring** (Jade 2026-11-22: the
-    native choice). kwalletd answers `org.freedesktop.secrets`, so
+    native choice). ksecretd answers `org.freedesktop.secrets`, so
     `secret-tool` callers keep working. One-off move of the user's secrets
     from gnome-keyring; gnome-keyring goes. kwallet-pam gets a loophole pass
     first (it runs in the root PAM stack and works in the user's folders,
@@ -364,7 +364,7 @@ private review page; attack detail stays there.
 | No "recent files" database | Activity manager records opened files | Off, immutable | VM |
 | Coredumps / crash reports stay local | DrKonqi crash reporting, KUserFeedback; `plasma6.nix:288-289` also hooks DrKonqi's processor into every `systemd-coredump` run, and `excludePackages` does not remove that | Not installed / off; `drkonqi-coredump-processor@` `wantedBy = mkForce [ ]` | VM: crash a test program, no DrKonqi unit runs |
 | No phone link, no remote desktop | KDE Connect (opens LAN ports), KRdp | Not installed | port scan in VM |
-| Secrets in gnome-keyring (`system/security/keyring.nix`) | kwalletd and kwallet-pam, also a Secret Service provider | One provider only: KWallet (decision 16), gnome-keyring removed; kwallet-pam loophole pass (L178); Wi-Fi/VPN secrets stay system-side as today | VM: kwalletd owns `org.freedesktop.secrets`; `secret-tool` lookup works; nothing else claims the name; planted link in the wallet folder before login is refused |
+| Secrets in gnome-keyring (`system/security/keyring.nix`) | ksecretd and kwallet-pam, also a Secret Service provider | One provider only: KWallet (decision 16), gnome-keyring removed; kwallet-pam loophole pass (L178); Wi-Fi/VPN secrets stay system-side as today | VM: ksecretd owns `org.freedesktop.secrets`; `secret-tool` lookup works; nothing else claims the name; planted link in the wallet folder before login is refused |
 | Network calls only from apps the user opens | Weather, picture of the day, Welcome Center, KNewStuff fetches | Not installed or off | VM with network log |
 | Session not restored on login | Plasma restores the last session's apps | Empty session at login | VM |
 | Security notices, disk-unlock shield, build-source, VPN, USB and Thunderbolt units start with the desktop | They wait for `hyprland-session.target` (10 files) and would never start | Move to `graphical-session.target` | VM: each unit active after login |
@@ -563,45 +563,103 @@ Each checkpoint: VM proof on e2e-fw13, exec-guard probes, regression list
 - W14 (Plane 409) docs + public stance
 - Later (Plane 410): niri session (logged, not planned)
 
-## Open research (to check before the matching checkpoint)
+## Research results (2026-11-23, pin 8ce73368)
 
-- Krohnkite: maintainer, CoC, Plasma 6 support, spiral layout behaviour.
-- OSK on KWin: wvkbd cannot type there (no virtual-keyboard protocol for
-  clients, KDE bug 512996). plasma-keyboard: key preview off, tablet-mode
-  auto-show, close gesture.
-- Greeter with OSK: Plasma Login Manager (Plasma 6.6+, starts
-  plasma-keyboard) vs greetd + a graphical greeter under
-  `kwin_wayland --inputmethod`; Plymouth hand-over, measured-boot prompt
-  order, USB keyboard gate.
-- KWin privileged-interface grants: where they come from and that the
-  user session cannot add one (private review page).
-- PowerDevil: which config keys hold lid, power key, docked and
-  lock-before-sleep; whether Kiosk `[$i]` holds them.
-- plasma-nm / NetworkManagerQt secret agent: does it check who asks.
-- plasmashell and kscreenlocker: can user-dir QML packages, KRunner D-Bus
-  runners and look-and-feel lock screens be turned off for good.
-- kglobalacceld: who may register shortcuts.
-- Capability wrappers: how to drop the two system-monitor wrappers (the
-  wrappers module has no enable switch); does KWin drop cap_sys_nice.
-- xdg-desktop-portal-kde: restore tokens.
-- KWallet: which daemon owns `org.freedesktop.secrets` in the pinned KF6,
-  the wallet cipher, kwallet-pam with greetd and with a fingerprint login
-  (no password to unlock with), how the one-off move from gnome-keyring
-  runs without printing a secret. Today `passwd` re-encrypts the login
-  keyring with the new password (`keyring.nix`); check whether kwallet-pam
-  does the same, otherwise the wallet stays on the old password.
-- Pass 3: per-screen workspaces and the scratchpad as store KWin scripts
-  (what the pinned KWin script API allows, how the script list stays
-  locked); hide-cursor effect in the pinned KWin; Krohnkite gaps and pseudo
-  tile; tearing default; a touchpad default for every device and the
-  KWin swipe finger count; resize area on borderless tiles; whether the
-  greeter needs accounts-daemon; RemoteDesktop/InputCapture switches in
-  the pinned portal; KRunner runners that go online; lock-screen
-  notification text; thumbnailers on removable media; session start
-  files (private review page, L181).
-- KCMs that start root helpers, named one by one: date/time (set-time stays
-  `auth_admin_keep` as today), Plymouth, partition manager (kpmcore),
-  print-manager, Thunderbolt (bolt rule covers it).
+Read from source at the pin (Plasma 6.6.6, KF 6.26.0, KWin 6.6.6); not
+yet proven in a VM. Security details for every item marked L are on the
+private review page; the VM probes at the end are still owed.
+
+- **Krohnkite** (codeberg.org/anametologin/Krohnkite, MIT, kept up, no
+  code-of-conduct file). The pin has 0.9.9.2, upstream 0.9.11.0. Spiral
+  layout yes, gaps settable (default 0), no pseudo-tile. Its per-screen
+  desktops need KWin 6.7.
+- **Per-screen workspaces and scratchpad.** The KWin 6.6.6 script API has
+  one global current desktop; a script can only fake per-screen
+  workspaces by moving windows. A scratchpad script looks doable (window
+  desktops, minimise, shortcuts), no prototype yet. Scripts load only from
+  the store if we patch the lookup: a `[Plugins][$i]` list alone does not
+  hold (L166).
+- **plasma-keyboard** (6.6.6, in the pin). No setting for the key preview
+  (needs a patch to its style or our own style). KWin shows it after the
+  last input was touch or pen, or always with `KWIN_IM_SHOW_ALWAYS`; a
+  "no hardware keyboard" rule needs a KWin patch. Closing: only the hide
+  key, no swipe. Config: kwinrc `[Wayland] InputMethod` /
+  `VirtualKeyboardEnabled`. Layouts are read from the user data dir first
+  (L189).
+- **Greeter.** Plasma Login Manager 6.6.6: daemon as root, greeter as user
+  `plasmalogin`, its KWin runs with `--inputmethod plasma-keyboard` (the
+  OSK button in the UI is commented out), starts after plymouth-quit (no
+  smooth hand-over), PAM includes login. Its KAuth helper (save, sync,
+  reset; auth_admin) cannot be left out of the build; CVE-2026-25710 is
+  fixed in the pin, the later helper hardening is on master only (L165).
+  greetd: only the daemon is root; regreet and qtgreet are in the pin, a
+  KWin wrapper with `--inputmethod` would be our own code. Neither hands
+  over from Plymouth smoothly. Greeter pick = decision 15 VM comparison.
+- **KWin grants** (L164, L184, L185, L187). Desktop files name the
+  privileged globals, the user data dir counts, and only five globals are
+  restricted at all; clipboard (data control), screen layout and plasma
+  shell are open to every client. Plan: root-owned allow-list in our KWin
+  patch, more globals restricted.
+- **kglobalacceld** (L176): no caller check on registering or changing
+  shortcuts. Plan: caller allow-list patch, lock and VT keys outside it.
+- **plasma-nm secret agent:** no caller check in code, but the agent is
+  reachable only through NetworkManager's own bus policy (root only). Keep
+  that policy as shipped; secrets that must stay out of user reach (VPN,
+  802.1X) stay system-owned as today. Closes the question of L168.
+- **User QML and runners** (L169): KRunner D-Bus runners load from the user
+  data dir with no Kiosk key. Plan: store-only lookup for shell, lock
+  screen, look-and-feel, wallpaper and runners.
+- **Kiosk** (L188): `[$i]` in `/etc/xdg` is only a lock if nothing earlier
+  in the config search order can be written by the user. Every lock below
+  depends on this.
+- **Capability wrappers** (L172): each wrapper has an `enable` option;
+  set it false for `ksystemstats_intel_helper` and `ksgrd_network_helper`.
+  KWin seems to keep `cap_sys_nice` after start.
+- **Polkit** (L173, L192): one rule file: NO for kio-admin, fontinst,
+  kcmclock, charge-threshold set and the ktexteditor buffer helper;
+  brightness YES; wakeup count and dmidecode NO. Partition manager,
+  Plymouth KCM and SDDM KCM are not pulled in and stay out. kio-admin is a
+  required package, so removing it needs a module change.
+- **Session start files** (L181): KDE adds start paths (env scripts,
+  shutdown scripts, autostart through systemd). L181 does not close by
+  switching; it needs a startplasma patch, and systemd user units stay a
+  known limit.
+- **KWallet:** `ksecretd` owns `org.freedesktop.secrets` in KF 6.26
+  (`kwalletd6` is a compatibility client). Cipher Blowfish-CBC with
+  PBKDF2-SHA512 (50000 rounds). `pam_kwallet` opens only when a session
+  type or display is set (greetd: VM probe). Fingerprint login leaves the
+  wallet locked until its first use asks for the password. `passwd` does
+  not re-key the wallet. No importer from gnome-keyring: the one-off move
+  is our own tool (libsecret read, write to `org.kde.secretservicecompat`,
+  nothing printed). Daemon points in L190.
+- **PowerDevil:** `powerdevilrc` `[AC|Battery|LowBattery][SuspendAndShutdown]`
+  `PowerButtonAction`, `LidAction`,
+  `InhibitLidActionWhenExternalMonitorPresent` (docked, default true),
+  `AutoSuspendAction`, `AutoSuspendIdleTimeoutSec`, `SleepMode`. Lock
+  before sleep is kscreenlockerrc `[Daemon] LockOnResume` (default true).
+  `[RunScript]` actions must be locked empty (L193).
+- **Portal:** screen-share restore is on by default and skips the dialog;
+  no setting turns it off (L177). RemoteDesktop and InputCapture can be
+  set to `none` in portals.conf (L186).
+- **Feel:** hide-cursor effect `hidecursor` (off by default,
+  `HideOnTyping` default true); `[Compositing] AllowTearing` default true,
+  only for the active fullscreen window that asks; touchpad defaults for
+  every device in kcminputrc `[Libinput][Defaults][Touchpad]`; swipe
+  fingers are fixed (3/4 left-right desktops, 4 up overview, 4 down grid);
+  Breeze keeps an invisible resize strip on borderless windows.
+- **Lock screen:** shows no desktop notifications in 6.6.6; it shows the
+  media title and artist (`showMediaControls`, default on).
+- **Online runners** (L191): dictionary (plain TCP to dict.org, on by
+  default) and the unit converter (daily currency download). USB sticks
+  count as local disks, so Dolphin builds thumbnails for them.
+- **Greeter and accounts-daemon:** no accounts-daemon use found in Plasma
+  Login Manager; L180 can stay off.
+
+Still owed in a VM (CP-W0/CP-W2): greeter comparison (decision 15), real
+KConfig search order, lock-screen package shadowing, kglobalaccel bare-key
+grabs, greetd session type for `pam_kwallet`, KWin `cap_sys_nice` after
+start, PowerDevil Kiosk lock, KCMs that start root helpers one by one
+(date/time, print-manager, Thunderbolt).
 
 ## Behaviour carried from our patches
 
