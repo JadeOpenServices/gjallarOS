@@ -876,7 +876,9 @@ an unattended one whose answers ask for chip unlock, stops instead.
 
 A firmware update from the maker may add the command. The system checks the
 chip at every start, and `gjallarctl luks chip` switches chip unlock on once
-the chip passes; it refuses while the check still fails.
+the chip passes; it refuses while the check still fails. Until then the
+security status does not offer chip unlock for the disk, and
+`gjallarctl luks status` prints the reason from the start-up check.
 
 On a new install, the firmware boot entry for the new disk is written only
 after the chip step has worked. If the install fails after the disk was
