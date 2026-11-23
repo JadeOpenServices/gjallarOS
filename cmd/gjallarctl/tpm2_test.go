@@ -2,11 +2,15 @@ package main
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/diskcrypto"
 )
 
 func TestTPM2ReenrollArgvUsesSudoForUsers(t *testing.T) {
@@ -69,6 +73,30 @@ func TestInstallerTPM2FollowsTheRequest(t *testing.T) {
 		}
 		if data, _ := os.ReadFile(hardware); string(data) != "{ ... }:\n{\n}\n" {
 			t.Errorf("%q: hardware.nix changed:\n%s", test.args, data)
+		}
+	}
+}
+
+// A chip without PolicyAuthorizeNV, or one that cannot be checked, keeps
+// TPM2 unlock off on the installed system as well (friend's T480s, .68).
+func TestTPM2ChipNote(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		support diskcrypto.PCRLockSupport
+		err     error
+		want    string
+	}{
+		{"supported", diskcrypto.PCRLockSupported, nil, ""},
+		{"obsolete", diskcrypto.PCRLockObsolete, nil, "TPM2 unlock stays off: the security chip lacks the PolicyAuthorizeNV command that the startup policy needs. Startup keeps asking for the passphrase or recovery key."},
+		{"partial", diskcrypto.PCRLockPartial, nil, "TPM2 unlock stays off: the security chip lacks parts of TPM 2.0 that the startup policy needs. Startup keeps asking for the passphrase or recovery key."},
+		{"no", diskcrypto.PCRLockNoTPM, nil, "TPM2 unlock stays off: no usable TPM 2.0 security chip was found. Startup keeps asking for the passphrase or recovery key."},
+		{"error", "", errors.New("boom"), "TPM2 unlock stays off: the security chip could not be checked (boom). Startup keeps asking for the passphrase or recovery key."},
+	} {
+		got := tpm2ChipNote(context.Background(), func(context.Context) (diskcrypto.PCRLockSupport, error) {
+			return test.support, test.err
+		})
+		if got != test.want {
+			t.Errorf("%s: got %q, want %q", test.name, got, test.want)
 		}
 	}
 }

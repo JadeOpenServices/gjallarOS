@@ -163,3 +163,43 @@ partition still fails the shim check.
 - Open: failure save to GJLOGS on a maker stick (a dd'ed ISO has no GJLOGS;
   the save returns silently when no stick drive is found); ODDC data for
   the T480s (waits on the T480s PK read), then the ODDC pin bump.
+
+## Follow-up 2026-11-23: chip without PolicyAuthorizeNV (.68 on the T480s)
+
+The .68 maker stick got past the Plane 388 question on the friend's T480s
+and then failed late:
+
+- `lzbt installHook` runs `systemd-pcrlock make-policy`, which refused with
+  "TPM2 does not support PolicyAuthorizeNV command"; `nixos-install` exited 1.
+- `bootFirst` had already put shim on the new ESP first in BootOrder, but
+  `FinishFreshShim` never ran, so the gjallarOS key was never queued for
+  MokManager.
+- Next start: shim refused systemd-boot (Security Violation), fell back to
+  MokManager, and the machine looped.
+- The VM tests never hit this: the default swtpm has the command.
+
+Jade's decisions (Q256-Q258, 2026-11-23):
+
+- **Q256 passphrase only.** `diskcrypto.CheckPCRLockSupport` runs
+  `systemd-pcrlock is-supported` (store path, fixed arguments, stdout only;
+  through `sudo --` when the installer is not root, because `/dev/tpmrm0` is
+  root-only). `resolveChipUnlock` (`app/security_flow.go`) runs before disk
+  work. Any answer but `yes` prints the reason and sets `luksTpm2Enable` and
+  `luksTpm2Pin` to false; managed or preboot-lock installs, and unattended
+  installs that ask for chip unlock, stop. Shim and Secure Boot stay on.
+  `gjallar-chip-check` (root oneshot) writes `/run/gjallar/chip-check.json` at
+  every start; `gjallarctl luks chip` and the settings service read it through
+  `nettrust.ReadRootFile` and refuse while it fails.
+- **Q257 remove and reorder.** In `lanzaboote.nix` a fresh install runs
+  `bootFirst` at the end of `installHook`, after `make-policy`
+  (`tests/nix/measured-boot-limit.nix` checks the order). `freshUndo`
+  (`app/fresh_undo.go`) is armed right before the new partition table and
+  disarmed once the system can start. On failure it removes every firmware
+  entry pointing at the new ESP (`bootnext.RemoveForESP`, matched by this
+  run's random ESP PARTUUID) and zeroes that partition with
+  `blkdiscard --zeroout` (exclusive open, no `--force`).
+- **Q258** ships this as .69 after a swtpm VM test whose TPM profile leaves
+  out `PolicyAuthorizeNV` (0x192).
+
+A firmware update that adds the command is the only way to get chip unlock
+on such a chip; the research is tracked in Plane.

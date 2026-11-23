@@ -15,6 +15,7 @@ import (
 
 	"github.com/godbus/dbus/v5"
 
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/diskcrypto"
 	"github.com/JadeOpenServices/gjallarOS/internal/namecheck"
 	"github.com/JadeOpenServices/gjallarOS/internal/nettrust"
 	"github.com/JadeOpenServices/gjallarOS/internal/settings"
@@ -193,6 +194,12 @@ func (busSystem) NameTaken(ctx context.Context, device, name string) (netip.Addr
 // (gjallar-system-disk).
 func (busSystem) SystemDiskOnUSB() string {
 	return readSystemDisk(systemDiskPath)
+}
+
+// ChipUnlockBlocked reads root's boot check of the security chip
+// (gjallar-chip-check).
+func (busSystem) ChipUnlockBlocked() string {
+	return diskcrypto.ReadChipCheck(diskcrypto.ChipCheckPath)
 }
 
 // USBArmed reads the stored USB trust state (gjallar-usbtrustd).

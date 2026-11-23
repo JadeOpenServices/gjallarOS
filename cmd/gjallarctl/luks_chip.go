@@ -62,6 +62,11 @@ func runLUKSChip(ctx context.Context, in io.Reader, stdout, stderr io.Writer) in
 	case !diskcrypto.TPMAvailable():
 		return fail(errors.New("this device has no usable TPM 2.0 security chip (see: systemd-analyze has-tpm2). Nothing was changed"))
 	}
+	// The chip is root-only; root's boot check says whether it can carry
+	// the startup policy. The settings service refuses the same way.
+	if reason := diskcrypto.ReadChipCheck(diskcrypto.ChipCheckPath); reason != "" {
+		return fail(fmt.Errorf("chip unlock stays off: %s. Startup keeps asking for the passphrase or recovery key. Nothing was changed", reason))
+	}
 
 	kind := diskcrypto.ModelTPMKind()
 	fmt.Fprint(stdout, diskcrypto.StartupUnlockText(kind))

@@ -52,6 +52,7 @@ func runFreshBareMetal(
 	passwordFiles []string,
 	hostOverlay *oddc.HostOverlay,
 	mv *moveRun,
+	undo *freshUndo,
 	out io.Writer,
 ) (freshBareMetalResult, error) {
 	if out == nil {
@@ -113,6 +114,10 @@ func runFreshBareMetal(
 	}
 
 	fmt.Fprintln(out, "STAGE: creating fresh canonical partition table")
+
+	// From here on a failed run takes back its ESP and firmware entries
+	// (Q257); app.go disarms this once the new system can start.
+	undo.arm(plan.TargetDisk.Path, plan.ESP.PARTUUID)
 
 	if _, err := freshgpt.Provision(
 		ctx,

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -311,5 +312,61 @@ func TestKeptHardwareTPM2(t *testing.T) {
 		if got != c.want {
 			t.Errorf("%s: got %v, want %v", c.name, got, c.want)
 		}
+	}
+}
+
+func TestResolveChipUnlock(t *testing.T) {
+	answer := func(s diskcrypto.PCRLockSupport, err error) func(context.Context) (diskcrypto.PCRLockSupport, error) {
+		return func(context.Context) (diskcrypto.PCRLockSupport, error) { return s, err }
+	}
+	cases := []struct {
+		name    string
+		user    config.User
+		support diskcrypto.PCRLockSupport
+		err     error
+		want    bool
+		wantErr bool
+	}{
+		{name: "supported keeps request", user: config.User{LUKSTPM2Enable: true, LUKSTPM2PIN: true}, support: diskcrypto.PCRLockSupported, want: true},
+		{name: "T480s obsolete turns off", user: config.User{LUKSTPM2Enable: true, LUKSTPM2PIN: true}, support: diskcrypto.PCRLockObsolete},
+		{name: "partial turns off", user: config.User{}, support: diskcrypto.PCRLockPartial},
+		{name: "check error turns off", user: config.User{LUKSTPM2Enable: true}, err: errors.New("boom")},
+		{name: "managed stops", user: config.User{Management: config.ManagementIntent{Enable: true}, LUKSTPM2Enable: true}, support: diskcrypto.PCRLockObsolete, wantErr: true},
+		{name: "preboot lock stops", user: config.User{PrebootLock: config.PrebootLockIntent{Enable: true}}, support: diskcrypto.PCRLockObsolete, wantErr: true},
+		{name: "unattended request stops", user: config.User{UnattendedInstall: true, LUKSTPM2Enable: true}, support: diskcrypto.PCRLockObsolete, wantErr: true},
+		{name: "unattended without request continues", user: config.User{UnattendedInstall: true}, support: diskcrypto.PCRLockObsolete},
+		{name: "unattended check error with request stops", user: config.User{UnattendedInstall: true, LUKSTPM2Enable: true}, err: errors.New("boom"), wantErr: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			u := tc.user
+			before := u
+			var out strings.Builder
+			got, err := resolveChipUnlock(context.Background(), &out, &u, answer(tc.support, tc.err))
+			if tc.wantErr {
+				if err == nil || got {
+					t.Fatalf("got %v, %v; want refusal", got, err)
+				}
+				if !reflect.DeepEqual(u, before) {
+					t.Fatalf("refusal changed the settings: %+v", u)
+				}
+				return
+			}
+			if err != nil || got != tc.want {
+				t.Fatalf("got %v, %v; want %v", got, err, tc.want)
+			}
+			if tc.want {
+				if !reflect.DeepEqual(u, before) || out.Len() != 0 {
+					t.Fatalf("supported chip changed settings or printed: %+v %q", u, out.String())
+				}
+				return
+			}
+			if u.LUKSTPM2Enable || u.LUKSTPM2PIN {
+				t.Fatalf("chip unlock left on: %+v", u)
+			}
+			if !strings.Contains(out.String(), "disk passphrase") || !strings.Contains(out.String(), "Secure Boot is not affected") {
+				t.Fatalf("notice missing: %q", out.String())
+			}
+		})
 	}
 }

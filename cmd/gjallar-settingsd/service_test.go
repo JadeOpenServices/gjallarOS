@@ -39,6 +39,7 @@ type fakeSystem struct {
 	taken      map[string]netip.Addr
 	probed     []string
 	usbDisk    string
+	chipReason string
 	usbArmed   bool
 	usbErr     error
 
@@ -73,6 +74,7 @@ func (f *fakeSystem) NameTaken(_ context.Context, device, name string) (netip.Ad
 }
 func (f *fakeSystem) Rebuilding(context.Context) (bool, error) { return f.rebuilding, nil }
 func (f *fakeSystem) SystemDiskOnUSB() string                  { return f.usbDisk }
+func (f *fakeSystem) ChipUnlockBlocked() string                { return f.chipReason }
 func (f *fakeSystem) USBArmed() (bool, error)                  { return f.usbArmed, f.usbErr }
 
 // Verdict hands out the queued verdicts in turn and repeats the last one.
@@ -462,5 +464,20 @@ func TestReadSystemDiskNeedsRootCheck(t *testing.T) {
 	}
 	if readSystemDisk(path) == "" {
 		t.Fatal("a check without a reason field counts as an internal disk")
+	}
+}
+
+// A chip without PolicyAuthorizeNV refuses chip unlock before the change is
+// kept; the rebuild would stop at make-policy (friend's T480s, .68).
+func TestChipUnlockRefusedOnUnsupportedChip(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	f.sys.chipReason = "the security chip lacks the PolicyAuthorizeNV command that the startup policy needs"
+	if _, err := f.svc.Request(ctx, ":1.10", `{"luksTpm2Enable":true}`); !errors.Is(err, errRefused) || !strings.Contains(err.Error(), "PolicyAuthorizeNV") {
+		t.Fatalf("chip unlock on an unsupported chip: %v", err)
+	}
+	f.sys.chipReason = ""
+	if _, err := f.svc.Request(ctx, ":1.10", `{"luksTpm2Enable":true}`); errors.Is(err, errRefused) && strings.Contains(err.Error(), "chip unlock stays off") {
+		t.Fatalf("chip unlock on a supported chip: %v", err)
 	}
 }

@@ -159,11 +159,24 @@ let
     # Switching secureBootShim is a rebuild, so the firmware entry follows
     # here: under fixed keys the firmware refuses systemd-boot and has to
     # start shim (e2e-fw13, 2026-11-02). Writes nothing when the entry
-    # already starts the right file. It runs before make-policy: the entry
-    # belongs to the files just written, and a failed TPM update must not
-    # leave it pointing at a loader the firmware refuses (e2e-fw13,
-    # 2026-11-02, rebuild from a shim boot under a pre-shim policy).
-    ${bootFirst} --keep-order ${esp}
+    # already starts the right file. On a rebuild it runs before
+    # make-policy: the entry belongs to the files just written, and a failed
+    # TPM update must not leave it pointing at a loader the firmware refuses
+    # (e2e-fw13, 2026-11-02, rebuild from a shim boot under a pre-shim
+    # policy).
+    # A fresh install (nixos-install: only stage 2 creates
+    # /run/booted-system) sets the entry only after make-policy worked. On a
+    # chip without PolicyAuthorizeNV make-policy refused after the entry
+    # already started shim from the new disk, whose key was never queued for
+    # MOK: Security Violation, then a MokManager loop (friend's T480s, .68,
+    # 2026-11-22). The installer removes what this run wrote when it fails.
+    fresh=
+    if [ ! -e /run/booted-system ]; then
+      fresh=1
+    fi
+    if [ -z "$fresh" ]; then
+      ${bootFirst} --keep-order ${esp}
+    fi
     ${lib.optionalString cfg.measuredBoot.enable ''
       ${lib.optionalString (lib.elem 4 cfg.measuredBoot.pcrs) (
         lib.concatMapStrings (entry: ''
@@ -201,6 +214,9 @@ let
         echo "warning: once the TPM is back, boot with the recovery key or disk passphrase and run: gjallarctl tpm2 reenroll" >&2
       fi
     ''}
+    if [ -n "$fresh" ]; then
+      ${bootFirst} --keep-order ${esp}
+    fi
   '';
 in
 {
@@ -265,6 +281,8 @@ in
   # entry pointing at freed clusters; fsck cut the credential to 0 bytes and
   # TPM unlock failed with "Encrypted file too short" (e2e-fw13, 2026-10-10,
   # after rollback). Sync last, as the systemd-boot builder does.
+  # tests/nix/measured-boot-limit.nix checks the order of its steps.
+  system.build.gjallarLzbtInstallHook = installHook;
   system.build.installBootLoader = lib.mkIf settings.secureBootEnable (
     lib.mkForce (
       pkgs.writeShellScript "install-lanzaboote" ''

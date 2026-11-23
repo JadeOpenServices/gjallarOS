@@ -234,6 +234,44 @@ func collectStartupUnlock(ctx context.Context, ui prompt.UI, kind diskcrypto.TPM
 	return nil
 }
 
+// resolveChipUnlock checks, before any disk work, that the TPM can carry
+// the measured-boot policy chip unlock depends on. The policy needs
+// TPM2_PolicyAuthorizeNV; on a chip without it make-policy refused late in
+// the install, after the disk and the boot entry were written, and the
+// machine looped in MokManager (friend's T480s, .68, 2026-11-22; Jade Q256).
+// A chip that cannot, or a check that fails, turns chip unlock off: the
+// disk stays encrypted and unlocks with the passphrase or the recovery key.
+// Installs that need chip unlock stop instead.
+func resolveChipUnlock(ctx context.Context, out io.Writer, u *config.User, check func(context.Context) (diskcrypto.PCRLockSupport, error)) (bool, error) {
+	support, err := check(ctx)
+	if err == nil && support == diskcrypto.PCRLockSupported {
+		return true, nil
+	}
+	reason := support.Describe()
+	if err != nil {
+		reason = "the security chip could not be checked (" + err.Error() + ")"
+	}
+	switch {
+	case u.Management.Enable || u.PrebootLock.Enable:
+		return false, fmt.Errorf("%s; a managed install and the preboot lock need TPM2 disk unlock. The disk was not touched", reason)
+	case u.UnattendedInstall && u.LUKSTPM2Enable:
+		return false, fmt.Errorf("%s; user.config.json sets luksTpm2Enable=true. Set it to false or rerun interactively. The disk was not touched", reason)
+	}
+	fmt.Fprintln(out)
+	fmt.Fprint(out, chipUnlockUnsupportedNotice(reason))
+	u.LUKSTPM2Enable = false
+	u.LUKSTPM2PIN = false
+	return false, nil
+}
+
+func chipUnlockUnsupportedNotice(reason string) string {
+	return "Security chip: " + reason + ".\n" +
+		"  The disk cannot unlock through the chip on this computer. It stays encrypted,\n" +
+		"  and every start asks for the disk passphrase; the recovery key works as well.\n" +
+		"  Secure Boot is not affected. A firmware update from the maker may add the\n" +
+		"  missing command; after one, gjallarctl luks chip can switch chip unlock on.\n"
+}
+
 // firmwareTrustReport is what the firmware trusts, read before any Secure
 // Boot question so the user sees it whatever they choose (Plane 293).
 func firmwareTrustReport(t secureboot.FirmwareTrust) string {

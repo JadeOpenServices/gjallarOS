@@ -178,6 +178,29 @@ lib.mkIf (settings.dotfilesDir == "/etc/gjallar/system") {
     };
   };
 
+  # The settings service has no device access either, so this unit asks
+  # systemd-pcrlock at boot whether the TPM can carry the startup policy.
+  # The service refuses chip unlock when it cannot, or when this answer is
+  # missing (friend's T480s, .68: no PolicyAuthorizeNV).
+  systemd.services.gjallar-chip-check = {
+    description = "Check whether the security chip can carry the startup policy";
+    wantedBy = [ "multi-user.target" ];
+    before = [ "gjallar-settingsd.service" ];
+    after = [ "tpm2.target" ];
+    serviceConfig = {
+      Type = "oneshot";
+      RemainAfterExit = true;
+      ExecStart = "${settingsd}/bin/gjallar-chip-check /run/gjallar/chip-check.json";
+      ProtectSystem = "strict";
+      ReadWritePaths = [ "/run/gjallar" ];
+      PrivateNetwork = true;
+      ProtectHome = true;
+      NoNewPrivileges = true;
+      DevicePolicy = "closed";
+      DeviceAllow = [ "/dev/tpmrm0 rw" ];
+    };
+  };
+
   systemd.tmpfiles.rules = [
     "d /etc/gjallar/developer 0755 root root -"
     "d /run/gjallar 0755 root root -"
@@ -188,10 +211,12 @@ lib.mkIf (settings.dotfilesDir == "/etc/gjallar/system") {
     wants = [
       "gjallar-settings-key.service"
       "gjallar-system-disk.service"
+      "gjallar-chip-check.service"
     ];
     after = [
       "gjallar-settings-key.service"
       "gjallar-system-disk.service"
+      "gjallar-chip-check.service"
     ];
     # tailscale status lists the tailnet a new hostname must not clash with.
     path = lib.optional config.services.tailscale.enable config.services.tailscale.package;

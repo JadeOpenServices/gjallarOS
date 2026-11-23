@@ -64,7 +64,35 @@ let
     secureBootShim = true;
   };
   noShim = evaluate true false;
+  lib = nixpkgs.lib;
+  # The hook text split at the firmware entry step. On a rebuild it runs
+  # before make-policy; on a fresh install only after it worked (friend's
+  # T480s, .68, 2026-11-22: make-policy refused after the entry already
+  # started shim from the new disk, MokManager loop).
+  hookParts =
+    config:
+    lib.filter builtins.isString (
+      builtins.split "gjallar-boot-first" (
+        builtins.unsafeDiscardStringContext config.system.build.gjallarLzbtInstallHook.text
+      )
+    );
+  lastIf = text: lib.last (lib.splitString "if [" text);
+  hookOrderOk =
+    config:
+    let
+      parts = hookParts config;
+      before = builtins.elemAt parts 0;
+      between = builtins.elemAt parts 1;
+    in
+    builtins.length parts == 3
+    && lib.hasInfix "if [ ! -e /run/booted-system ]; then" before
+    && lib.hasPrefix " -z \"$fresh\" ]" (lastIf before)
+    && lib.hasInfix "Predicting the PCR state" between
+    && lib.hasInfix "exit 1" between
+    && lib.hasPrefix " -n \"$fresh\" ]" (lastIf between);
 in
+assert hookOrderOk shim;
+assert hookOrderOk noShim;
 # systemd-pcrlock: at most 8 alternatives per PCR; PCR 4 sees every UKI.
 assert measured.measuredBoot.enable;
 assert measured.configurationLimit * 3 <= 8;
@@ -80,7 +108,8 @@ assert nixpkgs.lib.elem "iomem=relaxed" flashReadEntry.boot.kernelParams;
 assert !(nixpkgs.lib.elem "iomem=relaxed" flashRead.boot.kernelParams);
 # A failed unseal with a startup PIN asked for the PIN forever there.
 assert flashReadEntry.boot.initrd.luks.devices.cryptroot.crypttabExtraOpts == [ "tries=0" ];
-assert nixpkgs.lib.elem "tpm2-device=auto" flashRead.boot.initrd.luks.devices.cryptroot.crypttabExtraOpts;
+assert nixpkgs.lib.elem "tpm2-device=auto"
+  flashRead.boot.initrd.luks.devices.cryptroot.crypttabExtraOpts;
 # Shim mode (Plane 293): fwupd starts its capsule loader through shim, and
 # the install hook differs from the one without shim (--shim-directory).
 assert shim.services.fwupd.uefiCapsuleSettings.DisableShimForSecureBoot == false;
@@ -92,7 +121,8 @@ assert nixpkgs.lib.hasInfix "install-lanzaboote" "${recovery.system.build.instal
 # Without measured boot there is no make-policy unit at all; a bare
 # .after left an empty unit without ExecStart= (fw13, 2026-11-03).
 assert !((evaluate false false).systemd.services ? systemd-pcrlock-make-policy);
-assert builtins.elem "systemd-tmpfiles-setup.service" noShim.systemd.services.systemd-pcrlock-make-policy.after;
+assert builtins.elem "systemd-tmpfiles-setup.service"
+  noShim.systemd.services.systemd-pcrlock-make-policy.after;
 nixpkgs.legacyPackages.${system}.runCommand "gjallar-measured-boot-limit-check" { } ''
   touch "$out"
 ''

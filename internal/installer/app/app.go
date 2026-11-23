@@ -71,6 +71,9 @@ type options struct {
 	move string
 }
 type state struct {
+	// freshUndo takes back a failed fresh install's ESP and firmware
+	// entries (Q257).
+	freshUndo                *freshUndo
 	user                     config.User
 	render                   nixrender.Settings
 	preset, existing         bool
@@ -324,7 +327,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 	}()
 	ui := prompt.New(in, out)
 	ui.UsePages(in)
-	s := state{control: controlBinary()}
+	s := state{control: controlBinary(), freshUndo: &freshUndo{}}
 	runLog.user = &s.user
 	// A failure from here on may become an install report the user saves
 	// (Plane 292). Failures before this point are about the checkout, not
@@ -332,6 +335,10 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 	recorder := &failureRecorder{Writer: errOut}
 	errOut = recorder
 	defer func() {
+		if code != 0 {
+			// Q257: before the log is saved, so its lines are in it.
+			s.freshUndo.run(ctx, out)
+		}
 		if code == 1 && recorder.err != nil {
 			// Plane 388 b: a failed run always leaves its error text and the
 			// redacted install log on the boot stick's GJLOGS partition,
@@ -860,6 +867,24 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 		}
 	}
 
+	// chipUnlock: the TPM can carry the startup policy. The Startup unlock
+	// question is only asked then (Jade Q256, 2026-11-23).
+	chipUnlock := false
+	if tpmAvailable {
+		requested := s.user.LUKSTPM2Enable
+		var chipErr error
+		chipUnlock, chipErr = resolveChipUnlock(ctx, out, &s.user, diskcrypto.CheckPCRLockSupport)
+		if chipErr != nil {
+			return fail(errOut, chipErr)
+		}
+		if !chipUnlock && requested && s.preset {
+			if err := config.WriteAtomic(presetPath, s.user); err != nil {
+				return fail(errOut, fmt.Errorf("save luksTpm2Enable=false to user.config.json: %w", err))
+			}
+			fmt.Fprintln(out, "Updated user.config.json: luksTpm2Enable=false, luksTpm2Pin=false.")
+		}
+	}
+
 	// Read before any Secure Boot question: turning Secure Boot off and
 	// installing own keys both need the firmware setup. On locked firmware
 	// the only way in is shim, which must already start this system.
@@ -892,7 +917,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 				s.user.SecureBootEnable = true
 				s.user.SecureBootShim = true
 				s.user.FirmwarePasswordLock = false
-				if tpmAvailable && !s.user.Management.Enable {
+				if chipUnlock && !s.user.Management.Enable {
 					if err := collectStartupUnlock(ctx, ui, diskcrypto.ModelTPMKind(), s.chassisType, s.touchscreen, &s.user); err != nil {
 						return fail(errOut, err)
 					}
@@ -949,8 +974,10 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 			if err != nil {
 				return fail(errOut, err)
 			}
-			if err := collectStartupUnlock(ctx, ui, diskcrypto.ModelTPMKind(), s.chassisType, s.touchscreen, &s.user); err != nil {
-				return fail(errOut, err)
+			if chipUnlock {
+				if err := collectStartupUnlock(ctx, ui, diskcrypto.ModelTPMKind(), s.chassisType, s.touchscreen, &s.user); err != nil {
+					return fail(errOut, err)
+				}
 			}
 		}
 	} else if tpmAvailable &&
@@ -970,8 +997,10 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 				s.user.SecureBootEnable = true
 				s.user.SecureBootShim = true
 				s.user.FirmwarePasswordLock = false
-				if err := collectStartupUnlock(ctx, ui, diskcrypto.ModelTPMKind(), s.chassisType, s.touchscreen, &s.user); err != nil {
-					return fail(errOut, err)
+				if chipUnlock {
+					if err := collectStartupUnlock(ctx, ui, diskcrypto.ModelTPMKind(), s.chassisType, s.touchscreen, &s.user); err != nil {
+						return fail(errOut, err)
+					}
 				}
 			}
 		}
@@ -1793,6 +1822,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 				freshPasswordFiles(s.render),
 				hostOverlayToCommit,
 				mv,
+				s.freshUndo,
 				out,
 			)
 			if err != nil {
@@ -1830,6 +1860,11 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 		shimSBOff = !sbOn
 	}
 	freshShim := s.render.SecureBootEnable && s.render.SecureBootShim && !shimSBOff && !persistentInstalledHost
+	if !freshShim {
+		// Every path but fresh shim starts the new system as installed; a
+		// later failure must not take back a working install.
+		s.freshUndo.disarm()
+	}
 	if freshRoot != "" && !freshShim {
 		// The fresh shim path queues this with the gjallarOS key for one
 		// MokManager visit; every other fresh install queues it alone.
@@ -1863,6 +1898,9 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 		}); err != nil {
 			return fail(errOut, err)
 		}
+		// The gjallarOS key waits for MokManager: shim can start the new
+		// system after the next restart.
+		s.freshUndo.disarm()
 		if err := armSecureBootResume(ctx, out); err != nil {
 			return fail(errOut, err)
 		}

@@ -71,6 +71,9 @@ type system interface {
 	// SystemDiskOnUSB says why USB blocking must stay off because of the
 	// disk the system runs from; "" when that disk is not on USB.
 	SystemDiskOnUSB() string
+	// ChipUnlockBlocked says why chip unlock must stay off on this TPM; ""
+	// when the chip supports the startup policy.
+	ChipUnlockBlocked() string
 	// USBArmed reports whether the stored USB trust state says blocking is
 	// armed.
 	USBArmed() (bool, error)
@@ -319,6 +322,9 @@ func (s *service) keep(ctx context.Context, sender string, who caller, change se
 		return settings.Pending{}, err
 	}
 	if err := s.checkUSBDisarmed(change); err != nil {
+		return settings.Pending{}, err
+	}
+	if err := s.checkChipUnlock(change); err != nil {
 		return settings.Pending{}, err
 	}
 	if change.Tier == config.TierCritical {
@@ -771,6 +777,23 @@ func (s *service) checkUSBSystemDisk(change settings.Change) error {
 		}
 		if reason := s.sys.SystemDiskOnUSB(); reason != "" {
 			return fmt.Errorf("%w: USB blocking stays off: %s", errRefused, reason)
+		}
+	}
+	return nil
+}
+
+// checkChipUnlock refuses switching chip unlock on when root's boot check
+// says the TPM cannot carry the startup policy. The rebuild would stop at
+// make-policy, and the settings would keep asking for it on every later
+// rebuild (friend's T480s, .68, 2026-11-22).
+func (s *service) checkChipUnlock(change settings.Change) error {
+	for _, key := range change.Keys {
+		var on bool
+		if key.Key != "luksTpm2Enable" || json.Unmarshal(key.New, &on) != nil || !on {
+			continue
+		}
+		if reason := s.sys.ChipUnlockBlocked(); reason != "" {
+			return fmt.Errorf("%w: chip unlock stays off: %s. Startup keeps asking for the passphrase or recovery key", errRefused, reason)
 		}
 	}
 	return nil

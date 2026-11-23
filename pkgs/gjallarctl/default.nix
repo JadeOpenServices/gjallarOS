@@ -61,9 +61,12 @@ buildGoModule {
   subPackages = [ "cmd/gjallarctl" ];
 
   env.CGO_ENABLED = "0";
+  # The chip check runs as root (installer, `installer tpm2`): a store path,
+  # never a PATH lookup.
   ldflags = [
     "-s"
     "-w"
+    "-X github.com/JadeOpenServices/gjallarOS/internal/installer/diskcrypto.PCRLock=${systemd}/lib/systemd/systemd-pcrlock"
   ];
 
   postInstall = ''

@@ -2,6 +2,7 @@
   lib,
   buildGoModule,
   openssh,
+  systemd,
 }:
 
 buildGoModule {
@@ -16,6 +17,7 @@ buildGoModule {
       (lib.fileset.fileFilter (f: f.hasExt "go" || f.name == "meta.json") ../../apps)
       ../../apps/firefox-addons.json
       ../../apps/retired.json
+      ../../cmd/gjallar-chip-check
       ../../cmd/gjallar-devproof
       ../../cmd/gjallar-namecheck
       ../../cmd/gjallar-settingsd
@@ -45,6 +47,7 @@ buildGoModule {
   proxyVendor = true;
 
   subPackages = [
+    "cmd/gjallar-chip-check"
     "cmd/gjallar-devproof"
     "cmd/gjallar-namecheck"
     "cmd/gjallar-settingsd"
@@ -52,9 +55,12 @@ buildGoModule {
     "cmd/gjallar-system-disk"
   ];
 
-  # Own signing keys are checked by ssh-keygen -Y verify.
+  # Own signing keys are checked by ssh-keygen -Y verify. gjallar-chip-check
+  # asks systemd-pcrlock (as root, by store path) whether the TPM can carry
+  # the startup policy.
   ldflags = [
     "-X github.com/JadeOpenServices/gjallarOS/internal/sshsig.Keygen=${openssh}/bin/ssh-keygen"
+    "-X github.com/JadeOpenServices/gjallarOS/internal/installer/diskcrypto.PCRLock=${systemd}/lib/systemd/systemd-pcrlock"
   ];
 
   env.CGO_ENABLED = "0";

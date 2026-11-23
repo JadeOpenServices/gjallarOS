@@ -338,6 +338,10 @@ func runTPM2(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stdout, "luks_tpm2_enable=false\n[NOTE] No TPM2 device detected; startup keeps asking for the recovery key or passphrase.")
 		return 0
 	}
+	if note := tpm2ChipNote(context.Background(), diskcrypto.CheckPCRLockSupport); note != "" {
+		fmt.Fprintln(stdout, "luks_tpm2_enable=false\n[NOTE] "+note)
+		return 0
+	}
 	// Only the LUKS device under / counts. Other LUKS disks (an old swap
 	// partition, a USB stick) are not the system disk and must not block
 	// the check (locked laptop, 2026-11-15).
@@ -361,6 +365,23 @@ func runTPM2(args []string, stdout, stderr io.Writer) int {
 	fmt.Fprintf(stdout, "PLAN: after Secure Boot verification, request the disk passphrase and enroll this TPM against PCRLock on %s\n", device)
 	fmt.Fprintln(stdout, "luks_tpm2_enable=true")
 	return 0
+}
+
+// tpm2ChipNote is empty when the chip supports the startup policy, and
+// otherwise says why chip unlock stays off. A chip without
+// PolicyAuthorizeNV makes make-policy refuse after the boot entry was
+// written (friend's T480s, .68, 2026-11-22); an unknown answer counts as
+// unsupported.
+func tpm2ChipNote(ctx context.Context, check func(context.Context) (diskcrypto.PCRLockSupport, error)) string {
+	support, err := check(ctx)
+	if err == nil && support == diskcrypto.PCRLockSupported {
+		return ""
+	}
+	reason := support.Describe()
+	if err != nil {
+		reason = "the security chip could not be checked (" + err.Error() + ")"
+	}
+	return "TPM2 unlock stays off: " + reason + ". Startup keeps asking for the passphrase or recovery key."
 }
 
 func runLocalPassword(args []string, stdout, stderr io.Writer) int {

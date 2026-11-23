@@ -20,7 +20,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -209,4 +211,132 @@ func Set(ctx context.Context, r Runner, entry string) error {
 		}
 	}
 	return fmt.Errorf("BootNext is not %s after setting it", entry)
+}
+
+var partUUIDRe = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
+
+// RemoveForESP deletes every firmware entry, active or not, whose device
+// path starts on the ESP with this PARTUUID, and clears BootNext when it
+// pointed at one of them. The fresh installer calls it after a failed run
+// (Q257, friend's T480s, .68, 2026-11-22): that run made the PARTUUID at
+// random for its new ESP, so no entry of another system carries it.
+// efibootmgr also drops a deleted entry from BootOrder. It returns the
+// entries it deleted and reads the list back to check that none is left.
+func RemoveForESP(ctx context.Context, r Runner, partUUID string) ([]string, error) {
+	u := strings.ToLower(partUUID)
+	if !partUUIDRe.MatchString(u) {
+		return nil, fmt.Errorf("ESP PARTUUID %q is not a UUID", partUUID)
+	}
+	raw, err := readEntries(ctx, r)
+	if err != nil {
+		return nil, err
+	}
+	entries, next := entriesOnESP(raw, u)
+	var removed []string
+	for _, e := range entries {
+		if _, err := r.Output(ctx, "efibootmgr", "--quiet", "--bootnum", e, "--delete-bootnum"); err != nil {
+			return removed, fmt.Errorf("delete boot entry %s: %w", e, err)
+		}
+		removed = append(removed, e)
+	}
+	if next != "" && slices.Contains(entries, next) {
+		if _, err := r.Output(ctx, "efibootmgr", "--quiet", "--delete-bootnext"); err != nil {
+			return removed, fmt.Errorf("clear BootNext %s: %w", next, err)
+		}
+	}
+	if len(entries) == 0 {
+		return nil, nil
+	}
+	raw, err = readEntries(ctx, r)
+	if err != nil {
+		return removed, err
+	}
+	if left, _ := entriesOnESP(raw, u); len(left) > 0 {
+		return removed, fmt.Errorf("boot entries %s are still there after deleting them", strings.Join(left, ", "))
+	}
+	return removed, nil
+}
+
+func readEntries(ctx context.Context, r Runner) ([]byte, error) {
+	raw, err := r.Output(ctx, "efibootmgr", "-v")
+	if err != nil {
+		return nil, fmt.Errorf("read boot entries: %w", err)
+	}
+	if len(raw) > maxOutput {
+		return nil, errors.New("efibootmgr printed too much")
+	}
+	return raw, nil
+}
+
+// entriesOnESP lists the entries whose device path starts on the ESP with
+// PARTUUID u, whatever loader they name, and the BootNext value.
+func entriesOnESP(raw []byte, u string) (entries []string, next string) {
+	for _, line := range strings.Split(string(bytes.TrimRight(raw, "\n")), "\n") {
+		if m := nextLine.FindStringSubmatch(line); m != nil {
+			next = strings.ToUpper(m[1])
+			continue
+		}
+		m := entryLine.FindStringSubmatch(line)
+		if m == nil {
+			continue
+		}
+		p := hdPath.FindStringSubmatch(strings.ToLower(m[4]))
+		if p == nil || p[1] != u {
+			continue
+		}
+		e := strings.ToUpper(m[1])
+		if !slices.Contains(entries, e) {
+			entries = append(entries, e)
+		}
+	}
+	return entries, next
+}
+
+// FindESP returns the device of the partition with this PARTUUID when it is
+// an ESP on disk and no other partition carries the same PARTUUID. Empty
+// means there is none: the run stopped before the partition table was
+// written. disk is the whole disk as lsblk -p prints it.
+func FindESP(ctx context.Context, r Runner, disk, partUUID string) (string, error) {
+	u := strings.ToLower(partUUID)
+	if !partUUIDRe.MatchString(u) {
+		return "", fmt.Errorf("ESP PARTUUID %q is not a UUID", partUUID)
+	}
+	raw, err := r.Output(ctx, "lsblk", "-J", "-l", "-p", "-o", "PATH,TYPE,PARTUUID,PARTLABEL,PARTTYPE,PKNAME")
+	if err != nil {
+		return "", fmt.Errorf("list disks: %w", err)
+	}
+	if len(raw) > maxOutput {
+		return "", errors.New("lsblk printed too much")
+	}
+	var out struct {
+		BlockDevices []blockDevice `json:"blockdevices"`
+	}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return "", fmt.Errorf("decode lsblk: %w", err)
+	}
+	var found []blockDevice
+	for _, d := range out.BlockDevices {
+		if strings.ToLower(d.PartUUID) == u {
+			found = append(found, d)
+		}
+	}
+	switch len(found) {
+	case 0:
+		return "", nil
+	case 1:
+	default:
+		return "", fmt.Errorf("%d partitions carry the ESP PARTUUID %s", len(found), u)
+	}
+	d := found[0]
+	switch {
+	case d.Type != "part":
+		return "", fmt.Errorf("%s with the ESP PARTUUID is a %q, not a partition", d.Path, d.Type)
+	case d.PKName != disk:
+		return "", fmt.Errorf("%s with the ESP PARTUUID is not on %s", d.Path, disk)
+	case strings.ToLower(d.PartType) != partTypeESP:
+		return "", fmt.Errorf("%s with the ESP PARTUUID is not an ESP", d.Path)
+	case !strings.HasPrefix(d.Path, "/dev/") || filepath.Clean(d.Path) != d.Path || strings.ContainsAny(d.Path, "\n\t "):
+		return "", fmt.Errorf("lsblk gave an unexpected device path %q", d.Path)
+	}
+	return d.Path, nil
 }

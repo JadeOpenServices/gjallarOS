@@ -862,6 +862,29 @@ The new list takes effect at the next restart. With TPM disk unlock, the TPM
 accepts the current and the new state until then, so a rebuild in between
 still unlocks.
 
+### Disk unlock by the security chip
+
+Chip unlock binds the disk key to a startup policy that `systemd-pcrlock`
+keeps in the TPM. That policy needs the TPM command `PolicyAuthorizeNV`.
+Some older chips lack it, such as the one in a ThinkPad T480s; there
+`systemd-pcrlock is-supported` answers `obsolete`. The installer asks the
+chip before the disk is touched. When the answer is anything but `yes`, it
+says why, keeps the disk encrypted and leaves chip unlock and the PIN off:
+every start asks for the disk passphrase, and the recovery key works as
+well. Secure Boot, shim included, is not affected. A managed install, or
+an unattended one whose answers ask for chip unlock, stops instead.
+
+A firmware update from the maker may add the command. The system checks the
+chip at every start, and `gjallarctl luks chip` switches chip unlock on once
+the chip passes; it refuses while the check still fails.
+
+On a new install, the firmware boot entry for the new disk is written only
+after the chip step has worked. If the install fails after the disk was
+partitioned, the installer removes the firmware boot entries that point at
+the new EFI system partition and clears that partition, so the next start
+does not land in a half-installed system. The rest of the disk keeps what
+was written until the next install.
+
 ### USB trust
 
 On machines with an ODDC model the installer asks about USB devices as one
