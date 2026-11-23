@@ -70,15 +70,18 @@ let
       }
 
       # In page mode (the installer stick, GJALLAR_PAGES=1) text goes in the
-      # 66-column block in the middle of the screen, where the installer's
-      # own text is (calmmenu.Width and calmmenu.NewColumn).
+      # page frame, where the installer's own text is. The stick passes the
+      # frame as GJALLAR_PAGE_FRAME="COL WIDTH" (prompt.PageEnviron, from
+      # calmmenu.FrameFor); anything else there is ignored and the text
+      # goes out plain.
       page_width=0
       page_col=1
-      if [ "''${GJALLAR_PAGES:-}" = 1 ] && size=$(stty size 2>/dev/null); then
-        cols=''${size#* }
-        if [ "$cols" -gt 0 ] 2>/dev/null; then
-          page_width=$((cols < 66 ? cols : 66))
-          page_col=$(((cols - page_width) / 2 + 1))
+      if [ "''${GJALLAR_PAGES:-}" = 1 ] && [[ "''${GJALLAR_PAGE_FRAME:-}" =~ ^([0-9]{1,4})\ ([0-9]{1,4})$ ]]; then
+        col=$((10#''${BASH_REMATCH[1]}))
+        width=$((10#''${BASH_REMATCH[2]}))
+        if [ "$col" -ge 1 ] && [ "$width" -ge 1 ]; then
+          page_col=$col
+          page_width=$width
         fi
       fi
 

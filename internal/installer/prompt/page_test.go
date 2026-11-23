@@ -270,6 +270,7 @@ func TestPagesOptIn(t *testing.T) {
 	_, term, _ := testPTY(t)
 	t.Setenv(PageEnv, "1")
 	t.Setenv(PageTitleEnv, "Install gjallarOS")
+	t.Setenv(PageFrameEnv, "5 112")
 	out, e := Pages(term, term)
 	if !Paged(out) || !Paged(e) {
 		t.Fatal("Pages without pages on a terminal with the variable set")
@@ -277,7 +278,7 @@ func TestPagesOptIn(t *testing.T) {
 	if pagerOf(e).file != term || terminal(e) != io.Writer(term) {
 		t.Fatal("errOut on the same terminal does not share the page")
 	}
-	for _, v := range []string{PageEnv, PageTitleEnv} {
+	for _, v := range []string{PageEnv, PageTitleEnv, PageFrameEnv} {
 		if _, set := os.LookupEnv(v); set {
 			t.Fatalf("Pages left %s for programs it starts", v)
 		}
@@ -285,13 +286,15 @@ func TestPagesOptIn(t *testing.T) {
 }
 
 func TestPageEnviron(t *testing.T) {
-	env := []string{"PATH=/bin", PageEnv + "=1", PageTitleEnv + "=old", "LANG=C"}
-	got := PageEnviron(context.Background(), env)
+	env := []string{"PATH=/bin", PageEnv + "=1", PageTitleEnv + "=old", PageFrameEnv + "=1 66", "LANG=C"}
+	sz := calmmenu.Size{Cols: 120, Rows: 33}
+	got := PageEnviron(context.Background(), env, sz)
 	if strings.Join(got, " ") != "PATH=/bin LANG=C" {
 		t.Fatalf("plain ctx: %q", got)
 	}
-	got = PageEnviron(WithPage(context.Background(), "Install gjallarOS"), env)
-	want := "PATH=/bin LANG=C " + PageEnv + "=1 " + PageTitleEnv + "=Install gjallarOS"
+	got = PageEnviron(WithPage(context.Background(), "Install gjallarOS"), env, sz)
+	// The frame of 120x33 (see TestFrameFor): column 5, 112 wide.
+	want := "PATH=/bin LANG=C " + PageEnv + "=1 " + PageTitleEnv + "=Install gjallarOS " + PageFrameEnv + "=5 112"
 	if strings.Join(got, " ") != want {
 		t.Fatalf("page ctx: %q", got)
 	}

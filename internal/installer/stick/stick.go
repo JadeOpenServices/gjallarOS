@@ -54,7 +54,7 @@ func (Exec) Output(ctx context.Context, name string, args ...string) ([]byte, er
 func (Exec) Interactive(ctx context.Context, name string, args ...string) error {
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
-	cmd.Env = prompt.PageEnviron(ctx, os.Environ())
+	cmd.Env = prompt.PageEnviron(ctx, os.Environ(), tty.Size(os.Stdout))
 	return cmd.Run()
 }
 

@@ -85,7 +85,7 @@ func (f *fakeNet) Output(_ context.Context, name string, args ...string) ([]byte
 func (f *fakeNet) Interactive(ctx context.Context, name string, args ...string) error {
 	f.calls = append(f.calls, "RUN "+name+" "+strings.Join(args, " "))
 	title := ""
-	for _, e := range prompt.PageEnviron(ctx, nil) {
+	for _, e := range prompt.PageEnviron(ctx, nil, calmmenu.Size{Cols: 80, Rows: 24}) {
 		if t, ok := strings.CutPrefix(e, prompt.PageTitleEnv+"="); ok {
 			title = t
 		}

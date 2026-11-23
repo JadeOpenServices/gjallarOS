@@ -2,6 +2,7 @@ package prompt
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"os"
 	"strings"
@@ -25,9 +26,14 @@ import (
 // Page mode is opt-in. The stick sets PageEnv for the programs it starts,
 // and pages only show when the output is a terminal too. gjallarctl and
 // the installer on an installed system never see the variable.
+//
+// PageFrameEnv is the page frame (calmmenu.FrameFor) as "COL WIDTH", for
+// shell steps such as gjallar-recover (system/recovery/tools.nix) that
+// print in the frame but cannot work it out themselves.
 const (
 	PageEnv      = "GJALLAR_PAGES"
 	PageTitleEnv = "GJALLAR_PAGE_TITLE"
+	PageFrameEnv = "GJALLAR_PAGE_FRAME"
 )
 
 type pageKey struct{}
@@ -38,18 +44,20 @@ func WithPage(ctx context.Context, title string) context.Context {
 	return context.WithValue(ctx, pageKey{}, title)
 }
 
-// PageEnviron returns env for a program started with ctx: without any
-// page variables, and with them when ctx asks for pages.
-func PageEnviron(ctx context.Context, env []string) []string {
-	out := make([]string, 0, len(env)+2)
+// PageEnviron returns env for a program started with ctx on a terminal of
+// size sz: without any page variables, and with them when ctx asks for
+// pages.
+func PageEnviron(ctx context.Context, env []string, sz calmmenu.Size) []string {
+	out := make([]string, 0, len(env)+3)
 	for _, e := range env {
-		if strings.HasPrefix(e, PageEnv+"=") || strings.HasPrefix(e, PageTitleEnv+"=") {
+		if strings.HasPrefix(e, PageEnv+"=") || strings.HasPrefix(e, PageTitleEnv+"=") || strings.HasPrefix(e, PageFrameEnv+"=") {
 			continue
 		}
 		out = append(out, e)
 	}
 	if title, ok := ctx.Value(pageKey{}).(string); ok {
-		out = append(out, PageEnv+"=1", PageTitleEnv+"="+title)
+		f := calmmenu.FrameFor(sz)
+		out = append(out, PageEnv+"=1", PageTitleEnv+"="+title, fmt.Sprintf("%s=%d %d", PageFrameEnv, f.Col, f.Width))
 	}
 	return out
 }
@@ -75,6 +83,7 @@ func Pages(out, errOut io.Writer) (io.Writer, io.Writer) {
 	title := pageTitle(os.Getenv(PageTitleEnv))
 	_ = os.Unsetenv(PageEnv)
 	_ = os.Unsetenv(PageTitleEnv)
+	_ = os.Unsetenv(PageFrameEnv)
 	if !on {
 		return out, errOut
 	}
