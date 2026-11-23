@@ -69,7 +69,7 @@ func runFreshBareMetal(
 		ctx,
 		targetdisk.Input{
 			Path:         targetPath,
-			MinSizeBytes: freshTargetMinimumBytes,
+			MinSizeBytes: freshdiskplan.MinimumDiskBytes,
 		},
 	)
 	if err != nil {

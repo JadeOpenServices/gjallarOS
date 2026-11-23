@@ -283,7 +283,7 @@ terminal.
 | Region | Timezone, language and keyboard layout, picked from lists; a new install starts from what the live session uses |
 | You | Username, password, hostname |
 | Management | Whether JODS manages this machine (only offered with TPM2 and Secure Boot) |
-| Disk (USB stick) | Which disk to erase |
+| Disk (USB stick) | Which disk to erase (at least 40 GiB) |
 | Printing | Printers and scanners: off, plugged into this computer, or also on the local network |
 | Security | Secure Boot, how the disk unlocks (TPM2 alone or with a PIN, both add a recovery key), recovery (boot entry and partition, boot entry only, or none; the partition needs Secure Boot), USB devices (off, review new devices, or review and block unknown devices; a new install offers review) |
 
@@ -293,6 +293,14 @@ skips this step; on the installed system `fwupdmgr update` installs them. USB de
 days without use; Settings changes that. A managed machine always gets recovery. At the end the installer
 shows every answer once and asks "Install now?"; Enter means no, and
 nothing is written or installed.
+
+A new install needs a disk of at least 40 GiB. The recovery partition
+takes another 12 GiB, so it needs a disk of at least 52 GiB. On a smaller
+disk the installer does not offer it, says why, and offers recovery as a
+boot entry only. A managed machine always gets the partition, so it needs
+the 52 GiB disk; on a smaller one the install stops before any disk is
+changed. A preset that asks for the partition on a smaller disk loses it,
+with the same reason shown.
 
 The installer does not ask about apps. A new install gets the default
 apps from the catalogue, Tailscale with no home network set, and Firefox

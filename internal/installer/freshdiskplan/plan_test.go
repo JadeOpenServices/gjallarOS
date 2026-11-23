@@ -127,7 +127,7 @@ func TestBuildGeneratesFreshIdentities(t *testing.T) {
 // what Build lays out.
 func TestRootBytesMatchesBuild(t *testing.T) {
 	for _, recovery := range []bool{false, true} {
-		for _, size := range []uint64{40 << 30, 1000*1024*1024*1024 + 12345, 2000398934016} {
+		for _, size := range []uint64{MinimumRecoveryDiskBytes, 1000*1024*1024*1024 + 12345, 2000398934016} {
 			o := observed()
 			o.SizeBytes = size
 			p, err := Build(Input{Observed: o, EnableRecovery: recovery})
@@ -147,5 +147,40 @@ func TestRootBytesMatchesBuild(t *testing.T) {
 func TestInstallSwap(t *testing.T) {
 	if InstallSwap(SmallSwapRoot-1) != InstallSwapSmallBytes || InstallSwap(SmallSwapRoot) != InstallSwapBytes {
 		t.Fatal("swap rule")
+	}
+}
+
+// Plane 415 / Q259: the recovery partition comes on top of the 40 GiB
+// minimum. Below 52 GiB the root would be smaller than a minimum install's,
+// and Build refuses the partition before anything is written.
+func TestRecoveryFitsOnlyAboveTheMinimum(t *testing.T) {
+	if MinimumRecoveryDiskBytes != 52<<30 {
+		t.Fatalf("recovery minimum = %d, want 52 GiB", MinimumRecoveryDiskBytes)
+	}
+	for _, tc := range []struct {
+		size uint64
+		fits bool
+	}{
+		{MinimumDiskBytes, false},
+		{MinimumRecoveryDiskBytes - 1, false},
+		{MinimumRecoveryDiskBytes - AlignmentBytes, false},
+		{MinimumRecoveryDiskBytes, true},
+		{1000 << 30, true},
+	} {
+		if got := RecoveryFits(tc.size); got != tc.fits {
+			t.Errorf("RecoveryFits(%d) = %v, want %v", tc.size, got, tc.fits)
+		}
+		o := observed()
+		o.SizeBytes = tc.size
+		_, err := Build(Input{Observed: o, EnableRecovery: true})
+		if (err == nil) != tc.fits {
+			t.Errorf("Build(%d, recovery) err = %v, want fits=%v", tc.size, err, tc.fits)
+		}
+		if _, err := Build(Input{Observed: o}); err != nil {
+			t.Errorf("Build(%d) without recovery: %v", tc.size, err)
+		}
+	}
+	if RootBytes(MinimumRecoveryDiskBytes, true) != RootBytes(MinimumDiskBytes, false) {
+		t.Fatal("the recovery minimum must leave the root of a minimum install")
 	}
 }

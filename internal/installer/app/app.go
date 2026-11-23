@@ -36,6 +36,7 @@ import (
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/diskplan"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/firmware"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/flakesource"
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/freshdiskplan"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/hardwareconfig"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/installlog"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/installreport"
@@ -733,6 +734,9 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 	// A fresh install picks its disk before the questions, so USB blocking
 	// knows whether the system will run from a USB drive (wiki 752 Q11).
 	freshTarget := ""
+	// recoveryNoRoom says why the chosen disk gets no recovery partition:
+	// it is too small to take one (Plane 415, Q259). Empty when it fits.
+	recoveryNoRoom := ""
 	mayInstall := !opt.noRebuild && (!s.preset || s.user.RunRebuild || opt.forceRedeploy)
 	if mayInstall && !s.existing {
 		// A first install clones this commit into the system checkout,
@@ -748,11 +752,13 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 		}
 	}
 	if !persistentInstalledHost && mayInstall {
-		freshTarget, err = selectFreshTargetDisk(ctx, ui, out, opt.targetDisk)
+		target, err := selectFreshTargetDisk(ctx, ui, out, opt.targetDisk)
 		if err != nil {
 			return fail(errOut, fmt.Errorf("select fresh installation target: %w", err))
 		}
+		freshTarget = target.Path
 		s.targetDisk = freshTarget
+		recoveryNoRoom = recoveryRoom(target.SizeBytes)
 		if err := mv.pickTarget(ctx, freshTarget, s.user); errors.Is(err, move.ErrStopped) {
 			fmt.Fprintln(out, "The move stopped. Nothing was changed on any disk.")
 			return 0
@@ -1145,7 +1151,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 	// decision, and nothing is partitioned or shrunk without it. USB comes
 	// last in the security block, after the TPM decision.
 	if !s.preset {
-		if err := collectRecovery(ctx, ui, partitionable, s.user.SecureBootEnable, &s.user); err != nil {
+		if err := collectRecovery(ctx, ui, partitionable, s.user.SecureBootEnable, recoveryNoRoom, &s.user); err != nil {
 			return fail(errOut, err)
 		}
 		if err := collectUSBTrust(ctx, ui, resolvedDevice.ModelID != "", partitionable, tpmAvailable && !tpmSecurityOff, usbSystemDisk, running, &s.user); err != nil {
@@ -1157,6 +1163,8 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 	} else if s.user.RecoveryPartitionEnable && s.user.SecureBootShim {
 		s.user.RecoveryPartitionEnable = false
 		fmt.Fprintln(out, shimNoRecoveryPartitionNotice)
+	} else if err := dropRecoveryWithoutRoom(out, &s.user, recoveryNoRoom); err != nil {
+		return fail(errOut, err)
 	}
 
 	if s.existing &&
@@ -1784,7 +1792,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 				return fail(errOut, errors.New("the move has no checked new disk"))
 			}
 			if targetDisk == "" {
-				targetDisk, err = selectFreshTargetDisk(
+				target, err := selectFreshTargetDisk(
 					ctx,
 					ui,
 					out,
@@ -1798,6 +1806,10 @@ func run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 							err,
 						),
 					)
+				}
+				targetDisk = target.Path
+				if err := dropRecoveryWithoutRoom(out, &s.user, recoveryRoom(target.SizeBytes)); err != nil {
+					return fail(errOut, err)
 				}
 			}
 			s.targetDisk = targetDisk
@@ -2382,6 +2394,45 @@ const shimRecoveryPartitionQuestion = "The recovery partition has not been teste
 	"It needs its own space on the disk. If it does not start later, the installed system still starts as usual.\n" +
 	"Add the recovery partition anyway?"
 
+// recoveryRoom says why a fresh disk of diskBytes gets no recovery
+// partition, or "" when it takes one (Plane 415, Q259). The partition comes
+// on top of the 40 GiB minimum, so the system keeps the room it needs to
+// install and update.
+func recoveryRoom(diskBytes uint64) string {
+	if freshdiskplan.RecoveryFits(diskBytes) {
+		return ""
+	}
+	return fmt.Sprintf(
+		"No recovery partition: this disk has %s. The recovery partition takes %d GiB, which leaves %s for the system, and the system needs %s to install and update. A disk of at least %d GiB gets the recovery partition.",
+		targetdisk.SizeText(diskBytes),
+		freshdiskplan.RecoveryBytes>>30,
+		targetdisk.SizeText(freshdiskplan.RootBytes(diskBytes, true)),
+		targetdisk.SizeText(freshdiskplan.RootBytes(freshdiskplan.MinimumDiskBytes, false)),
+		freshdiskplan.MinimumRecoveryDiskBytes>>30,
+	)
+}
+
+// managedRecoveryNoRoom refuses a managed install on a disk too small for
+// the recovery partition, which a managed machine always gets.
+func managedRecoveryNoRoom(why string) error {
+	return fmt.Errorf("a managed machine always gets the recovery partition, and this disk is too small for it. %s Nothing was changed", why)
+}
+
+// dropRecoveryWithoutRoom turns the recovery partition off, with the reason,
+// when the disk has no room for it (why != ""). A managed machine always gets
+// the partition, so there it stops instead.
+func dropRecoveryWithoutRoom(out io.Writer, u *config.User, why string) error {
+	if why == "" || !u.RecoveryPartitionEnable {
+		return nil
+	}
+	if u.Management.Enable {
+		return managedRecoveryNoRoom(why)
+	}
+	u.RecoveryPartitionEnable = false
+	fmt.Fprintln(out, why)
+	return nil
+}
+
 // freshRecoveryPartition says whether a fresh disk gets a recovery partition. The
 // boot entry alone needs no partition; the partition comes only with
 // gjallarOS Secure Boot (collectRecovery).
@@ -2401,21 +2452,27 @@ const (
 // Secure Boot with its own keys and a root on encrypted Btrfs; without them
 // the choice says why and leaves the partition out. A managed machine is
 // not asked: it always gets the boot entry, and the partition where it can.
-func collectRecovery(ctx context.Context, ui prompt.UI, partitionable, secureBoot bool, u *config.User) error {
-	partition := secureBoot && !u.SecureBootShim && partitionable
+func collectRecovery(ctx context.Context, ui prompt.UI, partitionable, secureBoot bool, noRoom string, u *config.User) error {
+	fits := noRoom == ""
+	partition := secureBoot && !u.SecureBootShim && partitionable && fits
 	// Shim path: the partition is possible but untested, so it waits for an
 	// explicit yes below. A managed machine has nobody to ask and keeps none.
-	shimAsk := secureBoot && u.SecureBootShim && partitionable && !u.Management.Enable
+	shimAsk := secureBoot && u.SecureBootShim && partitionable && fits && !u.Management.Enable
 	why := ""
 	switch {
 	case !secureBoot:
 		why = noRecoveryPartitionNotice
+	case !fits:
+		why = noRoom
 	case u.SecureBootShim && !shimAsk:
 		why = shimNoRecoveryPartitionNotice
 	case !partitionable:
 		why = "No recovery partition: this root is not on encrypted Btrfs, which the recovery partition needs."
 	}
 	if u.Management.Enable {
+		if secureBoot && !u.SecureBootShim && partitionable && !fits {
+			return managedRecoveryNoRoom(noRoom)
+		}
 		u.RecoveryEnable, u.RecoveryPartitionEnable = true, partition
 		fmt.Fprintln(ui.Out, "Recovery: a managed machine always gets the trusted gjallarOS recovery/JODS boot entry.")
 		if why != "" {

@@ -36,6 +36,24 @@ func RootBytes(diskBytes uint64, recovery bool) uint64 {
 	return alignDown(diskBytes-fixed, AlignmentBytes)
 }
 
+// MinimumDiskBytes is the smallest disk a fresh install takes (Q227): the
+// ESP, the system, the install swap file, and room for local builds and the
+// first update. It is checked before anything is erased, for a chosen disk
+// and for --target-disk alike.
+const MinimumDiskBytes uint64 = 40 << 30
+
+// MinimumRecoveryDiskBytes is the smallest disk that gets the recovery
+// partition (Plane 415, Q259): the partition comes on top of the minimum,
+// so the root keeps the room a minimum install has. A 40 GiB disk with the
+// partition left a 27 GiB root, and nixos-install ran out of space on it.
+const MinimumRecoveryDiskBytes = MinimumDiskBytes + RecoveryBytes
+
+// RecoveryFits tells whether a disk of diskBytes takes the recovery
+// partition and still leaves the root a minimum install has.
+func RecoveryFits(diskBytes uint64) bool {
+	return RootBytes(diskBytes, true) >= RootBytes(MinimumDiskBytes, false)
+}
+
 // Installation swap: live media have no swap, and nixos-install was
 // OOM-killed evaluating the configuration on a 12 GiB machine, so a fresh
 // install puts a temporary swap file on the new root. A root below
@@ -111,6 +129,16 @@ func Build(input Input) (diskplan.Plan, error) {
 			"target disk is too small for canonical gjallarOS layout: have=%d require-at-least=%d",
 			observed.SizeBytes,
 			required,
+		)
+	}
+
+	// Q259: the question leaves the partition out on a smaller disk; this
+	// stops a preset or any other path that still asks for it.
+	if input.EnableRecovery && !RecoveryFits(observed.SizeBytes) {
+		return diskplan.Plan{}, fmt.Errorf(
+			"the recovery partition needs a disk of at least %d GiB, and this disk has %d bytes; nothing was changed",
+			MinimumRecoveryDiskBytes>>30,
+			observed.SizeBytes,
 		)
 	}
 

@@ -7,20 +7,20 @@ import (
 	"io"
 	"strings"
 
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/freshdiskplan"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/installlog"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/prompt"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/targetdisk"
 )
 
-// freshTargetMinimumBytes is the smallest disk a fresh install takes (Q227):
-// ESP 1 GiB + recovery 12 GiB + the system, the install swap file, and room
-// for builds and the first update. It is checked before anything is erased,
-// for a chosen disk and for --target-disk alike.
-const freshTargetMinimumBytes uint64 = 40 << 30
-
 // discoverTargetDisks lists the disks a fresh install could use. Tests swap
 // it for a fixed list; the installer always uses targetdisk.Discover.
 var discoverTargetDisks = targetdisk.Discover
+
+// validateTargetDisk checks a --target-disk before the questions, so the
+// recovery question knows its size (Q259). Tests swap it; the install
+// validates the disk again before anything is erased.
+var validateTargetDisk = targetdisk.Validate
 
 // validateTargetDiskContext rejects --target-disk on a persistent installed
 // host. Fresh installation only runs from a live or recovery environment; an
@@ -41,20 +41,30 @@ func selectFreshTargetDisk(
 	ui prompt.UI,
 	out io.Writer,
 	explicit string,
-) (string, error) {
+) (targetdisk.Result, error) {
 	explicit = strings.TrimSpace(explicit)
 	if explicit != "" {
 		fmt.Fprintf(out, "Using explicitly configured target disk: %s\n", explicit)
+		disk, err := validateTargetDisk(ctx, targetdisk.Input{
+			Path:         explicit,
+			MinSizeBytes: freshdiskplan.MinimumDiskBytes,
+		})
+		if err != nil {
+			return targetdisk.Result{}, err
+		}
 		installlog.Mark(installlog.DiskGiven)
-		return explicit, nil
+		// The configured spelling stays the target; the install resolves
+		// and validates it again.
+		disk.Path = explicit
+		return disk, nil
 	}
 
 	eligible, rejected, err := discoverTargetDisks(
 		ctx,
-		freshTargetMinimumBytes,
+		freshdiskplan.MinimumDiskBytes,
 	)
 	if err != nil {
-		return "", err
+		return targetdisk.Result{}, err
 	}
 
 	if len(rejected) != 0 {
@@ -66,7 +76,7 @@ func selectFreshTargetDisk(
 
 	if len(eligible) == 0 {
 		fmt.Fprintln(out, "No eligible installation target disks were found.")
-		return "", fmt.Errorf(
+		return targetdisk.Result{}, fmt.Errorf(
 			"no eligible whole target disk passed installer safety validation",
 		)
 	}
@@ -90,24 +100,24 @@ func selectFreshTargetDisk(
 		}
 		yes, err := ui.Confirm(ctx, question, false)
 		if err != nil {
-			return "", fmt.Errorf("confirm target disk: %w", err)
+			return targetdisk.Result{}, fmt.Errorf("confirm target disk: %w", err)
 		}
 		if !yes {
-			return "", errors.New("no disk chosen; nothing was changed")
+			return targetdisk.Result{}, errors.New("no disk chosen; nothing was changed")
 		}
 		fmt.Fprintf(out, "Selected target disk: %s\n", selected.Path)
 		installlog.Mark(installlog.DiskOnlyOneConfirmed)
-		return selected.Path, nil
+		return selected, nil
 	}
 
 	fmt.Fprintln(out, "Multiple eligible installation target disks detected:")
 
 	options := make([]string, 0, len(eligible))
-	paths := make(map[string]string, len(eligible))
+	disks := make(map[string]targetdisk.Result, len(eligible))
 	for _, disk := range eligible {
 		label := disk.Summary()
 		options = append(options, label)
-		paths[label] = disk.Path
+		disks[label] = disk
 	}
 
 	label := "Select the whole disk to erase and install gjallarOS onto"
@@ -116,19 +126,19 @@ func selectFreshTargetDisk(
 	}
 	selected, err := ui.Choice(ctx, label, "", options)
 	if err != nil {
-		return "", fmt.Errorf("select target disk: %w", err)
+		return targetdisk.Result{}, fmt.Errorf("select target disk: %w", err)
 	}
 
-	path, ok := paths[selected]
+	disk, ok := disks[selected]
 	if !ok {
-		return "", fmt.Errorf(
+		return targetdisk.Result{}, fmt.Errorf(
 			"selected target disk is not part of the validated candidate set",
 		)
 	}
 
-	fmt.Fprintf(out, "Selected target disk: %s\n", path)
+	fmt.Fprintf(out, "Selected target disk: %s\n", disk.Path)
 	installlog.Mark(installlog.DiskChosen, installlog.Count("disks", len(eligible)))
-	return path, nil
+	return disk, nil
 }
 
 // targetDiskDetails is the block shown above the disk question: per disk

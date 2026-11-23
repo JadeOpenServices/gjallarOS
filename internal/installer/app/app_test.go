@@ -157,11 +157,79 @@ func TestManagedPresetForcesBootRecoveryContract(t *testing.T) {
 
 func runRecovery(t *testing.T, input string, partitionable, secureBoot bool, u *config.User) string {
 	t.Helper()
+	return runRecoveryOn(t, input, partitionable, secureBoot, "", u)
+}
+
+func runRecoveryOn(t *testing.T, input string, partitionable, secureBoot bool, noRoom string, u *config.User) string {
+	t.Helper()
 	var output bytes.Buffer
-	if err := collectRecovery(context.Background(), prompt.New(strings.NewReader(input), &output), partitionable, secureBoot, u); err != nil {
+	if err := collectRecovery(context.Background(), prompt.New(strings.NewReader(input), &output), partitionable, secureBoot, noRoom, u); err != nil {
 		t.Fatalf("%v\n%s", err, output.String())
 	}
 	return output.String()
+}
+
+// Plane 415, Q259: the recovery partition comes on top of the 40 GiB
+// minimum. A smaller disk ran out of space in nixos-install (27 GiB root on
+// the 40 GiB e2e-t480 disk), so the partition is not offered there and the
+// installer says why.
+func TestRecoveryRoomNamesTheNeededDisk(t *testing.T) {
+	if why := recoveryRoom(52 << 30); why != "" {
+		t.Fatalf("52 GiB disk refused: %s", why)
+	}
+	why := recoveryRoom(40 << 30)
+	for _, want := range []string{"40.0 GiB", "12 GiB", "52 GiB", "No recovery partition"} {
+		if !strings.Contains(why, want) {
+			t.Fatalf("reason misses %q: %s", want, why)
+		}
+	}
+}
+
+func TestCollectRecoverySkipsPartitionWithoutRoom(t *testing.T) {
+	why := recoveryRoom(40 << 30)
+	for _, shim := range []bool{false, true} {
+		u := config.User{SecureBootShim: shim}
+		output := runRecoveryOn(t, "\n", true, true, why, &u)
+		if !u.RecoveryEnable || u.RecoveryPartitionEnable {
+			t.Fatalf("shim=%t: recovery=%t partition=%t", shim, u.RecoveryEnable, u.RecoveryPartitionEnable)
+		}
+		if strings.Contains(output, recoveryFull) || !strings.Contains(output, why) {
+			t.Fatalf("shim=%t: partition offered or reason missing:\n%s", shim, output)
+		}
+	}
+}
+
+// A managed machine always gets the partition; a disk without room for it
+// stops the install before any disk is touched.
+func TestManagedInstallWithoutRecoveryRoomStops(t *testing.T) {
+	why := recoveryRoom(40 << 30)
+	u := config.User{Management: config.ManagementIntent{Enable: true}}
+	var output bytes.Buffer
+	err := collectRecovery(context.Background(), prompt.New(strings.NewReader(""), &output), true, true, why, &u)
+	if err == nil || !strings.Contains(err.Error(), "managed machine") {
+		t.Fatalf("err = %v", err)
+	}
+	u = config.User{Management: config.ManagementIntent{Enable: true}, RecoveryPartitionEnable: true}
+	if err := dropRecoveryWithoutRoom(&output, &u, why); err == nil || !u.RecoveryPartitionEnable {
+		t.Fatalf("managed preset: err=%v partition=%t", err, u.RecoveryPartitionEnable)
+	}
+}
+
+// A preset that asks for the partition on a small disk loses it, with the
+// reason; on a disk with room nothing changes.
+func TestPresetRecoveryDroppedWithoutRoom(t *testing.T) {
+	why := recoveryRoom(40 << 30)
+	var output bytes.Buffer
+	u := config.User{RecoveryEnable: true, RecoveryPartitionEnable: true}
+	if err := dropRecoveryWithoutRoom(&output, &u, ""); err != nil || !u.RecoveryPartitionEnable || output.Len() != 0 {
+		t.Fatalf("disk with room: err=%v partition=%t out=%q", err, u.RecoveryPartitionEnable, output.String())
+	}
+	if err := dropRecoveryWithoutRoom(&output, &u, why); err != nil || u.RecoveryPartitionEnable || !u.RecoveryEnable {
+		t.Fatalf("small disk: err=%v recovery=%t partition=%t", err, u.RecoveryEnable, u.RecoveryPartitionEnable)
+	}
+	if !strings.Contains(output.String(), why) {
+		t.Fatalf("reason not printed: %q", output.String())
+	}
 }
 
 // On an unencrypted in-place root the partition is not offered: the

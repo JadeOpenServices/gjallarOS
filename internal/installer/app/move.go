@@ -15,6 +15,7 @@ import (
 
 	"github.com/JadeOpenServices/gjallarOS/internal/binarycache"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/config"
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/freshdiskplan"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/installlog"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/move"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/move/freespace"
@@ -159,7 +160,7 @@ func (m *moveRun) pickTarget(ctx context.Context, target string, user config.Use
 	if oldDisk, err := filepath.EvalSymlinks(m.old.Disk.Disk); err != nil || oldDisk == resolved {
 		return fmt.Errorf("%s holds the old system; pick another disk for the new one", target)
 	}
-	eligible, _, err := discoverTargetDisks(ctx, freshTargetMinimumBytes)
+	eligible, _, err := discoverTargetDisks(ctx, freshdiskplan.MinimumDiskBytes)
 	if err != nil {
 		return err
 	}
@@ -184,7 +185,7 @@ func (m *moveRun) pickTarget(ctx context.Context, target string, user config.Use
 	m.fileCache = uint64(closure.Bytes)
 	m.choices, err = m.flow.Choose(ctx, m.old, move.Target{
 		DiskBytes:   size,
-		Recovery:    freshRecoveryPartition(user),
+		Recovery:    freshRecoveryPartition(user) && freshdiskplan.RecoveryFits(size),
 		BaseClosure: uint64(closure.Bytes) / 4 * 5,
 		FileCache:   m.fileCache,
 	})

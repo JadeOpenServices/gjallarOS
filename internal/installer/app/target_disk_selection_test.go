@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/freshdiskplan"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/prompt"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/targetdisk"
 )
@@ -91,8 +92,8 @@ func fakeDisks(t *testing.T, eligible []targetdisk.Result, rejected []targetdisk
 	saved := discoverTargetDisks
 	t.Cleanup(func() { discoverTargetDisks = saved })
 	discoverTargetDisks = func(_ context.Context, min uint64) ([]targetdisk.Result, []targetdisk.Rejected, error) {
-		if min != freshTargetMinimumBytes {
-			t.Fatalf("discovery minimum = %d, want %d", min, freshTargetMinimumBytes)
+		if min != freshdiskplan.MinimumDiskBytes {
+			t.Fatalf("discovery minimum = %d, want %d", min, freshdiskplan.MinimumDiskBytes)
 		}
 		return eligible, rejected, nil
 	}
@@ -102,8 +103,8 @@ func pickDisk(t *testing.T, answers string) (string, string, error) {
 	t.Helper()
 	var out bytes.Buffer
 	ui := prompt.UI{Reader: bufio.NewReader(strings.NewReader(answers)), Out: &out}
-	path, err := selectFreshTargetDisk(context.Background(), ui, &out, "")
-	return path, out.String(), err
+	disk, err := selectFreshTargetDisk(context.Background(), ui, &out, "")
+	return disk.Path, out.String(), err
 }
 
 var (
