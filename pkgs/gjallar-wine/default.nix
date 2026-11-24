@@ -33,6 +33,8 @@ buildGoModule {
       # off (L51).
       ../../apps/wine/home.nix
       ../../cmd/gjallar-wine
+      # internal/tty gives a terminal's size as a calmmenu.Size.
+      ../../internal/installer/calmmenu
       ../../internal/installer/config
       ../../internal/input/xkb
       ../../internal/localchanges
