@@ -9,6 +9,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/diskplan"
 )
 
 const maxSymlinks = 32
@@ -93,7 +95,7 @@ func prepareBoot(ctx context.Context, root string, r runner) error {
 	}
 
 	if mounted == "" {
-		if err := r.Run(ctx, "mount", source, target); err != nil {
+		if err := r.Run(ctx, "mount", "-o", diskplan.PrivateFATMasks, source, target); err != nil {
 			return fmt.Errorf(
 				"mount installed /boot at %s: %w",
 				target,
@@ -104,6 +106,13 @@ func prepareBoot(ctx context.Context, root string, r runner) error {
 		mounted, options, err = mountedSource(ctx, r, target)
 		if err != nil {
 			return err
+		}
+		if missing := diskplan.MissingFATMask(options); missing != "" {
+			return fmt.Errorf(
+				"installed /boot at %s is mounted without %s, so other users could read it",
+				target,
+				missing,
+			)
 		}
 	}
 

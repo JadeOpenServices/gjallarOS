@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 )
 
@@ -30,6 +31,26 @@ const (
 	RecoveryPartLabel = "GJALLAR-RECOVERY"
 	RecoveryFSLabel   = "GJALLAR-REC"
 )
+
+// PrivateFATMasks keeps a vfat ESP or recovery partition readable by
+// root only. vfat has no owners, so without masks every user can read
+// the boot loader random seed (bootctl warns about it). The installer
+// mounts both partitions with them, and nixos-generate-config copies
+// them into the hardware configuration; system/hardware/boot.nix sets
+// the same masks for /boot on the installed system (Plane 434).
+const PrivateFATMasks = "fmask=0077,dmask=0077"
+
+// MissingFATMask returns the first of PrivateFATMasks that the
+// comma-separated mount options lack, or "" when both are there.
+func MissingFATMask(options string) string {
+	have := strings.Split(strings.TrimSpace(options), ",")
+	for _, want := range strings.Split(PrivateFATMasks, ",") {
+		if !slices.Contains(have, want) {
+			return want
+		}
+	}
+	return ""
+}
 
 var guidPattern = regexp.MustCompile(`(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 

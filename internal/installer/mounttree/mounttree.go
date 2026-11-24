@@ -103,7 +103,7 @@ func prepare(
 	if err := privileged(ctx, runner, "mkdir", "-p", espMount); err != nil {
 		return Result{}, fmt.Errorf("create ESP mount point: %w", err)
 	}
-	if err := privileged(ctx, runner, "mount", espDevice, espMount); err != nil {
+	if err := privileged(ctx, runner, "mount", "-o", diskplan.PrivateFATMasks, espDevice, espMount); err != nil {
 		return Result{}, fmt.Errorf("mount ESP: %w", err)
 	}
 
@@ -115,6 +115,10 @@ func prepare(
 	}
 
 	if err := verifyMount(ctx, runner, espMount, espDevice, "vfat"); err != nil {
+		cleanupESP()
+		return Result{}, fmt.Errorf("verify ESP mount: %w", err)
+	}
+	if err := verifyPrivateFAT(ctx, runner, espMount); err != nil {
 		cleanupESP()
 		return Result{}, fmt.Errorf("verify ESP mount: %w", err)
 	}
@@ -171,7 +175,7 @@ func prepare(
 			cleanupESP()
 			return Result{}, fmt.Errorf("create recovery mount point: %w", err)
 		}
-		if err := privileged(ctx, runner, "mount", recoveryDevice, recoveryMount); err != nil {
+		if err := privileged(ctx, runner, "mount", "-o", diskplan.PrivateFATMasks, recoveryDevice, recoveryMount); err != nil {
 			cleanupESP()
 			return Result{}, fmt.Errorf("mount recovery filesystem: %w", err)
 		}
@@ -183,6 +187,11 @@ func prepare(
 			recoveryDevice,
 			"vfat",
 		); err != nil {
+			_ = privileged(ctx, runner, "umount", recoveryMount)
+			cleanupESP()
+			return Result{}, fmt.Errorf("verify recovery mount: %w", err)
+		}
+		if err := verifyPrivateFAT(ctx, runner, recoveryMount); err != nil {
 			_ = privileged(ctx, runner, "umount", recoveryMount)
 			cleanupESP()
 			return Result{}, fmt.Errorf("verify recovery mount: %w", err)
@@ -343,6 +352,34 @@ func requireFreshPartition(
 		}
 	}
 
+	return nil
+}
+
+// verifyPrivateFAT checks that the kernel took diskplan.PrivateFATMasks
+// for the vfat mount at mountPoint.
+func verifyPrivateFAT(
+	ctx context.Context,
+	runner commandRunner,
+	mountPoint string,
+) error {
+	raw, err := runner.Output(
+		ctx,
+		"findmnt",
+		"-nro",
+		"FS-OPTIONS",
+		"--mountpoint",
+		mountPoint,
+	)
+	if err != nil {
+		return fmt.Errorf("read mount options of %s: %w", mountPoint, err)
+	}
+	if missing := diskplan.MissingFATMask(string(raw)); missing != "" {
+		return fmt.Errorf(
+			"%s is mounted without %s, so other users could read it",
+			mountPoint,
+			missing,
+		)
+	}
 	return nil
 }
 

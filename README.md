@@ -765,6 +765,14 @@ layout. A reinstall from recovery reads the answers from
 `/etc/gjallar/system/user.config.json` on the installed disk after you
 unlock it, and asks for them when that file is missing.
 
+Only root can read the ESP (`/boot`) and the recovery partition. vfat
+has no file owners, so the installer mounts both with
+`fmask=0077,dmask=0077` and the installed system keeps those options.
+Installs made with v2026.10.69 or older still mount the recovery
+partition readable for every local user. It holds only the signed
+recovery images, and only root can write to it. `/boot` is root-only on
+every install through `system/hardware/boot.nix`.
+
 > [!NOTE]
 > The installed system does not carry the installer. `gjallar-installer` and
 > `gjallar-recovery-maintenance` (package `pkgs/gjallar-installer`) can

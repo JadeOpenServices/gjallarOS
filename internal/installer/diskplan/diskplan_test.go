@@ -334,3 +334,17 @@ func TestPlanAllowsMissingTargetModel(t *testing.T) {
 		)
 	}
 }
+
+func TestMissingFATMask(t *testing.T) {
+	for options, want := range map[string]string{
+		"rw,relatime,fmask=0077,dmask=0077,codepage=437\n": "",
+		"rw,fmask=0022,dmask=0022":                         "fmask=0077",
+		"rw,fmask=0077":                                    "dmask=0077",
+		"rw,fmask=00777,dmask=0077":                        "fmask=0077",
+		"":                                                 "fmask=0077",
+	} {
+		if got := MissingFATMask(options); got != want {
+			t.Errorf("MissingFATMask(%q) = %q, want %q", options, got, want)
+		}
+	}
+}

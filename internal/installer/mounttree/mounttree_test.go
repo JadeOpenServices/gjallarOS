@@ -16,6 +16,9 @@ const (
 	recoveryUUID = "99999999-8888-7777-6666-555555555555"
 )
 
+// vfatOptions is what the kernel lists for a vfat mount with both masks.
+const vfatOptions = "rw,fmask=0077,dmask=0077,codepage=437,iocharset=ascii,shortname=mixed,errors=remount-ro\n"
+
 type fakeRunner struct {
 	calls   [][]string
 	outputs map[string][]byte
@@ -173,6 +176,14 @@ func runner(withRecovery bool) *fakeRunner {
 				"--mountpoint",
 				"/mnt/boot",
 			): []byte(esp + " vfat\n"),
+
+			key(
+				"findmnt",
+				"-nro",
+				"FS-OPTIONS",
+				"--mountpoint",
+				"/mnt/boot",
+			): []byte(vfatOptions),
 		},
 		errors: map[string]error{},
 	}
@@ -207,6 +218,14 @@ func runner(withRecovery bool) *fakeRunner {
 			"--mountpoint",
 			"/mnt/recovery",
 		)] = []byte(recovery + " vfat\n")
+
+		r.outputs[key(
+			"findmnt",
+			"-nro",
+			"FS-OPTIONS",
+			"--mountpoint",
+			"/mnt/recovery",
+		)] = []byte(vfatOptions)
 	}
 
 	return r
@@ -241,10 +260,10 @@ func TestPrepareESPAndRecoveryMountTree(t *testing.T) {
 	for _, required := range []string{
 		"sudo mkfs.vfat -F 32 -n EFI /dev/nvme1n1p1",
 		"sudo mkdir -p /mnt/boot",
-		"sudo mount /dev/nvme1n1p1 /mnt/boot",
+		"sudo mount -o fmask=0077,dmask=0077 /dev/nvme1n1p1 /mnt/boot",
 		"sudo mkfs.vfat -F 32 -n GJALLAR-REC /dev/nvme1n1p3",
 		"sudo mkdir -p /mnt/recovery",
-		"sudo mount /dev/nvme1n1p3 /mnt/recovery",
+		"sudo mount -o fmask=0077,dmask=0077 /dev/nvme1n1p3 /mnt/recovery",
 	} {
 		if !strings.Contains(joined, required) {
 			t.Fatalf("missing command %q:\n%s", required, joined)
@@ -364,6 +383,60 @@ func TestMountVerificationFailureStopsStage(t *testing.T) {
 	}
 	if !strings.Contains(calls(r.calls), "sudo umount /mnt/boot") {
 		t.Fatalf("failed ESP mount was not cleaned up:\n%s", calls(r.calls))
+	}
+}
+
+// Plane 434: a mount that the kernel took without the masks leaves the
+// boot loader random seed readable by every user, so the stage stops.
+func TestFATMountWithoutMasksStopsStage(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		mountPoint string
+		options    string
+		missing    string
+		unmounts   []string
+	}{
+		{
+			name:       "ESP without fmask",
+			mountPoint: "/mnt/boot",
+			options:    "rw,fmask=0022,dmask=0077,codepage=437\n",
+			missing:    "fmask=0077",
+			unmounts:   []string{"sudo umount /mnt/boot"},
+		},
+		{
+			name:       "recovery without dmask",
+			mountPoint: "/mnt/recovery",
+			options:    "rw,fmask=0077,codepage=437\n",
+			missing:    "dmask=0077",
+			unmounts:   []string{"sudo umount /mnt/recovery", "sudo umount /mnt/boot"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := runner(true)
+			r.outputs[key(
+				"findmnt",
+				"-nro",
+				"FS-OPTIONS",
+				"--mountpoint",
+				tc.mountPoint,
+			)] = []byte(tc.options)
+
+			var out bytes.Buffer
+			_, err := prepare(
+				context.Background(),
+				Input{Plan: plan(true), Out: &out},
+				r,
+			)
+			if err == nil || !strings.Contains(err.Error(), "without "+tc.missing) {
+				t.Fatalf("mount without %s accepted: %v", tc.missing, err)
+			}
+			joined := calls(r.calls)
+			for _, unmount := range tc.unmounts {
+				if !strings.Contains(joined, unmount) {
+					t.Fatalf("missing cleanup %q:\n%s", unmount, joined)
+				}
+			}
+		})
 	}
 }
 

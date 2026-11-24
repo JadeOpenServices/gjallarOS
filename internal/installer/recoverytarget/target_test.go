@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/diskplan"
 )
 
 type fakeExitError struct {
@@ -334,6 +336,7 @@ func TestPrepareBootFailsClosedWhenMountFails(t *testing.T) {
 			): fakeExitError{code: 1},
 			commandKey(
 				"mount",
+				"-o", diskplan.PrivateFATMasks,
 				source,
 				target,
 			): fmt.Errorf("mount failed"),
@@ -386,7 +389,7 @@ func TestPrepareBootMountsAndVerifiesBoot(t *testing.T) {
 		t.Fatalf("prepareBoot: %v", err)
 	}
 
-	wantMount := commandKey("mount", source, target)
+	wantMount := commandKey("mount", "-o", diskplan.PrivateFATMasks, source, target)
 	found := false
 	for _, run := range r.runs {
 		if run == wantMount {
@@ -399,10 +402,42 @@ func TestPrepareBootMountsAndVerifiesBoot(t *testing.T) {
 	}
 }
 
+// Plane 434: the installed /boot holds the boot loader random seed, so a
+// mount that the kernel took without the masks stops the stage.
+func TestPrepareBootRejectsOwnMountWithoutMasks(t *testing.T) {
+	dir := t.TempDir()
+	source := "/dev/disk/by-uuid/TEST-ESP"
+	target := filepath.Join(dir, "boot")
+	findmntKey := commandKey(
+		"findmnt",
+		"-nvro", "SOURCE,OPTIONS",
+		"--mountpoint", target,
+	)
+
+	writeNixOSFstab(t, dir, source)
+
+	r := &fakeRunner{
+		outputs: map[string][]byte{},
+		errors:  map[string]error{},
+	}
+
+	err := prepareBoot(context.Background(), dir, &mountingRunner{
+		fakeRunner: r,
+		findmntKey: findmntKey,
+		options:    "rw,relatime,fmask=0022,dmask=0022,codepage=437",
+	})
+	if err == nil || !strings.Contains(err.Error(), "without fmask=0077") {
+		t.Fatalf("mount without masks accepted: %v", err)
+	}
+}
+
 type mountingRunner struct {
 	fakeRunner *fakeRunner
 	findmntKey string
 	lookups    int
+	// options is what findmnt lists after the mount; empty means a
+	// mount with diskplan.PrivateFATMasks.
+	options string
 }
 
 func (r *mountingRunner) Output(
@@ -417,7 +452,11 @@ func (r *mountingRunner) Output(
 		if r.lookups == 1 {
 			return nil, fakeExitError{code: 1}
 		}
-		return []byte("/dev/disk/by-uuid/TEST-ESP rw,relatime\n"), nil
+		options := r.options
+		if options == "" {
+			options = "rw,relatime," + diskplan.PrivateFATMasks + ",codepage=437"
+		}
+		return []byte("/dev/disk/by-uuid/TEST-ESP " + options + "\n"), nil
 	}
 
 	return r.fakeRunner.Output(ctx, name, args...)
@@ -457,5 +496,48 @@ func TestPrepareBootRejectsReadOnlyExistingMount(t *testing.T) {
 	err := prepareBoot(context.Background(), dir, r)
 	if err == nil || !strings.Contains(err.Error(), "not mounted read-write") {
 		t.Fatalf("expected read-only mount rejection, got %v", err)
+	}
+}
+
+// Loophole pass for Plane 434: a planted boot link on the installed root
+// must stop the stage before mount, so root never mounts the ESP over a
+// path outside the installed root.
+func TestPrepareBootRejectsPlantedBootLink(t *testing.T) {
+	for name, link := range map[string]string{
+		"absolute": "",
+		"relative": "../outside",
+	} {
+		t.Run(name, func(t *testing.T) {
+			parent := t.TempDir()
+			dir := filepath.Join(parent, "root")
+			outside := filepath.Join(parent, "outside")
+			if err := os.MkdirAll(outside, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			writeNixOSFstab(t, dir, "/dev/disk/by-uuid/TEST-ESP")
+			if link == "" {
+				link = outside
+			}
+			if err := os.Symlink(link, filepath.Join(dir, "boot")); err != nil {
+				t.Fatal(err)
+			}
+
+			r := &fakeRunner{
+				outputs: map[string][]byte{},
+				errors:  map[string]error{},
+			}
+			err := prepareBoot(context.Background(), dir, r)
+			if err == nil {
+				t.Fatal("planted boot link accepted")
+			}
+			if !strings.Contains(err.Error(), "escapes") {
+				t.Fatalf("planted boot link failed for another reason: %v", err)
+			}
+			for _, run := range r.runs {
+				if strings.HasPrefix(run, commandKey("mount")) {
+					t.Fatalf("mount ran through a planted link: %q", r.runs)
+				}
+			}
+		})
 	}
 }
