@@ -231,8 +231,8 @@ the value below, and only then run it.
 
 | Maker | SHA-256 of the current release |
 | --- | --- |
-| `make-stick.sh` | 95178002ba6916816ac86a7a44086499a560e37e1ef5430188e9ced91e3dab3d |
-| `make-stick.ps1` | a720ee97f849bbb8e09f4bdaf0879c7620643b86303834b3507cb5a89fa3bcf3 |
+| `make-stick.sh` | 17c3c7cb740cd4ee08405c5b8256bddf93aaabbf3d87ea6d895b4ca0e82c2640 |
+| `make-stick.ps1` | a114d005e792e5d029b78c61a2cdd65c5337384006f223781c5d890456571f48 |
 
 On Linux:
 
