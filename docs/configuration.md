@@ -239,3 +239,11 @@ catches up; it never goes back to an older commit.
 `--repo`, `--host`, `--update-inputs` and other `nixos-rebuild` arguments are
 refused; only `-- --override-input oddc COMMIT` may follow, and the oddc pin
 may move only to a commit of an official ODDC branch (ROADMAP §14).
+
+When the new system is already running but a service failed to start,
+stop or restart during the switch, the rebuild ends with "⚠ Switched to the
+new system, but the switch reported errors" instead of "Rebuild failed",
+and lists each failed unit with a `journalctl -b -u UNIT` line. The exit
+status stays 4. Old generations are kept and no snapshot is taken, so the
+previous generation stays in the boot menu. Fix the cause and run
+`gjallarctl rebuild` again.

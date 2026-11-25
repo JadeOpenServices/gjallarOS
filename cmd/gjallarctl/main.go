@@ -22,6 +22,7 @@ import (
 	"os/signal"
 	osuser "os/user"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -2251,11 +2252,12 @@ func rebuildCheckout(repo string, opts rebuildOptions, stdout, stderr io.Writer)
 	}
 
 	var status int
+	var activated bool
 	if debug {
 		fmt.Fprintf(stdout, "Rebuilding NixOS for %s\n[gjallarOS] Flake: %s#%s\n\n", host, repo, host)
-		status = plan.run(context.Background(), stdout, stderr)
+		status, activated = plan.run(context.Background(), stdout, stderr)
 	} else {
-		status = runRebuildQuiet(stdout, stderr, host, messages, started, plan)
+		status, activated = runRebuildQuiet(stdout, stderr, host, messages, started, plan)
 	}
 	if status == 0 && cleanup {
 		if cleanupStatus := runCleanupOld(nil, stdout, stderr); cleanupStatus != 0 {
@@ -2266,14 +2268,30 @@ func rebuildCheckout(repo string, opts rebuildOptions, stdout, stderr io.Writer)
 		}
 	}
 	elapsed := int(time.Since(started).Round(time.Second) / time.Second)
-	if status == 130 {
-		fmt.Fprintf(stderr, "\n⏱ %02d:%02d  ✗ Rebuild cancelled.\n", elapsed/60, elapsed%60)
-	} else if status == 0 {
-		fmt.Fprintf(stdout, "\n⏱ %02d:%02d  ✓ Rebuild completed successfully.\n", elapsed/60, elapsed%60)
-	} else {
-		fmt.Fprintf(stderr, "\n⏱ %02d:%02d  ✗ Rebuild failed.\n", elapsed/60, elapsed%60)
+	out := stderr
+	if status == 0 {
+		out = stdout
 	}
+	fmt.Fprintf(out, "\n⏱ %02d:%02d  %s\n", elapsed/60, elapsed%60, rebuildResult(status, activated))
 	return status
+}
+
+// rebuildResult is the last line of a rebuild. A switch that activated the
+// new system and then reported failed units is not "Rebuild failed": the
+// new generation runs, only the cleanup of old generations was skipped
+// (Plane 333). The wrapper also takes no snapshot for it, as for any status
+// other than 0.
+func rebuildResult(status int, activated bool) string {
+	switch {
+	case status == 0:
+		return "✓ Rebuild completed successfully."
+	case status == 130:
+		return "✗ Rebuild cancelled."
+	case activated && status == rebuildSwitchWarning:
+		return "⚠ Switched to the new system, but the switch reported errors (see above). Old generations were kept."
+	default:
+		return "✗ Rebuild failed."
+	}
 }
 
 // oddcOverrideRevision returns the commit a `--override-input oddc <ref>`
@@ -2394,28 +2412,38 @@ func newRebuildPlan(
 	return plan
 }
 
-func (p rebuildPlan) run(ctx context.Context, stdout, stderr io.Writer) int {
+// rebuildSwitchWarning is the exit status of switch-to-configuration when it
+// activated the new system but a unit failed to start, stop, reload or
+// restart, or the user units could not be reloaded
+// (nixpkgs switch-to-configuration-ng). Exit 2 means the activation script
+// itself failed and stays "Rebuild failed".
+const rebuildSwitchWarning = 4
+
+// run evaluates, builds and activates the system. activated reports whether
+// the activate step ran, so a status of rebuildSwitchWarning can be told
+// apart from a failed evaluation or build that happened to exit 4.
+func (p rebuildPlan) run(ctx context.Context, stdout, stderr io.Writer) (status int, activated bool) {
 	var drv bytes.Buffer
 	if status := runPrivilegedCommand(ctx, &drv, stderr, p.eval...); status != 0 {
-		return status
+		return status, false
 	}
 	drvPath := strings.TrimSpace(drv.String())
 	if !strings.HasPrefix(drvPath, "/nix/store/") || !strings.HasSuffix(drvPath, ".drv") {
 		fmt.Fprintf(stderr, "ERROR: evaluation printed no derivation: %q\n", drvPath)
-		return 1
+		return 1, false
 	}
 
 	var built bytes.Buffer
 	if status := runPrivilegedCommand(ctx, &built, stderr, slices.Concat(p.build, []string{drvPath + "^out"})...); status != 0 {
-		return status
+		return status, false
 	}
 	system := strings.TrimSpace(built.String())
 	if !strings.HasPrefix(system, "/nix/store/") || strings.ContainsAny(system, " \n") {
 		fmt.Fprintf(stderr, "ERROR: build printed no single system path: %q\n", system)
-		return 1
+		return 1, false
 	}
 
-	return runPrivilegedCommand(ctx, stdout, stderr, slices.Concat(p.activate, []string{"--store-path", system})...)
+	return runPrivilegedCommand(ctx, stdout, stderr, slices.Concat(p.activate, []string{"--store-path", system})...), true
 }
 
 // pullCheckout brings the checkout up to date before the rebuild. It
@@ -2803,11 +2831,11 @@ func runHelpme(args []string, stdout, stderr io.Writer) int {
 	return runCommand(context.Background(), stdout, stderr, "yad", yad...)
 }
 
-func runRebuildQuiet(stdout, stderr io.Writer, host string, messages []string, started time.Time, plan rebuildPlan) int {
+func runRebuildQuiet(stdout, stderr io.Writer, host string, messages []string, started time.Time, plan rebuildPlan) (int, bool) {
 	log, err := os.CreateTemp("", "gjallar-rebuild-*.log")
 	if err != nil {
 		fmt.Fprintf(stderr, "ERROR: create rebuild log: %v\n", err)
-		return 1
+		return 1, false
 	}
 	keepLog := false
 	defer func() {
@@ -2855,7 +2883,7 @@ func runRebuildQuiet(stdout, stderr io.Writer, host string, messages []string, s
 	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	status := plan.run(ctx, log, log)
+	status, activated := plan.run(ctx, log, log)
 	cancelled := ctx.Err() != nil
 	cancel()
 	if interactive {
@@ -2903,8 +2931,54 @@ func runRebuildQuiet(stdout, stderr io.Writer, host string, messages []string, s
 			fmt.Fprintf(stderr, "[rebuild] No network: %s\n", networkError)
 			fmt.Fprintln(stderr, "[rebuild] Check the connection (Wi-Fi, DHCP lease, VPN, router) and run gjallarctl rebuild again.")
 		}
+		if activated && status == rebuildSwitchWarning {
+			for _, unit := range rebuildFailedUnits(log) {
+				fmt.Fprintf(stderr, "[rebuild] Failed to start: %s (details: journalctl -b -u %s)\n", unit, unit)
+			}
+		}
 	}
-	return status
+	return status, activated
+}
+
+// rebuildFailedUnitsPrefix starts the line switch-to-configuration prints
+// for units that failed while it activated the new system.
+const rebuildFailedUnitsPrefix = "warning: the following units failed:"
+
+// systemdUnitName matches a unit name as systemd writes it (escaped
+// characters as \xNN). Anything else in that line is left out, so no
+// terminal control text from the log reaches the hint.
+var systemdUnitName = regexp.MustCompile(`^[A-Za-z0-9:_.@\\-]+\.(service|socket|target|mount|automount|swap|timer|path|slice|scope|device)$`)
+
+// rebuildFailedUnits returns the units switch-to-configuration named as
+// failed, once each. Mixed into the rest of the switch output, the line was
+// easy to miss, and "Rebuild failed" read as if nothing had changed
+// (T480s, systemd-tpm2-setup in TPM lockout, Plane 333).
+func rebuildFailedUnits(log io.ReadSeeker) []string {
+	if _, err := log.Seek(0, io.SeekStart); err != nil {
+		return nil
+	}
+	seen := map[string]struct{}{}
+	var units []string
+	scanner := bufio.NewScanner(log)
+	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
+	for scanner.Scan() {
+		rest, ok := strings.CutPrefix(strings.TrimSpace(scanner.Text()), rebuildFailedUnitsPrefix)
+		if !ok {
+			continue
+		}
+		for _, unit := range strings.Split(rest, ",") {
+			unit = strings.TrimSpace(unit)
+			if !systemdUnitName.MatchString(unit) {
+				continue
+			}
+			if _, ok := seen[unit]; ok {
+				continue
+			}
+			seen[unit] = struct{}{}
+			units = append(units, unit)
+		}
+	}
+	return units
 }
 
 // rebuildNetworkErrorMarkers are curl and git messages for a host that

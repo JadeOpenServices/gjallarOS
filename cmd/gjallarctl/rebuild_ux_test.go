@@ -481,3 +481,46 @@ func TestRebuildPlanBootsNextInRecoveryEntry(t *testing.T) {
 		t.Fatalf("activate = %q, want boot in the recovery entry", plan.activate)
 	}
 }
+
+func TestRebuildFailedUnitsNamesEachUnitOnce(t *testing.T) {
+	// switch-to-configuration-ng output after the T480s rebuild in TPM
+	// lockout (Plane 333), with a second unit to check the list split.
+	log := strings.NewReader(strings.Join([]string{
+		"activating the configuration...",
+		"the following new units were started: gjallar-x.service",
+		"warning: the following units failed: systemd-cryptsetup@luks\\x2droot.service, systemd-tpm2-setup.service",
+		"× systemd-tpm2-setup.service - Security Chip Setup",
+		"warning: the following units failed: systemd-tpm2-setup.service, \x1b]0;title\x07bad.service",
+	}, "\n"))
+	got := rebuildFailedUnits(log)
+	want := []string{`systemd-cryptsetup@luks\x2droot.service`, "systemd-tpm2-setup.service"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("units = %q, want %q", got, want)
+	}
+
+	if got := rebuildFailedUnits(strings.NewReader("activating the configuration...\n")); got != nil {
+		t.Fatalf("units = %q, want none", got)
+	}
+}
+
+func TestRebuildResultTellsSwitchErrorsFromFailures(t *testing.T) {
+	for _, tc := range []struct {
+		status    int
+		activated bool
+		prefix    string
+	}{
+		{0, true, "✓"},
+		{130, false, "✗ Rebuild cancelled"},
+		{130, true, "✗ Rebuild cancelled"},
+		{rebuildSwitchWarning, true, "⚠ Switched to the new system"},
+		// Exit 4 from nix eval or nix build is a plain failure.
+		{rebuildSwitchWarning, false, "✗ Rebuild failed"},
+		// Exit 2: the activation script failed.
+		{2, true, "✗ Rebuild failed"},
+		{1, false, "✗ Rebuild failed"},
+	} {
+		if got := rebuildResult(tc.status, tc.activated); !strings.HasPrefix(got, tc.prefix) {
+			t.Fatalf("rebuildResult(%d, %v) = %q, want prefix %q", tc.status, tc.activated, got, tc.prefix)
+		}
+	}
+}
