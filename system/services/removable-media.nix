@@ -215,9 +215,9 @@ in
 {
   # A stick written with dd loses partitions and keeps its old label in
   # udev (Plane 185). What the fix does and when to drop it:
-  # system/fixes/systemd-partition-reread.
+  # system/fixes/systemd (remove-before-add.patch).
   imports = [
-    ../fixes/systemd-partition-reread
+    ../fixes/systemd
     ./foreign-media-readonly.nix
   ];
 

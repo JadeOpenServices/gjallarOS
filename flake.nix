@@ -269,9 +269,7 @@
         "nextcloud-client-openvfs" = (import ./apps/nextcloud/package.nix { inherit pkgs; }).client;
         openvfs = (import ./apps/nextcloud/package.nix { inherit pkgs; }).openvfs;
         "gjallar-opencode" = import ./apps/ai/opencode.nix { inherit pkgs; };
-        "systemd-partition-reread" = import ./system/fixes/systemd-partition-reread/package.nix {
-          inherit pkgs;
-        };
+        "gjallar-systemd" = import ./system/fixes/systemd/package.nix { inherit pkgs; };
         inherit (pkgs.qt6Packages) qt6ct;
         inherit (pkgs.kdePackages) dolphin;
         inherit (pkgs)
@@ -302,7 +300,7 @@
             nextcloud-client-openvfs
             openvfs
             gjallar-opencode
-            systemd-partition-reread
+            gjallar-systemd
             lzbt-shim
             qt6ct
             _nemu
@@ -419,12 +417,12 @@
 
         systemd-partition-reread-fix = import ./tests/nix/systemd-partition-reread-fix.nix {
           inherit pkgs;
-          fixModule = ./system/fixes/systemd-partition-reread;
+          fixModule = ./system/fixes/systemd;
         };
 
         systemd-tpm2-lockout-fix = import ./tests/nix/systemd-tpm2-lockout-fix.nix {
           inherit pkgs;
-          fixedSystemd = import ./system/fixes/systemd-tpm2-lockout/package.nix { inherit pkgs; };
+          fixedSystemd = import ./system/fixes/systemd/package.nix { inherit pkgs; };
         };
 
         adb-usbguard-allow = import ./tests/nix/adb-usbguard-allow.nix {

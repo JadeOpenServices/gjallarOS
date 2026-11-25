@@ -24,11 +24,16 @@ drop when upstream fixes the bug.
 - A test in `tests/nix/` runs the bug on a stock machine next to a fixed one.
   When the stock machine stops failing, the test fails and says which part
   to remove.
+- When we patch one package for several bugs, the package is rebuilt once:
+  one folder named after the package (`systemd/`), one patch and one test
+  per bug, and one section per patch in the `default.nix` header, each with
+  its own "Remove when". The table below has one row per patch.
 
 ## Current fixes
 
 | Fix | Linked from | Plane | Remove when |
 | --- | --- | --- | --- |
 | `avahi-daemon/` | `system/services/printing.nix` (ipp-usb turns avahi on) | 181 | the test's stock machine survives a stale pid file; avahi is newer than 0.8 and handles SIGHUP before writing its pid file |
-| `systemd-partition-reread/` | `system/services/removable-media.nix` (sticks written with dd) | 185 | the test's stock machine shows every new partition and the new disk label after a dd; systemd is newer than 260.2 and removes partitions in the way before adding |
+| `systemd/` remove-before-add.patch | `system/services/removable-media.nix` (sticks written with dd) | 185 | the test's stock machine shows every new partition and the new disk label after a dd; systemd is newer than 260.5 and removes partitions in the way before adding |
+| `systemd/` tpm2-setup-lockout.patch | `system/security/secure-boot/measured-boot.nix` (any TPM; a wrong disk PIN can cause the lockout) | 333 | the test's stock run passes in lockout; nixpkgs has systemd 262 or later (no anchor secret left) |
 | `nix-download-retry/` | `system/default.nix` and `system/installer-media/live.nix` (Nix fetches large paths from the release cache) | 431 | the test's stock machine finishes a download whose connection breaks more than five times; Nix is newer than 2.34.9 and no longer counts tries that made progress |

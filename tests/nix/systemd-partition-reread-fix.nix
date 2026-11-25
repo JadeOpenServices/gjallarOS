@@ -1,7 +1,7 @@
-# system/fixes/systemd-partition-reread next to a stock systemd. Both write
-# one GPT image over another with dd, the way an image ends up on a stick.
-# The stock machine shows the bug; when it stops failing, the test says to
-# drop the fix.
+# system/fixes/systemd (remove-before-add.patch) next to a stock systemd.
+# Both write one GPT image over another with dd, the way an image ends up on
+# a stick. The stock machine shows the bug; when it stops failing, the test
+# says to drop the patch.
 { pkgs, fixModule }:
 let
   diskNode = {
@@ -113,7 +113,7 @@ pkgs.testers.runNixOSTest {
         if found == new_starts and uuid == new_uuid:
             raise Exception(
                 "stock systemd now shows every new partition and the new disk"
-                " after a dd; drop system/fixes/systemd-partition-reread"
+                " after a dd; drop remove-before-add.patch from system/fixes/systemd"
             )
   '';
 }

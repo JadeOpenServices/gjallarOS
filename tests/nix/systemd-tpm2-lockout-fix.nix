@@ -1,4 +1,5 @@
-# system/fixes/systemd-tpm2-lockout next to a stock systemd (Plane 333).
+# system/fixes/systemd (tpm2-setup-lockout.patch) next to a stock systemd
+# (Plane 333).
 # The VM's software TPM is put into dictionary attack lockout, then both
 # systemd-tpm2-setup binaries try to anchor the cryptsetup NvPCR. Here the
 # TPM refuses to unseal the stored anchor secret, so stock exits 1 ("Failed to
@@ -86,7 +87,8 @@ pkgs.testers.runNixOSTest {
         if rc == 0:
             raise Exception(
                 "stock systemd-tpm2-setup now passes while the TPM is in"
-                " dictionary attack lockout; drop system/fixes/systemd-tpm2-lockout"
+                " dictionary attack lockout; drop tpm2-setup-lockout.patch from"
+                " system/fixes/systemd"
             )
         assert (
             "Failed to acquire anchor secret: No locks available" in out

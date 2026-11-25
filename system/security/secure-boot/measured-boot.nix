@@ -123,6 +123,11 @@ let
   };
 in
 {
+  # The TPM's dictionary attack lockout fails systemd-tpm2-setup.service and
+  # the next rebuild reports a failed unit (Plane 333). What the fix does and
+  # when to drop it: system/fixes/systemd (tpm2-setup-lockout.patch).
+  imports = [ ../../fixes/systemd ];
+
   # Without tpm2-device=auto, systemd-cryptsetup takes its generic token
   # path, and a failed TPM unlock asks for a "LUKS2 token PIN" although the
   # human passphrase is what it accepts (e2e-target, 2026-10-05). That path
