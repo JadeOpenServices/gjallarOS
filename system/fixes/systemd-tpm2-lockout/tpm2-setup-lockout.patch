@@ -48,9 +48,9 @@ index 8275bd3..4e5658a 100644
          }
 +        if (r == -ENOLCK) {
 +                /* The TPM is in dictionary attack lockout, so it refuses to unseal the stored anchor
-+                 * secret or the extend that anchors the NvPCR. Nothing is wrong with the NvPCR itself, and it gets anchored on a later boot
-+                 * once the lockout has expired. Until then it stays unanchored and refuses
-+                 * measurements, as it does after any other failure here. */
++                 * secret or the extend that anchors the NvPCR. The NvPCR itself is fine: it stays
++                 * unanchored and refuses measurements, as after any other failure here, and gets
++                 * anchored on a later boot once the lockout has expired. */
 +                c->n_skipped++;
 +                return log_notice_errno(r, "TPM is in dictionary attack lockout mode, not anchoring NvPCR '%s' now: %m", name);
 +        }
