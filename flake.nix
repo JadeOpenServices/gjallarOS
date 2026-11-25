@@ -412,6 +412,11 @@
           fixModule = ./system/fixes/avahi-daemon;
         };
 
+        nix-download-retry-fix = import ./tests/nix/nix-download-retry-fix.nix {
+          inherit pkgs;
+          fixModule = ./system/fixes/nix-download-retry;
+        };
+
         systemd-partition-reread-fix = import ./tests/nix/systemd-partition-reread-fix.nix {
           inherit pkgs;
           fixModule = ./system/fixes/systemd-partition-reread;

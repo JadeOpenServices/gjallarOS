@@ -1,0 +1,44 @@
+--- a/src/libstore/filetransfer.cc
++++ b/src/libstore/filetransfer.cc
+@@ -133,6 +133,12 @@
+ 
+         curl_off_t writtenToSink = 0;
+ 
++        /**
++         * `writtenToSink` when the current attempt started. An attempt
++         * that got past this point made progress (see `finish()`).
++         */
++        curl_off_t writtenToSinkAtAttemptStart = 0;
++
+         std::chrono::steady_clock::time_point startTime = std::chrono::steady_clock::now();
+ 
+         inline static const std::set<long> successfulStatuses{200, 201, 204, 206, 304, 0 /* other protocol */};
+@@ -477,6 +483,8 @@
+ 
+             curl_easy_reset(req);
+ 
++            writtenToSinkAtAttemptStart = writtenToSink;
++
+             if (verbosity >= lvlVomit) {
+                 curl_easy_setopt(req, CURLOPT_VERBOSE, 1);
+                 curl_easy_setopt(req, CURLOPT_DEBUGFUNCTION, TransferItem::debugCallback);
+@@ -710,6 +718,19 @@
+ #pragma GCC diagnostic pop
+                 }
+ 
++                /* An attempt that wrote data to the sink resumes where it
++                   stopped, so it does not use up the retry budget: a large
++                   download whose connection keeps breaking (for example
++                   an HTTP/2 stream reset while the transfer was paused
++                   because the sink was slow) must not fail after
++                   `download-attempts` tries that each moved it forward.
++                   Only tries in a row without progress count. A server
++                   can still keep a download going by sending a little
++                   before each break, but it can already do that within a
++                   single try (`stalled-download-timeout`), so this adds
++                   no new way to hang. */
++                if (writtenToSink > writtenToSinkAtAttemptStart)
++                    attempt = 0;
+                 attempt++;
+ 
+                 std::optional<std::string> response;

@@ -91,3 +91,11 @@ The installer mounts the chosen partition for one moment, writes both files
 readable by their owner only, and unmounts it again. Read the files on
 another computer before you send them on. An installed system that runs the
 installer again offers its home folder instead of a drive.
+
+When the system install stops because Nix gave up on a download, the error
+line names the server the download came from, for example "nixos-install
+stopped because a download from github.com failed". The Nix error just above
+it gives the reason. On the release cache, which lets downloads resume, Nix
+picks a broken download up where it stopped and only gives up after five
+tries in a row that got no data at all (Plane 431). So this error means the
+network or the server stopped answering, not that the disk was slow.

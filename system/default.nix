@@ -36,6 +36,9 @@
     ./maintenance/storage.nix
     ./maintenance/installer-resume.nix
     ./maintenance/binary-cache.nix
+    # Large cache downloads survive broken connections; what the fix does
+    # and when to drop it: system/fixes/nix-download-retry.
+    ./fixes/nix-download-retry
     ./services/printing.nix
     ./services/removable-media.nix
     ./services/settings-service.nix

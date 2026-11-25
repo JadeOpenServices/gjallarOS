@@ -15,6 +15,7 @@ type fakeRunner struct {
 	calls   [][]string
 	outputs map[string][]byte
 	errors  map[string]error
+	stderr  map[string]string
 	onRun   func()
 }
 
@@ -26,7 +27,7 @@ func (f *fakeRunner) Run(
 	ctx context.Context,
 	_ io.Reader,
 	_ io.Writer,
-	_ io.Writer,
+	stderr io.Writer,
 	name string,
 	args ...string,
 ) error {
@@ -39,6 +40,9 @@ func (f *fakeRunner) Run(
 
 	if f.onRun != nil {
 		f.onRun()
+	}
+	if text, ok := f.stderr[commandKey(name, args...)]; ok {
+		io.WriteString(stderr, text)
 	}
 
 	return f.errors[commandKey(name, args...)]

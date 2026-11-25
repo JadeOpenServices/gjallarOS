@@ -24,6 +24,10 @@ in
   imports = [
     "${modulesPath}/installer/cd-dvd/installation-cd-minimal.nix"
     ./base.nix
+    # nixos-install fetches large paths from the release cache with the nix
+    # on PATH; what the fix does and when to drop it:
+    # system/fixes/nix-download-retry.
+    ../fixes/nix-download-retry
   ];
 
   services.usbguard.enable = lib.mkForce false;

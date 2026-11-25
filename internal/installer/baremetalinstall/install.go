@@ -168,14 +168,18 @@ func install(
 	}
 	installArgs = append(installArgs, input.Substitute...)
 	installArgs = append(installArgs, binarycache.Args(repo)...)
+	watch := &downloadWatch{out: input.Out}
 	if err := r.Run(
 		ctx,
 		nil,
-		input.Out,
-		input.Out,
+		watch,
+		watch,
 		"sudo",
 		installArgs...,
 	); err != nil {
+		if host := watch.failedHost(); host != "" {
+			return Result{}, fmt.Errorf("nixos-install stopped because a download from %s failed (the Nix error above says why): %w", host, err)
+		}
 		return Result{}, fmt.Errorf("nixos-install failed: %w", err)
 	}
 

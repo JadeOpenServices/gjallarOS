@@ -31,3 +31,4 @@ drop when upstream fixes the bug.
 | --- | --- | --- | --- |
 | `avahi-daemon/` | `system/services/printing.nix` (ipp-usb turns avahi on) | 181 | the test's stock machine survives a stale pid file; avahi is newer than 0.8 and handles SIGHUP before writing its pid file |
 | `systemd-partition-reread/` | `system/services/removable-media.nix` (sticks written with dd) | 185 | the test's stock machine shows every new partition and the new disk label after a dd; systemd is newer than 260.2 and removes partitions in the way before adding |
+| `nix-download-retry/` | `system/default.nix` and `system/installer-media/live.nix` (Nix fetches large paths from the release cache) | 431 | the test's stock machine finishes a download whose connection breaks more than five times; Nix is newer than 2.34.9 and no longer counts tries that made progress |
