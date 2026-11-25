@@ -116,3 +116,7 @@ Limits of Try again:
 - It works only in the same stick session. After a restart the next install
   erases the disk again, because the installer cannot prove a half-written
   disk is the one it set up.
+- The question waits until Nix gives up. When a server stops answering in the
+  middle of a download, Nix waits up to five minutes per try and tries five
+  times, so the screen can sit still for about 25 minutes before "What
+  next?" shows. Nothing is stuck; leave the machine running.
