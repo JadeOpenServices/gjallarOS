@@ -2057,6 +2057,19 @@ func rebuildCheckout(repo string, opts rebuildOptions, stdout, stderr io.Writer)
 	hardwareUpdate, channel, switchNow := opts.hardwareUpdate, opts.channel, opts.switchNow
 	update, rebuildArgs := opts.update, opts.rebuildArgs
 
+	// Ctrl+C reaches this side through sudo (Plane 312), a closed terminal
+	// as SIGHUP. The step that runs finishes, and the rebuild stops before
+	// the next one; a build is stopped at once, an activation never.
+	ctx, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
+	defer stopSignals()
+	cancelled := func() bool {
+		if ctx.Err() == nil {
+			return false
+		}
+		fmt.Fprintln(stderr, "[gjallarOS] Rebuild cancelled; nothing rebuilt")
+		return true
+	}
+
 	// The channel pull below follows the configuration, so the grant is
 	// checked before anything is fetched (Plane 283).
 	user, err := config.Load(filepath.Join(repo, "user.config.json"))
@@ -2071,6 +2084,9 @@ func rebuildCheckout(repo string, opts rebuildOptions, stdout, stderr io.Writer)
 	if update {
 		if code := pullCheckout(repo, stdout, stderr); code != 0 {
 			return code
+		}
+		if cancelled() {
+			return 130
 		}
 	}
 
@@ -2088,6 +2104,9 @@ func rebuildCheckout(repo string, opts rebuildOptions, stdout, stderr io.Writer)
 		if switchNow == "0" {
 			fmt.Fprintln(stdout, "[gjallarOS] oddc pin updated, not switched (--switch 0). Apply with: gjallarctl rebuild")
 			return 0
+		}
+		if cancelled() {
+			return 130
 		}
 	}
 
@@ -2251,13 +2270,21 @@ func rebuildCheckout(repo string, opts rebuildOptions, stdout, stderr io.Writer)
 		fmt.Fprintln(stdout, "[gjallarOS] Recovery entry: the rebuilt system starts with the next boot")
 	}
 
+	if cancelled() {
+		return 130
+	}
 	var status int
 	var activated bool
 	if debug {
 		fmt.Fprintf(stdout, "Rebuilding NixOS for %s\n[gjallarOS] Flake: %s#%s\n\n", host, repo, host)
-		status, activated = plan.run(context.Background(), stdout, stderr)
+		status, activated = plan.run(ctx, stdout, stderr)
 	} else {
-		status, activated = runRebuildQuiet(stdout, stderr, host, messages, started, plan)
+		status, activated = runRebuildQuiet(ctx, stdout, stderr, host, messages, started, plan)
+	}
+	if status == 0 && ctx.Err() != nil {
+		// Cancelled while the new system was switched in.
+		fmt.Fprintln(stderr, "[gjallarOS] Cancelled during the switch, which always runs to the end; old generations kept")
+		cleanup = false
 	}
 	if status == 0 && cleanup {
 		if cleanupStatus := runCleanupOld(nil, stdout, stderr); cleanupStatus != 0 {
@@ -2419,10 +2446,16 @@ func newRebuildPlan(
 // itself failed and stays "Rebuild failed".
 const rebuildSwitchWarning = 4
 
-// run evaluates, builds and activates the system. activated reports whether
-// the activate step ran, so a status of rebuildSwitchWarning can be told
+// run evaluates, builds and switches in the system. activated reports
+// whether the switch ran, so a status of rebuildSwitchWarning can be told
 // apart from a failed evaluation or build that happened to exit 4.
+// A cancelled ctx stops the evaluation or the build, and nothing after it
+// runs (status 130). The switch itself is never stopped: halfway through,
+// services of both generations would run side by side.
 func (p rebuildPlan) run(ctx context.Context, stdout, stderr io.Writer) (status int, activated bool) {
+	if ctx.Err() != nil {
+		return 130, false
+	}
 	var drv bytes.Buffer
 	if status := runPrivilegedCommand(ctx, &drv, stderr, p.eval...); status != 0 {
 		return status, false
@@ -2442,8 +2475,11 @@ func (p rebuildPlan) run(ctx context.Context, stdout, stderr io.Writer) (status 
 		fmt.Fprintf(stderr, "ERROR: build printed no single system path: %q\n", system)
 		return 1, false
 	}
+	if ctx.Err() != nil {
+		return 130, false
+	}
 
-	return runPrivilegedCommand(ctx, stdout, stderr, slices.Concat(p.activate, []string{"--store-path", system})...), true
+	return runPrivilegedCommand(context.WithoutCancel(ctx), stdout, stderr, slices.Concat(p.activate, []string{"--store-path", system})...), true
 }
 
 // pullCheckout brings the checkout up to date before the rebuild. It
@@ -2831,7 +2867,7 @@ func runHelpme(args []string, stdout, stderr io.Writer) int {
 	return runCommand(context.Background(), stdout, stderr, "yad", yad...)
 }
 
-func runRebuildQuiet(stdout, stderr io.Writer, host string, messages []string, started time.Time, plan rebuildPlan) (int, bool) {
+func runRebuildQuiet(ctx context.Context, stdout, stderr io.Writer, host string, messages []string, started time.Time, plan rebuildPlan) (int, bool) {
 	log, err := os.CreateTemp("", "gjallar-rebuild-*.log")
 	if err != nil {
 		fmt.Fprintf(stderr, "ERROR: create rebuild log: %v\n", err)
@@ -2882,10 +2918,8 @@ func runRebuildQuiet(stdout, stderr io.Writer, host string, messages []string, s
 		fmt.Fprintf(stdout, "Rebuilding NixOS for %s\n", host)
 	}
 
-	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	status, activated := plan.run(ctx, log, log)
 	cancelled := ctx.Err() != nil
-	cancel()
 	if interactive {
 		close(stop)
 		ui.Wait()
@@ -3124,15 +3158,7 @@ func runPrivilegedCommand(
 		return status
 	}
 
-	sudoArgs := append([]string{"-n"}, args...)
-
-	return runCommand(
-		ctx,
-		stdout,
-		stderr,
-		"sudo",
-		sudoArgs...,
-	)
+	return runForegroundCommand(stdout, stderr, "sudo", append([]string{"-n"}, args...)...)
 }
 
 func shellJoin(args []string) string {
@@ -3426,6 +3452,27 @@ func reportAuthentication(tty io.Writer, status int) int {
 	return status
 }
 
+// runForegroundCommand runs a command that runs something as root (sudo,
+// su) and waits for it. Ctrl+C belongs to that root command (Plane 312), so
+// the command stays in this process group, the terminal's foreground job.
+// sudo then reads the key and passes it to the root command's pseudo-terminal
+// (use_pty); a command on the terminal itself, like su's, gets it directly.
+// This process gets SIGINT and SIGQUIT only in the second case and must not
+// die of them while root still runs, so it catches and drops them until the
+// command returns. Notify, not Ignore: an ignored signal stays ignored in the
+// child.
+// There is no context: stopping sudo from here would orphan the root
+// command, while the key reaches it through the terminal.
+func runForegroundCommand(stdout, stderr io.Writer, name string, args ...string) int {
+	interrupts := make(chan os.Signal, 1)
+	signal.Notify(interrupts, os.Interrupt, syscall.SIGQUIT)
+	defer signal.Stop(interrupts)
+
+	cmd := exec.Command(name, args...)
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, stdout, stderr
+	return commandExitStatus(cmd, cmd.Run(), stderr)
+}
+
 func runCommand(ctx context.Context, stdout, stderr io.Writer, name string, args ...string) int {
 	return runCmd(ctx, stdout, stderr, exec.CommandContext(ctx, name, args...))
 }
@@ -3435,6 +3482,12 @@ func runCommand(ctx context.Context, stdout, stderr io.Writer, name string, args
 func runCmd(ctx context.Context, stdout, stderr io.Writer, cmd *exec.Cmd) int {
 	cmd.Stdout, cmd.Stderr, cmd.Stdin = stdout, stderr, os.Stdin
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if cmd.Cancel != nil {
+		// CommandContext would SIGKILL the command alone. nix stops its
+		// builders when it gets SIGTERM; killed, it leaves them running.
+		cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM) }
+		cmd.WaitDelay = time.Minute
+	}
 	err := cmd.Run()
 	if err == nil {
 		return 0
@@ -3443,7 +3496,20 @@ func runCmd(ctx context.Context, stdout, stderr io.Writer, cmd *exec.Cmd) int {
 		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM)
 		return 130
 	}
+	return commandExitStatus(cmd, err, stderr)
+}
+
+// commandExitStatus turns the error of cmd.Run into an exit status the way
+// a shell does: 128 + the signal for a command killed by a signal (130 after
+// Ctrl+C), where ExitCode gives -1.
+func commandExitStatus(cmd *exec.Cmd, err error, stderr io.Writer) int {
+	if err == nil {
+		return 0
+	}
 	if exit, ok := err.(*exec.ExitError); ok {
+		if status, ok := exit.Sys().(syscall.WaitStatus); ok && status.Signaled() {
+			return 128 + int(status.Signal())
+		}
 		return exit.ExitCode()
 	}
 	fmt.Fprintf(stderr, "ERROR: %s: %v\n", filepath.Base(cmd.Path), err)

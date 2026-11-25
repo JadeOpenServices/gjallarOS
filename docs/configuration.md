@@ -247,3 +247,11 @@ and lists each failed unit with a `journalctl -b -u UNIT` line. The exit
 status stays 4. Old generations are kept and no snapshot is taken, so the
 previous generation stays in the boot menu. Fix the cause and run
 `gjallarctl rebuild` again.
+
+Ctrl+C stops a rebuild, and so does closing its terminal. A build stops at
+once; other steps, such as the channel update, finish first, and nothing
+after them runs. The rebuild then ends with "Rebuild cancelled" and takes
+no snapshot. Once the new system is being switched in, the switch always
+runs to the end, because a switch stopped halfway would leave services of
+the old and the new system running side by side. Ctrl+C then keeps old
+generations but changes nothing else.

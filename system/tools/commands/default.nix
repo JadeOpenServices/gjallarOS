@@ -13,6 +13,19 @@ let
       echo "[gjallarOS] Error: gjallar-system-rebuild runs as root; use gjallarctl rebuild" >&2
       exit 2
     fi
+    # Ctrl+C or a closed terminal before gjallarctl takes over (Plane 312):
+    # nothing is built yet, so say so and remove the error file. The traps
+    # come before mktemp, so a Ctrl+C right after it still removes the file.
+    # From the rebuild on, gjallarctl handles the signals itself.
+    errors=""
+    trap '[ -z "$errors" ] || ${pkgs.coreutils}/bin/rm -f "$errors"' EXIT
+    cancelled() {
+      echo "[gjallarOS] Rebuild cancelled; nothing rebuilt" >&2
+      exit "$1"
+    }
+    trap 'cancelled 130' INT
+    trap 'cancelled 143' TERM
+    trap 'cancelled 129' HUP
     # The rebuild below prints the same source line, so only errors show.
     ${gjallarctl}/bin/gjallarctl system check >/dev/null
     ctl=${gjallarctl}/bin/gjallarctl
@@ -28,6 +41,7 @@ let
       ${pkgs.coreutils}/bin/tail -n 3 "$errors" >&2
     fi
     ${pkgs.coreutils}/bin/rm -f "$errors"
+    trap - EXIT INT TERM HUP
     # On the subvolume layout the system settings get a snapshot before the
     # rebuild and after a good one, so the last built state can be restored.
     # The rebuild may turn snapshots off, so the check runs each time.
