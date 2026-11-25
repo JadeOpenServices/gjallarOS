@@ -428,3 +428,25 @@ func TestGTKTextEscaping(t *testing.T) {
 		t.Fatalf("gtkMnemonic = %q", got)
 	}
 }
+
+// Plane 442: an answer that is not listed shows the list again, and a
+// listed name counts in any case.
+func TestChoiceListsAgainAfterAnUnlistedAnswer(t *testing.T) {
+	options := []string{"GJLOGS on USB stick", "Look again", "Do not save"}
+	var out bytes.Buffer
+	ui := New(strings.NewReader("yes\ndo not save\n"), &out)
+	got, err := ui.Choice(context.Background(), "Where should the report be saved?", "Do not save", options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "Do not save" {
+		t.Fatalf("Choice = %q, want %q", got, "Do not save")
+	}
+	text := out.String()
+	if strings.Count(text, "1) GJLOGS on USB stick") != 2 {
+		t.Fatalf("list not shown again:\n%s", text)
+	}
+	if !strings.Contains(text, "type its number (1 to 3) or its name") {
+		t.Fatalf("no hint:\n%s", text)
+	}
+}

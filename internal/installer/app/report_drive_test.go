@@ -157,7 +157,7 @@ func TestDriveSaveMountsWritesAndUnmounts(t *testing.T) {
 	if entries, _ := os.ReadDir(os.Getenv("HOME")); len(entries) != 0 {
 		t.Errorf("a live run wrote to the home folder: %v", entries)
 	}
-	if !strings.Contains(shown, "Save the report and the install log to a USB drive?") {
+	if !strings.Contains(shown, "Where should the report and the install log be saved?") {
 		t.Errorf("question missing:\n%s", shown)
 	}
 }
@@ -243,7 +243,7 @@ func TestUnknownModelSavesReportOnly(t *testing.T) {
 	ui, out := reportUI("y\n1\n")
 	offerInstallReport(context.Background(), ui, out, input)
 	mounts := rig.called("mount")
-	if len(mounts) != 1 || !strings.Contains(out.String(), "Save the report to a USB drive?") {
+	if len(mounts) != 1 || !strings.Contains(out.String(), "Where should the report be saved?") {
 		t.Fatalf("mounts %v:\n%s", mounts, out)
 	}
 	entries, _ := os.ReadDir(mounts[0][len(mounts[0])-1])

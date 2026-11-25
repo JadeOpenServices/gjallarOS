@@ -143,7 +143,7 @@ func TestTargetDiskChoiceHasNoDefault(t *testing.T) {
 	if path != "/dev/sdb" {
 		t.Fatalf("picked %q, want /dev/sdb", path)
 	}
-	if strings.Count(out, "Choose one listed value.") != 2 {
+	if strings.Count(out, "Choose one listed value:") != 2 {
 		t.Fatalf("Enter must not pick a disk:\n%s", out)
 	}
 	if strings.Contains(out, "[") {

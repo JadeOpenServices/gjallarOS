@@ -42,9 +42,9 @@ var saveMountPrefix = "/run/gjallar-save."
 // next start, so live runs save to a drive (Plane 343). target is the disk
 // the run installs to, never offered.
 func saveFilesToDrive(ctx context.Context, ui prompt.UI, out io.Writer, target string, files []savedFile) {
-	question := "Save the report to a USB drive?"
+	question := "Where should the report be saved?"
 	if len(files) > 1 {
-		question = "Save the report and the install log to a USB drive?"
+		question = "Where should the report and the install log be saved?"
 	}
 	for {
 		drives, err := listSaveDrives(ctx, target)

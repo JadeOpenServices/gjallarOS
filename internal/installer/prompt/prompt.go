@@ -734,9 +734,12 @@ func (u UI) Choice(ctx context.Context, label, def string, options []string) (st
 		}
 		return value, nil
 	}
-	for i, v := range options {
-		fmt.Fprintf(u.Out, "  %d) %s\n", i+1, v)
+	list := func() {
+		for i, v := range options {
+			fmt.Fprintf(u.Out, "  %d) %s\n", i+1, v)
+		}
 	}
+	list()
 	for {
 		value, err := u.Value(ctx, label, def)
 		if err != nil {
@@ -747,10 +750,18 @@ func (u UI) Choice(ctx context.Context, label, def string, options []string) (st
 				return value, nil
 			}
 		}
+		for _, candidate := range options {
+			if strings.EqualFold(value, candidate) {
+				return candidate, nil
+			}
+		}
 		if n, e := strconv.Atoi(value); e == nil && n > 0 && n <= len(options) {
 			return options[n-1], nil
 		}
-		fmt.Fprintln(u.Out, "Choose one listed value.")
+		// Show the list again: an answer such as "yes" means the person
+		// did not see it, or did not read it as the only answers (442).
+		fmt.Fprintf(u.Out, "Choose one listed value: type its number (1 to %d) or its name.\n", len(options))
+		list()
 	}
 }
 
