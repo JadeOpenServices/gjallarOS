@@ -207,6 +207,8 @@ What this path does not have yet:
   USB stick. An unattended install or an answers file never adds it
 - An unattended install (preset answers, nobody at the keyboard) stops at
   step 9 on such firmware until ODDC knows the model
+- Repairing an existing gjallarOS from recovery media (keeping the system
+  on the disk) stops on such firmware. A fresh install from the stick works
 - The firmware keys stay as they are. `gjallarctl secure-boot setup
   --own-keys` needs the firmware setup and an ODDC Secure Boot setup for
   the model
