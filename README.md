@@ -890,7 +890,13 @@ every start asks for the disk passphrase, and the recovery key works as
 well. Secure Boot, shim included, is not affected. A managed install, or
 an unattended one whose answers ask for chip unlock, stops instead.
 
-A firmware update from the maker may add the command. The system checks the
+A firmware update from the maker may add the command. For the T480s,
+Lenovo ships firmware 7.85.4555.0 for its Infineon chip through the
+Microsoft Update Catalog ("ThinkPad T480S IFX TPM Firmware"). Version 7.85
+follows TPM specification 1.38, which has the command; the 7.63 line does
+not. The update runs only from Windows, and the move from 7.63 to 7.85
+clears the chip, so everything stored in it is lost, BitLocker keys
+included. gjallarOS does not install chip firmware. The system checks the
 chip at every start, and `gjallarctl luks chip` switches chip unlock on once
 the chip passes; it refuses while the check still fails. Until then the
 security status does not offer chip unlock for the disk, and
