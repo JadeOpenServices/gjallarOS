@@ -24,6 +24,7 @@ yes/no or one of the words listed here, never text a user typed.
 | GJA-1025 | `install.hardware.disk-swap-dropped` | Swap partitions that were on while the hardware configuration was made are left out; gjallarOS swaps to zram only. The partitions are not changed. | `swaps` (count): how many swap partitions were left out |
 | GJA-1030 | `install.nixos-install.started` | nixos-install started building and copying the system. | none |
 | GJA-1031 | `install.nixos-install.finished` | nixos-install finished without an error. | none |
+| GJA-1032 | `install.nixos-install.retry` | nixos-install ended with an error during a fresh install and the person was asked whether to run it again on the same disk. | `answer` (one of try-again, stop): run nixos-install again, or stop and keep the failure |
 | GJA-1040 | `install.checkout.cloned` | The system checkout was cloned into the target. | none |
 | GJA-1041 | `install.fresh.finished` | The fresh install on the new disk is complete; Secure Boot steps may follow. | none |
 | GJA-1050 | `install.secureboot.continue` | The Secure Boot part of the run started. | `path` (one of shim, shim-fresh, shim-sb-off, own-keys): shim on a running system, shim after a fresh install from the stick, shim while firmware Secure Boot is off, or own keys |

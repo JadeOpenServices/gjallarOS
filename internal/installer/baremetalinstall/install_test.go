@@ -3,6 +3,7 @@ package baremetalinstall
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -262,6 +263,10 @@ func TestInstallRequiresRootAndBootMounts(t *testing.T) {
 			if err == nil || !strings.Contains(err.Error(), "not mounted") {
 				t.Fatalf("unmounted target accepted: %v", err)
 			}
+			var step *NixOSInstallError
+			if errors.As(err, &step) {
+				t.Fatalf("a target check failure may not be offered again: %v", err)
+			}
 			if strings.Contains(callsText(r.calls), "nixos-install") {
 				t.Fatalf(
 					"nixos-install ran before mount validation:\n%s",
@@ -430,6 +435,10 @@ func TestFailureDoesNotReportOSInstalled(t *testing.T) {
 
 	if err == nil {
 		t.Fatal("failed nixos-install reported success")
+	}
+	var step *NixOSInstallError
+	if !errors.As(err, &step) {
+		t.Fatalf("nixos-install failure is not a NixOSInstallError: %v", err)
 	}
 	if strings.Contains(out.String(), "STAGE: os-installed") {
 		t.Fatalf(

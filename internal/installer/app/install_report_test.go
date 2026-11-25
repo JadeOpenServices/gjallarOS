@@ -31,7 +31,7 @@ func TestFailRecordsErrorForReport(t *testing.T) {
 
 func TestReportNeedsAPersonAtATerminal(t *testing.T) {
 	t.Setenv("GJALLAR_INSTALLER_RESUMED", "")
-	if reportAllowed(strings.NewReader("y\n"), config.User{}) {
+	if personAtInstall(strings.NewReader("y\n"), config.User{}) {
 		t.Fatal("a piped answer stream may be offered a report")
 	}
 	pipeRead, pipeWrite, err := os.Pipe()
@@ -40,7 +40,7 @@ func TestReportNeedsAPersonAtATerminal(t *testing.T) {
 	}
 	defer pipeRead.Close()
 	defer pipeWrite.Close()
-	if reportAllowed(pipeRead, config.User{}) {
+	if personAtInstall(pipeRead, config.User{}) {
 		t.Fatal("a pipe counts as a terminal")
 	}
 	null, err := os.Open("/dev/null")
@@ -49,22 +49,22 @@ func TestReportNeedsAPersonAtATerminal(t *testing.T) {
 	}
 	defer null.Close()
 	// /dev/null is a character device but no terminal (e2e-r292).
-	if reportAllowed(null, config.User{}) {
+	if personAtInstall(null, config.User{}) {
 		t.Fatal("/dev/null counts as a terminal")
 	}
 
 	tty := openPTY(t)
-	if !reportAllowed(tty, config.User{}) {
+	if !personAtInstall(tty, config.User{}) {
 		t.Fatal("terminal not accepted")
 	}
-	if reportAllowed(tty, config.User{UnattendedInstall: true}) {
+	if personAtInstall(tty, config.User{UnattendedInstall: true}) {
 		t.Fatal("unattended install offered a report")
 	}
-	if reportAllowed(tty, config.User{Management: config.ManagementIntent{Enable: true}}) {
+	if personAtInstall(tty, config.User{Management: config.ManagementIntent{Enable: true}}) {
 		t.Fatal("managed install offered a report")
 	}
 	t.Setenv("GJALLAR_INSTALLER_RESUMED", "1")
-	if reportAllowed(tty, config.User{}) {
+	if personAtInstall(tty, config.User{}) {
 		t.Fatal("resumed run offered a report")
 	}
 }

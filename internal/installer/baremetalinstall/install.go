@@ -96,6 +96,14 @@ func (execRunner) Output(
 	return exec.CommandContext(ctx, name, args...).Output()
 }
 
+// NixOSInstallError is a failure of nixos-install itself, after the
+// target and the staged source passed their checks. The target is still
+// mounted as before, so nixos-install may run on it again (Plane 431).
+type NixOSInstallError struct{ Err error }
+
+func (e *NixOSInstallError) Error() string { return e.Err.Error() }
+func (e *NixOSInstallError) Unwrap() error { return e.Err }
+
 func Install(ctx context.Context, input Input) (Result, error) {
 	return install(ctx, input, execRunner{})
 }
@@ -178,9 +186,9 @@ func install(
 		installArgs...,
 	); err != nil {
 		if host := watch.failedHost(); host != "" {
-			return Result{}, fmt.Errorf("nixos-install stopped because a download from %s failed (the Nix error above says why): %w", host, err)
+			return Result{}, &NixOSInstallError{fmt.Errorf("nixos-install stopped because a download from %s failed (the Nix error above says why): %w", host, err)}
 		}
-		return Result{}, fmt.Errorf("nixos-install failed: %w", err)
+		return Result{}, &NixOSInstallError{fmt.Errorf("nixos-install failed: %w", err)}
 	}
 
 	if err := verifyInstallerConfig(repo, configBefore); err != nil {

@@ -27,6 +27,7 @@ const (
 	HardwareSwapDropped  ID = 1025
 	NixOSInstallStarted  ID = 1030
 	NixOSInstallFinished ID = 1031
+	NixOSInstallRetry    ID = 1032
 	CheckoutCloned       ID = 1040
 	FreshInstallFinished ID = 1041
 	SecureBootContinue   ID = 1050
@@ -164,6 +165,10 @@ var Registry = []Anchor{
 		Meaning: "nixos-install started building and copying the system."},
 	{ID: NixOSInstallFinished, Name: "install.nixos-install.finished",
 		Meaning: "nixos-install finished without an error."},
+	{ID: NixOSInstallRetry, Name: "install.nixos-install.retry",
+		Meaning: "nixos-install ended with an error during a fresh install and the person was asked whether to run it again on the same disk.",
+		Fields: []FieldSpec{{Name: "answer", Kind: KindChoice, Choices: []string{"try-again", "stop"},
+			Meaning: "run nixos-install again, or stop and keep the failure"}}},
 	{ID: CheckoutCloned, Name: "install.checkout.cloned",
 		Meaning: "The system checkout was cloned into the target."},
 	{ID: FreshInstallFinished, Name: "install.fresh.finished",

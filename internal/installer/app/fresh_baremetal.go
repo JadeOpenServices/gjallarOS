@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/baremetalinstall"
+	"github.com/JadeOpenServices/gjallarOS/internal/installer/config"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/credential"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/discovery"
 	"github.com/JadeOpenServices/gjallarOS/internal/installer/diskplan"
@@ -53,6 +55,7 @@ func runFreshBareMetal(
 	hostOverlay *oddc.HostOverlay,
 	mv *moveRun,
 	undo *freshUndo,
+	retry askRetry,
 	out io.Writer,
 ) (freshBareMetalResult, error) {
 	if out == nil {
@@ -268,19 +271,26 @@ func runFreshBareMetal(
 	fmt.Fprintln(out, "STAGE: installing gjallarOS into prepared target")
 	installlog.Mark(installlog.NixOSInstallStarted)
 
-	if _, err := baremetalinstall.Install(
-		ctx,
-		baremetalinstall.Input{
-			Repo:       repo,
-			Hostname:   hostname,
-			Substitute: substitute,
-			Out:        out,
-		},
-	); err != nil {
-		return freshBareMetalResult{}, fmt.Errorf(
-			"install fresh gjallarOS: %w",
-			err,
+	for {
+		_, err := baremetalinstall.Install(
+			ctx,
+			baremetalinstall.Input{
+				Repo:       repo,
+				Hostname:   hostname,
+				Substitute: substitute,
+				Out:        out,
+			},
 		)
+		if err == nil {
+			break
+		}
+		if !retryInstall(ctx, retry, err) {
+			return freshBareMetalResult{}, fmt.Errorf(
+				"install fresh gjallarOS: %w",
+				err,
+			)
+		}
+		installlog.Mark(installlog.NixOSInstallStarted)
 	}
 
 	installlog.Mark(installlog.NixOSInstallFinished)
@@ -502,4 +512,52 @@ func closeFreshTarget(ctx context.Context, mountPoint, mappingName string, out i
 		}
 		fmt.Fprintln(out, "The new system disk is closed again; you can start the install over.")
 	}
+}
+
+// askRetry asks the person at the install whether to run nixos-install
+// again after err. It is nil when nobody can be asked (unattended,
+// managed, resumed or no terminal); the failure then stands.
+type askRetry func(ctx context.Context, err error) bool
+
+// retryInstall is true when nixos-install failed by itself (not a check
+// before it), the run was not stopped, and the person chose to try again.
+// The target stays open between tries, so Nix keeps every path it already
+// has and only fetches the rest (Plane 431, R54). A new stick session
+// erases the disk as before: it cannot prove a half-written disk is the
+// one this run set up.
+func retryInstall(ctx context.Context, retry askRetry, err error) bool {
+	var step *baremetalinstall.NixOSInstallError
+	if retry == nil || ctx.Err() != nil || !errors.As(err, &step) {
+		return false
+	}
+	return retry(ctx, err)
+}
+
+const (
+	retryAgain = "Try again"
+	retryStop  = "Stop"
+)
+
+// installRetry is the askRetry for this run: nil unless a person sits at
+// the install.
+func installRetry(in io.Reader, ui prompt.UI, out io.Writer, user config.User) askRetry {
+	if !personAtInstall(in, user) {
+		return nil
+	}
+	return func(ctx context.Context, err error) bool {
+		return askInstallRetry(ctx, ui, out, err)
+	}
+}
+
+// askInstallRetry is the question retryInstall asks on the terminal.
+func askInstallRetry(ctx context.Context, ui prompt.UI, out io.Writer, err error) bool {
+	fmt.Fprintf(out, "\nThe install stopped before the system was complete:\n  %v\n", err)
+	fmt.Fprintln(out, "The disk is still set up from this run. Trying again keeps what was already downloaded and fetches only the rest. It helps when a download broke off; when the same error comes back, choose Stop.")
+	choice, askErr := ui.Choice(ctx, "What next?", retryAgain, []string{retryAgain, retryStop})
+	if askErr == nil && choice == retryAgain {
+		installlog.Mark(installlog.NixOSInstallRetry, installlog.Choice("answer", "try-again"))
+		return true
+	}
+	installlog.Mark(installlog.NixOSInstallRetry, installlog.Choice("answer", "stop"))
+	return false
 }

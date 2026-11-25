@@ -99,3 +99,20 @@ it gives the reason. On the release cache, which lets downloads resume, Nix
 picks a broken download up where it stopped and only gives up after five
 tries in a row that got no data at all (Plane 431). So this error means the
 network or the server stopped answering, not that the disk was slow.
+
+On a fresh install, when `nixos-install` itself ends with an error, the
+installer asks "What next?" before the report, with "Try again" as the
+default. Try again runs `nixos-install` once more on the disk that is still
+open from this run. Nix keeps every path it already has, so only the missing
+ones download. Choose Stop when the same error comes back; the run then ends
+with the report as before.
+
+Limits of Try again:
+
+- It is offered only when a person sits at the install: not on a resumed,
+  unattended or managed run.
+- It is offered only for a failure of `nixos-install` itself. A failed check
+  before it, such as a target that is not mounted, ends the run as before.
+- It works only in the same stick session. After a restart the next install
+  erases the disk again, because the installer cannot prove a half-written
+  disk is the one it set up.

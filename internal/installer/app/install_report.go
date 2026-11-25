@@ -76,10 +76,11 @@ func saveFailureToBootStick(ctx context.Context, out io.Writer, runLog *logKeepe
 	}
 }
 
-// reportAllowed is true when a person sits at this install: stdin is a
+// personAtInstall is true when a person sits at this install: stdin is a
 // terminal, and the run is not resumed, unattended or managed. Nobody is
-// asked anything otherwise.
-func reportAllowed(in io.Reader, user config.User) bool {
+// asked anything otherwise: no install report, no second try of a failed
+// nixos-install.
+func personAtInstall(in io.Reader, user config.User) bool {
 	if os.Getenv("GJALLAR_INSTALLER_RESUMED") == "1" || user.UnattendedInstall || user.Management.Enable {
 		return false
 	}
