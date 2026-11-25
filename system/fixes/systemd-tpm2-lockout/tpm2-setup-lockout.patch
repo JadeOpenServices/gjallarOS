@@ -1,0 +1,97 @@
+diff --git a/src/shared/tpm2-util.c b/src/shared/tpm2-util.c
+index c4520e8..d925f38 100644
+--- a/src/shared/tpm2-util.c
++++ b/src/shared/tpm2-util.c
+@@ -6327,6 +6327,9 @@ static int tpm2_extend_nvpcr_nv_index(
+                         /* shandle2= */ ESYS_TR_NONE,
+                         /* shandle3= */ ESYS_TR_NONE,
+                         &buf);
++        if (rc == TPM2_RC_LOCKOUT)
++                return log_debug_errno(SYNTHETIC_ERRNO(ENOLCK),
++                                       "TPM2 device is in dictionary attack lockout mode.");
+         if (rc != TSS2_RC_SUCCESS)
+                 return log_debug_errno(SYNTHETIC_ERRNO(ENOTRECOVERABLE),
+                                        "Failed to extend NV index: %s", sym_Tss2_RC_Decode(rc));
+@@ -7658,6 +7661,9 @@ int tpm2_nvpcr_initialize(
+                         /* shandle2= */ ESYS_TR_NONE,
+                         /* shandle3= */ ESYS_TR_NONE,
+                         &buf);
++        if (rc == TPM2_RC_LOCKOUT)
++                return log_debug_errno(SYNTHETIC_ERRNO(ENOLCK),
++                                       "TPM2 device is in dictionary attack lockout mode.");
+         if (rc != TSS2_RC_SUCCESS)
+                 return log_debug_errno(SYNTHETIC_ERRNO(ENOTRECOVERABLE),
+                                        "Failed to extend NV index: %s", sym_Tss2_RC_Decode(rc));
+diff --git a/src/tpm2-setup/tpm2-setup.c b/src/tpm2-setup/tpm2-setup.c
+index 8275bd3..4e5658a 100644
+--- a/src/tpm2-setup/tpm2-setup.c
++++ b/src/tpm2-setup/tpm2-setup.c
+@@ -428,10 +428,13 @@
+                  * now, and haven't provided the anchor secret yet. Hence acquire it now. */
+ 
+                 r = tpm2_nvpcr_acquire_anchor_secret(&c->anchor_secret, /* sync_secondary= */ !arg_early);
+-                if (r < 0)
++                /* Unsealing a stored anchor secret fails with ENOLCK in dictionary attack lockout,
++                 * which is handled below like a lockout on the extend. */
++                if (r < 0 && r != -ENOLCK)
+                         return log_error_errno(r, "Failed to acquire anchor secret: %m");
+ 
+-                r = tpm2_nvpcr_initialize(c->tpm2_context, /* session= */ NULL, name, &c->anchor_secret);
++                if (r >= 0)
++                        r = tpm2_nvpcr_initialize(c->tpm2_context, /* session= */ NULL, name, &c->anchor_secret);
+         }
+         if (r == -EOPNOTSUPP) {
+                 c->n_failed++;
+@@ -449,6 +452,14 @@
+                                         LOG_MESSAGE("The TPM's NV index space is exhausted, skipping allocation of NvPCR '%s' and any less important ones: %m", name),
+                                         LOG_MESSAGE_ID(SD_MESSAGE_TPM_NVINDEX_EXHAUSTED_STR));
+         }
++        if (r == -ENOLCK) {
++                /* The TPM is in dictionary attack lockout, so it refuses to unseal the stored anchor
++                 * secret or the extend that anchors the NvPCR. Nothing is wrong with the NvPCR itself, and it gets anchored on a later boot
++                 * once the lockout has expired. Until then it stays unanchored and refuses
++                 * measurements, as it does after any other failure here. */
++                c->n_skipped++;
++                return log_notice_errno(r, "TPM is in dictionary attack lockout mode, not anchoring NvPCR '%s' now: %m", name);
++        }
+         if (r < 0) {
+                 c->n_failed++;
+                 return log_error_errno(r, "Failed to extend NvPCR index with anchor secret: %m");
+@@ -520,6 +531,8 @@
+                 return EX_UNAVAILABLE;   /* e.g. no NvPCR support in TPM */
+         if (ret == -ENOBUFS)
+                 return EX_CANTCREAT;     /* NV index space on TPM exhausted */
++        if (ret == -ENOLCK)
++                return EX_TEMPFAIL;      /* TPM in dictionary attack lockout */
+ 
+         return ret;
+ }
+@@ -541,7 +554,7 @@
+         umask(0022);
+ 
+         /* Execute both jobs, and then return unlisted errors preferably, and listed errors
+-         * (i.e. EX_UNAVAILABLE, EX_CANTCREAT, EX_PROTOCOL) otherwise. */
++         * (i.e. EX_UNAVAILABLE, EX_CANTCREAT, EX_TEMPFAIL, EX_PROTOCOL) otherwise. */
+         r = setup_srk();
+         int k = setup_nvpcr();
+         if (r < 0)
+diff --git a/units/systemd-tpm2-setup-early.service.in b/units/systemd-tpm2-setup-early.service.in
+index ce1ee94..b4d0591 100644
+--- a/units/systemd-tpm2-setup-early.service.in
++++ b/units/systemd-tpm2-setup-early.service.in
+@@ -28,3 +28,5 @@ SuccessExitStatus=PROTOCOL
+ SuccessExitStatus=UNAVAILABLE
+ # The tool returns EX_CANTCREAT if the NV index space is exhausted.
+ SuccessExitStatus=CANTCREAT
++# The tool returns EX_TEMPFAIL if the TPM is in dictionary attack lockout mode.
++SuccessExitStatus=TEMPFAIL
+diff --git a/units/systemd-tpm2-setup.service.in b/units/systemd-tpm2-setup.service.in
+index dff5168..ff25519 100644
+--- a/units/systemd-tpm2-setup.service.in
++++ b/units/systemd-tpm2-setup.service.in
+@@ -29,3 +29,5 @@ SuccessExitStatus=PROTOCOL
+ SuccessExitStatus=UNAVAILABLE
+ # The tool returns EX_CANTCREAT if the NV index space is exhausted.
+ SuccessExitStatus=CANTCREAT
++# The tool returns EX_TEMPFAIL if the TPM is in dictionary attack lockout mode.
++SuccessExitStatus=TEMPFAIL

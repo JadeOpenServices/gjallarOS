@@ -422,6 +422,11 @@
           fixModule = ./system/fixes/systemd-partition-reread;
         };
 
+        systemd-tpm2-lockout-fix = import ./tests/nix/systemd-tpm2-lockout-fix.nix {
+          inherit pkgs;
+          fixedSystemd = import ./system/fixes/systemd-tpm2-lockout/package.nix { inherit pkgs; };
+        };
+
         adb-usbguard-allow = import ./tests/nix/adb-usbguard-allow.nix {
           inherit pkgs;
           patchedTools = pkgs.android-tools;
