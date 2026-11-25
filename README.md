@@ -849,6 +849,16 @@ this model. The default is no. An unattended install has nobody to answer,
 so on such firmware it stops before the disk is touched; it goes through
 once ODDC knows the model.
 
+The gjallarOS shim carries two Microsoft signatures: the UEFI CA 2011 one
+first, then the UEFI CA 2023 one. Firmware that trusts only the 2023 CA
+starts it when it checks every signature, as EDK2-based firmware does.
+Firmware that reads only the first signature refuses it. The installer stick
+starts through the same shim, so on such a machine the stick does not start
+and nothing is written. Many Secured-core PCs ship with the Microsoft
+third-party CA switched off and refuse the shim as well: switch on "Allow
+Microsoft 3rd Party UEFI CA" (the name differs by maker) in the firmware
+setup first.
+
 `gjallarctl secure-boot setup --own-keys` replaces the firmware keys with
 gjallarOS keys instead. It needs an ODDC Secure Boot setup for the model. The
 command also takes this path on its own when the firmware is already in Setup
