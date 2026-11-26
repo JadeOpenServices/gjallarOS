@@ -75,3 +75,34 @@ func TestShimRecordBindsPK(t *testing.T) {
 		}
 	}
 }
+
+// A PKDefault efivar that differs from the active PK shows the factory key
+// was replaced: Inspect must say the efivar exists, so the Plane 388
+// no-PKDefault path (question, ODDC facts) never applies. Only firmware
+// without the efivar gets that path. Until this fix a differing PKDefault was
+// reported as missing.
+func TestClassifyPlatformKey(t *testing.T) {
+	pk, other := []byte("factory platform key"), []byte("replaced platform key")
+	sum := strings.Repeat("a", 64)
+	both := ShimOwnerFacts{FactoryPKFingerprints: []string{sum}, AcceptedUnknownPKSHA256: sum}
+	for _, tc := range []struct {
+		name        string
+		pkDefault   []byte
+		present     bool
+		wantState   State
+		wantDefault bool
+		wantProceed bool
+	}{
+		{"PK is PKDefault", pk, true, StateOEMFactoryDerived, true, false},
+		{"PK differs from PKDefault", other, true, StateForeignManaged, true, false},
+		{"no PKDefault efivar", nil, false, StateForeignManaged, false, true},
+	} {
+		insp := classifyPlatformKey(pk, tc.pkDefault, tc.present, sum, true, false)
+		if insp.State != tc.wantState || insp.PKDefaultPresent != tc.wantDefault || insp.PKSHA256 != sum {
+			t.Errorf("%s: %+v", tc.name, insp)
+		}
+		if ok, _, _ := shimForeignProceed(insp, both, true); ok != tc.wantProceed {
+			t.Errorf("%s: shim path proceed=%v, want %v", tc.name, ok, tc.wantProceed)
+		}
+	}
+}

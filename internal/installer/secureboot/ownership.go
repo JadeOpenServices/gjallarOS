@@ -272,48 +272,67 @@ func Inspect(ctx context.Context) (inspection Inspection, err error) {
 		}, nil
 	}
 
-	// The PK is the root of the Secure Boot hierarchy. Firmware-provided
-	// may legitimately update KEK/db/dbx over time, so factory-derived state
-	// is deliberately based on the active PK matching PKDefault rather than
-	// requiring byte-identical KEK/db databases.
-	if pkPresent {
-		pkDefault, defaultPresent, err := efivarPayload("PKDefault")
-		if err != nil {
-			return Inspection{}, err
+	if !pkPresent {
+		return Inspection{
+			State:       StateForeignManaged,
+			SetupMode:   false,
+			SecureBoot:  secureBoot,
+			Recorded:    recorded,
+			PKSHA256:    pkSHA,
+			Description: "The active Secure Boot hierarchy is neither the firmware default PK nor the current gjallarOS key hierarchy.",
+		}, nil
+	}
+	pkDefault, defaultPresent, err := efivarPayload("PKDefault")
+	if err != nil {
+		return Inspection{}, err
+	}
+	return classifyPlatformKey(pk, pkDefault, defaultPresent, pkSHA, secureBoot, recorded), nil
+}
+
+// classifyPlatformKey classifies an active PK outside Setup Mode that no
+// valid gjallarOS record explains. The PK is the root of the Secure Boot
+// hierarchy. Firmware may legitimately update KEK/db/dbx over time, so
+// factory-derived state is deliberately based on the active PK matching
+// PKDefault rather than requiring byte-identical KEK/db databases.
+//
+// PKDefaultPresent must say whether the efivar exists, not whether it
+// matched: Plane 388's lenient shim path is only for firmware without one.
+// A PKDefault that differs from the PK shows the factory key was replaced.
+func classifyPlatformKey(pk, pkDefault []byte, defaultPresent bool, pkSHA string, secureBoot, recorded bool) Inspection {
+	if defaultPresent && samePlatformKey(pk, pkDefault) {
+		return Inspection{
+			State:            StateOEMFactoryDerived,
+			SetupMode:        false,
+			SecureBoot:       secureBoot,
+			Recorded:         false,
+			PKDefaultPresent: true,
+			PKSHA256:         pkSHA,
+			Description:      "The active Platform Key certificate matches the firmware PKDefault; KEK/db updates do not change OEM-root classification.",
 		}
-		if defaultPresent && samePlatformKey(pk, pkDefault) {
-			return Inspection{
-				State:            StateOEMFactoryDerived,
-				SetupMode:        false,
-				SecureBoot:       secureBoot,
-				Recorded:         false,
-				PKDefaultPresent: true,
-				PKSHA256:         pkSHA,
-				Description:      "The active Platform Key certificate matches the firmware PKDefault; KEK/db updates do not change OEM-root classification.",
-			}, nil
-		}
-		// Plane 388: no PKDefault efivar (older firmware, e.g. T480s), so the
-		// factory PK cannot be confirmed here; the caller decides between the
-		// y/N question (shim path) and ODDC factory-PK facts.
+	}
+	if defaultPresent {
 		return Inspection{
 			State:            StateForeignManaged,
 			SetupMode:        false,
 			SecureBoot:       secureBoot,
 			Recorded:         recorded,
-			PKDefaultPresent: false,
+			PKDefaultPresent: true,
 			PKSHA256:         pkSHA,
-			Description:      "The firmware exposes no PKDefault, so its Platform Key cannot be confirmed as the factory key; the active Secure Boot hierarchy is not the current gjallarOS key hierarchy.",
-		}, nil
+			Description:      "The active Platform Key is not the firmware PKDefault, so the factory key was replaced; the active Secure Boot hierarchy is not the current gjallarOS key hierarchy.",
+		}
 	}
-
+	// Plane 388: no PKDefault efivar (older firmware, e.g. T480s), so the
+	// factory PK cannot be confirmed here; the caller decides between the
+	// y/N question (shim path) and ODDC factory-PK facts.
 	return Inspection{
-		State:       StateForeignManaged,
-		SetupMode:   false,
-		SecureBoot:  secureBoot,
-		Recorded:    recorded,
-		PKSHA256:    pkSHA,
-		Description: "The active Secure Boot hierarchy is neither the firmware default PK nor the current gjallarOS key hierarchy.",
-	}, nil
+		State:            StateForeignManaged,
+		SetupMode:        false,
+		SecureBoot:       secureBoot,
+		Recorded:         recorded,
+		PKDefaultPresent: false,
+		PKSHA256:         pkSHA,
+		Description:      "The firmware exposes no PKDefault, so its Platform Key cannot be confirmed as the factory key; the active Secure Boot hierarchy is not the current gjallarOS key hierarchy.",
+	}
 }
 
 func verifyOwnershipRecord(
