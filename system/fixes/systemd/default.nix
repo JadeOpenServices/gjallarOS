@@ -82,18 +82,25 @@
 #   systemd-tpm2-setup.service" (seen on the T480s, 2026-11-23).
 #
 # What this does
-#   tpm2-setup-lockout.patch turns TPM2_RC_LOCKOUT on the extend into
-#   ENOLCK. tpm2-setup then skips the NvPCR with a notice when the extend or
-#   the unseal of the stored anchor secret (already ENOLCK in stock systemd)
-#   hits the lockout, exits EX_TEMPFAIL (75) and lets both tpm2-setup units
-#   accept that status. The NvPCR stays unanchored and refuses measurements
+#   tpm2-setup-lockout.patch turns TPM2_RC_LOCKOUT on the extend and on the
+#   seal of a new anchor secret into ENOLCK. At boot the anchor secret comes
+#   from the copy on the ESP; stock systemd skips that copy when the TPM
+#   refuses to decrypt it, makes up a new secret and then fails to seal it
+#   ("Failed to acquire anchor secret: State not recoverable", seen on the
+#   e2e-fw13 VM, 2026-11-26). Had the seal worked, the new secret would
+#   have replaced the stored copies. The patch stops there with ENOLCK when
+#   any passed copy failed for the lockout. tpm2-setup then skips the NvPCR
+#   with a notice when the extend, the seal or the unseal of the stored
+#   anchor secret (already ENOLCK in stock systemd) hits the lockout, exits
+#   EX_TEMPFAIL (75) and lets both tpm2-setup units accept that status. The NvPCR stays unanchored and refuses measurements
 #   until a later boot anchors it, exactly as after the failure today; only
 #   the unit result changes. Measuring into an NvPCR (systemd-pcrextend,
 #   systemd-cryptsetup) still fails in lockout, now with ENOLCK instead of
 #   ENOTRECOVERABLE; neither skips on ENOLCK. The units that run after
 #   tpm2-setup only order After= it and never needed it to succeed. In the
 #   test VM the lockout already stops the unseal; the T480s got one step
-#   further, to the extend. The VM test covers the unseal route only.
+#   further, to the extend. The VM test covers the unseal, the copy passed
+#   in as from the ESP, and the seal of a first secret; not the extend.
 #
 # Upstream
 #   systemd v262 dropped the anchor secret (PR #42796, commit f0f36877,

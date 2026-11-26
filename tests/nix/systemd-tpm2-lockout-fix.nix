@@ -5,8 +5,12 @@
 # TPM refuses to unseal the stored anchor secret, so stock exits 1 ("Failed to
 # acquire anchor secret: No locks available"). On the T480s it failed one
 # step later, at the extend ("Failed to extend NvPCR index with anchor
-# secret"). The fixed one skips the NvPCR with a notice in both cases and
-# exits EX_TEMPFAIL (75), which its unit accepts.
+# secret"). Two boot cases follow, with no anchor secret in /run yet: the
+# secret comes from a copy passed in as from the ESP, which the TPM refuses
+# to decrypt, or there is no copy and a first one has to be sealed. Stock
+# makes up a new secret in both and fails to seal it ("State not
+# recoverable"). The fixed one skips the NvPCR with a notice in all cases,
+# keeps the stored copies and exits EX_TEMPFAIL (75), which its unit accepts.
 # After the lockout is cleared the fixed one anchors the NvPCR. When stock
 # stops failing, the test says to drop the fix.
 { pkgs, fixedSystemd }:
@@ -28,6 +32,8 @@ pkgs.testers.runNixOSTest {
     fixed = "${fixedSystemd}/lib/systemd/systemd-tpm2-setup"
     assert stock != fixed, "fixedSystemd is the stock systemd"
     anchor = "/run/systemd/nvpcr/cryptsetup.anchor"
+    secret = "/run/systemd/nvpcr/nvpcr-anchor.cred"
+    var_secret = "/var/lib/systemd/nvpcr/nvpcr-anchor.cred"
     # A DA-protected NV index with a known password, to spend the one try.
     index = "0x01500020"
 
@@ -35,8 +41,18 @@ pkgs.testers.runNixOSTest {
     # No --graceful: the test VM boots without UEFI, so the firmware part of
     # the TPM2 support check fails and --graceful would exit 0 before any
     # NvPCR work. The units pass --graceful on real machines.
-    def setup(binary):
-        return machine.execute(f"{binary} 2>&1")
+    def setup(binary, env=""):
+        return machine.execute(f"{env} {binary} 2>&1")
+
+
+    def stock_fails(rc, out, *reasons):
+        if rc == 0:
+            raise Exception(
+                "stock systemd-tpm2-setup now passes while the TPM is in"
+                " dictionary attack lockout; drop tpm2-setup-lockout.patch from"
+                " system/fixes/systemd"
+            )
+        assert any(r in out for r in reasons), "stock failed for another reason"
 
 
     def in_lockout():
@@ -84,17 +100,38 @@ pkgs.testers.runNixOSTest {
     with subtest("stock tpm2-setup fails in lockout"):
         rc, out = setup(stock)
         print(out)
-        if rc == 0:
-            raise Exception(
-                "stock systemd-tpm2-setup now passes while the TPM is in"
-                " dictionary attack lockout; drop tpm2-setup-lockout.patch from"
-                " system/fixes/systemd"
-            )
-        assert (
-            "Failed to acquire anchor secret: No locks available" in out
-            or "Failed to extend NvPCR index with anchor secret" in out
-        ), "stock failed for another reason"
+        stock_fails(
+            rc, out,
+            "Failed to acquire anchor secret: No locks available",
+            "Failed to extend NvPCR index with anchor secret",
+        )
         machine.fail(f"test -e {anchor}")
+
+    # A new boot: no anchor secret in /run yet. The boot loader passes the
+    # ESP copy in as an encrypted system credential; the test VM has no ESP,
+    # so a copy of the /var one stands in for it.
+    machine.succeed(f"mv {secret} /root/anchor-secret.saved")
+    machine.succeed(f"mkdir /root/creds && cp {var_secret} /root/creds/nvpcr-anchor.test.cred")
+    stored = machine.succeed(f"sha256sum {var_secret} /root/creds/nvpcr-anchor.test.cred")
+    passed = "SYSTEMD_ENCRYPTED_SYSTEM_CREDENTIALS_DIRECTORY=/root/creds"
+
+    for case, env in [("the copy passed in as from the ESP", passed), ("a first secret", "")]:
+        with subtest(f"boot in lockout, {case}: stock fails, fixed exits EX_TEMPFAIL"):
+            machine.succeed(f"rm -f {secret}")
+            rc, out = setup(stock, env)
+            print(out)
+            stock_fails(rc, out, "Failed to acquire anchor secret: State not recoverable")
+            machine.succeed(f"rm -f {secret}")
+            rc, out = setup(fixed, env)
+            print(out)
+            assert rc == 75, f"fixed tpm2-setup exited {rc}, expected 75"
+            assert "dictionary attack lockout" in out, "no lockout notice"
+            machine.fail(f"test -e {anchor}")
+            assert machine.succeed(f"sha256sum {var_secret} /root/creds/nvpcr-anchor.test.cred") == stored, (
+                "a stored anchor secret changed in lockout"
+            )
+
+    machine.succeed(f"rm -f {secret} && mv /root/anchor-secret.saved {secret}")
 
     with subtest("fixed tpm2-setup anchors the NvPCR once the lockout is cleared"):
         machine.succeed("tpm2_dictionarylockout --clear-lockout")
