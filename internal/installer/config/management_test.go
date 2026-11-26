@@ -6,43 +6,20 @@ import (
 	"testing"
 )
 
-// The flat names from before JODS-565 are not read; a file that still
-// holds one stops with an unknown-field error that names the new key from
-// system/tools/legacy/renames.json (wiki 752 R39).
+// The flat names from before JODS-565 are not read. Their rename rows
+// left the legacy table after v2026.10.70, so a file that still holds one
+// stops with the decoder's unknown-field error.
 func TestParseRefusesOldManagementKeys(t *testing.T) {
-	for key, now := range map[string]string{
-		"endpointManagedDevice": "management.enable",
-		"jodsEndpoint":          "management.endpoint",
-		"jodsPrebootLockEnable": "prebootLock.enable",
-	} {
+	for _, key := range []string{"endpointManagedDevice", "jodsEndpoint", "jodsPrebootLockEnable"} {
 		fields := presetFields(t)
-		delete(fields, "management")
-		delete(fields, "prebootLock")
-		fields[key] = false
+		fields[key] = json.RawMessage(`false`)
 		contents, err := json.Marshal(fields)
 		if err != nil {
 			t.Fatal(err)
 		}
-		want := "unknown field: " + key + " is now " + now + "; move the value there in user.config.json"
-		if _, err := Parse(contents); err == nil || !strings.Contains(err.Error(), want) {
-			t.Fatalf("%s: err = %v, want %q", key, err, want)
+		if _, err := Parse(contents); err == nil || !strings.Contains(err.Error(), `json: unknown field "`+key+`"`) {
+			t.Fatalf("%s: err = %v, want the decoder's unknown-field error", key, err)
 		}
-	}
-}
-
-// An old key is refused even when the new key is set too, and every old
-// key in the file is named at once.
-func TestParseNamesEveryOldManagementKey(t *testing.T) {
-	fields := presetFields(t)
-	fields["jodsEndpoint"] = json.RawMessage(`"https://jods.example.test"`)
-	fields["jodsDeviceClass"] = json.RawMessage(`"workstation"`)
-	contents, err := json.Marshal(fields)
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := "jodsDeviceClass is now management.deviceClass, jodsEndpoint is now management.endpoint;"
-	if _, err := Parse(contents); err == nil || !strings.Contains(err.Error(), want) {
-		t.Fatalf("err = %v, want %q", err, want)
 	}
 }
 

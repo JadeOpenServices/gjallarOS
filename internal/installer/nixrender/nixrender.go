@@ -235,17 +235,6 @@ func FromUser(user config.User) Settings {
 }
 
 var retiredGeneratedKeys = map[string]bool{
-	// Moved under management and prebootLock by JODS-565.
-	"endpointManagedDevice":               true,
-	"jodsEndpoint":                        true,
-	"jodsPolicySigningPublicKey":          true,
-	"jodsRecoveryCommandSigningPublicKey": true,
-	"jodsEnrollmentMode":                  true,
-	"jodsAllowInsecureTls":                true,
-	"jodsDeviceClass":                     true,
-	"jodsDesktopProfile":                  true,
-	"jodsFingerprintEnrollmentAllowed":    true,
-	"jodsPrebootLockEnable":               true,
 	// Selected by apps since the app catalogue.
 	"aiEnable":             true,
 	"containersEnable":     true,

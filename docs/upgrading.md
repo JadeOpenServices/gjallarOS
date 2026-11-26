@@ -84,3 +84,30 @@ are removed. A revision gives the same answer on every machine and day.
 
 A rename adds its row in the same commit. Tests and captured device
 output may still name the old name.
+
+v2026.10.71 removed every row with `deleteAfter` `v2026.10.70`: the old
+commands (`rebuild`, `helpme`, `cleanup`, `cleanup-old-generations`,
+`thermal-status`, `thermal-test`, `check-installer`, `gjallar-preflight`,
+`network-diagnostics`, `gjallar-register-key`,
+`gjallar-management-status`), the flat management fields from before
+JODS-565 (`endpointManagedDevice` and the `jods*` fields), the
+`JODS-RECOVERY` and `JODS-REC` labels, `jods-mdm-agent.service` and the
+two old status files. An old command now gets the shell's plain "command
+not found". A `user.config.json` that still holds an old field stops
+with `json: unknown field "OLD"`; move the value to its new field:
+
+| Old field | New field |
+| --- | --- |
+| `endpointManagedDevice` | `management.enable` |
+| `jodsEndpoint` | `management.endpoint` |
+| `jodsPolicySigningPublicKey` | `management.policySigningPublicKey` |
+| `jodsRecoveryCommandSigningPublicKey` | `management.recoveryCommandSigningPublicKey` |
+| `jodsEnrollmentMode` | `management.enrollmentMode` |
+| `jodsAllowInsecureTls` | `management.allowInsecureTls` |
+| `jodsDeviceClass` | `management.deviceClass` |
+| `jodsDesktopProfile` | `management.desktopProfile` |
+| `jodsFingerprintEnrollmentAllowed` | `management.fingerprintEnrollmentAllowed` |
+| `jodsPrebootLockEnable` | `prebootLock.enable` |
+
+A `generated/state.nix` from before JODS-565 keeps its old lines after a
+rebuild; nothing reads them.
