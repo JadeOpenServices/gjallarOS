@@ -72,8 +72,8 @@ What an old name does until its row goes:
 | A field in `user.config.json` | It is not read; everything that reads the file stops and names the new field |
 | A command name that is a real command again | The system does not build |
 
-For example, `rebuild` prints
-`gjallarOS: rebuild was removed; use gjallarctl rebuild`, and an old field
+For example, an old command prints
+`gjallarOS: OLD was removed; use NEW`, and an old field
 stops with "unknown field: OLD is now NEW; move the value there in
 user.config.json".
 

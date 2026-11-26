@@ -357,6 +357,10 @@
 
         legacy-names = import ./tests/nix/legacy-names.nix { inherit pkgs; };
 
+        copies = import ./tests/nix/copies.nix { inherit pkgs; };
+
+        debt = import ./tests/nix/debt.nix { inherit pkgs; };
+
         nextcloud-client-patches = import ./tests/nix/nextcloud-client-patches.nix { inherit pkgs; };
 
         qt6ct-kde-style = import ./tests/nix/qt6ct-kde-style.nix { inherit pkgs; };

@@ -1,0 +1,36 @@
+# Plane 445: the upkeep gates. copies fails on copied code that
+# tests/copies/known.json does not list, debt on a patch outside
+# tests/debt/register.json or an overdue tier 1 review, legacy-names on an
+# old name still in use. The weekly run catches a review date that runs out
+# between pushes. How to: docs/copies.md, docs/debt.md, docs/upgrading.md.
+# No secrets.
+name: upkeep gates
+
+on:
+  push:
+    branches: [dev]
+  pull_request:
+  schedule:
+    - cron: "17 5 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    if: github.repository == 'JadeOpenServices/gjallarOS'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31.11.1
+
+      - name: copies, debt, legacy-names
+        run: >-
+          nix build --print-build-logs --no-link --keep-going
+          '.#checks.x86_64-linux.copies'
+          '.#checks.x86_64-linux.debt'
+          '.#checks.x86_64-linux.legacy-names'

@@ -27,7 +27,7 @@ let
     ]
     || lib.hasPrefix "_" file.name;
   # Tests may name old names to prove they are refused, and captured
-  # fixtures keep what the device printed.
+  # fixtures (Go testdata/, left out by the grep) keep what the device printed.
   testFile = file: lib.hasSuffix "_test.go" file.name;
   sources = lib.fileset.toSource {
     inherit root;
@@ -58,7 +58,7 @@ let
           " -w -e ${lib.escapeShellArg row.old}";
     in
     ''
-      hits=$(grep -r -l -F${search} . | ${filter} | sort || true)
+      hits=$(grep -r -l --exclude-dir=testdata -F${search} . | ${filter} | sort || true)
       if [ -n "$hits" ]; then
         printf '%s\n' ${lib.escapeShellArg "${row.old} was renamed to ${row.new} (${row.item}); still used in:"} $hits
         failed=1

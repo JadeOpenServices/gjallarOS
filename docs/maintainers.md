@@ -12,6 +12,15 @@ runs gjallarOS. If you need the package itself, build it with
 `nix build "git+file://$PWD#gjallarctl"`. A `path:` flake reference copies the
 whole directory into the Nix store, untracked files and VM disks included.
 
+## Upkeep checks
+
+Three flake checks keep old code from piling up. `copies` fails on copied
+code that is not listed ([Copied code](copies.md)), `debt` on a patch or
+workaround without an entry or with an overdue security review
+([Debt register](debt.md)), and `legacy-names` on an old name still in use
+([Old names](upgrading.md#old-names)). `.github/workflows/upkeep.yml` runs
+all three on every push to `dev`, on pull requests and once a week.
+
 ## Release cache
 
 gjallarOS patches a few packages (Noctalia, its greeter, the Nextcloud client

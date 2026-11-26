@@ -1,0 +1,492 @@
+{
+  "debt": [
+    {
+      "name": "nextcloud-client",
+      "kind": "patches",
+      "members": [
+        "apps/nextcloud/patches/nextcloud-browser-hooks.patch",
+        "apps/nextcloud/patches/nextcloud-dolphin-vfs-overlays.patch",
+        "apps/nextcloud/patches/nextcloud-hydration-encoded-size.patch",
+        "apps/nextcloud/patches/nextcloud-hydration-liveness.patch",
+        "apps/nextcloud/patches/nextcloud-keep-local-picker.patch",
+        "apps/nextcloud/patches/nextcloud-no-autostart.patch",
+        "apps/nextcloud/patches/nextcloud-notification-click.patch",
+        "apps/nextcloud/patches/nextcloud-openvfs-effective-pin.patch",
+        "apps/nextcloud/patches/nextcloud-openvfs-failed-hydration.patch",
+        "apps/nextcloud/patches/nextcloud-openvfs-folder-availability.patch",
+        "apps/nextcloud/patches/nextcloud-openvfs-folder-pin-below.patch",
+        "apps/nextcloud/patches/nextcloud-openvfs-in-sync.patch",
+        "apps/nextcloud/patches/nextcloud-openvfs-keep-open-files.patch",
+        "apps/nextcloud/patches/nextcloud-openvfs-stale-mount.patch",
+        "apps/nextcloud/patches/nextcloud-openvfs-start-gate.patch",
+        "apps/nextcloud/patches/nextcloud-openvfs-sync-loop.patch",
+        "apps/nextcloud/patches/nextcloud-palette-theme.patch",
+        "apps/nextcloud/patches/nextcloud-quit-on-sigterm.patch",
+        "apps/nextcloud/patches/nextcloud-remote-options-no-exit.patch",
+        "apps/nextcloud/patches/nextcloud-sync-folders-title.patch",
+        "apps/nextcloud/patches/nextcloud-vfs-default.patch",
+        "apps/nextcloud/patches/nextcloud-vfs-folder-wizard.patch"
+      ],
+      "tier": 2,
+      "item": 232,
+      "why": "Nextcloud desktop client fixes for OpenVFS hydration that are not upstream yet.",
+      "exit": "Upstream takes it (book 753) or the package leaves",
+      "guard": "apps/nextcloud/client-source.nix"
+    },
+    {
+      "name": "openvfs",
+      "kind": "patches",
+      "members": [
+        "apps/nextcloud/patches/openvfs-exit-with-client.patch",
+        "apps/nextcloud/patches/openvfs-hydration-liveness.patch",
+        "apps/nextcloud/patches/openvfs-keep-open-files.patch",
+        "apps/nextcloud/patches/openvfs-progress-deadline.patch",
+        "apps/nextcloud/patches/openvfs-quiet-socket-log.patch",
+        "apps/nextcloud/patches/openvfs-refusal-count.patch",
+        "apps/nextcloud/patches/openvfs-shutdown.patch",
+        "apps/nextcloud/patches/openvfs-worker-reserve.patch"
+      ],
+      "tier": 2,
+      "item": 232,
+      "why": "OpenVFS fixes for hydration, shutdown and logging that are not upstream yet.",
+      "exit": "Upstream takes it (book 753) or the package leaves",
+      "guard": "apps/nextcloud/package.nix"
+    },
+    {
+      "name": "libreoffice",
+      "kind": "patches",
+      "members": [
+        "pkgs/libreoffice/26.8-add-dir-prereq.patch",
+        "pkgs/libreoffice/dont-detect-qt-paths-from-qmake.patch",
+        "pkgs/libreoffice/readd-explicit-zlib-link.patch",
+        "pkgs/libreoffice/skip-broken-tests-stable.patch",
+        "pkgs/libreoffice/skip-broken-tests.patch"
+      ],
+      "tier": 2,
+      "item": 232,
+      "why": "Build fixes for the vendored LibreOffice 26.8.2.2.",
+      "exit": "nixpkgs ships LibreOffice 26.8.1 or later and the vendored build goes",
+      "guard": "pkgs/libreoffice/src/main.nix"
+    },
+    {
+      "name": "noctalia",
+      "kind": "patches",
+      "members": [
+        "pkgs/noctalia/battery-notify.patch",
+        "pkgs/noctalia/bluetooth-pairing.patch",
+        "pkgs/noctalia/bluetooth.patch",
+        "pkgs/noctalia/cpu-temp-smoothing.patch",
+        "pkgs/noctalia/greeter-sync-on-start.patch",
+        "pkgs/noctalia/greeter-sync-polkit-ready.patch",
+        "pkgs/noctalia/libqalculate-randstate.patch",
+        "pkgs/noctalia/lock-osk.patch",
+        "pkgs/noctalia/media-tray.patch",
+        "pkgs/noctalia/network-secret-agent.patch",
+        "pkgs/noctalia/notification-app-name.patch",
+        "pkgs/noctalia/notification-internal-actions.patch",
+        "pkgs/noctalia/notification-progress-left.patch",
+        "pkgs/noctalia/notification-swipe.patch",
+        "pkgs/noctalia/openjade-artwork.patch",
+        "pkgs/noctalia/openjade-motion.patch",
+        "pkgs/noctalia/openjade-shape.patch",
+        "pkgs/noctalia/pointer-axis-frame.patch",
+        "pkgs/noctalia/pointer-event-time.patch",
+        "pkgs/noctalia/settings-per-version.patch",
+        "pkgs/noctalia/touch-long-press.patch",
+        "pkgs/noctalia/tray-trailing-separator.patch",
+        "pkgs/noctalia/wallpaper-store-path.patch",
+        "pkgs/noctalia/wpa-supplicant-access-denied.patch"
+      ],
+      "tier": 2,
+      "item": 232,
+      "why": "Noctalia shell fixes and the openjade look; libqalculate-randstate fixes the calculator in it.",
+      "exit": "Noctalia leaves with the KDE move (Plane 408) or upstream takes it (book 753)",
+      "guard": "Plane 474"
+    },
+    {
+      "name": "noctalia-greeter",
+      "kind": "patches",
+      "members": [
+        "pkgs/noctalia-greeter/display-ready.patch",
+        "pkgs/noctalia-greeter/internal-panel-first.patch",
+        "pkgs/noctalia-greeter/menu-click.patch",
+        "pkgs/noctalia-greeter/osk-auto-show.patch",
+        "pkgs/noctalia-greeter/osk.patch",
+        "pkgs/noctalia-greeter/runtime-dir.patch",
+        "pkgs/noctalia-greeter/staging-snapshot.patch",
+        "pkgs/noctalia-greeter/wlr-log-level.patch"
+      ],
+      "tier": 2,
+      "item": 232,
+      "why": "Greeter fixes: display start, on-screen keyboard, menus, staging snapshot.",
+      "exit": "The Noctalia greeter leaves with the KDE move (Plane 408) or upstream takes it (book 753)",
+      "guard": "Plane 474"
+    },
+    {
+      "name": "winetricks",
+      "kind": "patches",
+      "members": [
+        "pkgs/gjallar-winetricks/vcrun2022-msvcp140.patch"
+      ],
+      "tier": 2,
+      "item": 232,
+      "why": "vcrun2022 left Wine's own msvcp140 in place (Plane 277).",
+      "exit": "Upstream takes it (book 753) or the package leaves",
+      "guard": "Plane 474"
+    },
+    {
+      "name": "android-tools",
+      "kind": "patches",
+      "members": [
+        "pkgs/patches/android-tools-libusb-authorized-later.patch"
+      ],
+      "tier": 1,
+      "item": 232,
+      "why": "A phone that USBGuard allows after it was plugged in reaches a running adb server.",
+      "exit": "Upstream takes it (book 753) or the package leaves",
+      "guard": "pkgs/overlays/android-tools.nix",
+      "test": "tests/nix/adb-usbguard-allow.nix",
+      "review": "2026-12-24"
+    },
+    {
+      "name": "aquamarine",
+      "kind": "patches",
+      "members": [
+        "pkgs/patches/aquamarine-primary-renderer-once.patch"
+      ],
+      "tier": 2,
+      "item": 232,
+      "why": "A GPU without an EGL renderer made aquamarine retry on every commit.",
+      "exit": "Hyprland leaves with the KDE move (Plane 408) or upstream takes it (book 753)",
+      "guard": "pkgs/overlays/aquamarine.nix"
+    },
+    {
+      "name": "btrbk",
+      "kind": "patches",
+      "members": [
+        "pkgs/patches/btrbk-onchange-up-to-date.patch"
+      ],
+      "tier": 2,
+      "item": 232,
+      "why": "onchange snapshots compared generations the way Linux before 6.18 bumped them.",
+      "exit": "Upstream takes it (book 753) or the package leaves",
+      "guard": "pkgs/overlays/btrbk.nix"
+    },
+    {
+      "name": "chrony",
+      "kind": "patches",
+      "members": [
+        "pkgs/patches/chrony-rtc-initial-trim-timeout.patch"
+      ],
+      "tier": 2,
+      "item": 232,
+      "why": "An RTC that never interrupts kept chronyd starting until systemd killed it.",
+      "exit": "Upstream takes it (book 753) or the package leaves",
+      "guard": "pkgs/overlays/chrony.nix"
+    },
+    {
+      "name": "dolphin",
+      "kind": "patches",
+      "members": [
+        "pkgs/patches/dolphin-touchpad-swipe-navigation.patch"
+      ],
+      "tier": 2,
+      "item": 232,
+      "why": "Two-finger touchpad swipe goes back and forward (KDE bug 506603).",
+      "exit": "Upstream takes it (book 753) or the package leaves",
+      "guard": "pkgs/overlays/dolphin.nix"
+    },
+    {
+      "name": "fprintd",
+      "kind": "patches",
+      "members": [
+        "pkgs/patches/fprintd-claim-waits-for-close.patch"
+      ],
+      "tier": 1,
+      "item": 232,
+      "why": "A fingerprint claim during the close for the previous holder failed with AlreadyInUse.",
+      "exit": "Upstream takes it (book 753) or the package leaves",
+      "guard": "pkgs/overlays/fprintd.nix",
+      "test": "tests/nix/fprintd-claim-after-close.nix",
+      "review": "2026-12-24"
+    },
+    {
+      "name": "ghostty",
+      "kind": "patches",
+      "members": [
+        "pkgs/patches/ghostty-scope-app-id.patch",
+        "pkgs/patches/ghostty-touch-cancel.patch"
+      ],
+      "tier": 2,
+      "item": 232,
+      "why": "Ghostty kept the mouse button down after a cancelled touch, and the scope app id.",
+      "exit": "Upstream takes it (book 753) or the package leaves",
+      "guard": "pkgs/overlays/ghostty.nix"
+    },
+    {
+      "name": "hyprland",
+      "kind": "patches",
+      "members": [
+        "pkgs/patches/hyprland-axis-relative-direction.patch",
+        "pkgs/patches/hyprland-float-onscreen.patch",
+        "pkgs/patches/hyprland-permission-client-destroy.patch",
+        "pkgs/patches/hyprland-sendshortcut-unshifted.patch",
+        "pkgs/patches/hyprland-stale-cursor.patch",
+        "pkgs/patches/hyprland-unlock-focus.patch"
+      ],
+      "tier": 2,
+      "item": 232,
+      "why": "Hyprland 0.55.4 fixes: cursor plane, unlock focus, floats, shortcuts, permissions, scrolling.",
+      "exit": "Hyprland leaves with the KDE move (Plane 408) or upstream takes it (book 753)",
+      "guard": "pkgs/overlays/hyprland.nix"
+    },
+    {
+      "name": "kio-device-capacity",
+      "kind": "patches",
+      "members": [
+        "pkgs/patches/kio-device-capacity-text.patch"
+      ],
+      "tier": 2,
+      "item": 232,
+      "why": "The places panel shows the free space of a device as text.",
+      "exit": "Upstream takes it (book 753) or the package leaves",
+      "guard": "pkgs/optional-overlays/kio-device-capacity-text.nix"
+    },
+    {
+      "name": "kio-fuse",
+      "kind": "patches",
+      "members": [
+        "pkgs/patches/kio-fuse-mounts-slow.patch"
+      ],
+      "tier": 2,
+      "item": 232,
+      "why": "KIO took FUSE mounts such as OpenVFS for a fast disk and downloaded every file (Plane 252).",
+      "exit": "Upstream takes it (book 753) or the package leaves",
+      "guard": "pkgs/overlays/kio.nix"
+    },
+    {
+      "name": "lanzaboote-shim",
+      "kind": "patches",
+      "members": [
+        "pkgs/patches/lanzaboote-shim-first-stage.patch"
+      ],
+      "tier": 1,
+      "item": 232,
+      "why": "lzbt installs shim as the first stage on firmware with fixed keys (Plane 293).",
+      "exit": "Upstream takes it (book 753) or the package leaves",
+      "guard": "Plane 471",
+      "test": "Plane 471",
+      "review": "2026-12-24"
+    },
+    {
+      "name": "plymouth",
+      "kind": "patches",
+      "members": [
+        "pkgs/patches/plymouth-flush-on-idle.patch",
+        "pkgs/patches/plymouth-script-quit-on-retain.patch"
+      ],
+      "tier": 2,
+      "item": 232,
+      "why": "The boot animation froze mid-turn under the greeter.",
+      "exit": "Upstream takes it (book 753) or the package leaves",
+      "guard": "pkgs/overlays/plymouth.nix"
+    },
+    {
+      "name": "qt6ct",
+      "kind": "patches",
+      "members": [
+        "pkgs/patches/qt6ct-kde-fixed-font-key.patch"
+      ],
+      "tier": 2,
+      "item": 232,
+      "why": "The KDE integration read the fixed font from a key that never exists.",
+      "exit": "Upstream takes it (book 753) or the package leaves",
+      "guard": "pkgs/overlays/qt6ct-kde-integration.nix"
+    },
+    {
+      "name": "sbctl",
+      "kind": "patches",
+      "members": [
+        "pkgs/patches/sbctl-subject-key-id.patch"
+      ],
+      "tier": 1,
+      "item": 232,
+      "why": "mokutil looks the gjallarOS key up by its Subject Key Identifier, which sbctl did not set.",
+      "exit": "Upstream takes it (book 753) or the package leaves",
+      "guard": "pkgs/overlays/sbctl.nix",
+      "test": "Plane 472",
+      "review": "2026-12-24"
+    },
+    {
+      "name": "systemd-initrd-pin-text",
+      "kind": "patches",
+      "members": [
+        "pkgs/patches/systemd-cryptsetup-wrong-pin-text.patch"
+      ],
+      "tier": 2,
+      "item": 232,
+      "why": "After a wrong startup PIN the ask looked as if nothing had happened (Plane 332). Only the initrd copy is patched.",
+      "exit": "Upstream takes it (book 753) or the package leaves",
+      "guard": "system/security/disk-unlock.nix"
+    },
+    {
+      "name": "udiskie",
+      "kind": "patches",
+      "members": [
+        "pkgs/patches/udiskie-mount-new-media-only.patch"
+      ],
+      "tier": 2,
+      "item": 232,
+      "why": "udiskie mounted what a tool had just written to a stick (Plane 185).",
+      "exit": "Upstream takes it (book 753) or the package leaves",
+      "guard": "pkgs/overlays/udiskie.nix"
+    },
+    {
+      "name": "usbguard",
+      "kind": "patches",
+      "members": [
+        "pkgs/patches/usbguard-long-endpoint-descriptor.patch"
+      ],
+      "tier": 1,
+      "item": 232,
+      "why": "USBGuard rejected long endpoint descriptors, so some phones never reached USB review (usbguard#686).",
+      "exit": "Upstream takes it (book 753) or the package leaves",
+      "guard": "pkgs/overlays/usbguard.nix",
+      "test": "Plane 473",
+      "review": "2026-12-24"
+    },
+    {
+      "name": "wine",
+      "kind": "patches",
+      "members": [
+        "pkgs/patches/wine-setupapi-readonly-target.patch"
+      ],
+      "tier": 2,
+      "item": 232,
+      "why": "A file copied from a read-only source kept that flag, so the next setup copy over it failed with access denied.",
+      "exit": "Upstream takes it (book 753) or the package leaves",
+      "guard": "pkgs/overlays/wine.nix"
+    },
+    {
+      "name": "wvkbd",
+      "kind": "patches",
+      "members": [
+        "pkgs/patches/wvkbd-close-key-swipe.patch"
+      ],
+      "tier": 2,
+      "item": 232,
+      "why": "Close key, swipe to hide, type on lift; also holds W10 (Plane 235).",
+      "exit": "Hyprland leaves with the KDE move (Plane 408) or upstream takes it (book 753)",
+      "guard": "pkgs/overlays/wvkbd.nix"
+    },
+    {
+      "name": "xdph",
+      "kind": "patches",
+      "members": [
+        "pkgs/patches/xdph-release-wayland.patch"
+      ],
+      "tier": 2,
+      "item": 232,
+      "why": "The Hyprland portal crashed at every logout.",
+      "exit": "Hyprland leaves with the KDE move (Plane 408) or upstream takes it (book 753)",
+      "guard": "pkgs/overlays/xdg-desktop-portal-hyprland.nix"
+    },
+    {
+      "name": "avahi",
+      "kind": "patches",
+      "members": [
+        "system/fixes/avahi-daemon/ignore-sighup-until-handler.patch"
+      ],
+      "tier": 2,
+      "item": 232,
+      "why": "avahi-daemon died at boot and never started again (Plane 181).",
+      "exit": "Upstream takes it (book 753) or the package leaves",
+      "guard": "system/fixes/avahi-daemon/default.nix"
+    },
+    {
+      "name": "nix-download-retry",
+      "kind": "patches",
+      "members": [
+        "system/fixes/nix-download-retry/nix-retry-counts-stalled-tries-only.patch"
+      ],
+      "tier": 2,
+      "item": 232,
+      "why": "Large downloads failed after five broken connections that all moved forward (Plane 431).",
+      "exit": "Upstream takes it (book 753) or the package leaves",
+      "guard": "system/fixes/nix-download-retry/default.nix"
+    },
+    {
+      "name": "systemd",
+      "kind": "patches",
+      "members": [
+        "system/fixes/systemd/remove-before-add.patch",
+        "system/fixes/systemd/tpm2-setup-lockout.patch"
+      ],
+      "tier": 1,
+      "item": 232,
+      "why": "TPM2 setup lockout (Plane 333) and partition re-read on removable media.",
+      "exit": "Upstream takes it (book 753) or the package leaves",
+      "guard": "system/fixes/systemd/package.nix",
+      "test": "tests/nix/systemd-tpm2-lockout-fix.nix",
+      "review": "2026-12-24"
+    },
+    {
+      "name": "hyprgrass",
+      "kind": "patches",
+      "members": [
+        "user/wm/hyprland/hyprgrass-border-drag.patch",
+        "user/wm/hyprland/hyprgrass-finger-slip.patch"
+      ],
+      "tier": 2,
+      "item": 232,
+      "why": "Edge swipes from the border on any monitor, and finger slip.",
+      "exit": "Hyprland leaves with the KDE move (Plane 408) or upstream takes it (book 753)",
+      "guard": "user/wm/hyprland/touch.nix"
+    },
+    {
+      "name": "wl-clipboard",
+      "kind": "patches",
+      "members": [
+        "user/wm/hyprland/wl-copy-paste-once-keep-owner.patch"
+      ],
+      "tier": 2,
+      "item": 232,
+      "why": "Paste-once keeps the clipboard owner so plain-text paste works.",
+      "exit": "Hyprland leaves with the KDE move (Plane 408) or upstream takes it (book 753)",
+      "guard": "Plane 474"
+    },
+    {
+      "name": "W10 wvkbd input method drop",
+      "kind": "workaround",
+      "members": [
+        "pkgs/patches/wvkbd-close-key-swipe.patch"
+      ],
+      "tier": 3,
+      "item": 235,
+      "why": "Input-method events in the first second after binding are ignored, by a timer (IM_STARTUP_MS).",
+      "exit": "A signal that does not rely on time, or Hyprland leaves (Plane 408)"
+    },
+    {
+      "name": "W12 Noctalia Wi-Fi backend",
+      "kind": "workaround",
+      "members": [
+        "pkgs/noctalia/wpa-supplicant-access-denied.patch"
+      ],
+      "tier": 3,
+      "item": 244,
+      "why": "A wpa_supplicant that answers AccessDenied won the backend race at startup, so the NetworkManager backend lost.",
+      "exit": "Upstream fix, or Noctalia leaves (Plane 408)"
+    },
+    {
+      "name": "W13 Firefox pop-ups",
+      "kind": "workaround",
+      "members": [
+        "user/wm/hyprland/rules.nix"
+      ],
+      "tier": 3,
+      "item": 262,
+      "why": "Firefox extension pop-ups get their title too late for a window rule; a handler floats them.",
+      "exit": "Hyprland leaves (Plane 408) or Firefox titles the pop-up at map time"
+    }
+  ]
+}

@@ -1,0 +1,325 @@
+{
+  "copies": [
+    {
+      "kind": "run",
+      "members": [
+        "apps/plane/home.nix",
+        "apps/teams/home.nix"
+      ],
+      "tier": 3,
+      "item": "469",
+      "why": "Not shared yet; add a web app lookup by id to the web-application library."
+    },
+    {
+      "kind": "run",
+      "members": [
+        "cmd/gjallar-settingsd/bus.go Authorize",
+        "cmd/gjallar-snapshotd/main.go Authorize"
+      ],
+      "tier": 1,
+      "item": "451",
+      "why": "Not shared yet; share the polkit authorization check between settingsd and snapshotd.",
+      "review": "2026-12-24"
+    },
+    {
+      "kind": "run",
+      "members": [
+        "cmd/gjallar-wine/import.go importPrefix",
+        "cmd/gjallar-wine/setup.go copyPrefix"
+      ],
+      "tier": 1,
+      "item": "461",
+      "why": "Not shared yet; share the staged prefix creation of Wine import and setup.",
+      "review": "2026-12-24"
+    },
+    {
+      "kind": "run",
+      "members": [
+        "cmd/gjallarctl/main.go runTPM2MetadataHuman",
+        "cmd/gjallarctl/main.go runTPM2MetadataPIN",
+        "cmd/gjallarctl/main.go runTPM2MetadataPolicy"
+      ],
+      "tier": 1,
+      "item": "455",
+      "why": "Not shared yet; share the LUKS metadata loading of the tpm2-metadata commands.",
+      "review": "2026-12-24"
+    },
+    {
+      "kind": "run",
+      "members": [
+        "internal/installer/config/config.go WriteAtomic",
+        "internal/installer/config/set_bool.go replaceFile"
+      ],
+      "tier": 1,
+      "item": "452",
+      "why": "Not shared yet; give user.config.json one atomic replace and one in-place edit path.",
+      "review": "2026-12-24"
+    },
+    {
+      "kind": "run",
+      "members": [
+        "internal/installer/config/set_bool.go SetBool",
+        "internal/installer/config/set_value.go SetValue"
+      ],
+      "tier": 1,
+      "item": "452",
+      "why": "Not shared yet; give user.config.json one atomic replace and one in-place edit path.",
+      "review": "2026-12-24"
+    },
+    {
+      "kind": "run",
+      "members": [
+        "internal/installer/freshdiskplan/plan.go Build",
+        "internal/installer/recoveryprovision/existing_plan.go BuildExistingPlan"
+      ],
+      "tier": 2,
+      "item": "462",
+      "why": "Not shared yet; define the recovery partition and PARTUUID generator once in diskplan."
+    },
+    {
+      "kind": "run",
+      "members": [
+        "internal/installer/gptprovision/provision.go inspectDisk",
+        "internal/installer/mounttree/mounttree.go requireFreshPartition",
+        "internal/installer/recoveryprovision/existing_plan.go BuildExistingPlan",
+        "internal/installer/rootprovision/provision.go inspectPartition"
+      ],
+      "tier": 1,
+      "item": "453",
+      "why": "Not shared yet; move the lsblk disk and partition inspection into one package.",
+      "review": "2026-12-24"
+    },
+    {
+      "kind": "run",
+      "members": [
+        "internal/installer/mounttree/mounttree.go requireFreshPartition",
+        "internal/installer/rootprovision/provision.go inspectPartition"
+      ],
+      "tier": 1,
+      "item": "453",
+      "why": "Not shared yet; move the lsblk disk and partition inspection into one package.",
+      "review": "2026-12-24"
+    },
+    {
+      "kind": "run",
+      "members": [
+        "internal/installer/oddc/canonical.go resolveCanonical",
+        "internal/installer/oddc/fetched.go ask"
+      ],
+      "tier": 3,
+      "item": "467",
+      "why": "Not shared yet; map the ODDC machine identity in one place."
+    },
+    {
+      "kind": "run",
+      "members": [
+        "internal/installer/recoveryresize/executor.go ExecuteFreshInstallerResize",
+        "internal/installer/rootprovision/provision.go provision"
+      ],
+      "tier": 1,
+      "item": "454",
+      "why": "Not shared yet; share the stdin-keyed LUKS2 open between provisioning and resize.",
+      "review": "2026-12-24"
+    },
+    {
+      "kind": "run",
+      "members": [
+        "internal/usbtrust/action.go Mutation",
+        "internal/usbtrust/action.go Valid"
+      ],
+      "tier": 1,
+      "item": "456",
+      "why": "Not shared yet; keep the USB trust action list in one table.",
+      "review": "2026-12-24"
+    },
+    {
+      "kind": "run",
+      "members": [
+        "internal/usbtrust/controller/controller.go arm",
+        "internal/usbtrust/controller/controller.go enrollPortMatches"
+      ],
+      "tier": 1,
+      "item": "457",
+      "why": "Not shared yet; share the internal-device enrollment of USB trust arm and port match.",
+      "review": "2026-12-24"
+    },
+    {
+      "kind": "run",
+      "members": [
+        "pkgs/gjallar-settings/qml/AppDetailPage.qml",
+        "pkgs/gjallar-settings/qml/AppsPage.qml"
+      ],
+      "tier": 3,
+      "item": "466",
+      "why": "Not shared yet; make the Wine network toggle row one QML component."
+    },
+    {
+      "kind": "run",
+      "members": [
+        "pkgs/gjallar-settings/qml/AppsPage.qml",
+        "pkgs/gjallar-settings/qml/SecurityPage.qml"
+      ],
+      "tier": 3,
+      "item": "445",
+      "why": "QML page header: the same imports and required properties every settings page needs."
+    },
+    {
+      "kind": "run",
+      "members": [
+        "pkgs/gjallar-settingsd/default.nix",
+        "pkgs/gjallar-wine/default.nix"
+      ],
+      "tier": 2,
+      "item": "463",
+      "why": "Not shared yet; share the Go source fileset of the Nix packages."
+    },
+    {
+      "kind": "run",
+      "members": [
+        "shells/comfy/flake.nix",
+        "shells/invoke/flake.nix"
+      ],
+      "tier": 2,
+      "item": "464",
+      "why": "Not shared yet; merge the dev-shell flakes into one flake with one lock."
+    },
+    {
+      "kind": "run",
+      "members": [
+        "shells/comfy/flake.nix",
+        "shells/invoke/flake.nix",
+        "shells/lampray/flake.nix",
+        "shells/python/flake.nix"
+      ],
+      "tier": 2,
+      "item": "464",
+      "why": "Not shared yet; merge the dev-shell flakes into one flake with one lock."
+    },
+    {
+      "kind": "run",
+      "members": [
+        "shells/comfy/flake.nix",
+        "shells/invoke/flake.nix",
+        "shells/python/flake.nix"
+      ],
+      "tier": 2,
+      "item": "464",
+      "why": "Not shared yet; merge the dev-shell flakes into one flake with one lock."
+    },
+    {
+      "kind": "run",
+      "members": [
+        "shells/invoke/flake.nix",
+        "shells/lampray/flake.nix",
+        "shells/python/flake.nix"
+      ],
+      "tier": 2,
+      "item": "464",
+      "why": "Not shared yet; merge the dev-shell flakes into one flake with one lock."
+    },
+    {
+      "kind": "run",
+      "members": [
+        "system/installer-media/base.nix",
+        "system/installer-media/stick.nix"
+      ],
+      "tier": 3,
+      "item": "445",
+      "why": "Initrd oneshot unit settings; the two units do different work and only the frame is the same."
+    },
+    {
+      "kind": "run",
+      "members": [
+        "system/security/secure-boot/lifecycle.nix",
+        "system/security/secure-boot/measured-boot.nix"
+      ],
+      "tier": 3,
+      "item": "445",
+      "why": "The same module argument header; the bodies differ."
+    },
+    {
+      "kind": "run",
+      "members": [
+        "system/security/virus-scan.nix",
+        "system/services/settings-service.nix"
+      ],
+      "tier": 1,
+      "item": "458",
+      "why": "Not shared yet; share one systemd sandbox baseline across root services.",
+      "review": "2026-12-24"
+    },
+    {
+      "kind": "run",
+      "members": [
+        "system/services/settings-service.nix",
+        "system/services/snapshots.nix"
+      ],
+      "tier": 1,
+      "item": "459",
+      "why": "Not shared yet; build the D-Bus policy and activation files of root services from one function.",
+      "review": "2026-12-24"
+    },
+    {
+      "kind": "run",
+      "members": [
+        "themes/black.nix",
+        "themes/gruvbox.nix",
+        "themes/nord.nix"
+      ],
+      "tier": 3,
+      "item": "465",
+      "why": "Not shared yet; move shared theme defaults into one file."
+    },
+    {
+      "kind": "run",
+      "members": [
+        "themes/black.nix",
+        "themes/nord.nix"
+      ],
+      "tier": 3,
+      "item": "465",
+      "why": "Not shared yet; move shared theme defaults into one file."
+    },
+    {
+      "kind": "whole",
+      "members": [
+        "internal/hardware/deviceprobe/probe.go read",
+        "internal/usbtrust/mediagate/gate.go readTrim"
+      ],
+      "tier": 3,
+      "item": "445",
+      "why": "Read a file and trim it: five lines in two unrelated packages, sharing would tie them together."
+    },
+    {
+      "kind": "whole",
+      "members": [
+        "internal/installer/app/app.go (anonymous) #8",
+        "internal/installer/app/app.go containsValue"
+      ],
+      "tier": 3,
+      "item": "470",
+      "why": "Not shared yet; replace hand-written contains loops in the installer app with slices.Contains."
+    },
+    {
+      "kind": "whole",
+      "members": [
+        "internal/installer/installreport/report.go (anonymous) #2",
+        "internal/installer/oddcdraft/besteffort.go (anonymous)"
+      ],
+      "tier": 1,
+      "item": "460",
+      "why": "Not shared yet; share the control-character filter for text shown in the terminal.",
+      "review": "2026-12-24"
+    },
+    {
+      "kind": "whole",
+      "members": [
+        "internal/installer/move/flow.go size",
+        "internal/installer/targetdisk/savedrive.go humanSize"
+      ],
+      "tier": 3,
+      "item": "468",
+      "why": "Not shared yet; share the decimal disk size formatter."
+    }
+  ]
+}
