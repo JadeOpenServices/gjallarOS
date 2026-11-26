@@ -320,6 +320,13 @@ in
   imports = [
     ./live.nix
     {
+      options.gjallar.stick.base = lib.mkOption {
+        type = lib.types.package;
+        description = ''
+          The base system's toplevel (system/base). Stage 1 copies its
+          closure from the stick store to the new disk.
+        '';
+      };
       options.gjallar.stick.release = {
         url = lib.mkOption {
           type = lib.types.strMatching "https://[^?#]+[^/?#]";
@@ -361,6 +368,10 @@ in
   image.baseName = lib.mkForce (lib.removeSuffix ".iso" isoName);
 
   networking.hostName = "gjallar-stick";
+
+  # The base system rides in the verified stick store; this link is how
+  # stage 1 finds it (docs/two-stage-install.md).
+  environment.etc."gjallar/stick-base".source = config.gjallar.stick.base;
 
   # The installer queues the removal of the stick's hash from shim's list
   # (QueueStickHashDelete); mokutil does that.

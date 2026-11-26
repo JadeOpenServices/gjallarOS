@@ -73,9 +73,9 @@ Steps after the questions:
    `stickrelease`)
 2. Partition, format, open the encrypted root (as today, `freshdiskplan`,
    `diskcrypto`)
-3. Copy the base system from the stick. The base system is a signed
-   release output stored on the stick. Every path is checked against the
-   release key before it lands on the disk (Q264). No network is used
+3. Copy the base system from the stick. The base system is part of the
+   stick's verity-checked store, and the maker checked the stick against
+   the release key (Q264, see "The base system" below). No network is used
 4. Install the boot chain: shim, the signed boot loader and kernel
 5. Queue the gjallarOS signing key for MokManager, and also put the public
    gjallarOS certificate on the boot partition (Q285, see "Missed MokManager
@@ -89,6 +89,112 @@ typed again at the unlock screen. No temporary partition is made.
 
 The stick menu keeps "More options" for the full install maker (Q271) and
 for IT staff who want the terminal path (see "Terminal path").
+
+### The base system (CP-T1)
+
+The base system is a NixOS system of its own, `gjallar-base` in the flake.
+It is the same for every machine and is built with the release. It holds
+what the first boot needs and nothing more: the kernel and boot chain,
+disk unlock, network, `gjallarctl`, the release cache settings and,
+from CP-T4 on, the stage 2 session.
+
+#### How the stick carries it
+
+The base system is part of the stick's store. The stick store is a
+squashfs checked by dm-verity, and its root hash is on the command line
+of the stick's signed boot image (`gjallar.verity=`). So every block of
+the base system that stage 1 reads is checked against that hash. The
+maker checks the stick image against the release key before it writes
+the stick (`stickrelease`). Together this covers "checked against the
+release key" (Q264) with no network, and with no second key on the stick.
+
+A separate signed list of the base paths would add nothing. The key that
+checks it would sit on the same stick, under the same verity hash.
+
+Stage 1 copies the base closure from the stick store to the new disk and
+sets it as the first system generation. It does not build or evaluate
+anything.
+
+#### How the base finds the disk
+
+The base cannot carry this disk's partition IDs, because it is built once
+for everyone. The boot image is made and signed on the target in stage 1
+(per-machine key, R47), but its command line comes from the base system,
+which is fixed.
+
+The base uses the Discoverable Partitions Specification: the systemd
+initrd looks for the root partition by its type ID on the disk that holds
+the boot partition the firmware started (`root=gpt-auto`). A second disk
+with gjallarOS on it, or a USB disk, is never picked, because only the
+boot disk is searched.
+
+For that, stage 1 gives the root partition the type "Linux root
+(x86-64)" (`4f68bce3-e8cd-4db1-96e7-fbcaf984b709`) instead of the plain
+"Linux LUKS" type. The full system after stage 2 still names its disks by
+UUID in its hardware file, so it does not depend on the type. New installs
+on the other paths get the same type, so there is one partition layout.
+The type change lands with CP-T2, together with the stage 1 copy and its
+VM install test; until then the installer still writes the LUKS type.
+
+The base opens the encrypted root as `/dev/mapper/root` (the name the
+specification uses). The full system keeps `cryptroot`. Stage 2 steps
+that need the open device ask the system for it and do not use a fixed
+name.
+
+The specification mounts only the default btrfs subvolume (`@`) as `/`.
+The base mounts `@nix`, `@home` and `@config` from `/dev/gpt-auto-root`,
+the name the systemd initrd gives the opened root. That name comes from a
+udev rule file (`90-image-dissect.rules`) that the NixOS initrd leaves
+out, so the base adds it to its initrd. The CP-T2 VM install checks that
+the initrd finds and mounts all four.
+
+The base carries the initrd modules for the usual storage controllers
+(NVMe, SATA/AHCI, and virtio for the test VMs), since it has
+no hardware scan.
+
+The base has no account with a password and no shell (Q265). The account
+is made in stage 2.
+
+Open for CP-T2: the base is built for Secure Boot (signed boot loader and
+kernel). On a machine where Secure Boot is off or not usable, stage 1
+still installs that chain; CP-T2 checks that it boots there and what the
+person sees.
+
+#### Size
+
+The stick image must stay under the size of the smallest stick we
+support (README: 2 GB). The stick build stops when the image is over
+1,900,000,000 bytes.
+
+Measured at CP-T1 (2026-11-26):
+
+| | Size |
+|---|---|
+| Stick image without the base | 1,760,421,888 bytes |
+| Stick image with the base | 1,822,693,376 bytes (77 MB under the limit) |
+| Base closure | 1.27 GB, 617 store paths |
+| Of that, not already in the stick store | 166 MB, 180 paths |
+
+Most of the base is shared with the stick (kernel, modules, firmware,
+NetworkManager). The new part is mainly the patched systemd, the boot
+loader signing tools, the base's own initrd and the hardware database.
+
+The base leaves out three parts it never uses, which together were about
+500 MB:
+
+- the fat installer's resume after Secure Boot setup (zenity dialogs,
+  GTK). Stage 2 has its own Secure Boot check. The Secure Boot
+  verification unit stays, since the shim flow reads what it records.
+- the manuals (no shell, Q265)
+- the nixpkgs copy for the flake registry and `NIX_PATH`. Stage 2 builds
+  the full system from the checkout's `flake.lock`.
+
+Anything new on the base or the stick counts against the 77 MB.
+
+#### Decision
+
+R58 (wiki 752): trust model and disk discovery as above. Default until
+answered.
 
 ### First reboot and MokManager
 

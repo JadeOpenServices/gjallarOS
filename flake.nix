@@ -193,6 +193,21 @@
       recoveryImage = recoverySystem [ ];
       installerLabImage = recoverySystem [ ./system/recovery/installer-lab.nix ];
 
+      # The base system of the two-stage install (Plane 385): the same for
+      # everyone, fixed settings, carried in the stick store.
+      baseSystem = nixpkgs.lib.nixosSystem {
+        inherit system;
+        modules = [
+          ./system/base
+          # Patched lzbt: shim first stage for fixed-key firmware (293).
+          { boot.lanzaboote.package = self.packages.${system}.lzbt-shim; }
+        ];
+        specialArgs = {
+          inherit inputs;
+          settings = import ./system/base/settings.nix;
+        };
+      };
+
       # The installer stick is the same for everyone: no recoveryKeyboard,
       # nothing from generated/. Its installer needs the Monique submodule,
       # which a flake source only holds when built with ?submodules=1.
@@ -201,6 +216,7 @@
         modules = [
           ./system/installer-media/stick.nix
           { gjallar.stick.release.key = releaseKey; }
+          { gjallar.stick.base = baseSystem.config.system.build.toplevel; }
           # The installer makes the Secure Boot keys with the stick's sbctl,
           # so the stick needs the Subject Key Identifier patch too.
           { nixpkgs.overlays = [ (import ./pkgs/overlays/sbctl.nix) ]; }
@@ -253,6 +269,7 @@
         "gjallar-recovery-iso" = recoveryImage.config.system.build.isoImage;
         "gjallar-installer-lab-iso" = installerLabImage.config.system.build.isoImage;
         "gjallar-stick-iso" = stickImage.config.system.build.gjallarStickIso;
+        "gjallar-base" = baseSystem.config.system.build.toplevel;
         "gjallar-gjlogs-image" = pkgs.callPackage ./pkgs/gjallar-gjlogs-image { };
 
         # Packages that cache.nixos.org does not have because gjallarOS patches
@@ -542,6 +559,7 @@
         gjallar-recovery = recoveryImage;
         gjallar-installer-lab = installerLabImage;
         gjallar-stick = stickImage;
+        gjallar-base = baseSystem;
 
         ${settings.hostname} = nixpkgs.lib.nixosSystem {
           modules = [
